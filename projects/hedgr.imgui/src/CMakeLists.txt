@@ -28,13 +28,15 @@ add_executable(${exe_target_name} ${files})
 set_target_properties(${exe_target_name} PROPERTIES
     OUTPUT_NAME ${exe_binary_name})
 
+target_include_directories(${exe_target_name} PRIVATE
+    ${CMAKE_SOURCE_DIR}/projects/hedgr.imgui/include)
+
 target_link_libraries(${exe_target_name}
     PRIVATE
         ores::client
+        Boost::program_options
         imgui::imgui
         implot::implot
-        imgui::imgui_impl_glfw
-        imgui::imgui_impl_opengl3
         GLEW::GLEW
         OpenGL::GL
         glfw

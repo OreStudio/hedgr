@@ -108,7 +108,8 @@ find_package(Boost REQUIRED COMPONENTS
     exception
     scope_exit
     iostreams
-    process)
+    process
+    program_options)
 
 # OpenSSL
 find_package(OpenSSL REQUIRED)

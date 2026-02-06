@@ -22,6 +22,9 @@
         "boost-exception",
         "boost-uuid",
         "boost-crc",
-        "boost-process"
+        "boost-process",
+        "boost-program-options",
+        "magic-enum",
+        "reflectcpp"
     ]
 }
