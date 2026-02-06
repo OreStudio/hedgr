@@ -30,6 +30,7 @@
 #endif
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
+#include "ores.iam/client/auth_helpers.hpp"
 
 namespace {
 
@@ -143,18 +144,7 @@ void application::render_loop(GLFWwindow* window) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        if (show_demo_window_)
-            ImGui::ShowDemoWindow(&show_demo_window_);
-
         render_control_panel();
-
-        if (show_another_window_) {
-            ImGui::Begin("Another Window", &show_another_window_);
-            ImGui::Text("Hello from another window!");
-            if (ImGui::Button("Close Me"))
-                show_another_window_ = false;
-            ImGui::End();
-        }
 
         ImGui::Render();
         int display_w, display_h;
@@ -173,22 +163,21 @@ void application::render_loop(GLFWwindow* window) {
 }
 
 void application::render_control_panel() {
-    static float f = 0.0f;
-    static int counter = 0;
-
     ImGui::Begin("Hedgr Control Panel");
 
-    ImGui::Text("Server Connection Status: %s", connection_status_.c_str());
+    /*
+     * Connection section.
+     */
+    ImGui::SeparatorText("Connection");
+    ImGui::Text("Status: %s", connection_status_.c_str());
 
-    ImGui::InputText("Server Address", &ui_server_address_);
-    ImGui::InputText("Server Port", &ui_server_port_);
+    if (!session_.is_connected()) {
+        ImGui::InputText("Server Address", &ui_server_address_);
+        ImGui::InputText("Server Port", &ui_server_port_);
 
-    if (session_.is_connected()) {
-        if (ImGui::Button("Disconnect")) {
-            disconnect();
-        }
-    } else {
-        if (ImGui::Button("Connect") && !connecting_) {
+        const bool busy = connecting_;
+        if (busy) ImGui::BeginDisabled();
+        if (ImGui::Button("Connect")) {
             ores::comms::net::client_options opts;
             opts.host = ui_server_address_;
             opts.port = static_cast<std::uint16_t>(
@@ -196,30 +185,68 @@ void application::render_control_panel() {
             opts.client_identifier = "hedgr-imgui";
             connect(opts);
         }
+        if (busy) ImGui::EndDisabled();
+    } else {
+        ImGui::Text("Server: %s:%s",
+            ui_server_address_.c_str(), ui_server_port_.c_str());
+
+        if (ImGui::Button("Disconnect")) {
+            disconnect();
+        }
     }
 
+    /*
+     * Login section - only shown when connected but not logged in.
+     */
+    if (session_.is_connected() && !session_.is_logged_in()) {
+        ImGui::SeparatorText("Login");
+
+        if (!login_status_.empty())
+            ImGui::TextWrapped("%s", login_status_.c_str());
+
+        ImGui::InputText("Username", &ui_username_);
+        ImGui::InputText("Password", &ui_password_,
+            ImGuiInputTextFlags_Password);
+
+        const bool busy = logging_in_;
+        const bool fields_empty = ui_username_.empty() || ui_password_.empty();
+        if (busy || fields_empty) ImGui::BeginDisabled();
+        if (ImGui::Button("Login")) {
+            login(ui_username_, ui_password_);
+        }
+        if (busy || fields_empty) ImGui::EndDisabled();
+    }
+
+    /*
+     * Session section - shown when logged in.
+     */
+    if (session_.is_logged_in()) {
+        ImGui::SeparatorText("Session");
+        ImGui::Text("Logged in as: %s", session_.username().c_str());
+        ImGui::Text("Email: %s", session_.email().c_str());
+
+        if (!login_status_.empty())
+            ImGui::TextWrapped("%s", login_status_.c_str());
+
+        if (ImGui::Button("Logout")) {
+            logout();
+        }
+    }
+
+    /*
+     * Status bar.
+     */
     ImGui::Separator();
-
-    ImGui::Checkbox("Demo Window", &show_demo_window_);
-    ImGui::Checkbox("Another Window", &show_another_window_);
-
-    ImGui::SliderFloat("float", &f, 0.0f, 1.0f);
-    ImGui::ColorEdit3("clear color", clear_color_);
-
-    if (ImGui::Button("Button"))
-        counter++;
-    ImGui::SameLine();
-    ImGui::Text("counter = %d", counter);
-
     const ImGuiIO& io = ImGui::GetIO();
-    ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
-        1000.0f / io.Framerate, io.Framerate);
+    ImGui::Text("%.1f FPS", io.Framerate);
+
     ImGui::End();
 }
 
 void application::connect(const ores::comms::net::client_options& opts) {
     connecting_ = true;
     connection_status_ = "Connecting...";
+    login_status_.clear();
 
     BOOST_LOG_SEV(lg(), info) << "Connecting to " << opts.host
         << ":" << opts.port;
@@ -240,11 +267,49 @@ void application::connect(const ores::comms::net::client_options& opts) {
     }).detach();
 }
 
+void application::login(const std::string& username,
+    const std::string& password) {
+    logging_in_ = true;
+    login_status_ = "Logging in...";
+
+    BOOST_LOG_SEV(lg(), info) << "Logging in as " << username;
+
+    std::thread([this, username, password]() {
+        auto result = ores::iam::client::login(session_, username, password);
+        if (result.success) {
+            login_status_.clear();
+            ui_password_.clear();
+            BOOST_LOG_SEV(lg(), info) << "Logged in as " << result.username
+                << ", tenant: " << result.tenant_name;
+        } else {
+            login_status_ = "Login failed: " + result.error_message;
+            BOOST_LOG_SEV(lg(), error) << "Login failed: "
+                << result.error_message;
+        }
+        logging_in_ = false;
+    }).detach();
+}
+
+void application::logout() {
+    BOOST_LOG_SEV(lg(), info) << "Logging out.";
+    auto result = ores::iam::client::logout(session_);
+    if (result.success) {
+        login_status_.clear();
+        connection_status_ = "Disconnected";
+        BOOST_LOG_SEV(lg(), info) << "Logged out successfully.";
+    } else {
+        login_status_ = "Logout failed: " + result.error_message;
+        BOOST_LOG_SEV(lg(), error) << "Logout failed: "
+            << result.error_message;
+    }
+}
+
 void application::disconnect() {
     if (session_.is_connected()) {
         BOOST_LOG_SEV(lg(), info) << "Disconnecting.";
         session_.disconnect();
         connection_status_ = "Disconnected";
+        login_status_.clear();
     }
 }
 

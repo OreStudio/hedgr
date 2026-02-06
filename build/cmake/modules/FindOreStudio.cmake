@@ -80,6 +80,7 @@ if(NOT TARGET ores::client)
 
     target_link_libraries(ores::client INTERFACE
         ores.comms
+        ores.iam
         ores.utility
         ores.eventing
         ores.logging

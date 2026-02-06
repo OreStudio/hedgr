@@ -66,17 +66,21 @@ private:
     void render_loop(GLFWwindow* window);
     void render_control_panel();
     void connect(const ores::comms::net::client_options& opts);
+    void login(const std::string& username, const std::string& password);
+    void logout();
     void disconnect();
     void shutdown_graphics(GLFWwindow* window);
 
     std::optional<ores::comms::net::client_options> connection_config_;
     ores::comms::net::client_session session_;
     std::atomic<bool> connecting_{false};
+    std::atomic<bool> logging_in_{false};
     std::string connection_status_{"Disconnected"};
+    std::string login_status_;
     std::string ui_server_address_{"localhost"};
     std::string ui_server_port_{"55555"};
-    bool show_demo_window_{true};
-    bool show_another_window_{false};
+    std::string ui_username_;
+    std::string ui_password_;
     float clear_color_[4]{0.45f, 0.55f, 0.60f, 1.00f};
     const char* glsl_version_{nullptr};
 };
