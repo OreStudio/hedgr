@@ -1,0 +1,3 @@
+[submodule "external/OreStudio"]
+	path = external/OreStudio
+	url = git@github.com:OreStudio/OreStudio.git

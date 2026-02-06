@@ -1,0 +1,27 @@
+{
+    "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+    "name": "hedgr",
+    "version-semver": "0.0.1",
+    "description": "Remote ImGui/ImPlot client for OreStudio.",
+    "dependencies": [
+        {
+            "name": "imgui",
+            "features": [
+                "glfw-binding",
+                "opengl3-binding"
+            ]
+        },
+        "implot",
+        "glfw3",
+        "glew",
+        "openssl",
+        "boost-log",
+        "boost-scope-exit",
+        "boost-iostreams",
+        "boost-system",
+        "boost-exception",
+        "boost-uuid",
+        "boost-crc",
+        "boost-process"
+    ]
+}

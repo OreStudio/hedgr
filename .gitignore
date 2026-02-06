@@ -1,0 +1,48 @@
+# -*- mode: sh; tab-width: 4; indent-tabs-mode: nil -*-
+
+# backup files and emacs source control checkouts
+*~
+
+# windows thumbnails
+Thumbs.db
+
+# OSX system configuration files
+.DS_Store
+
+# CLion files
+.idea
+
+# build directory
+build/output
+
+# .Net ignores
+packages
+*.userprefs
+test-results
+obj
+bin
+*.suo
+TestResult.xml
+
+# clangd
+compile_commands.json
+
+# org-roam
+.org-roam.db
+
+.cache
+
+# vcpkg
+vcpkg_installed
+
+# Qt Designer
+CMakeLists.txt.user
+CMakeUserPresets.json
+/.org-id-locations-file
+/.packages/
+
+# VSCode
+.vscode/
+
+# Open Code
+.opencode/
