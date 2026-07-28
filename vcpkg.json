@@ -25,6 +25,7 @@
         "boost-process",
         "boost-program-options",
         "magic-enum",
-        "reflectcpp"
+        "reflectcpp",
+        "stb"
     ]
 }

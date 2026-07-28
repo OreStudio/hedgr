@@ -43,4 +43,16 @@ target_link_libraries(${exe_target_name}
         ores::openssl_cleanup
         Threads::Threads)
 
+# Copy background image to publish directory alongside the binary.
+set(background_image "${CMAKE_SOURCE_DIR}/assets/images/large_background.png")
+set(background_dest "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.imgui/background.png")
+add_custom_command(TARGET ${exe_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.imgui"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${background_image}" "${background_dest}"
+    COMMENT "Copying background image to publish/share/hedgr.imgui/")
+
 install(TARGETS ${exe_target_name} RUNTIME DESTINATION bin)
+install(FILES ${background_image} DESTINATION share/hedgr.imgui
+    RENAME background.png)

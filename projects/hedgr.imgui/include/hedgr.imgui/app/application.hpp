@@ -23,6 +23,7 @@
 #include <atomic>
 #include <string>
 #include <optional>
+#include <filesystem>
 #include "ores.logging/make_logger.hpp"
 #include "ores.comms/net/client_session.hpp"
 #include "ores.comms/net/client_options.hpp"
@@ -63,6 +64,10 @@ public:
 
 private:
     GLFWwindow* initialise_graphics();
+    void setup_theme();
+    void load_fonts();
+    void load_background_texture();
+    void render_background(GLFWwindow* window);
     void render_loop(GLFWwindow* window);
     void render_control_panel();
     void connect(const ores::comms::net::client_options& opts);
@@ -81,8 +86,11 @@ private:
     std::string ui_server_port_{"55555"};
     std::string ui_username_;
     std::string ui_password_;
-    float clear_color_[4]{0.45f, 0.55f, 0.60f, 1.00f};
+    float clear_color_[4]{0.05f, 0.05f, 0.05f, 1.00f};
     const char* glsl_version_{nullptr};
+    unsigned int background_texture_{0};
+    int background_width_{0};
+    int background_height_{0};
 };
 
 }
