@@ -31,6 +31,11 @@ written down before it is started so that none of it is lost.
 ## Toolbars
 
 8. **There are two toolbars and there should be one**, the one next to the tree.
+   Pulled forward into the unit in flight, because the operator hit it on the
+   Accounts window. The browser draws a strip and each window draws another; they
+   collapse to one beside the tree, and it carries what both carried, including
+   sign-in on Accounts and add instance and probe on Instances. Fixed in the
+   browser rather than per window, so both hosts are fixed and a third would be.
 9. **Probe every instance moves out of the main toolbar** into the instance
    toolbar only.
 10. **Remove refresh from every window.** There will soon be many windows and a
