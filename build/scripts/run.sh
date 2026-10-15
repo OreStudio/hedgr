@@ -51,16 +51,14 @@ if [ -n "${ORES_NATS_TLS_CA:-}" ]; then
     export ORES_HEDGR_NATS_TLS_KEY="${ORES_NATS_TLS_KEY}"
 fi
 
-# The development master password.
+# The master password is deliberately not defaulted here.
 #
-# A known value so an unattended run, a capture or a scripted check can unlock
-# the store without a prompt, and so the same store opens every time. It guards
-# a local development database and nothing else, and it is deliberately not a
-# secret: it is written here in the clear, which is exactly why it must never
-# be used for a store that matters.
+# It used to be, and that was a mistake: an interactive run unlocked the store
+# and went straight to the Instances window without anyone pressing the button,
+# which makes the gate look like it is not there. The gate is the point.
 #
-# Setting it means the unlock prompt does not appear on a development run. Unset
-# it, or override it, to see the prompt and the gate as an operator would.
-export HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}"
-
+# For an unattended run, a capture or a scripted check, set it explicitly:
+#
+#     HEDGR_MASTER_PASSWORD=... build/scripts/run.sh
+#
 exec "${binary}" "$@"
