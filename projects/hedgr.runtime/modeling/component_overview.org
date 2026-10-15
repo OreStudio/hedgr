@@ -1,0 +1,29 @@
+:PROPERTIES:
+:ID: hedgr.runtime
+:END:
+#+title: hedgr.runtime
+#+description: Hedgr runtime
+
+* Summary
+
+Hedgr runtime
+
+* Inputs
+
+None yet.
+
+* Outputs
+
+None yet.
+
+* Entry points
+
+None yet.
+
+* Dependencies
+
+None yet.
+
+* See also
+
+- [[file:hedgr.runtime.puml][Class diagram source]]

@@ -1,0 +1,4 @@
+@startuml hedgr.runtime
+' Component skeleton. Fill in as the component grows.
+title hedgr.runtime
+@enduml
