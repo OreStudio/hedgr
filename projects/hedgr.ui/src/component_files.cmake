@@ -1,0 +1,34 @@
+# -*- mode: cmake; cmake-tab-width: 4; indent-tabs-mode: nil -*-
+#
+# Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+set(files
+    "icon/fonts.cpp"
+    "render/chart_window.cpp"
+    "render/grid_window.cpp"
+    "render/instance_manager_window.cpp"
+    "render/notice_window.cpp"
+    "render/renderer.cpp"
+    "render/workspace.cpp"
+    "theme/theme.cpp"
+)
+
+# The headers are listed for the install and IDE targets.
+set(HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/export.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/hedgr.ui.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/fonts.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/hedgr.ui.icon.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/icons.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/hedgr.ui.render.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/workspace.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/theme/hedgr.ui.theme.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/theme/theme.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/hedgr.ui.widget.hpp"
+)

@@ -1,0 +1,4 @@
+@startuml hedgr.ui
+' Component skeleton. Fill in as the component grows.
+title hedgr.ui
+@enduml

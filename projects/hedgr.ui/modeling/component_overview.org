@@ -1,0 +1,29 @@
+:PROPERTIES:
+:ID: hedgr.ui
+:END:
+#+title: hedgr.ui
+#+description: Hedgr ImGui presentation
+
+* Summary
+
+Hedgr ImGui presentation
+
+* Inputs
+
+None yet.
+
+* Outputs
+
+None yet.
+
+* Entry points
+
+None yet.
+
+* Dependencies
+
+None yet.
+
+* See also
+
+- [[file:hedgr.ui.puml][Class diagram source]]
