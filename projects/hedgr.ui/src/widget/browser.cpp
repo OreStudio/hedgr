@@ -713,10 +713,11 @@ void draw_folder_form(widget::browser_state& state,
  * this is where ImGui's own geometry for the row is still current.
  */
 void draw_tree_row(const widget::browser_model& model, const tree_row& row,
-    widget::browser_state& state, const render_input& input, bool& opened,
+    window_ui_state& window, const render_input& input, bool& opened,
     widget::capture_element* element) {
     namespace icon = hedgr::ui::icon;
 
+    widget::browser_state& state = window.browser;
     const std::string_view id = id_of(model, row);
     const bool root = is_root_of(model, row);
     const bool leaf = row.kind == widget::node_kind::leaf;
@@ -824,6 +825,21 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
             state.selected_leaf.clear();
         }
     }
+
+    /*
+     * A second click on an entry opens it, which is the gesture every list in
+     * every desktop program uses and the reason the toolbar's open button is
+     * not the only way in. It is asked of ImGui rather than counted here,
+     * because ImGui already knows the interval two clicks have to fall inside
+     * to count as a double, and a count of our own would be a second opinion
+     * about it.
+     *
+     * The selection above has already run, so the row the operator is about to
+     * act on is the row that is selected by the time the callback reads it.
+     */
+    if (leaf && model.activate_leaf != nullptr
+        && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        model.activate_leaf(input, window, id);
 
     if (draggable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
         const drag_payload_data payload{row.kind, std::string{id}};
@@ -1179,7 +1195,7 @@ void render_browser(const browser_model& model, window_ui_state& window,
 
             bool opened = false;
             widget::capture_element element;
-            draw_tree_row(model, row, state, input, opened, &element);
+            draw_tree_row(model, row, window, input, opened, &element);
             widget::observe_capture_element(name_of(model, row), element);
 
             if (opened) {

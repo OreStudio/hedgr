@@ -340,6 +340,19 @@ struct browser_model final {
     void (*duplicate_leaf)(hedgr::ui::render::window_ui_state&,
         std::string_view leaf_id) = nullptr;
 
+    /**
+     * @brief Opens an entry, on a double click.
+     *
+     * What opening an entry means is the host's: for an instance it is the
+     * accounts window of that deployment, and for an account it is the session
+     * behind it. The browser knows only that a row was clicked twice.
+     *
+     * The row is already selected when this is called, so a host that reads the
+     * selection rather than the argument sees the same row either way.
+     */
+    void (*activate_leaf)(const hedgr::ui::render::render_input&,
+        hedgr::ui::render::window_ui_state&, std::string_view leaf_id) = nullptr;
+
     /** @brief Draws the host's form for one leaf, when one is open. */
     void (*leaf_form)(const hedgr::ui::render::render_input&,
         hedgr::ui::render::window_ui_state&) = nullptr;

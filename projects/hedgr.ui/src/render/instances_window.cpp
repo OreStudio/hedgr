@@ -710,6 +710,46 @@ void draw_dashboard(const render_input& input, window_ui_state& state) {
  * editing and removing one are the browser's edit and remove, so neither is
  * repeated here.
  */
+/**
+ * @brief Asks for the accounts window of one instance.
+ *
+ * The accounts window is found or made by the runtime, which owns the window
+ * table: the interface names the instance it wants and the runtime answers
+ * with the one window showing it. A second request focuses the window that
+ * exists rather than making another.
+ *
+ * An instance the table does not hold is refused here rather than sent. The
+ * runtime would have nothing to bind the window to, and a window bound to
+ * nothing is a surface that can only report its own emptiness.
+ */
+void open_accounts_window(const render_input& input, std::string_view instance_id) {
+    if (!input.instances.find(instance_id))
+        return;
+
+    command request;
+    request.kind = command_kind::open_window;
+    request.instance_id = std::string{instance_id};
+    request.new_window_kind = hedgr::model::domain::window_kind::accounts;
+    input.commands.push(std::move(request));
+}
+
+/**
+ * @brief Opens an entry, which for an instance is the accounts behind it.
+ *
+ * The toolbar's open button and a double click on a row arrive here, so there
+ * is one description of what opening an instance means rather than two that
+ * can drift.
+ *
+ * Nothing is done with the window state. Opening is a request to the runtime
+ * rather than a change to what this window shows, and the row that was clicked
+ * is already the selected one by the time this runs.
+ */
+void activate_instance(const render_input& input, window_ui_state& state,
+    std::string_view leaf_id) {
+    static_cast<void>(state);
+    open_accounts_window(input, leaf_id);
+}
+
 void instance_window_actions(const render_input& input, window_ui_state& state) {
     /*
      * A vertical rule between the browser's own actions and this window's, so
@@ -744,21 +784,8 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
 
     ImGui::SameLine();
     if (widget::icon_button("open-accounts", icon::account,
-            "Open the accounts of the selected instance")) {
-        /*
-         * The accounts window is found or made by the runtime, which owns the
-         * window table: the interface names the instance it wants and the
-         * runtime answers with the one window showing it. A second request
-         * focuses the window that exists rather than making another.
-         */
-        if (input.instances.find(state.browser.selected_leaf)) {
-            command request;
-            request.kind = command_kind::open_window;
-            request.instance_id = state.browser.selected_leaf;
-            request.new_window_kind = hedgr::model::domain::window_kind::accounts;
-            input.commands.push(std::move(request));
-        }
-    }
+            "Open the accounts of the selected instance"))
+        open_accounts_window(input, state.browser.selected_leaf);
 }
 
 /** @brief The index of the one column whose cells are label pills. */
@@ -1097,6 +1124,7 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.columns = instance_columns();
     model.window_actions = &instance_window_actions;
     model.lock = &lock;
+    model.activate_leaf = &activate_instance;
     model.row_cells = &instance_row_cells;
     model.row_labels = &instance_row_labels;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {

@@ -322,7 +322,21 @@ void workspace::render(const render_input& input) {
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
-        if (!ImGui::Begin(begin_label.c_str())) {
+        /*
+         * Every window but the root carries a close control on its title bar.
+         * The root does not, because closing it would leave an interface with
+         * no way to open anything again: it is where the toolbar and the tree
+         * that opens the other windows live.
+         *
+         * Closing is a command rather than a local hide. The runtime owns the
+         * window table, so a window hidden here would come back on the next
+         * frame with its own row still saying it was open, and the two would
+         * disagree about a window nobody could see.
+         */
+        const bool closable =
+            kind != hedgr::model::domain::window_kind::instance_manager;
+        bool keep_open = true;
+        if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr)) {
             /*
              * Collapsed or fully clipped: ImGui still wants its End, and
              * nothing inside the window is submitted. This is the content
@@ -330,6 +344,13 @@ void workspace::render(const render_input& input) {
              */
             ImGui::End();
             continue;
+        }
+
+        if (!keep_open) {
+            hedgr::model::command::command request;
+            request.kind = hedgr::model::command::command_kind::close_window;
+            request.window_id = std::string{input.windows.id(handle)};
+            input.commands.push(std::move(request));
         }
 
         const auto key = std::string{input.windows.id(handle)};
