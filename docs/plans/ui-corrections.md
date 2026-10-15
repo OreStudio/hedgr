@@ -56,10 +56,15 @@ written down before it is started so that none of it is lost.
 ## Visual
 
 15. **The row icon carries the state.** Instead of a separate ready-or-not
-    glyph, the instance icon itself is red when unreachable, amber when
-    bootstrapping, and green when ready.
+    glyph, the entry's own icon is red when unreachable, amber when bootstrapping,
+    and green when ready. Being done in the unit in flight.
 16. **Remove the other columns.** The reachability and readiness columns go,
-    since the icon now carries both.
+    since the icon now carries both. Being done in the unit in flight.
+
+    The operator has been explicit that this is **one icon and not two**, and that
+    it is **the same icon the tree already draws** for the entry. Two surfaces
+    showing the same entry should show the same glyph, tinted, rather than each
+    inventing its own or the list adding a second marker beside the first.
 17. **Labels use a much smaller font.** The pills are too large.
 18. **The dashboard is always visible and is not collapsible.**
 19. **The dashboard becomes a plot**, collecting the counts over the polling
