@@ -20,212 +20,285 @@
 #ifndef HEDGR_UI_ICON_ICONS_HPP
 #define HEDGR_UI_ICON_ICONS_HPP
 
-#include "hedgr.ui/icon/third_party/IconsFontAwesome6.h"
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 
 /**
  * @brief The whole icon set, as semantic names.
  *
- * This is the only translation unit boundary the icon font has: no other file
- * in the component includes IconsFontAwesome6.h, and no other file names a
- * Font Awesome constant. The set is therefore swappable by editing this file
- * alone -- point each name at a different constant, or at a glyph from an
- * entirely different font, and every toolbar, table row and status indicator
- * follows, because the rest of the interface only ever says "the connect icon"
+ * This is the only translation unit boundary the icon set has. No other file
+ * in the component names a glyph, and no other file knows which catalogue the
+ * artwork comes from. The set is therefore swappable by editing this table
+ * alone, because the rest of the interface only ever says "the connect icon"
  * rather than "the plug icon".
  *
- * The string literals are compile-time constants and have static storage
- * duration, which is what ImGui requires of a glyph range or a glyph offset:
- * it stores the pointer rather than copying the text.
+ * The artwork is Microsoft Fluent UI System Icons, the set ORE Studio uses. The
+ * concept column names an ORE catalogue entry and the file it selects; the file
+ * is ic_fluent_<concept>_regular.svg, and the concept carries the catalogue's
+ * own size suffix, so the file is chosen at the size the catalogue asks for.
+ * The guidelines document is
+ * doc/knowledge/ui/icon_guidelines.org in the OreStudio tree, and every concept
+ * below is one of its entries unless the comment says otherwise.
+ *
+ * The code points are in the Unicode private use area, starting at U+E000.
+ * Nothing outside this file depends on the particular value. It is a key that
+ * ties a constant to the matching cell of the rasterised sheet, and the sheet
+ * is generated from this same table, so the two cannot drift.
+ *
+ * The string literals have static storage duration, which is what ImGui
+ * requires of a glyph string. ImGui stores the pointer rather than copying the
+ * text.
  */
+
+namespace hedgr::ui::icon::detail {
+
+/**
+ * @brief Encodes a code point as a NUL terminated UTF-8 string.
+ *
+ * ImGui hands text to the platform layer as bytes while a font atlas is keyed
+ * by code point, so the two have to agree on an encoding. Every icon string is
+ * therefore stored as UTF-8 and this is the one place that turns a code point
+ * into one.
+ */
+constexpr std::array<char, 5> utf8(char32_t codepoint) {
+    std::array<char, 5> bytes{};
+    if (codepoint < 0x80) {
+        bytes[0] = static_cast<char>(codepoint);
+    } else if (codepoint < 0x800) {
+        bytes[0] = static_cast<char>(0xc0 | (codepoint >> 6));
+        bytes[1] = static_cast<char>(0x80 | (codepoint & 0x3f));
+    } else if (codepoint < 0x10000) {
+        bytes[0] = static_cast<char>(0xe0 | (codepoint >> 12));
+        bytes[1] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+        bytes[2] = static_cast<char>(0x80 | (codepoint & 0x3f));
+    } else {
+        bytes[0] = static_cast<char>(0xf0 | (codepoint >> 18));
+        bytes[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3f));
+        bytes[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3f));
+        bytes[3] = static_cast<char>(0x80 | (codepoint & 0x3f));
+    }
+    return bytes;
+}
+
+/**
+ * @brief One glyph's bytes, as a type that can be named by code point.
+ *
+ * A helper function cannot return a pointer with static storage duration, so
+ * the storage is a class template's static member and each code point gets its
+ * own instantiation.
+ */
+template <char32_t Codepoint>
+struct glyph_storage final {
+    static constexpr std::array<char, 5> bytes = utf8(Codepoint);
+};
+
+}
+
 namespace hedgr::ui::icon {
 
-/** @brief An instance: a deployment Hedgr can talk to. */
-inline constexpr const char* instance = ICON_FA_SERVER;
+/**
+ * @brief The pixel size every glyph is drawn at in the atlas.
+ *
+ * A font bakes its text at one size and a rasterised glyph has no outline to
+ * rescale, so the sheet is rasterised at one size as well. The catalogue's own
+ * per-concept size still selects the asset file, which is what the size suffix
+ * in the concept column carries.
+ */
+inline constexpr int glyph_pixel_size = 16;
 
-/** @brief An account: a principal that may be presented to an instance. */
-inline constexpr const char* account = ICON_FA_ID_CARD;
-
-/** @brief A session, in the abstract: one account presented to one instance. */
-inline constexpr const char* session = ICON_FA_CIRCLE_NODES;
-
-/** @brief A session whose connection attempt is still in flight. */
-inline constexpr const char* session_pending = ICON_FA_USER_CLOCK;
-
-/** @brief A session whose last attempt failed. */
-inline constexpr const char* session_failed = ICON_FA_USER_XMARK;
-
-/** @brief Open a session. */
-inline constexpr const char* connect = ICON_FA_PLUG;
-
-/** @brief Close a session. */
-inline constexpr const char* disconnect = ICON_FA_PLUG_CIRCLE_XMARK;
-
-/** @brief Add a row. */
-inline constexpr const char* add = ICON_FA_PLUS;
-
-/** @brief Remove a row, or ask to: this is the destructive action. */
-inline constexpr const char* remove = ICON_FA_TRASH;
-
-/** @brief Edit a row in place. */
-inline constexpr const char* edit = ICON_FA_PEN;
-
-/** @brief Confirm and persist an edit. */
-inline constexpr const char* save = ICON_FA_FLOPPY_DISK;
-
-/** @brief Abandon an edit. The X of a form, not the X of a window. */
-inline constexpr const char* cancel = ICON_FA_XMARK;
-
-/** @brief A chart: a timeline of one numeric series. */
-inline constexpr const char* chart = ICON_FA_CHART_LINE;
-
-/** @brief A grid: a paged table of one resource. */
-inline constexpr const char* grid = ICON_FA_TABLE_CELLS;
-
-/** @brief A notice: a message for a person to read. */
-inline constexpr const char* notice = ICON_FA_BELL;
-
-/** @brief Fetch the current data again, now. */
-inline constexpr const char* refresh = ICON_FA_ROTATE;
-
-/** @brief Settings. */
-inline constexpr const char* settings = ICON_FA_GEAR;
+/**
+ * @brief One icon's place in the set, its glyph key and its source file.
+ */
+struct icon_source final {
+    char32_t codepoint;
+    // The catalogue's own name for the drawing, which is also the stem of the
+    // asset file. Named for the catalogue rather than for the table macro
+    // because concept is a keyword.
+    const char* catalogue_name;
+};
 
 /*
- * There is no full-screen glyph and no exit glyph here any more. Both were
- * carried only by the application-level toolbar, which is gone: full screen is
- * the frame loop's own F11 handling, and leaving is the window's close control.
- * A glyph with no control behind it is a shape a reader learns for nothing.
+ * The set, one row per semantic name. Each row is
+ *
+ *     X(hedgr name, code point, ORE catalogue concept)
+ *
+ * The catalogue concept is also the artwork file name, so a reader can check a
+ * row against the asset directory and against the guidelines document. Where
+ * Hedgr has a concept the catalogue does not carry, the comment says so and the
+ * row keeps the nearest catalogue concept rather than inventing artwork.
  */
+#define HEDGR_UI_ICON_TABLE(X)                                                 \
+    /* A deployment Hedgr can talk to. The catalogue entry is Server Link. */          \
+    X(instance, 0xE000, server_link_20)                                        \
+    /* A principal that may be presented to an instance. The catalogue entry is Person. */       \
+    X(account, 0xE001, person_20)                                              \
+    /* One account presented to one instance. The catalogue entry is Plug Connected    \
+     * Checkmark, whose usage is an authenticated session. */                  \
+    X(session, 0xE002, plug_connected_checkmark_20)                            \
+    /* A connection attempt still in flight. The catalogue has no pending      \
+     * concept; Sync is the nearest, a transfer in progress. */                \
+    X(session_pending, 0xE003, arrow_sync_20)                                  \
+    /* A connection attempt that failed. The catalogue has no failed-session   \
+     * concept; Plug Disconnected is the nearest connection state. */          \
+    X(session_failed, 0xE004, plug_disconnected_20)                            \
+    /* Open a session. The catalogue entry is Plug Connected. */                       \
+    X(connect, 0xE005, plug_connected_20)                                      \
+    /* Close a session. The catalogue entry is Plug Disconnected. */                   \
+    X(disconnect, 0xE006, plug_disconnected_20)                                \
+    /* Add a row. The catalogue entry is Add. */                                       \
+    X(add, 0xE007, add_20)                                                     \
+    /* Remove a row, the destructive action. The catalogue entry is Delete. */         \
+    X(remove, 0xE008, delete_20)                                               \
+    /* Edit a row in place. The catalogue entry is Edit. */                            \
+    X(edit, 0xE009, edit_20)                                                   \
+    /* Confirm and persist an edit. The catalogue entry is Save. */                    \
+    X(save, 0xE00A, save_20)                                                   \
+    /* Abandon an edit, the X of a form. The catalogue entry is Dismiss. */            \
+    X(cancel, 0xE00B, dismiss_20)                                              \
+    /* A timeline of one numeric series. The catalogue has no single-series    \
+     * chart; Chart Multiple is the nearest data-visualisation concept. */     \
+    X(chart, 0xE00C, chart_multiple_20)                                        \
+    /* A paged table of one resource. The catalogue entry is Table. */                 \
+    X(grid, 0xE00D, table_20)                                                  \
+    /* A message for a person to read. The catalogue entry is Alert, the bell the      \
+     * live asset set carries though the inventory does not list it. */        \
+    X(notice, 0xE00E, alert_20)                                                \
+    /* Fetch the current data again. The catalogue entry is Sync. */                   \
+    X(refresh, 0xE00F, arrow_sync_20)                                          \
+    /* Settings. The catalogue entry is Settings. */                                   \
+    X(settings, 0xE010, settings_20)                                           \
+    /* Something wants attention. The catalogue entry is Warning. */                   \
+    X(warning, 0xE011, warning_20)                                             \
+    /* Something did not work. The catalogue entry is Error Circle. */                 \
+    X(error, 0xE012, error_circle_20)                                          \
+    /* Something worth knowing, no urgency. The catalogue entry is Info. */            \
+    X(information, 0xE013, info_20)                                            \
+    /* Reveal a masked secret. The catalogue has no visibility concept; Lock   \
+     * Open is the nearest, access granted. */                                 \
+    X(eye, 0xE014, lock_open_20)                                               \
+    /* Mask a revealed secret. The catalogue has no visibility concept; Lock   \
+     * Closed is the nearest, access withdrawn. */                             \
+    X(eye_off, 0xE015, lock_closed_20)                                         \
+    /* Filter a list to what matches. The catalogue entry is Search. */                \
+    X(search, 0xE016, search_20)                                               \
+    /* The Instance Manager's overview. The catalogue has no dashboard         \
+     * concept; Apps is the nearest, a grid of tiles. */                       \
+    X(dashboard, 0xE017, apps_20)                                              \
+    /* A point in time. The catalogue entry is Clock, the one 16px entry. */           \
+    X(clock, 0xE018, clock_16)                                                 \
+    /* The store is unlocked and the master password is held. The catalogue entry is   \
+     * Lock Open. */                                                           \
+    X(lock_open, 0xE019, lock_open_20)                                         \
+    /* The store is locked. The catalogue entry is Lock Closed. */                     \
+    X(lock_closed, 0xE01A, lock_closed_20)                                     \
+    /* There is no master password yet. The catalogue has no first-run         \
+     * concept; Warning is the nearest, an action wanted. */                   \
+    X(lock_absent, 0xE01B, warning_20)                                         \
+    /* Lock the store, dropping the held password. The catalogue entry is Lock         \
+     * Closed. */                                                              \
+    X(lock, 0xE01C, lock_closed_20)                                            \
+    /* Enter the master password. The catalogue entry is Key Multiple, the key         \
+     * concept the catalogue carries for password operations. */               \
+    X(unlock, 0xE01D, key_multiple_20)                                         \
+    /* A connection between two things. The catalogue has no standalone link   \
+     * concept; Plug Connected is the nearest, a link established. */          \
+    X(link, 0xE01E, plug_connected_20)                                         \
+    /* Asking every instance whether it answers. The catalogue has no probe    \
+     * concept; Sync is the nearest, a server round trip. */                   \
+    X(probe, 0xE01F, arrow_sync_20)                                            \
+    /* Readiness, the one good answer. The catalogue entry is Checkmark Circle. */     \
+    X(ready, 0xE020, checkmark_circle_20)                                      \
+    /* A folder in a tree. The catalogue entry is Folder. */                           \
+    X(folder, 0xE021, folder_20)                                               \
+    /* The instances tree's root. The catalogue has no open-folder asset, so   \
+     * the closed Folder carries the root as well. */                          \
+    X(folder_root, 0xE022, folder_20)                                          \
+    /* Move a row into another folder. The catalogue has no move concept;      \
+     * Arrow Upload is the nearest, sending something to a target. */          \
+    X(move, 0xE023, arrow_upload_20)                                           \
+    /* Create a second copy of a row. The catalogue entry is Copy. */                  \
+    X(duplicate, 0xE024, copy_20)                                              \
+    /* Sign out of a session. The catalogue has no sign-out concept; Plug      \
+     * Disconnected is the nearest, a session ended. */                        \
+    X(sign_out, 0xE025, plug_disconnected_20)                                  \
+    /* Sign in to an instance. The catalogue has no sign-in concept; Plug      \
+     * Connected Checkmark is the nearest, an authenticated session. */        \
+    X(sign_in, 0xE026, plug_connected_checkmark_20)                            \
+    /* A fact about a session. The catalogue has no fact concept; Info is the  \
+     * nearest, an informational datum. */                                     \
+    X(fact, 0xE027, info_20)                                                   \
+    /* A panel the account's permissions decide. The catalogue has no panel    \
+     * concept; Column Triple is the nearest, a layout. */                     \
+    X(panel, 0xE028, column_triple_20)                                         \
+    /* Jump to the first page. The catalogue has no paging concept; Arrow      \
+     * Rotate Counterclockwise is the nearest, back to the start. */           \
+    X(page_first, 0xE029, arrow_rotate_counterclockwise_20)                    \
+    /* Go back one page. The catalogue entry is Arrow Left. */                         \
+    X(page_previous, 0xE02A, arrow_left_20)                                    \
+    /* Go forward one page. The catalogue has no paging concept; Arrow         \
+     * Clockwise is the nearest, advance. */                                   \
+    X(page_next, 0xE02B, arrow_clockwise_20)                                   \
+    /* Jump to the last page. The catalogue has no paging concept, so this is  \
+     * the same advance as Next; there is no distinct jump-to-end artwork. */  \
+    X(page_last, 0xE02C, arrow_clockwise_20)
 
-/** @brief Something is not fatal but wants attention. */
-inline constexpr const char* warning = ICON_FA_TRIANGLE_EXCLAMATION;
+#define HEDGR_UI_ICON_DECLARE(name, codepoint, concept)                        \
+    inline constexpr const char* name =                                        \
+        detail::glyph_storage<codepoint>::bytes.data();
 
-/** @brief Something did not work. */
-inline constexpr const char* error = ICON_FA_CIRCLE_EXCLAMATION;
+HEDGR_UI_ICON_TABLE(HEDGR_UI_ICON_DECLARE)
 
-/** @brief Something worth knowing, with no urgency attached. */
-inline constexpr const char* information = ICON_FA_CIRCLE_INFO;
+#undef HEDGR_UI_ICON_DECLARE
 
-/** @brief Reveal a secret that is currently masked. */
-inline constexpr const char* eye = ICON_FA_EYE;
-
-/** @brief Mask a secret that is currently revealed. */
-inline constexpr const char* eye_off = ICON_FA_EYE_SLASH;
-
-/** @brief Filter a list down to what matches some text. */
-inline constexpr const char* search = ICON_FA_MAGNIFYING_GLASS;
-
-/** @brief The Instance Manager: the root surface of the interface. */
-inline constexpr const char* dashboard = ICON_FA_CIRCLE_PLAY;
-
-/** @brief A point in time, or an elapsed time. */
-inline constexpr const char* clock = ICON_FA_CLOCK;
+#define HEDGR_UI_ICON_SOURCE(name, codepoint, concept)                         \
+    {codepoint, #concept},
 
 /**
- * @brief The store is unlocked and the master password is held.
+ * @brief The set in table order, for the code that registers the glyphs.
  *
- * An open padlock rather than a key, because the question the toolbar answers
- * is whether the lock is open, not whether the operator has a key.
+ * The position of a row here is the cell the generator wrote for it, so this
+ * array is also the mapping from a code point to a cell of the rasterised
+ * sheet. The static assertion below pins the two halves together, because a
+ * reordered or renumbered table that forgot the sheet cannot compile.
  */
-inline constexpr const char* lock_open = ICON_FA_LOCK_OPEN;
+inline constexpr icon_source icon_sources[] = {
+    HEDGR_UI_ICON_TABLE(HEDGR_UI_ICON_SOURCE)
+};
 
-/** @brief The store is locked: a master password exists and is not held. */
-inline constexpr const char* lock_closed = ICON_FA_LOCK;
+#undef HEDGR_UI_ICON_SOURCE
+
+/** @brief How many icons the set carries. */
+inline constexpr std::size_t icon_count = std::size(icon_sources);
+
+namespace detail {
 
 /**
- * @brief There is no master password yet.
+ * @brief Whether the code points run consecutively from the first one.
  *
- * The warning triangle rather than a padlock, because this is not a lock state
- * to be read but a first run that wants an action: the operator has to create
- * one before anything can be read.
+ * The generator writes one sheet cell per row and the loader finds cell n by
+ * subtracting the first code point, so the two are only in step while this
+ * holds. It is checked at compile time rather than at run time because the
+ * failure it prevents is a sheet that is one cell out of step, which would
+ * show as every icon wearing its neighbour's face.
  */
-inline constexpr const char* lock_absent = ICON_FA_TRIANGLE_EXCLAMATION;
+constexpr bool codepoints_are_consecutive() {
+    char32_t expected = 0xE000;
+    for (const auto& source : icon_sources) {
+        if (source.codepoint != expected)
+            return false;
+        ++expected;
+    }
+    return true;
+}
 
-/** @brief Lock the store, dropping the held master password. */
-inline constexpr const char* lock = ICON_FA_LOCK;
+}
 
-/**
- * @brief Enter the master password.
- *
- * A key and not an open padlock, deliberately. The open padlock is what the
- * indicator shows when the store *is* unlocked, and an action and a state drawn
- * with the same glyph in the same toolbar is a row that cannot be read: an
- * operator glancing at it would take an invitation to unlock for a statement
- * that the store already is.
- */
-inline constexpr const char* unlock = ICON_FA_KEY;
-
-/** @brief A connection between two things. */
-inline constexpr const char* link = ICON_FA_LINK;
-
-/**
- * @brief Asking every instance whether it answers.
- *
- * A filled circle, because the action is the same shape as the state it
- * produces: the toolbar button and the coloured icon a row carries for that
- * state should read as one idea rather than two.
- */
-inline constexpr const char* probe = ICON_FA_CIRCLE;
-
-/**
- * @brief Readiness: whether the deployment has been bootstrapped.
- *
- * A ticked circle rather than a plain one, because it is the one readiness
- * answer that is good news, and a mark is read as "done" without a legend.
- * Since the row's icon carries the state, this glyph no longer appears in the
- * instance list; it remains for any surface that wants to name the ready state
- * on its own.
- */
-inline constexpr const char* ready = ICON_FA_CIRCLE_CHECK;
-
-/**
- * @brief A folder in a tree.
- *
- * The same glyph whether the folder is open or shut, because ImGui draws its
- * own arrow for the open state and a second indicator beside it would be two
- * ways of saying one thing.
- */
-inline constexpr const char* folder = ICON_FA_FOLDER;
-
-/** @brief The instances tree's root, and a tree's anchor generally. */
-inline constexpr const char* folder_root = ICON_FA_FOLDER_TREE;
-
-/** @brief Move a row into another folder. */
-inline constexpr const char* move = ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT;
-
-/** @brief Create a second copy of a row. */
-inline constexpr const char* duplicate = ICON_FA_COPY;
-
-/** @brief Sign out of a session. */
-inline constexpr const char* sign_out = ICON_FA_RIGHT_FROM_BRACKET;
-
-/** @brief Sign in to an instance with an account. */
-inline constexpr const char* sign_in = ICON_FA_RIGHT_TO_BRACKET;
-
-/** @brief A fact about a session in the workspace's dashboard. */
-inline constexpr const char* fact = ICON_FA_CIRCLE_DOT;
-
-/** @brief A panel that the account's permissions will decide, once they exist. */
-inline constexpr const char* panel = ICON_FA_TABLE_COLUMNS;
-
-/*
- * Paging, for a paged table. The spec's list of semantic names stops at link;
- * these four are added because a paged grid's controls are icons here like
- * every other action, and an icon must come from this file rather than being
- * spelled inline at the call site.
- */
-
-/** @brief Jump to the first page. */
-inline constexpr const char* page_first = ICON_FA_ANGLES_LEFT;
-
-/** @brief Go back one page. */
-inline constexpr const char* page_previous = ICON_FA_ANGLE_LEFT;
-
-/** @brief Go forward one page. */
-inline constexpr const char* page_next = ICON_FA_ANGLE_RIGHT;
-
-/** @brief Jump to the last page. */
-inline constexpr const char* page_last = ICON_FA_ANGLES_RIGHT;
+static_assert(detail::codepoints_are_consecutive(),
+    "the icon table must number its code points consecutively from 0xE000, "
+    "because the loader finds a glyph's sheet cell by subtracting the first "
+    "code point");
 
 }
 

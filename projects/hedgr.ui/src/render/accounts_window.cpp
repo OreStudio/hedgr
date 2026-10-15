@@ -503,9 +503,10 @@ namespace hedgr::ui::render {
  * @brief Draws the Accounts window's own action, in the browser's toolbar.
  *
  * The sign-in is the one control the browser cannot draw for it, and it is the
- * window's reason for existing. It keeps its worded form rather than becoming
- * a glyph: it is the most important thing on the surface and an icon would make
- * it the least legible.
+ * window's reason for existing. It is a bare glyph like every other control in
+ * the strip, because the tooltip is the action's name on screen and a second
+ * copy of that name in the button made this the one control whose width did
+ * not match its neighbours.
  */
 void accounts_window_actions(const render_input& input,
     window_ui_state& state) {
@@ -536,14 +537,9 @@ void accounts_window_actions(const render_input& input,
         ? input.accounts.find(state.browser.selected_leaf)
         : std::optional<hedgr::model::state::account_handle>{};
 
-    if (!have_selection)
-        ImGui::BeginDisabled();
-    const bool sign_in =
-        ImGui::Button(std::format("{} Sign in", icon::sign_in).c_str());
-    if (!have_selection)
-        ImGui::EndDisabled();
-    ImGui::SetItemTooltip("%s",
-        "Sign in with the selected account and open a workspace");
+    const bool sign_in = widget::icon_button("sign-in", icon::sign_in,
+        "Sign in with the selected account and open a workspace",
+        have_selection);
 
     if (!sign_in || !selected)
         return;

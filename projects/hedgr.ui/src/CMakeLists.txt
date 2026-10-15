@@ -46,17 +46,19 @@ target_link_libraries(${lib_target_name}
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)
 
-# Copy the vendored Font Awesome face to the publish directory alongside the
-# library, the way hedgr.imgui publishes its background image, so a run out of
-# the build tree resolves icons through the same <exe>/../share/<component>
-# rule that an installed run uses.
-set(icon_font "${CMAKE_SOURCE_DIR}/assets/fonts/fa-solid-900.ttf")
+# Copy the generated icon sheet to the publish directory alongside the library,
+# the way hedgr.imgui publishes its background image, so a run out of the build
+# tree resolves icons through the same <exe>/../share/<component> rule that an
+# installed run uses. The sheet is regenerated from the icon table by
+# build/scripts/build-fluent-icons.py, and it is committed so the build needs no
+# rasteriser.
+set(icon_sheet "${CMAKE_SOURCE_DIR}/assets/fonts/fluent-icons.pgm")
 add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${icon_font}"
-        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/fa-solid-900.ttf"
-    COMMENT "Copying Font Awesome face to publish/share/hedgr.ui/")
+        "${icon_sheet}"
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/fluent-icons.pgm"
+    COMMENT "Copying the icon sheet to publish/share/hedgr.ui/")
 
-install(FILES ${icon_font} DESTINATION share/hedgr.ui)
+install(FILES ${icon_sheet} DESTINATION share/hedgr.ui)
