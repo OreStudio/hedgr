@@ -63,27 +63,33 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${HEDGR_PUBLISH_DIRECTORY}/bin)
 # use, i.e. don't skip the full RPATH for the build tree
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
 
-# when building, don't use the install RPATH already, but later on when
-# installing.
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+# Build with the install RPATH, because the build tree is the deployable
+# artefact. Letting CMake also append the directories of every library it
+# linked would leave absolute build-host paths in RUNPATH, and a package run on
+# the build host would then resolve against the build tree rather than against
+# its own bundle.
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+
+#
+# The publish directory is the deployable artefact, so it has to be relocatable.
+#
+# One value serves the executable and the libraries alike. From publish/bin it
+# resolves to publish/lib, and from publish/lib it resolves to itself. OreStudio
+# lives nowhere else on the target, so its libraries are copied in by the
+# bundling step in projects/hedgr.imgui and the loader never needs an absolute
+# path.
+#
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../lib")
 
 if(WIN32 AND (MSVC OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
     set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 if(UNIX)
+    # The install prefix is where "make install" puts things. It is deliberately
+    # not the RPATH: the same tree is deployed by copying the publish directory,
+    # and that has to work wherever it lands.
     set(CMAKE_INSTALL_PREFIX "/opt/Hedgr/${CMAKE_PROJECT_VERSION}")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-
-    # add the automatically determined parts of the RPATH
-    # which point to directories outside the build tree to the install RPATH
-    set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-    # the RPATH to be used when installing, but only if it's not a system directory
-    list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-    if("${isSystemDir}" STREQUAL "-1")
-        set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-    endif()
 endif()
 
 #
@@ -187,3 +193,22 @@ else()
 endif()
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/projects)
+
+#
+# Package the publish directory for deployment.
+#
+# The archive is the publish tree as it stands, because that tree is already
+# relocatable and already complete. There is nothing to stage.
+#
+set(HEDGR_PACKAGE_NAME
+    "hedgr-${CMAKE_PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+set(HEDGR_PACKAGE_FILE ${CMAKE_BINARY_DIR}/${HEDGR_PACKAGE_NAME}.tar.gz)
+
+add_custom_target(package_hedgr
+    COMMENT "Packaging ${HEDGR_PACKAGE_NAME}"
+    COMMAND ${CMAKE_COMMAND} -E tar czf ${HEDGR_PACKAGE_FILE}
+            --format=gnutar publish
+    COMMAND ${CMAKE_COMMAND} -E echo "Wrote ${HEDGR_PACKAGE_FILE}"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    DEPENDS hedgr.imgui.exe
+    VERBATIM)

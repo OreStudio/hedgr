@@ -45,6 +45,27 @@ build/scripts/build-target.sh hedgr.ui.lib  # one target, no reconfigure
 
 The release build lands in =build/output/linux-clang-release/publish/=.
 
+* Packaging and deployment
+
+The publish directory is the deployable artefact. The build copies OreStudio's
+shared libraries into =publish/lib= and rewrites their RUNPATH, so the tree
+runs from wherever it is unpacked. Copying the files is not enough: a bundled
+library that keeps an absolute RUNPATH resolves its own dependencies through
+that path and fails even with the file beside it.
+
+#+begin_src sh
+build/scripts/build-target.sh package_hedgr      # publish/ -> hedgr-<ver>.tar.gz
+build/scripts/deploy.sh                          # package, copy, unpack, verify
+HEDGR_DEPLOY_HOST=goedel HEDGR_DEPLOY_DIR=hedgr build/scripts/deploy.sh
+#+end_src
+
+The host keeps one directory per version and a =current= symlink, so a deploy
+never overwrites a running version. The smoke test runs =--version=, which the
+argument parser answers without opening a window, and it proves the bundle is
+complete because the loader resolves every library before =main= runs.
+
+=patchelf= is required to build the package.
+
 * Running
 
 The environment supplies the connection settings; Hedgr reads the =ORES_HEDGR_*=

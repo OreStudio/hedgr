@@ -56,3 +56,34 @@ add_custom_command(TARGET ${exe_target_name} POST_BUILD
 install(TARGETS ${exe_target_name} RUNTIME DESTINATION bin)
 install(FILES ${background_image} DESTINATION share/hedgr.imgui
     RENAME background.jpeg)
+
+#
+# Make the publish directory self-contained.
+#
+# OreStudio's libraries are not installed on the target and live outside this
+# tree on the build host, so they are copied in. The step runs after the
+# executable is linked, which is the point at which every library it needs has
+# been produced.
+#
+# The command is not conditioned on UNIX because the bundler reports that a
+# platform it does not understand has nothing to do, and a Windows build simply
+# has no RUNPATH to make relative.
+#
+set(HEDGR_BUNDLE_SCRIPT ${CMAKE_SOURCE_DIR}/build/scripts/bundle-dependencies.py)
+set(HEDGR_ORES_LIB_DIR ${ORES_BUILD_DIR}/publish/lib)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+
+if(Python3_Interpreter_FOUND AND TARGET hedgr.imgui.exe)
+    add_custom_command(TARGET ${exe_target_name} POST_BUILD
+        COMMAND ${Python3_EXECUTABLE} ${HEDGR_BUNDLE_SCRIPT}
+            --binary $<TARGET_FILE:${exe_target_name}>
+            --destination ${HEDGR_PUBLISH_DIRECTORY}/lib
+            --search ${HEDGR_PUBLISH_DIRECTORY}/lib
+            --search ${HEDGR_ORES_LIB_DIR}
+        COMMENT "Bundling the shared library dependencies into publish/lib"
+        VERBATIM)
+else()
+    message(STATUS "Dependency bundling skipped: python3 or the executable target is missing")
+endif()
+
