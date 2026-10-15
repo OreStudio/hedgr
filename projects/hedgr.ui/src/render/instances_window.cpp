@@ -730,33 +730,12 @@ constexpr float status_row_extra = 8.0f;
  * @brief Draws the window's status line: the last thing that happened.
  *
  * The bar itself decides what is on it and whether its time is up; this only
- * gives it a row, the frame's clock, and the moment to age itself. Reading the
- * clock here rather than keeping one is what makes the fade frame-rate
- * independent without a timer anywhere in the interface.
+ * gives it the frame's clock and the moment to age itself. Reading the clock
+ * here rather than keeping one is what makes the fade frame-rate independent
+ * without a timer anywhere in the interface.
  */
 void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
     status.advance(now_ns);
-
-    const float text_height = ImGui::GetTextLineHeight()
-            * static_cast<float>(status_row_lines)
-        + status_row_extra;
-    const float height = text_height + ImGui::GetStyle().ItemSpacing.y;
-
-    /*
-     * Pinned to the foot of the window rather than left wherever the browser
-     * stopped. The browser's body is a fixed height and leaves the rest of the
-     * window empty, so a line drawn after it would float in the middle of that
-     * gap and move whenever the table above it changed size.
-     */
-    const float bottom = ImGui::GetWindowContentRegionMax().y;
-    ImGui::SetCursorPosY(bottom - height);
-
-    ImGui::Separator();
-    if (!ImGui::BeginChild("##hedgr-status", ImVec2(0.0f, text_height),
-            ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar)) {
-        ImGui::EndChild();
-        return;
-    }
 
     /*
      * The fade is a style alpha rather than a colour of its own, so the line
@@ -769,7 +748,58 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
     ImGui::TextWrapped("%s", status.message().c_str());
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
+}
 
+/**
+ * @brief How tall the window's foot is, whether or not anything is on it.
+ *
+ * Counted from the font rather than fixed, so a theme that installs a larger
+ * face gets a foot that still fits its own text.
+ */
+[[nodiscard]] float status_foot_height() {
+    return ImGui::GetTextLineHeight() * static_cast<float>(status_row_lines)
+        + status_row_extra;
+}
+
+/**
+ * @brief Measures the foot of the window and draws the line into it.
+ *
+ * Both halves are needed and the split is the point. Reserving the space first
+ * is what stops the table above from changing height as messages come and go:
+ * a table that grew by two rows whenever something was announced would move
+ * the row under the pointer at the worst possible moment. Drawing into a child
+ * of its own is what pins the line to the window's foot instead of leaving it
+ * wherever the browser happened to stop, which is what put it in the middle of
+ * the window when it was drawn straight after the table.
+ *
+ * The reservation is always made, so nothing below knows whether there is a
+ * message; the line is drawn only when there is one.
+ */
+void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
+    const float height = status_foot_height();
+
+    /*
+     * The reservation: an empty child of exactly the foot's height, which
+     * advances the cursor past the foot and leaves the line below it with the
+     * window's whole width.
+     */
+    ImGui::BeginChild("##hedgr-status-space", ImVec2(0.0f, height),
+        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+    ImGui::EndChild();
+
+    const float bottom = ImGui::GetWindowHeight() - height
+        - ImGui::GetStyle().WindowPadding.y;
+    ImGui::SetCursorPosY(bottom);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+        ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
+    ImGui::Separator();
+    ImGui::PopStyleVar();
+
+    ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
+        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+    if (!status.empty())
+        draw_status_line(status, now_ns);
     ImGui::EndChild();
 }
 
@@ -888,8 +918,7 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * Nothing is drawn when there is nothing to say, so the common case costs
      * the table no height at all.
      */
-    if (!status.empty())
-        draw_status_line(status, input.now_ns);
+    draw_status_foot(status, input.now_ns);
 
     /*
      * A form the callbacks above opened but did not fill is filled here, once

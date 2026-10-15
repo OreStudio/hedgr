@@ -85,10 +85,18 @@ submodule and a copy step.
 
 ## Consequences
 
-A sound that plays on a state change is a second thing that happens per poll, so
-the mapping has to be small and deliberate. Every registered sound is a noise an
-operator will hear repeatedly in a room where other people are working, and the
-default registration should be none rather than a set chosen on their behalf.
+**Sounds are registered by default while the application is in development.**
+The operator asked for them on rather than off, because a sound is how a state
+change is noticed without watching the window, and noticing is the whole point of
+raising a signal at all. That is a development decision and it is deliberately a
+temporary one: the operator intends to make the registration configurable, at
+which point the default becomes a matter of configuration rather than of code.
+
+Until then the mapping stays small, because every sound is a noise heard
+repeatedly by everyone in the room and a busy deployment can raise a signal on
+every poll where it is failing. A handful of distinct, short sounds is the whole
+budget. When the registration becomes configurable, an operator who wants silence
+gets silence by configuring it rather than by rebuilding.
 
 The signal names become an interface. Once a name is registered against a sound
 or shown in a status bar, renaming it silently breaks that registration, so the

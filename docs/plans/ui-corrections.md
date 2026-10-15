@@ -110,5 +110,7 @@ place.
   subset is vendored** into `assets/sounds/`; a submodule was considered and
   rejected because the pack is mostly files this application will never use.
 - The backend is **miniaudio**, already in Hedgr's vcpkg.
-- The default registration should be **no sound at all**. Every sound is a noise
-  heard repeatedly in a room where other people work, so an operator opts in.
+- Sounds are **registered by default while in development**, as the operator
+  asked, so a state change is noticed without watching the window. The
+  registration becomes configuration later; until then the mapping stays small
+  because a failing deployment can raise a signal on every poll.
