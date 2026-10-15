@@ -70,9 +70,18 @@ public:
     /**
      * @brief Declares something that is true until further notice.
      *
-     * Raised every frame by whoever owns the condition. The first raise
-     * replaces the bar's contents; later ones only move the clock, so a
-     * condition that is still true is not re-announced frame after frame.
+     * Raised every frame by whoever owns the condition, so it has to be
+     * idempotent: a condition re-announced sixty times a second would be
+     * noise, and would take the bar back from an event notice that landed in
+     * between -- which is the one message the operator has not read yet.
+     *
+     * A raise of the condition that already holds is a restatement and changes
+     * nothing, whether or not that condition is the thing the bar is showing:
+     * an event notice may be on the bar over the top of a condition that still
+     * holds, and that notice is the message the operator has not read yet.
+     * A raise of a different condition is a new fact and takes the bar.
+     *
+     * @param message what is true now.
      */
     void show_condition(std::string_view message);
 
@@ -122,7 +131,20 @@ private:
     };
 
     kind kind_ = kind::silent;
+
+    /** @brief What is on the bar, for the event case and the condition case. */
     std::string message_;
+
+    /**
+     * @brief The condition that currently holds, empty when none does.
+     *
+     * Held apart from @c message_ because the two answer different questions:
+     * this is what is true, and the message is what is being shown. An event
+     * notice on the bar over a condition that still holds is exactly the case
+     * where they differ.
+     */
+    std::string condition_;
+
     std::int64_t shown_at_ns_ = 0;
 };
 

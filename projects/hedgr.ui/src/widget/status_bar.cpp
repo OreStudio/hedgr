@@ -45,27 +45,39 @@ void status_bar::show_event(std::string_view message, std::int64_t now_ns) {
     shown_at_ns_ = now_ns;
 }
 
-void status_bar::show_condition(std::string_view message) {
+void status_bar::show_condition(std::string_view message, std::int64_t) {
     if (message.empty()) {
         clear_condition();
         return;
     }
 
     /*
-     * Only the first raise replaces what is on the bar. A condition is raised
-     * every frame by whatever owns it, and re-announcing it would wipe an
-     * event notice that landed in between -- so a person would lose the one
-     * message they had not read yet in favour of the one they had.
+     * A restatement of the condition that already holds changes nothing. This
+     * is not the same test as "the condition is what the bar is showing": an
+     * event notice may be on the bar over the top of a condition that still
+     * holds, and that is precisely the case this has to get right. Comparing
+     * against the display instead of against the condition would let the next
+     * frame's raise take the bar back from a notice the operator has not read,
+     * and comparing only by text would miss a condition whose own wording
+     * changed.
      */
-    if (kind_ == kind::condition)
+    if (condition_ == message)
         return;
 
+    condition_ = std::string{message};
     kind_ = kind::condition;
     message_ = std::string{message};
     shown_at_ns_ = 0;
 }
 
 void status_bar::clear_condition() {
+    condition_.clear();
+
+    /*
+     * Only the condition leaves the bar. An event notice on the bar describes
+     * something else that happened, and it is the message the operator has not
+     * finished reading: a condition ending is not a reason to take it away.
+     */
     if (kind_ != kind::condition)
         return;
     kind_ = kind::silent;

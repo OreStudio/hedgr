@@ -9,6 +9,7 @@
 #
 set(files
     "render_tests.cpp"
+    "status_bar_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

@@ -114,3 +114,24 @@ place.
   asked, so a state change is noticed without watching the window. The
   registration becomes configuration later; until then the mapping stays small
   because a failing deployment can raise a signal on every poll.
+
+## The lock UX, designed by the operator
+
+This supersedes what ADR 4 and the earlier brief said about the prompt being the
+surface. The window is not replaced; its content is blanked.
+
+1. The Instances window is drawn with its contents obscured while locked. The
+   shell, the toolbar and the status bar stay visible. Nothing is modal.
+2. The lock icon on the status bar carries the state and is the only control for
+   it.
+3. Clicking the lock opens the password entry. It is the only way in.
+4. A wrong password returns to locked and stays there. It does not retry and does
+   not re-present. The operator clicks the lock to try again, which stops a
+   failure becoming a loop.
+5. A password taken from the environment that worked is reported on the status
+   bar, not in the prompt.
+6. Colour carries the state: **green unlocked, amber locked, red for a failure**.
+   Amber because being locked is a normal state rather than an error, and red
+   belongs to something that has actually gone wrong.
+7. The blanked content still reads as the application. The tree and the list are
+   visibly there and waiting; an empty box or a spinner is not the same thing.
