@@ -1,0 +1,24 @@
+@startuml hedgr.imgui
+title hedgr.imgui
+class application {
+  +run()
+  -initialise_graphics()
+  -render_loop(GLFWwindow*)
+  -capture_frame(GLFWwindow*)
+}
+class host {
+  +{static} execute(args, out, err) : int
+}
+class parser {
+  +parse(arguments, info, error) : optional<options>
+}
+class options {
+  +logging : optional<logging_options>
+  +connection : optional<nats_options>
+  +database_path : path
+  +fullscreen : bool
+}
+host --> parser
+host --> application
+application --> options
+@enduml

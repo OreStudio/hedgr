@@ -65,7 +65,16 @@ int host::execute(const std::vector<std::string>& args,
      * Execute the application.
      */
     try {
-        hedgr::imgui::app::application app(cfg.connection);
+        /*
+         * HEDGR_CAPTURE asks for one finished frame to be written and the
+         * process to leave. It is the only way to inspect a change without a
+         * person watching, so it is read here and passed down.
+         */
+        std::filesystem::path capture;
+        if (const char* path = std::getenv("HEDGR_CAPTURE");
+            path != nullptr && *path != '\0')
+            capture = path;
+        hedgr::imgui::app::application app(cfg, std::move(capture));
         app.run();
         return EXIT_SUCCESS;
     } catch (const std::exception& e) {

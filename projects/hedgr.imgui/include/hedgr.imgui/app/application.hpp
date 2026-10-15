@@ -1,6 +1,6 @@
 /* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
  *
- * Copyright (C) 2025 Marco Craveiro <marco.craveiro@gmail.com>
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify it under
  * the terms of the GNU General Public License as published by the Free Software
@@ -20,77 +20,66 @@
 #ifndef HEDGR_IMGUI_APP_APPLICATION_HPP
 #define HEDGR_IMGUI_APP_APPLICATION_HPP
 
-#include <atomic>
-#include <string>
-#include <optional>
+#include "hedgr.imgui/config/options.hpp"
+#include "hedgr.runtime/manager/instance_manager.hpp"
+#include "hedgr.ui/render/workspace.hpp"
 #include <filesystem>
-#include "ores.logging/make_logger.hpp"
-#include "ores.comms/net/client_session.hpp"
-#include "ores.comms/net/client_options.hpp"
+#include <string>
 
 struct GLFWwindow;
 
 namespace hedgr::imgui::app {
 
 /**
- * @brief Owns the ImGui lifecycle and server connection state.
+ * @brief The executable: it owns the window, the frame loop and the wiring.
+ *
+ * Everything else lives in a library. The application's whole job is to open a
+ * GL context, hand the frame to hedgr.ui, and let hedgr.runtime apply what the
+ * interface asked for. It holds no domain state of its own and makes no
+ * connection of its own.
  */
 class application final {
-private:
-    inline static std::string_view logger_name =
-        "hedgr.imgui.app.application";
-
-    static auto& lg() {
-        using namespace ores::logging;
-        static auto instance = make_logger(logger_name);
-        return instance;
-    }
-
 public:
-    explicit application(
-        std::optional<ores::comms::net::client_options> connection_config
-            = std::nullopt);
+    /**
+     * @brief Takes the configuration and the frame-dump path.
+     *
+     * @param capture_path Where to write one finished frame, or empty. A dump
+     *                     is how a change is inspected without a person
+     *                     watching, so the process leaves once it is written.
+     */
+    explicit application(config::options cfg,
+                         std::filesystem::path capture_path = {});
+
+    ~application();
 
     application(const application&) = delete;
     application& operator=(const application&) = delete;
 
-    /**
-     * @brief Runs the application.
-     *
-     * Initialises graphics, optionally auto-connects, enters the render
-     * loop, then cleans up.
-     */
+    /** @brief Starts the runtime, opens the window, and loops until closed. */
     void run();
 
 private:
     GLFWwindow* initialise_graphics();
-    void setup_theme();
-    void load_fonts();
-    void load_background_texture();
-    void render_background(GLFWwindow* window);
-    void render_loop(GLFWwindow* window);
-    void render_control_panel();
-    void connect(const ores::comms::net::client_options& opts);
-    void login(const std::string& username, const std::string& password);
-    void logout();
-    void disconnect();
     void shutdown_graphics(GLFWwindow* window);
+    void load_background_texture();
+    void render_loop(GLFWwindow* window);
+    void toggle_fullscreen(GLFWwindow* window);
+    void capture_frame(GLFWwindow* window);
 
-    std::optional<ores::comms::net::client_options> connection_config_;
-    ores::comms::net::client_session session_;
-    std::atomic<bool> connecting_{false};
-    std::atomic<bool> logging_in_{false};
-    std::string connection_status_{"Disconnected"};
-    std::string login_status_;
-    std::string ui_server_address_{"localhost"};
-    std::string ui_server_port_{"55555"};
-    std::string ui_username_;
-    std::string ui_password_;
-    float clear_color_[4]{0.05f, 0.05f, 0.05f, 1.00f};
-    const char* glsl_version_{nullptr};
-    unsigned int background_texture_{0};
-    int background_width_{0};
-    int background_height_{0};
+    config::options cfg_;
+    std::filesystem::path capture_path_;
+    runtime::manager::instance_manager manager_;
+    ui::render::workspace workspace_;
+    std::string glsl_version_;
+    unsigned int background_texture_ = 0;
+    int background_width_ = 0;
+    int background_height_ = 0;
+    int windowed_x_ = 0;
+    int windowed_y_ = 0;
+    int windowed_width_ = 1280;
+    int windowed_height_ = 720;
+    bool fullscreen_ = false;
+    bool exit_requested_ = false;
 };
 
 }

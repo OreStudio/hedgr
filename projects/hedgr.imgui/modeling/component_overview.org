@@ -1,0 +1,41 @@
+:PROPERTIES:
+:ID: hedgr.imgui
+:END:
+#+title: hedgr.imgui
+#+description: The Hedgr executable: the GLFW window, the frame loop and the wiring.
+
+* Summary
+
+The only executable in Hedgr. It reads the configuration, opens the GL context,
+loads the interface fonts and theme, and runs a frame loop that hands each frame
+to =hedgr.ui= and lets =hedgr.runtime= apply what the interface asked for. It
+holds no domain state and opens no connection of its own.
+
+* Inputs
+
+- The shell environment, through =ORES_HEDGR_*=. The connection settings seed
+  the local store on a first run and are ignored afterwards.
+- =HEDGR_CAPTURE=, naming a path to write one finished frame to. When set, the
+  process writes frame eight and leaves, which is how a change is inspected
+  without a person watching.
+
+* Outputs
+
+- The local store at =$XDG_DATA_HOME/hedgr/hedgr.db=, or under =~/.local/share=.
+- A PPM frame dump when =HEDGR_CAPTURE= is set.
+
+* Entry points
+
+- =main=, which hands the arguments to =app::host::execute=.
+- =app::application::run=, which owns the lifecycle.
+
+* Dependencies
+
+- =hedgr.runtime= for the state owner and the thread pool.
+- =hedgr.ui= for every surface drawn.
+- GLFW, GLEW, OpenGL, Dear ImGui and ImPlot for the window and the renderer.
+
+* See also
+
+- [[file:hedgr.imgui.puml][Class diagram source]]
+- [[file:../../docs/adr/0001-component-decomposition.md][ADR 1: component decomposition]]

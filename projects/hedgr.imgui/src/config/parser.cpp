@@ -19,12 +19,16 @@
  */
 #include "hedgr.imgui/config/parser.hpp"
 
+#include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <ostream>
+#include <string>
 #include <boost/program_options.hpp>
 #include <boost/throw_exception.hpp>
 #include "hedgr.imgui/config/parser_exception.hpp"
 #include "ores.logging/logging_configuration.hpp"
+#include "ores.nats/config/nats_configuration.hpp"
 #include "ores.utility/program_options/environment_mapper_factory.hpp"
 
 namespace {
@@ -36,15 +40,12 @@ const std::string usage_error_msg("Usage error: ");
 const std::string help_arg("help");
 const std::string version_arg("version");
 
-const std::string connect_host_arg("connect-host");
-const std::string connect_port_arg("connect-port");
-const std::string connect_identifier_arg("connect-identifier");
-
 using boost::program_options::value;
 using boost::program_options::variables_map;
 using boost::program_options::options_description;
 
-using ores::comms::net::client_options;
+using ores::nats::config::nats_configuration;
+using ores::nats::config::nats_options;
 using hedgr::imgui::config::options;
 using hedgr::imgui::config::parser_exception;
 
@@ -61,18 +62,10 @@ options_description make_options_description() {
 
     const auto lod(logging_configuration::make_options_description(
             "hedgr.imgui.log"));
-
-    options_description cod("Connection");
-    cod.add_options()
-        (connect_host_arg.c_str(), value<std::string>(),
-            "Host to connect to (e.g., localhost)")
-        (connect_port_arg.c_str(), value<std::string>(),
-            "Port to connect to (e.g., 55555)")
-        (connect_identifier_arg.c_str(), value<std::string>(),
-            "Client identifier to use when connecting");
+    const auto nod(nats_configuration::make_options_description());
 
     options_description r;
-    r.add(god).add(lod).add(cod);
+    r.add(god).add(lod).add(nod);
     return r;
 }
 
@@ -82,7 +75,7 @@ options_description make_options_description() {
 void print_help(const options_description& od, std::ostream& info) {
     info << "Hedgr ImGui is a remote GUI client for ORE Studio."
          << std::endl
-         << "It provides an ImGui-based interface for connecting to and interacting with ores.comms.service."
+         << "It provides an ImGui-based interface for connecting to ORE Studio over NATS."
          << std::endl << std::endl
          << "Usage: hedgr.imgui [options]"
          << std::endl << std::endl
@@ -103,29 +96,34 @@ void version(std::ostream& info) {
 }
 
 /**
- * @brief Reads the connection configuration from the variables map.
+ * @brief Reads the connection configuration from the parsed environment.
+ *
+ * Everything comes from the environment: the shared ORES_NATS_* variables for
+ * the URL, subject prefix and wire format, and HEDGR_* for anything specific
+ * to this client. There is no bespoke configuration file.
  */
-std::optional<client_options>
+std::optional<nats_options>
 read_connection_configuration(const variables_map& vm) {
-    const bool has_host = vm.count(connect_host_arg) != 0;
-    const bool has_port = vm.count(connect_port_arg) != 0;
-    const bool has_identifier = vm.count(connect_identifier_arg) != 0;
+    return nats_configuration::read_options(vm);
+}
 
-    if (!has_host && !has_port && !has_identifier)
-        return {};
-
-    client_options r;
-    r.host = has_host ? vm[connect_host_arg].as<std::string>() : "localhost";
-    r.port = has_port ? static_cast<std::uint16_t>(std::stoi(vm[connect_port_arg].as<std::string>())) : 55555;
-    r.client_identifier = has_identifier ? vm[connect_identifier_arg].as<std::string>() : "hedgr-imgui";
-    r.verify_certificate = false; // FIXME: for now
-
-    if (r.port < 1 || r.port > 65535) {
-        BOOST_THROW_EXCEPTION(parser_exception(
-                std::format("Port number {} is out of valid range (1-65535)!", r.port)));
+/**
+ * @brief Where the local store lives.
+ *
+ * Under the user's data directory, honouring XDG_DATA_HOME, because the store
+ * belongs to the operator rather than to the installation. Falling back to
+ * HOME keeps this working on a machine with no XDG variables set.
+ */
+std::filesystem::path default_database_path() {
+    std::filesystem::path base;
+    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
+        base = xdg;
+    } else if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        base = std::filesystem::path(home) / ".local" / "share";
+    } else {
+        base = std::filesystem::temp_directory_path();
     }
-
-    return r;
+    return base / "hedgr" / "hedgr.db";
 }
 
 /**
@@ -136,6 +134,13 @@ std::optional<options>
 parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
     using ores::logging::logging_configuration;
     using ores::utility::program_options::environment_mapper_factory;
+
+    /*
+     * Make the unprefixed ORES_NATS_* variables available to the shared
+     * fallback tier, so a deployment's broker settings need only be stated
+     * once across every ORE Studio client.
+     */
+    nats_configuration::register_shared_domain();
 
     const auto od(make_options_description());
     const auto name_mapper(environment_mapper_factory::make_mapper("HEDGR"));
@@ -162,7 +167,9 @@ parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
 
     options r;
     r.logging = logging_configuration::read_options(vm);
+
     r.connection = read_connection_configuration(vm);
+    r.database_path = default_database_path();
     return r;
 }
 
