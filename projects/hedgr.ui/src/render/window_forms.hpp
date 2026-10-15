@@ -147,9 +147,21 @@ inline void apply_labels(const render_input& input,
     }
 }
 
-/** @brief Every live folder of one tree, as the browser wants them. */
+/**
+ * @brief The live folders of one tree belonging to one owner.
+ *
+ * The owner is part of the filter, not an afterthought. Every instance has its
+ * own accounts tree, so an accounts tree filtered on the tree alone returns
+ * every instance's root and the browser draws them all: one instance's window
+ * then shows one Accounts node per instance in the store, which is where the
+ * wall of empty account trees came from.
+ *
+ * The instances tree has no owner, so its callers pass nothing and match on the
+ * empty owner every one of its folders carries.
+ */
 [[nodiscard]] inline std::vector<widget::tree_folder> tree_folders(
-    const render_input& input, hedgr::model::domain::folder_tree tree) {
+    const render_input& input, hedgr::model::domain::folder_tree tree,
+    std::string_view owner_id = {}) {
     std::vector<widget::tree_folder> folders;
     const auto& layout = input.folders.layout();
     const auto rows = input.folders.rows();
@@ -158,7 +170,7 @@ inline void apply_labels(const render_input& input,
         if (!layout.is_alive(index))
             continue;
         const auto& row = rows[index];
-        if (row.tree != tree)
+        if (row.tree != tree || row.owner_id != owner_id)
             continue;
         folders.push_back(widget::tree_folder{row.id, row.parent_id, row.name,
             row.parent_id.empty()});

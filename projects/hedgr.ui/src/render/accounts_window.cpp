@@ -614,7 +614,7 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
      */
     widget::browser_model model;
     model.window_actions = &accounts_window_actions;
-    model.folders = forms::tree_folders(input, folder_tree::accounts);
+    model.folders = forms::tree_folders(input, folder_tree::accounts, instance_id);
     model.leaves = account_tree_leaves(input, instance_id);
     model.columns = account_columns();
     model.row_cells = &account_row_cells;
