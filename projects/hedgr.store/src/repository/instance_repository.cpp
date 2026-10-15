@@ -31,8 +31,8 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, name, nats_url, subject_prefix, wire_format, created_at "
-    "FROM instance ORDER BY name";
+    "SELECT id, name, nats_url, subject_prefix, wire_format, folder_id, "
+    "created_at FROM instance ORDER BY name";
 
 /** @brief Reads the row the statement is currently parked on. */
 dom::instance read_row(const sqlite::statement& query) {
@@ -42,7 +42,8 @@ dom::instance read_row(const sqlite::statement& query) {
     row.nats_url = std::string(query.column_text(2));
     row.subject_prefix = std::string(query.column_text(3));
     row.wire_format = std::string(query.column_text(4));
-    row.created_at = std::string(query.column_text(5));
+    row.folder_id = std::string(query.column_text(5));
+    row.created_at = std::string(query.column_text(6));
     return row;
 }
 
@@ -73,11 +74,12 @@ sqlite::result<void> instance_repository::save(const dom::instance& row) {
     sqlite::statement insert(
         db_->handle(),
         "INSERT INTO instance (id, name, nats_url, subject_prefix, "
-        "wire_format) VALUES (?, ?, ?, ?, ?) "
+        "wire_format, folder_id) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
         "nats_url = excluded.nats_url, "
         "subject_prefix = excluded.subject_prefix, "
-        "wire_format = excluded.wire_format");
+        "wire_format = excluded.wire_format, "
+        "folder_id = excluded.folder_id");
     if (!insert.is_valid())
         return std::unexpected(insert.step().error());
 
@@ -93,8 +95,28 @@ sqlite::result<void> instance_repository::save(const dom::instance& row) {
         return bound;
     if (auto bound = insert.bind(5, row.wire_format); !bound)
         return bound;
+    if (auto bound = insert.bind(6, row.folder_id); !bound)
+        return bound;
 
     auto stepped = insert.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+sqlite::result<void> instance_repository::set_parent(std::string_view id,
+    std::string_view folder_id) {
+    sqlite::statement query(
+        db_->handle(), "UPDATE instance SET folder_id = ? WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, folder_id); !bound)
+        return bound;
+    if (auto bound = query.bind(2, id); !bound)
+        return bound;
+
+    auto stepped = query.step();
     if (!stepped)
         return std::unexpected(stepped.error());
     return {};

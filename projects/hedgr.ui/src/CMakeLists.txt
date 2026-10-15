@@ -32,8 +32,8 @@ set_target_properties(${lib_target_name}
 
 target_include_directories(${lib_target_name} PUBLIC
     ${CMAKE_SOURCE_DIR}/projects/hedgr.ui/include)
-# The component's own src/ holds internal.hpp, the seam between the workspace
-# and the Instance Manager, which is deliberately not a public header.
+# The component's own src/ is on the include path for the renderers' shared
+# private headers, which are deliberately not part of the public interface.
 target_include_directories(${lib_target_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR})
 

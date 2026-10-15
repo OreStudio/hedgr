@@ -9,6 +9,7 @@
 #
 set(files
     "runtime_tests.cpp"
+    "seed_store_tests.cpp"
     "store_lock_tests.cpp"
 )
 

@@ -242,6 +242,10 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
         return icon::notice;
     case hedgr::model::domain::window_kind::instance_manager:
         return icon::dashboard;
+    case hedgr::model::domain::window_kind::accounts:
+        return icon::account;
+    case hedgr::model::domain::window_kind::workspace:
+        return icon::session;
     }
     return icon::information;
 }

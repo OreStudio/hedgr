@@ -23,6 +23,7 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <cstdint>
 
 namespace hedgr::store::repository {
 
@@ -55,6 +56,15 @@ using sqlite::result;
  * See ADR 4 and the @c Master @c password entry in CONTEXT.md.
  */
 [[nodiscard]] HEDGR_STORE_EXPORT result<void> apply(database& db);
+
+/**
+ * @brief The schema version this build writes and expects.
+ *
+ * Read by tests rather than restated in them: a version written into a test as
+ * a literal is a second place it has to be bumped, and the one that forgets is
+ * the one that makes a passing test lie.
+ */
+[[nodiscard]] HEDGR_STORE_EXPORT std::int64_t schema_version() noexcept;
 
 }
 

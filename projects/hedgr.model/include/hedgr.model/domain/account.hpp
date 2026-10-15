@@ -43,6 +43,15 @@ struct account final {
     /** @brief Short human name, for example "ops read-only". */
     std::string name;
 
+    /**
+     * @brief Key of the folder this account sits in.
+     *
+     * Inside the accounts tree of @c instance_id, which is what keeps the two
+     * trees apart: an account folder is owned by the instance, and this names
+     * one of them.
+     */
+    std::string folder_id;
+
     /** @brief The principal as IAM sees it, for example user@host. */
     std::string principal;
 };

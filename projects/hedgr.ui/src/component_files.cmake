@@ -9,13 +9,18 @@
 #
 set(files
     "icon/fonts.cpp"
+    "render/accounts_window.cpp"
     "render/chart_window.cpp"
     "render/grid_window.cpp"
-    "render/instance_manager_window.cpp"
+    "render/instances_window.cpp"
     "render/notice_window.cpp"
+    "render/panels.cpp"
     "render/renderer.cpp"
     "render/workspace.cpp"
+    "render/workspace_window.cpp"
     "theme/theme.cpp"
+    "widget/browser.cpp"
+    "widget/panels.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
@@ -26,9 +31,15 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/hedgr.ui.icon.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/icons.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/hedgr.ui.render.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/panels.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/renderer.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/windows.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/workspace.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/theme/hedgr.ui.theme.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/theme/theme.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/browser.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/browser_state.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/controls.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/hedgr.ui.widget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/panels.hpp"
 )

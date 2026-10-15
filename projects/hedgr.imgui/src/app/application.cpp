@@ -22,6 +22,7 @@
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "ores.logging/make_logger.hpp"
 
@@ -72,8 +73,10 @@ std::int64_t now_ns() {
 
 }
 
-application::application(config::options cfg, std::filesystem::path capture_path)
-    : cfg_(std::move(cfg)), capture_path_(std::move(capture_path)) {}
+application::application(config::options cfg, std::filesystem::path capture_path,
+    int capture_frame)
+    : cfg_(std::move(cfg)), capture_path_(std::move(capture_path)),
+      capture_frame_(capture_frame) {}
 
 application::~application() = default;
 
@@ -98,6 +101,25 @@ void application::run() {
         BOOST_LOG_SEV(lg(), error)
             << "Could not open the store: " << started.error();
     }
+
+    /*
+     * Armed before the first frame, so an unattended launch unlocks on the
+     * frame the prompt is first drawn rather than after a visible pause.
+     */
+    if (!cfg_.master_password.empty())
+        workspace_.unlock_with(cfg_.master_password);
+
+    /*
+     * A capture can ask for one piece of interface scratch to be set, because
+     * some of what these windows show is reached by a click and a capture is
+     * not a person. The variables are read here and nowhere else, so nothing
+     * below this line knows whether it is being captured.
+     */
+    if (const char* folder = std::getenv("HEDGR_CAPTURE_SELECT_FOLDER"))
+        ui::render::select_folder_for_capture(folder);
+    if (const char* dashboard = std::getenv("HEDGR_CAPTURE_SHOW_DASHBOARD");
+        dashboard != nullptr && *dashboard != '\0')
+        ui::render::open_dashboard_for_capture();
 
     auto* window = initialise_graphics();
     if (window == nullptr) {
@@ -334,7 +356,8 @@ void application::render_loop(GLFWwindow* window) {
          * One frame dump, then out. Frame eight rather than one so the layout
          * has settled and ImGui has sized every window.
          */
-        if (!capture_path_.empty() && ImGui::GetFrameCount() == 8) {
+        if (!capture_path_.empty()
+            && ImGui::GetFrameCount() == static_cast<unsigned int>(capture_frame_)) {
             /* Read the back buffer before it is swapped away, not after. */
             capture_frame(window);
             glfwSwapBuffers(window);

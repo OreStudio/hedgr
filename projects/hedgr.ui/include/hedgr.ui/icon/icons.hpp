@@ -176,6 +176,36 @@ inline constexpr const char* probe = ICON_FA_CIRCLE;
  */
 inline constexpr const char* ready = ICON_FA_CIRCLE_CHECK;
 
+/**
+ * @brief A folder in a tree.
+ *
+ * The same glyph whether the folder is open or shut, because ImGui draws its
+ * own arrow for the open state and a second indicator beside it would be two
+ * ways of saying one thing.
+ */
+inline constexpr const char* folder = ICON_FA_FOLDER;
+
+/** @brief The instances tree's root, and a tree's anchor generally. */
+inline constexpr const char* folder_root = ICON_FA_FOLDER_TREE;
+
+/** @brief Move a row into another folder. */
+inline constexpr const char* move = ICON_FA_ARROWS_UP_DOWN_LEFT_RIGHT;
+
+/** @brief Create a second copy of a row. */
+inline constexpr const char* duplicate = ICON_FA_COPY;
+
+/** @brief Sign out of a session. */
+inline constexpr const char* sign_out = ICON_FA_RIGHT_FROM_BRACKET;
+
+/** @brief Sign in to an instance with an account. */
+inline constexpr const char* sign_in = ICON_FA_RIGHT_TO_BRACKET;
+
+/** @brief A fact about a session in the workspace's dashboard. */
+inline constexpr const char* fact = ICON_FA_CIRCLE_DOT;
+
+/** @brief A panel that the account's permissions will decide, once they exist. */
+inline constexpr const char* panel = ICON_FA_TABLE_COLUMNS;
+
 /*
  * Paging, for a paged table. The spec's list of semantic names stops at link;
  * these four are added because a paged grid's controls are icons here like

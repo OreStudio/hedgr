@@ -84,6 +84,17 @@ public:
     [[nodiscard]] const domain::instance* get(instance_handle h) const noexcept;
     [[nodiscard]] domain::instance* get(instance_handle h) noexcept;
 
+    /**
+     * @brief Puts the instance in @p folder_id, and nowhere else.
+     *
+     * The one column of an instance row the runtime moves on its own, when a
+     * folder is removed and its contents are re-homed. A general mutable
+     * accessor would be a second writer beside upsert(); this is the single
+     * field that has a reason to change without the rest of the row being
+     * rewritten from a caller's copy.
+     */
+    void set_folder(instance_handle h, std::string folder_id);
+
     /** @brief Aliveness and generations, holes included. */
     [[nodiscard]] const slab& layout() const noexcept { return layout_; }
 
@@ -133,6 +144,9 @@ public:
     /** @brief The accounts belonging to one instance, holes skipped. */
     [[nodiscard]] std::vector<const domain::account*>
     children_of(std::string_view instance_id) const;
+
+    /** @brief Puts the account in @p folder_id. See instance_table::set_folder. */
+    void set_folder(account_handle h, std::string folder_id);
 
     /** @brief Aliveness and generations, holes included. */
     [[nodiscard]] const slab& layout() const noexcept { return layout_; }
@@ -353,6 +367,7 @@ struct session_columns final {
     std::vector<std::string> account_id;
 
     // Cold: read only when a detail surface opens.
+    std::vector<std::int64_t> opened_at_ns;
     std::vector<std::string> last_error;
     std::vector<std::string> tenant_name;
     std::vector<std::string> party_name;
@@ -398,6 +413,17 @@ public:
     /** @brief Records what IAM returned once the account was accepted. */
     void set_account_result(session_handle h, std::string tenant_name,
                              std::string party_name, std::string token);
+
+    /**
+     * @brief When this session was established, on the monotonic clock.
+     *
+     * A fact about the session rather than about either end of it, so it lives
+     * here and not on the account or the instance. Zero means the session has
+     * never been authenticated, which is a different state from having been
+     * established at the epoch.
+     */
+    [[nodiscard]] std::int64_t opened_at_ns(session_handle h) const;
+    void set_opened_at_ns(session_handle h, std::int64_t value);
 
     [[nodiscard]] std::string_view instance_id(session_handle h) const;
     [[nodiscard]] std::string_view account_id(session_handle h) const;

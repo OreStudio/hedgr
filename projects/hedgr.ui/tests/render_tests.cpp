@@ -19,13 +19,17 @@
  */
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/browser.hpp"
+#include "hedgr.ui/widget/panels.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 /*
  * There is deliberately no rendering test here. Every renderer in this
@@ -239,4 +243,291 @@ TEST_CASE("a failed lock is drawn as a failure and a working one is not",
 
     REQUIRE(failed != unlocked);
     REQUIRE(failed != locked);
+}
+
+/*
+ * ---------------------------------------------------------------- browser
+ *
+ * The browser's decisions -- what the filter keeps, what a selection lists,
+ * which affordances a row has, and which drops are refused -- are free
+ * functions over plain values, and they are tested here rather than through a
+ * frame. The drawing itself is not tested: ImGui::NewFrame without a live
+ * context, a font atlas and a backend aborts rather than returning an error, so
+ * there is no way to run a renderer in this binary and no reason to want one.
+ * What is worth a test is everything a renderer decides before it draws.
+ */
+
+using hedgr::ui::widget::affordances_for;
+using hedgr::ui::widget::browser_state;
+using hedgr::ui::widget::can_drop_onto;
+using hedgr::ui::widget::filter_matches;
+using hedgr::ui::widget::filter_matches_any;
+using hedgr::ui::widget::node_kind;
+
+TEST_CASE("the filter matches anywhere in a name, ignoring case", "[browser]") {
+    REQUIRE(filter_matches("nats://localhost:20405", "LOCALHOST"));
+    REQUIRE(filter_matches("production", "duct"));
+    REQUIRE(filter_matches("production", ""));
+    REQUIRE_FALSE(filter_matches("production", "staging"));
+    REQUIRE(filter_matches_any({"name", "principal"}, "PRIN"));
+    REQUIRE_FALSE(filter_matches_any({"name", "principal"}, "tenant"));
+}
+
+TEST_CASE("root offers no rename, move or delete, and offers creation",
+    "[browser]") {
+    /*
+     * The acceptance rule, stated as a test rather than as a comment: root is
+     * what the tree is anchored by, so the three affordances that would move or
+     * relabel it do not exist for it. It is where things are created, which is
+     * the one thing root is for.
+     */
+    const auto root = affordances_for(node_kind::folder, true);
+    REQUIRE_FALSE(root.rename);
+    REQUIRE_FALSE(root.move);
+    REQUIRE_FALSE(root.remove);
+    REQUIRE(root.create_inside);
+
+    /* An ordinary folder may do all four. */
+    const auto folder = affordances_for(node_kind::folder, false);
+    REQUIRE(folder.rename);
+    REQUIRE(folder.move);
+    REQUIRE(folder.remove);
+    REQUIRE(folder.create_inside);
+
+    /* A leaf holds nothing, so it is the one row that cannot contain. */
+    const auto leaf = affordances_for(node_kind::leaf, false);
+    REQUIRE(leaf.rename);
+    REQUIRE(leaf.move);
+    REQUIRE(leaf.remove);
+    REQUIRE_FALSE(leaf.create_inside);
+}
+
+TEST_CASE("a folder cannot be dropped into itself or its own subtree",
+    "[browser]") {
+    const std::vector<std::string> subtree{ "a", "b", "c" };
+
+    REQUIRE_FALSE(can_drop_onto("a", "a", subtree));
+    REQUIRE_FALSE(can_drop_onto("a", "b", subtree));
+    REQUIRE_FALSE(can_drop_onto("a", "c", subtree));
+
+    /* Somewhere outside the subtree, and the root, are both fine. */
+    REQUIRE(can_drop_onto("a", "d", subtree));
+    REQUIRE(can_drop_onto("a", "root", subtree));
+    REQUIRE(can_drop_onto("a", "root", {}));
+
+    /* Nothing is dropped onto nothing. */
+    REQUIRE_FALSE(can_drop_onto("a", "", {}));
+}
+
+TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {
+    empty_state state;
+
+    const auto add = [&](std::string id) {
+        hedgr::model::domain::instance row;
+        row.id = id;
+        row.name = id;
+        return state.instances.upsert(row);
+    };
+
+    /* An instance nobody has probed is counted as total and nothing else. */
+    const auto pending = add("pending");
+    const auto unprobed =
+        hedgr::ui::widget::count_instances(state.instances, state.probes);
+    REQUIRE(unprobed.total == 1);
+    REQUIRE(unprobed.ready == 0);
+    REQUIRE(unprobed.bootstrapping == 0);
+    REQUIRE(unprobed.unreachable == 0);
+
+    hedgr::model::domain::probe_result ready;
+    ready.reach = hedgr::model::domain::reachability::reachable;
+    ready.ready = hedgr::model::domain::readiness::ready;
+    state.probes.set(pending, ready);
+
+    hedgr::model::domain::probe_result booting;
+    booting.reach = hedgr::model::domain::reachability::reachable;
+    booting.ready = hedgr::model::domain::readiness::bootstrapping;
+    state.probes.set(add("booting"), booting);
+
+    /*
+     * A deployment whose IAM did not answer is unreachable and neither ready
+     * nor bootstrapping: unknown is not bootstrapping, because a deployment
+     * that said nothing has not said it is setting itself up.
+     */
+    hedgr::model::domain::probe_result down;
+    down.reach = hedgr::model::domain::reachability::unreachable;
+    down.ready = hedgr::model::domain::readiness::unknown;
+    state.probes.set(add("down"), down);
+
+    const auto counts =
+        hedgr::ui::widget::count_instances(state.instances, state.probes);
+    REQUIRE(counts.total == 3);
+    REQUIRE(counts.ready == 1);
+    REQUIRE(counts.bootstrapping == 1);
+    REQUIRE(counts.unreachable == 1);
+
+    /*
+     * A removed instance takes its probe row with it, so a result cannot be
+     * counted against the row that takes the slot afterwards.
+     */
+    const auto doomed = state.instances.find("down");
+    REQUIRE(doomed.has_value());
+    state.instances.remove(*doomed);
+    state.probes.forget(*doomed);
+
+    const auto after = hedgr::ui::widget::count_instances(state.instances, state.probes);
+    REQUIRE(after.total == 2);
+    REQUIRE(after.unreachable == 0);
+}
+
+TEST_CASE("an account that was never signed in differs from a failed one",
+    "[dashboard]") {
+    using hedgr::model::domain::session_status;
+    empty_state state;
+
+    const auto never = hedgr::ui::widget::last_sign_in(state.sessions, "i", "a");
+    REQUIRE_FALSE(never.ever_attempted);
+
+    const auto handle = state.sessions.insert("i", "a");
+    state.sessions.set_status(handle, session_status::failed);
+    state.sessions.set_last_error(handle, "IAM refused the password");
+
+    const auto failed = hedgr::ui::widget::last_sign_in(state.sessions, "i", "a");
+    REQUIRE(failed.ever_attempted);
+    REQUIRE(failed.status == session_status::failed);
+    REQUIRE(failed.last_error == "IAM refused the password");
+}
+
+TEST_CASE("an address is split into a host and a port without guessing",
+    "[dashboard]") {
+    using hedgr::ui::widget::host_port;
+    using hedgr::ui::widget::join_host_port;
+    using hedgr::ui::widget::split_host_port;
+
+    const auto plain = split_host_port("nats://manta:20405");
+    REQUIRE(plain.scheme == "nats://");
+    REQUIRE(plain.host == "manta");
+    REQUIRE(plain.port == "20405");
+    REQUIRE(join_host_port(plain) == "nats://manta:20405");
+
+    /* No port is no port, not a default filled in by the splitter. */
+    const auto bare = split_host_port("nats://manta");
+    REQUIRE(bare.host == "manta");
+    REQUIRE(bare.port.empty());
+    REQUIRE(join_host_port(bare) == "nats://manta");
+
+    /* A scheme nobody here knows is carried through rather than rewritten. */
+    const auto secure = split_host_port("tls://manta:4222");
+    REQUIRE(secure.scheme == "tls://");
+    REQUIRE(join_host_port(secure) == "tls://manta:4222");
+
+    /* A host with no scheme at all still yields a host and a port. */
+    const auto scheme_less = split_host_port("manta:4222");
+    REQUIRE(scheme_less.scheme.empty());
+    REQUIRE(scheme_less.host == "manta");
+    REQUIRE(scheme_less.port == "4222");
+
+    /* An IPv6 literal keeps its colons and still names its port. */
+    const auto v6 = split_host_port("nats://[::1]:4222");
+    REQUIRE(v6.host == "[::1]");
+    REQUIRE(v6.port == "4222");
+
+    const host_port empty;
+    REQUIRE(split_host_port("").host.empty());
+    REQUIRE(join_host_port(empty).empty());
+}
+
+TEST_CASE("label names are split on commas and trimmed", "[dashboard]") {
+    using hedgr::ui::widget::join_labels;
+    using hedgr::ui::widget::split_labels;
+
+    const auto names = split_labels(" production , staging,ops ");
+    REQUIRE(names == std::vector<std::string>{ "production", "staging", "ops" });
+
+    /* An empty word between two commas is nobody's label. */
+    REQUIRE(split_labels("a,,b").size() == 2);
+    REQUIRE(split_labels("").empty());
+    REQUIRE(split_labels("  ").empty());
+
+    REQUIRE(join_labels(names) == "production, staging, ops");
+    REQUIRE(join_labels({}).empty());
+}
+
+TEST_CASE("a catalogue window is culled while the store is locked", "[lock]") {
+    empty_state state;
+
+    /*
+     * The window kinds that read the store are the ones the lock closes. The
+     * ones whose contents arrive over a session are not, because a session is
+     * not what the master password protects.
+     */
+    const auto shows = [&](store_lock lock, window_kind kind) {
+        return hedgr::ui::render::shows_window(
+            kind, input_with(state, lock), std::string_view{"w-1"});
+    };
+
+    REQUIRE(shows(store_lock::unlocked, window_kind::accounts));
+    REQUIRE(shows(store_lock::unlocked, window_kind::workspace));
+    REQUIRE(shows(store_lock::unlocked, window_kind::instance_manager));
+
+    REQUIRE_FALSE(shows(store_lock::locked, window_kind::accounts));
+    REQUIRE_FALSE(shows(store_lock::locked, window_kind::workspace));
+    REQUIRE_FALSE(shows(store_lock::locked, window_kind::instance_manager));
+
+    REQUIRE(shows(store_lock::locked, window_kind::notice));
+    REQUIRE(shows(store_lock::locked, window_kind::chart));
+    REQUIRE(shows(store_lock::locked, window_kind::grid));
+}
+
+TEST_CASE("the new window kinds have renderers and titles", "[renderer]") {
+    using hedgr::model::domain::accounts_state;
+    using hedgr::model::domain::workspace_state;
+    using hedgr::model::domain::window_state;
+
+    REQUIRE(renderer_for(window_kind::accounts) != nullptr);
+    REQUIRE(renderer_for(window_kind::workspace) != nullptr);
+
+    empty_state state;
+    const auto input = input_with(state, store_lock::unlocked);
+
+    /*
+     * A window whose subject has gone still has a title, and it is the kind's
+     * own name rather than an empty string: a restored window over a deleted
+     * instance must still say what it is.
+     */
+    const window_state orphan = accounts_state{ "inst-gone" };
+    REQUIRE(hedgr::ui::render::window_title(window_kind::accounts, orphan, input)
+        == "Accounts: inst-gone");
+
+    const window_state session = workspace_state{ "acct-gone" };
+    REQUIRE(hedgr::ui::render::window_title(window_kind::workspace, session, input)
+        == "acct-gone");
+}
+
+TEST_CASE("every window kind has an icon and a distinct spelling", "[renderer]") {
+    /*
+     * The kind table is the one place a kind is registered, and the compiler
+     * checks the renderer half of it. The icon and the persisted spelling are
+     * the two halves it cannot check, so they are checked here: a kind with no
+     * icon or two kinds with one spelling are both a kind that cannot be
+     * restored or drawn.
+     */
+    std::unordered_set<std::string> spellings;
+    for (std::size_t value = 0; value < hedgr::model::domain::window_kind_count;
+         ++value) {
+        const auto kind = static_cast<window_kind>(value);
+
+        const auto icon = hedgr::ui::theme::window_kind_icon(kind);
+        REQUIRE(icon != nullptr);
+        REQUIRE(std::string{icon}.size() > 0);
+
+        const auto spelling =
+            std::string{hedgr::model::domain::to_string(kind)};
+        REQUIRE(spelling != "unknown");
+        REQUIRE(spellings.insert(spelling).second);
+
+        /* And it survives a round trip through the stored form. */
+        const auto parsed = hedgr::model::domain::window_kind_from_string(spelling);
+        REQUIRE(parsed.has_value());
+        REQUIRE(*parsed == kind);
+    }
 }

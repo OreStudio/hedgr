@@ -19,11 +19,14 @@
  */
 #include "hedgr.ui/render/workspace.hpp"
 
+#include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/widget/controls.hpp"
+
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
-#include "internal.hpp"
 #include "imgui.h"
+#include <algorithm>
 #include <cfloat>
 #include <cstddef>
 #include <format>
@@ -31,21 +34,6 @@
 #include <variant>
 
 namespace {
-
-/**
- * @brief An icon-only button with a tooltip naming the action.
- *
- * The tooltip is not decoration. An icon without one is a guess, and this
- * interface deliberately has no menu to fall back on.
- */
-bool icon_button(const char* id, const char* glyph, const char* tooltip) {
-    const float height = ImGui::GetFrameHeight();
-    ImGui::PushID(id);
-    const bool pressed = ImGui::Button(glyph, ImVec2(height, height));
-    ImGui::PopID();
-    ImGui::SetItemTooltip("%s", tooltip);
-    return pressed;
-}
 
 /**
  * @brief The photographic background, drawn under every window.
@@ -100,15 +88,19 @@ std::string lock_tooltip(hedgr::model::domain::store_lock value) {
 /**
  * @brief The icon strip along the top: the whole of the application's chrome.
  *
- * Add instance, refresh, probe, the lock indicator, full screen and exit. The
- * lock indicator is text rather than a button so that it cannot be mistaken for
- * the control; the control is the padlock action beside it.
+ * Refresh, probe, the lock indicator, full screen and exit. Everything that
+ * acts on one row lives in the window that holds the row, so this strip is only
+ * what acts on the whole application: a button here that meant "add an
+ * instance" would be a button whose subject is somewhere the operator is not
+ * looking.
+ *
+ * The lock indicator is text rather than a button so that it cannot be mistaken
+ * for the control; the control is the padlock action beside it.
  */
 void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_clicked,
     bool& unlock_clicked) {
     namespace icon = hedgr::ui::icon;
     using hedgr::model::command::command_kind;
-    namespace detail = hedgr::ui::render::detail;
 
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos);
@@ -133,11 +125,8 @@ void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_click
     if (!open)
         ImGui::BeginDisabled();
 
-    if (icon_button("add", icon::add, "Add instance"))
-        detail::add_instance_requested = true;
-
-    ImGui::SameLine();
-    if (icon_button("refresh", icon::refresh, "Refresh every window")) {
+    if (hedgr::ui::widget::icon_button("refresh", icon::refresh,
+            "Refresh every window")) {
         /*
          * One command per open window. The interface does not know how to
          * fetch anything: it names the windows that want fresh data and lets
@@ -158,7 +147,7 @@ void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_click
     }
 
     ImGui::SameLine();
-    if (icon_button("probe", icon::probe, "Probe every instance now")) {
+    if (hedgr::ui::widget::icon_button("probe", icon::probe, "Probe every instance now")) {
         /*
          * One command for the whole set rather than one per instance: the
          * runtime owns the schedule, so asking it to bring every deadline
@@ -186,16 +175,16 @@ void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_click
 
     ImGui::SameLine();
     if (open) {
-        if (icon_button("lock", icon::lock,
+        if (hedgr::ui::widget::icon_button("lock", icon::lock,
                 "Lock the store, forgetting the master password for this run"))
             lock_clicked = true;
     } else {
-        if (icon_button("unlock", icon::unlock, "Enter the master password"))
+        if (hedgr::ui::widget::icon_button("unlock", icon::unlock, "Enter the master password"))
             unlock_clicked = true;
     }
 
     ImGui::SameLine();
-    if (icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
+    if (hedgr::ui::widget::icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
         /*
          * Full screen is a property of the GLFW window, which this library
          * does not own and must not reach for. It synthesises the shortcut the
@@ -207,43 +196,13 @@ void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_click
     }
 
     ImGui::SameLine();
-    if (icon_button("exit", icon::exit_app, "Exit Hedgr")) {
+    if (hedgr::ui::widget::icon_button("exit", icon::exit_app, "Exit Hedgr")) {
         hedgr::model::command::command request;
         request.kind = command_kind::shutdown;
         input.commands.push(std::move(request));
     }
 
     ImGui::End();
-}
-
-/**
- * @brief The visible name of a window: its kind and, where it has one, its
- * subject.
- *
- * Titles are read from the window's state, which is cold. Only an open window
- * that survived the culling gates reaches here, so the read never lands on the
- * per-frame path for a window nobody is looking at.
- */
-std::string window_title(hedgr::model::domain::window_kind kind,
-    const hedgr::model::domain::window_state& state) {
-    using hedgr::model::domain::window_kind;
-    switch (kind) {
-    case window_kind::chart: {
-        const auto& chart = std::get<hedgr::model::domain::chart_state>(state);
-        return chart.label.empty() ? std::string{"Chart"} : chart.label;
-    }
-    case window_kind::grid: {
-        const auto& grid = std::get<hedgr::model::domain::grid_state>(state);
-        return grid.resource.empty() ? std::string{"Grid"} : grid.resource;
-    }
-    case window_kind::notice: {
-        const auto& notice = std::get<hedgr::model::domain::notice_state>(state);
-        return notice.title.empty() ? std::string{"Notice"} : notice.title;
-    }
-    case window_kind::instance_manager:
-        return "Instance Manager";
-    }
-    return "Window";
 }
 
 }
@@ -253,6 +212,20 @@ namespace hedgr::ui::render {
 workspace::workspace() = default;
 
 workspace::~workspace() = default;
+
+void workspace::unlock_with(std::string_view master_password) {
+    /*
+     * The buffer is the prompt's own, so an unattended launch sets exactly what
+     * a person would have typed and the rest of the path is unchanged: the same
+     * submit, the same command, the same wipe. A second copy of the password
+     * held anywhere else would be a second thing to remember to clear.
+     */
+    const auto length = std::min(master_password.size(),
+        master_password_.size() - 1);
+    std::copy_n(master_password.begin(), length, master_password_.begin());
+    master_password_[length] = '\0';
+    lock_prompt_dismissed_ = false;
+}
 
 void workspace::render(const render_input& input) {
     draw_toolbar(input);
@@ -266,6 +239,15 @@ void workspace::render(const render_input& input) {
      */
     if (!shows_instances(input)) {
         draw_lock_prompt(input);
+
+        /*
+         * An unattended launch left a password in the prompt's buffer, so it is
+         * submitted as soon as the store says it wants one. The prompt draws
+         * first, so the frame that carries the submission is a frame a person
+         * could have produced themselves by typing and pressing the button.
+         */
+        if (master_password_[0] != '\0' && !input.unlocking)
+            submit_master_password(input);
         return;
     }
 
@@ -297,7 +279,7 @@ void workspace::render(const render_input& input) {
             static_cast<hedgr::model::domain::window_kind>(kind_column[index]);
 
         /*
-         * The open flag culls every window except the Instance Manager, which
+         * The open flag culls every window except the Instances window, which
          * is root: closing it would leave an interface with no way to open
          * anything again, so it is drawn whether or not the flag is set. The
          * runtime still owns the flag and may suppress the row entirely.
@@ -311,6 +293,17 @@ void workspace::render(const render_input& input) {
             layout.generation[index]};
 
         /*
+         * The second gate. The first one above is the operator's: whether the
+         * window is open at all. This one is the store's, and it admits only
+         * the kinds that show something which is not read from the store. While
+         * the lock is closed the loop below is unreachable anyway, so this is
+         * the rule stated where a reader will find it rather than a condition
+         * that happens to be true.
+         */
+        if (!shows_window(kind, input, input.windows.id(handle)))
+            continue;
+
+        /*
          * The deadline is an input, not an order: the runtime owns the column
          * and decides whether the request is worth acting on. The interface
          * only says that by its own clock the data is now stale.
@@ -322,7 +315,8 @@ void workspace::render(const render_input& input) {
             input.commands.push(std::move(request));
         }
 
-        const std::string title = window_title(kind, input.windows.state(handle));
+        const std::string title =
+            window_title(kind, input.windows.state(handle), input);
 
         /*
          * The visible title can change with the data, so the ImGui id
@@ -336,6 +330,19 @@ void workspace::render(const render_input& input) {
 
         ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f),
             ImVec2(FLT_MAX, FLT_MAX));
+
+        /*
+         * The size a window opens at, once. The browser surfaces are the reason
+         * it is this wide: a folder tree and a list of columns need room, and a
+         * window that opened at ImGui's default would show a browser squeezed
+         * to the point where its own controls are the only thing visible. It is
+         * applied while the window is young, so a size an operator has chosen
+         * is never overridden on a later frame.
+         */
+        const ImVec2 default_size = kind == hedgr::model::domain::window_kind::accounts
+            ? ImVec2(1180.0f, 820.0f)
+            : ImVec2(700.0f, 460.0f);
+        ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
         if (!ImGui::Begin(begin_label.c_str())) {
             /*

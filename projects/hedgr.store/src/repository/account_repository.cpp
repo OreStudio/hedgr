@@ -33,7 +33,7 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, instance_id, name, principal FROM account";
+    "SELECT id, instance_id, name, principal, folder_id FROM account";
 
 dom::account read_row(const sqlite::statement& query) {
     dom::account row;
@@ -41,6 +41,7 @@ dom::account read_row(const sqlite::statement& query) {
     row.instance_id = std::string(query.column_text(1));
     row.name = std::string(query.column_text(2));
     row.principal = std::string(query.column_text(3));
+    row.folder_id = std::string(query.column_text(4));
     return row;
 }
 
@@ -87,10 +88,11 @@ account_repository::list_for_instance(std::string_view instance_id) const {
 sqlite::result<void> account_repository::save(const dom::account& row) {
     sqlite::statement insert(
         db_->handle(),
-        "INSERT INTO account (id, instance_id, name, principal) "
-        "VALUES (?, ?, ?, ?) "
+        "INSERT INTO account (id, instance_id, name, principal, folder_id) "
+        "VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET instance_id = excluded.instance_id, "
-        "name = excluded.name, principal = excluded.principal");
+        "name = excluded.name, principal = excluded.principal, "
+        "folder_id = excluded.folder_id");
     if (!insert.is_valid())
         return std::unexpected(insert.step().error());
 
@@ -102,8 +104,28 @@ sqlite::result<void> account_repository::save(const dom::account& row) {
         return bound;
     if (auto bound = insert.bind(4, row.principal); !bound)
         return bound;
+    if (auto bound = insert.bind(5, row.folder_id); !bound)
+        return bound;
 
     auto stepped = insert.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+sqlite::result<void> account_repository::set_parent(std::string_view id,
+    std::string_view folder_id) {
+    sqlite::statement query(
+        db_->handle(), "UPDATE account SET folder_id = ? WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, folder_id); !bound)
+        return bound;
+    if (auto bound = query.bind(2, id); !bound)
+        return bound;
+
+    auto stepped = query.step();
     if (!stepped)
         return std::unexpected(stepped.error());
     return {};

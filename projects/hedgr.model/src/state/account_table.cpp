@@ -40,6 +40,12 @@ account_handle account_table::upsert(domain::account row) {
     return h;
 }
 
+void account_table::set_folder(account_handle h, std::string folder_id) {
+    if (!contains(h))
+        return;
+    rows_[h.index].folder_id = std::move(folder_id);
+}
+
 void account_table::remove(account_handle h) {
     if (!contains(h))
         return;

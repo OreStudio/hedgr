@@ -114,6 +114,20 @@ read_connection_configuration(const variables_map& vm) {
  * belongs to the operator rather than to the installation. Falling back to
  * HOME keeps this working on a machine with no XDG variables set.
  */
+/**
+ * @brief The master password for an unattended launch, if one was supplied.
+ *
+ * Read from the environment rather than from the command line on purpose: a
+ * password in @c argv is visible in the process table to every user on the
+ * machine. The variable is not a secret store -- it is no better than the
+ * environment -- and that is why it is documented as being for an unattended
+ * launch rather than for an operator's daily use.
+ */
+std::string read_master_password() {
+    const char* password = std::getenv("HEDGR_MASTER_PASSWORD");
+    return password != nullptr ? std::string{password} : std::string{};
+}
+
 std::filesystem::path default_database_path() {
     std::filesystem::path base;
     if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
@@ -170,6 +184,7 @@ parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
 
     r.connection = read_connection_configuration(vm);
     r.database_path = default_database_path();
+    r.master_password = read_master_password();
     return r;
 }
 

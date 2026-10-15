@@ -51,8 +51,17 @@ public:
     workspace& operator=(const workspace&) = delete;
 
     /**
-     * @brief Draws the toolbar, then the Instance Manager, then every open
-     * window.
+     * @brief Arms the lock prompt with a password to submit on the next frame.
+     *
+     * For an unattended launch, where there is nobody to type one. The password
+     * is held in the same buffer the prompt edits and is wiped the moment it is
+     * submitted, so it exists in this object for exactly as long as a typed one
+     * would. Calling this on a store that is already unlocked does nothing.
+     */
+    void unlock_with(std::string_view master_password);
+
+    /**
+     * @brief Draws the toolbar, then every open window, gated on the lock.
      *
      * Must be called between ImGui::NewFrame and ImGui::Render. Pushes at most
      * one command per user action into input.commands; it never touches the

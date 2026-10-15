@@ -988,3 +988,118 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
 
     manager.stop();
 }
+
+TEST_CASE("removing a folder re-homes what is under it", "[runtime]") {
+    const temporary_database database("folder-rehome");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    const auto seeded = *manager.instances().rows().begin();
+
+    command parent;
+    parent.kind = command_kind::save_folder;
+    parent.folder_row.id = "fold-doomed";
+    parent.folder_row.parent_id = "instances-root";
+    parent.folder_row.name = "Doomed";
+    push_command(manager, parent);
+
+    /* The seeded instance is moved into the folder that is about to go. */
+    command move;
+    move.kind = command_kind::save_instance;
+    move.instance_row = *manager.instances().get(*manager.instances().find(seeded.id));
+    move.instance_row.folder_id = "fold-doomed";
+    push_command(manager, move);
+    REQUIRE(manager.instances().get(*manager.instances().find(seeded.id))->folder_id
+        == "fold-doomed");
+
+    command remove;
+    remove.kind = command_kind::remove_folder;
+    remove.folder_row.id = "fold-doomed";
+    push_command(manager, remove);
+
+    /*
+     * The folder is gone and the instance is not: removing a folder removes the
+     * folder, and what was under it moves to the root rather than being
+     * deleted. A row naming a folder that no longer exists would be a tree with
+     * a branch that leads nowhere.
+     */
+    REQUIRE_FALSE(manager.folders().find("fold-doomed").has_value());
+    REQUIRE(manager.instances().get(*manager.instances().find(seeded.id))->folder_id
+        == "instances-root");
+    REQUIRE(manager.last_error().empty());
+}
+
+TEST_CASE("a second request for one accounts window focuses the first",
+    "[runtime]") {
+    const temporary_database database("accounts-window");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    const auto seeded = *manager.instances().rows().begin();
+
+    const auto first = manager.open_accounts_window(seeded.id);
+    const auto second = manager.open_accounts_window(seeded.id);
+
+    /*
+     * One accounts window per instance, answered by a derived id rather than by
+     * a scan: the second request names the window the first made instead of
+     * making another.
+     */
+    REQUIRE(first == second);
+    REQUIRE(manager.windows().size() == 2);
+
+    /* And a workspace is keyed by the pair, so two accounts are two windows. */
+    command open;
+    open.kind = command_kind::open_window;
+    open.instance_id = seeded.id;
+    open.account_id = "acct-one";
+    open.new_window_kind = window_kind::workspace;
+    push_command(manager, open);
+
+    command twice;
+    twice.kind = command_kind::open_window;
+    twice.instance_id = seeded.id;
+    twice.account_id = "acct-one";
+    twice.new_window_kind = window_kind::workspace;
+    push_command(manager, twice);
+
+    REQUIRE(manager.windows().size() == 3);
+
+    command other;
+    other.kind = command_kind::open_window;
+    other.instance_id = seeded.id;
+    other.account_id = "acct-two";
+    other.new_window_kind = window_kind::workspace;
+    push_command(manager, other);
+
+    REQUIRE(manager.windows().size() == 4);
+}
+
+TEST_CASE("an accounts window reopens rather than being made again",
+    "[runtime]") {
+    const temporary_database database("accounts-reopen");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    const auto seeded = *manager.instances().rows().begin();
+
+    const auto id = manager.open_accounts_window(seeded.id);
+    const auto handle = manager.windows().find(id);
+    REQUIRE(handle.has_value());
+
+    command close;
+    close.kind = command_kind::close_window;
+    close.window_id = id;
+    push_command(manager, close);
+    REQUIRE_FALSE(manager.windows().find(id).has_value());
+
+    /*
+     * Closed is gone: the table removes the row, so the next request makes a
+     * window with the same derived id rather than reopening a row that is not
+     * there.
+     */
+    const auto again = manager.open_accounts_window(seeded.id);
+    REQUIRE(again == id);
+    REQUIRE(manager.windows().find(again).has_value());
+}

@@ -14,3 +14,7 @@
 # HEDGR_CAPTURE=<path> run.sh, and read the frame it writes.
 set(files
 )
+
+# The headers are listed for the install and IDE targets.
+set(HEADERS
+)

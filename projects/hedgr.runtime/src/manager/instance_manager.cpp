@@ -75,6 +75,33 @@ namespace transport = hedgr::session::transport;
     return result;
 }
 
+/**
+ * @brief The stable id of the window showing one subject, or empty.
+ *
+ * A window whose id is a function of what it shows is opened by looking it up
+ * rather than by making another: "one accounts window per instance" and "one
+ * workspace per session" are then answered by the id, and a second request
+ * focuses the window that exists. The kinds with no such identity -- a chart,
+ * a grid, a notice -- have no key, and a request for one always makes a new
+ * window, because two charts of two series are two windows.
+ */
+[[nodiscard]] std::string window_key_for(domain::window_kind kind,
+    std::string_view instance_id, std::string_view account_id) {
+    switch (kind) {
+    case domain::window_kind::instance_manager:
+        return "instance-manager";
+    case domain::window_kind::accounts:
+        return std::format("accounts:{}", instance_id);
+    case domain::window_kind::workspace:
+        return std::format("workspace:{}:{}", instance_id, account_id);
+    case domain::window_kind::chart:
+    case domain::window_kind::grid:
+    case domain::window_kind::notice:
+        break;
+    }
+    return {};
+}
+
 /** @brief Every live session row, holes skipped, for a whole-table walk. */
 [[nodiscard]] std::vector<model_state::session_handle>
 live_sessions(const model_state::session_table& sessions) {
@@ -189,14 +216,33 @@ constexpr std::chrono::milliseconds probe_cadence_max{60000};
  */
 constexpr std::size_t probe_thread_count = 2;
 
-/** @brief The default kind-specific state for a window opened by kind. */
+/**
+ * @brief The default kind-specific state for a window opened by kind.
+ *
+ * The instance and the account are parameters because two kinds cannot be
+ * described without them: an accounts window is the accounts of one instance,
+ * and a workspace is one account's session. Passing them in rather than
+ * reaching for them keeps this function a pure mapping from a command to the
+ * state its window starts with.
+ */
 [[nodiscard]] domain::window_state
-default_state_for(domain::window_kind kind, std::string_view last_error) {
+default_state_for(domain::window_kind kind, std::string_view last_error,
+    std::string_view instance_id, std::string_view account_id) {
     switch (kind) {
     case domain::window_kind::chart: {
         domain::chart_state chart;
         chart.label = "Series";
         return chart;
+    }
+    case domain::window_kind::accounts: {
+        domain::accounts_state accounts;
+        accounts.instance_id = std::string{instance_id};
+        return accounts;
+    }
+    case domain::window_kind::workspace: {
+        domain::workspace_state session;
+        session.account_id = std::string{account_id};
+        return session;
     }
     case domain::window_kind::grid: {
         domain::grid_state grid;
@@ -402,7 +448,20 @@ instance_manager::start(const std::filesystem::path& database_path,
         }
     }
 
+    /*
+     * The roots come first, because the seed is an instance and an instance has
+     * to sit in a folder: seeding before the tree exists would leave the row
+     * with no parent, which is a state the Browser cannot draw.
+     */
+    ensure_roots();
     seed_first_run();
+
+    /*
+     * The seed is an instance, and every instance owns an accounts tree, so the
+     * roots are made sure of once more on the other side of it: the first call
+     * above ran over the instances the store already had, and this one runs
+     * over the instance the seed just added.
+     */
     ensure_roots();
     ensure_instance_manager_window();
 
@@ -438,6 +497,7 @@ void instance_manager::seed_first_run() {
     row.nats_url = seed_options_.nats_url;
     row.subject_prefix = seed_options_.subject_prefix;
     row.wire_format = seed_options_.wire_format;
+    row.folder_id = std::string{domain::instances_root_id};
     row.created_at = iso8601_now();
 
     static_cast<void>(instances_.upsert(row));
@@ -555,6 +615,28 @@ void instance_manager::pump() {
      * the deadline the schedule reads.
      */
     pump_probes();
+}
+
+std::string instance_manager::open_accounts_window(const std::string& instance_id) {
+    /*
+     * The same rule as every other window opened by the interface, reached
+     * directly because this one is asked for by a caller that has no command
+     * queue to push to: the id is derived from the instance, and one lookup
+     * answers whether the window exists.
+     */
+    const std::string wanted = window_key_for(domain::window_kind::accounts,
+        instance_id, {});
+    if (const auto existing = windows_.find(wanted)) {
+        windows_.set_open(*existing, true);
+        return wanted;
+    }
+
+    command::command request;
+    request.kind = command::command_kind::open_window;
+    request.instance_id = instance_id;
+    request.new_window_kind = domain::window_kind::accounts;
+    handle(request);
+    return wanted;
 }
 
 void instance_manager::handle(command::command& cmd) {
@@ -676,16 +758,25 @@ void instance_manager::do_save_instance(const command::command& cmd) {
         ? std::optional<domain::instance>(*instances_.get(*existing))
         : std::nullopt;
 
-    const auto handle = instances_.upsert(cmd.instance_row);
+    /*
+     * An instance with no folder named lands in the instances tree's root,
+     * which is where a row created before folders existed belongs. Without this
+     * it would be in no folder at all, and the tree would draw a tree that
+     * omitted it.
+     */
+    domain::instance row = cmd.instance_row;
+    if (row.folder_id.empty())
+        row.folder_id = std::string{domain::instances_root_id};
 
-    if (auto saved = instance_repo_->save(cmd.instance_row); !saved) {
+    const auto handle = instances_.upsert(row);
+
+    if (auto saved = instance_repo_->save(row); !saved) {
         if (previous)
             static_cast<void>(instances_.upsert(*previous));
         else
             instances_.remove(handle);
         last_error_ = store_failure(
-            std::format("cannot save instance {}", cmd.instance_row.id),
-            saved.error());
+            std::format("cannot save instance {}", row.id), saved.error());
         return;
     }
 
@@ -694,7 +785,13 @@ void instance_manager::do_save_instance(const command::command& cmd) {
      * The root is created here rather than lazily on the first account, because
      * a tree with no root is a shape the Browser cannot draw.
      */
-    ensure_accounts_root(cmd.instance_row.id);
+    /*
+     * The row's own id, not the command's: the row is what was stored, and a
+     * caller that named the id only in the command's field would otherwise get
+     * an accounts tree rooted at nothing. The two are the same value for every
+     * caller that fills both, which is why only one of them is read here.
+     */
+    ensure_accounts_root(row.id);
 }
 
 void instance_manager::do_remove_instance(const command::command& cmd) {
@@ -827,16 +924,25 @@ void instance_manager::do_save_account(const command::command& cmd) {
         ? std::optional<domain::account>(*accounts_.get(*existing))
         : std::nullopt;
 
-    const auto handle = accounts_.upsert(cmd.account_row);
+    /*
+     * An account with no folder named lands in the accounts root of its own
+     * instance, which is the one folder every account of that instance may sit
+     * in. The root is derived from the instance rather than looked up, so a
+     * save that races the root's creation still has somewhere to put the row.
+     */
+    domain::account row = cmd.account_row;
+    if (row.folder_id.empty())
+        row.folder_id = domain::accounts_root_id_for(row.instance_id);
 
-    if (auto saved = account_repo_->save(cmd.account_row); !saved) {
+    const auto handle = accounts_.upsert(row);
+
+    if (auto saved = account_repo_->save(row); !saved) {
         if (previous)
             static_cast<void>(accounts_.upsert(*previous));
         else
             accounts_.remove(handle);
         last_error_ = store_failure(
-            std::format("cannot save account {}", cmd.account_row.id),
-            saved.error());
+            std::format("cannot save account {}", row.id), saved.error());
     }
 }
 
@@ -998,6 +1104,17 @@ void instance_manager::do_remove_folder(const command::command& cmd) {
      * releases the slot and a walk from a released row would find nothing.
      */
     const auto doomed = folders_.descendants_of(id);
+    auto going = doomed;
+    going.push_back(id);
+
+    /*
+     * Removing a folder removes what is under it and does not take the leaves
+     * with it: an operator who deletes a folder wants the folder gone, not
+     * their instances deleted. The leaves are re-homed to their tree's root
+     * first, which is the one folder every leaf of a tree may sit in, so no
+     * leaf is ever left naming a folder that no longer exists.
+     */
+    rehome_leaves(going);
 
     if (const auto handle = folders_.find(id))
         folders_.remove(*handle);
@@ -1021,6 +1138,78 @@ void instance_manager::do_remove_folder(const command::command& cmd) {
             last_error_ = store_failure(
                 std::format("cannot remove folder {}", folder_id),
                 removed.error());
+        }
+    }
+}
+
+void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids) {
+    const auto inside = [&](std::string_view folder_id) {
+        return !folder_id.empty()
+            && std::find(folder_ids.begin(), folder_ids.end(), folder_id)
+                != folder_ids.end();
+    };
+
+    const auto root_of = [&](domain::folder_tree tree,
+                             std::string_view owner_id) -> std::optional<std::string> {
+        const auto root = folders_.root(tree, owner_id);
+        if (!root)
+            return std::nullopt;
+        return folders_.get(*root)->id;
+    };
+
+    for (const auto index : live_indices(instances_.layout())) {
+        const auto handle = model_state::instance_handle{
+            index, instances_.layout().generation[index]};
+        const auto* row = instances_.get(handle);
+        if (row == nullptr || !inside(row->folder_id))
+            continue;
+
+        const auto root = root_of(domain::folder_tree::instances, {});
+        if (!root) {
+            last_error_ = std::format(
+                "the instances tree has no root, so {} cannot be moved out of "
+                "the folder being removed",
+                row->id);
+            continue;
+        }
+
+        instances_.set_folder(handle, *root);
+        if (instance_repo_) {
+            if (auto moved = instance_repo_->set_parent(row->id, *root); !moved) {
+                last_error_ = store_failure(
+                    std::format("cannot move instance {} out of a removed "
+                                "folder",
+                        row->id),
+                    moved.error());
+            }
+        }
+    }
+
+    for (const auto index : live_indices(accounts_.layout())) {
+        const auto handle = model_state::account_handle{
+            index, accounts_.layout().generation[index]};
+        const auto* row = accounts_.get(handle);
+        if (row == nullptr || !inside(row->folder_id))
+            continue;
+
+        const auto root = root_of(domain::folder_tree::accounts, row->instance_id);
+        if (!root) {
+            last_error_ = std::format(
+                "instance {} has no accounts root, so account {} cannot be "
+                "moved out of the folder being removed",
+                row->instance_id, row->id);
+            continue;
+        }
+
+        accounts_.set_folder(handle, *root);
+        if (account_repo_) {
+            if (auto moved = account_repo_->set_parent(row->id, *root); !moved) {
+                last_error_ = store_failure(
+                    std::format("cannot move account {} out of a removed "
+                                "folder",
+                        row->id),
+                    moved.error());
+            }
         }
     }
 }
@@ -1591,14 +1780,31 @@ void instance_manager::do_open_window(const command::command& cmd) {
         return;
     }
 
+    /*
+     * A window whose id is derived from what it shows is opened by focusing the
+     * one that already exists. That is what makes two requests for the same
+     * subject one window, and it is the reason the ids of those kinds are
+     * functions rather than serials.
+     */
+    const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
+        cmd.account_id);
+    if (!key.empty()) {
+        if (const auto existing = windows_.find(key)) {
+            windows_.set_open(*existing, true);
+            return;
+        }
+    }
+
     domain::window_spec spec;
-    spec.id = std::format("w-{}", next_window_serial_++);
+    spec.id = key.empty() ? std::format("w-{}", next_window_serial_++)
+                          : key;
     spec.kind = cmd.new_window_kind;
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
-    spec.state = default_state_for(cmd.new_window_kind, last_error);
+    spec.state = default_state_for(cmd.new_window_kind, last_error,
+        cmd.instance_id, cmd.account_id);
 
     const auto handle = windows_.insert(spec);
 
@@ -1906,6 +2112,15 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.token);
         sessions_.set_status(*handle, domain::session_status::authenticated);
+
+        /*
+         * Stamped here rather than by the worker, so the time says when the
+         * frame loop accepted the sign-in and every session's clock reading
+         * comes from one clock. A re-authentication of a pair that already had
+         * a session restamps it, which is what makes the workspace show the age
+         * of the connection it is actually looking at.
+         */
+        sessions_.set_opened_at_ns(*handle, steady_now_ns());
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);

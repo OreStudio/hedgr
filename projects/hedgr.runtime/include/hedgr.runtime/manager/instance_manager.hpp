@@ -91,6 +91,21 @@ public:
     /** @brief Applies every buffered command, then every buffered event. */
     void pump();
 
+    /**
+     * @brief Makes sure the accounts window of @p instance_id exists and is
+     * open, and returns its stable id.
+     *
+     * Idempotent, because the rule is one accounts window per instance: the
+     * second request finds the first rather than making a second, which is what
+     * keeps a restored wall from holding two windows over one instance's
+     * accounts. The interface could not do this itself -- reading a window's
+     * state to find out which instance it belongs to is not something the
+     * render path should have to do on every button press -- so the decision
+     * lives here, beside the table it changes.
+     */
+    [[nodiscard]] std::string open_accounts_window(
+        const std::string& instance_id);
+
     /** @brief Persists the window wall. Called when it changes and on exit. */
     [[nodiscard]] std::expected<void, std::string> save_windows();
 
@@ -241,6 +256,17 @@ private:
 
     /** @brief Applies one probe's answer: the result, then the next deadline. */
     void apply_probe_result(const model::event::event& ev);
+
+    /**
+     * @brief Moves every leaf out of @p folder_ids and into its tree's root.
+     *
+     * Called before a folder removal, so that removing a folder removes the
+     * folder rather than the operator's instances and accounts. A leaf whose
+     * tree has no root -- which a store written before roots existed could
+     * hold -- is left where it is rather than moved to nowhere, and the
+     * runtime reports that the tree is broken instead of silently detaching it.
+     */
+    void rehome_leaves(const std::vector<std::string>& folder_ids);
 
     /**
      * @brief Drops everything the schedule holds for one instance.

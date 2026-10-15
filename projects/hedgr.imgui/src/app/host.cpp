@@ -74,7 +74,21 @@ int host::execute(const std::vector<std::string>& args,
         if (const char* path = std::getenv("HEDGR_CAPTURE");
             path != nullptr && *path != '\0')
             capture = path;
-        hedgr::imgui::app::application app(cfg, std::move(capture));
+
+        /*
+         * Which frame to write is part of the question a capture answers. A
+         * surface that arrives from a worker -- anything behind the store's key
+         * derivation, which is deliberately slow -- is not on screen by the
+         * eighth frame, so a run that inspects one asks for a later frame
+         * rather than the capture learning to wait for a condition it cannot
+         * name.
+         */
+        int capture_frame = hedgr::imgui::app::application::default_capture_frame;
+        if (const char* late = std::getenv("HEDGR_CAPTURE_FRAME");
+            late != nullptr && *late != '\0')
+            capture_frame = std::atoi(late);
+
+        hedgr::imgui::app::application app(cfg, std::move(capture), capture_frame);
         app.run();
         return EXIT_SUCCESS;
     } catch (const std::exception& e) {

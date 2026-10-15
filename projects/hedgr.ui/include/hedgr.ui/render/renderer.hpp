@@ -26,6 +26,7 @@
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/export.hpp"
 #include <array>
 #include <cstdint>
@@ -65,6 +66,34 @@ struct window_ui_state final {
 
     /** @brief Whether the password is drawn in the clear. */
     bool password_visible = false;
+
+    /**
+     * @brief This window's browser: its selection, its filter and its forms.
+     *
+     * The browser is the same widget in both surfaces that host it, so its
+     * scratch state is a member of every window's state rather than a second
+     * map keyed by window id. A window that does not host a browser simply
+     * never reads it.
+     */
+    hedgr::ui::widget::browser_state browser;
+
+    /** @brief Whether a collapsible panel is open. */
+    bool panel_open = true;
+
+    /*
+     * The fields an instance or an account form edits.
+     *
+     * Fixed-size arrays rather than std::string, because they are handed
+     * straight to ImGui::InputText, which edits a caller-owned buffer in place
+     * and needs a bound to write within. They live here rather than in the
+     * browser's own state because what a form collects is the host's business:
+     * the browser knows a name and nothing else about an instance.
+     */
+    std::array<char, 128> draft_name{};
+    std::array<char, 128> draft_host{};
+    std::array<char, 16> draft_port{};
+    std::array<char, 128> draft_subject{};
+    std::array<char, 64> draft_wire_format{};
 };
 
 /**
@@ -170,29 +199,6 @@ using renderer_fn = void (*)(hedgr::model::state::window_handle,
  */
 [[nodiscard]] HEDGR_UI_EXPORT renderer_fn
 renderer_for(hedgr::model::domain::window_kind kind) noexcept;
-
-/**
- * @brief Whether the Instances window is drawn at all.
- *
- * This is the lock gate, and it is a function rather than a condition inside
- * the drawing loop so that it can be tested without a GL context. The rule is
- * one line: the catalogue is drawn only while the store is unlocked.
- *
- * The reason it is the whole catalogue and not just the accounts is that every
- * read of the store is a decryption. Instances and folders were never secrets
- * on their own, but they live in a file that is now unreadable without the
- * master password, so while it is not held there is genuinely nothing to draw.
- * The alternative -- showing a catalogue that cannot be written to -- would let
- * an operator edit rows that would then fail to save, which is worse than
- * asking for the password first.
- *
- * @c absent and @c locked both close the gate. @c absent is the first run,
- * where the operator has to create a password before there is a store worth
- * opening; @c failed closed it again after a refusal. Nothing here reports an
- * error, because a closed lock is a state and not a fault.
- */
-[[nodiscard]] HEDGR_UI_EXPORT bool
-shows_instances(const render_input& input) noexcept;
 
 }
 

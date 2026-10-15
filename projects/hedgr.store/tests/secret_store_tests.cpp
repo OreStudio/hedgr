@@ -375,7 +375,7 @@ TEST_CASE("a list of accounts carries no credential", "[credential]") {
                       .empty());
 }
 
-TEST_CASE("the schema this build writes is version 4", "[schema]") {
+TEST_CASE("the schema this build writes is version 5", "[schema]") {
     const temporary_database scratch;
     {
         auto opened = database::open(scratch.path());
@@ -396,16 +396,17 @@ TEST_CASE("the schema this build writes is version 4", "[schema]") {
     hedgr::store::sqlite::statement version(reopened.value().handle(),
         "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1");    REQUIRE(version.is_valid());
     REQUIRE(version.step().value());
-    REQUIRE(version.column_int64(0) == 4);
+    REQUIRE(version.column_int64(0)
+        == hedgr::store::repository::schema_version());
 }
 
-TEST_CASE("a version 3 file is refused", "[schema]") {
+TEST_CASE("a file written by an older build is refused", "[schema]") {
     const temporary_database scratch;
 
     /*
-     * A file this build wrote, then lied about: version 3 is exactly the state
-     * a store from the unit before this one is in, and the columns it would
-     * have are the ones this build no longer expects.
+     * A file this build wrote, then lied about: version 3 is the state a store
+     * from an earlier build is in, and the columns it would have are the ones
+     * this build no longer expects.
      */
     {
         auto opened = database::open(scratch.path());
@@ -422,7 +423,8 @@ TEST_CASE("a version 3 file is refused", "[schema]") {
     REQUIRE_FALSE(applied.has_value());
     REQUIRE(applied.error().code == store_errc::schema_mismatch);
     REQUIRE(applied.error().message.contains("3"));
-    REQUIRE(applied.error().message.contains("4"));
+    REQUIRE(applied.error().message.contains(
+        std::to_string(hedgr::store::repository::schema_version())));
 
     /*
      * Refused and never deleted. This unit is what put credentials in that

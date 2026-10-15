@@ -39,6 +39,12 @@ instance_handle instance_table::upsert(domain::instance row) {
     return h;
 }
 
+void instance_table::set_folder(instance_handle h, std::string folder_id) {
+    if (!contains(h))
+        return;
+    rows_[h.index].folder_id = std::move(folder_id);
+}
+
 void instance_table::remove(instance_handle h) {
     if (!contains(h))
         return;

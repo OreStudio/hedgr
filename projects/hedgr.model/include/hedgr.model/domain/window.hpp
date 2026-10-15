@@ -47,12 +47,16 @@ enum class window_kind : std::uint8_t {
     grid = 1,
     /** @brief A message with an optional low-level detail line. */
     notice = 2,
-    /** @brief The Instance Manager itself. */
+    /** @brief The Instances window itself: the root surface. */
     instance_manager = 3,
+    /** @brief The accounts of one instance, browsed as a tree and a list. */
+    accounts = 4,
+    /** @brief The live session for one account on one instance. */
+    workspace = 5,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 4;
+inline constexpr std::size_t window_kind_count = 6;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -98,8 +102,34 @@ struct notice_state final {
     std::string detail;
 };
 
+/**
+ * @brief State of an accounts window.
+ *
+ * The only fact an accounts window carries is which instance's accounts it
+ * shows, and it has to be persisted: the window wall is restored on the next
+ * launch and there is nobody to ask which instance a restored window was for.
+ * Everything else the window shows is read from the live tables.
+ */
+struct accounts_state final {
+    /** @brief Key of the instance whose accounts are browsed. */
+    std::string instance_id;
+};
+
+/** @brief State of a workspace window. */
+struct workspace_state final {
+    /**
+     * @brief Key of the account the session presents.
+     *
+     * The instance comes from the window's session binding rather than from
+     * here: a workspace is always bound to a session, and storing the instance
+     * twice would be two places for the pair to disagree.
+     */
+    std::string account_id;
+};
+
 /** @brief The kind-specific state of a window. */
-using window_state = std::variant<chart_state, grid_state, notice_state>;
+using window_state = std::variant<chart_state, grid_state, notice_state,
+    accounts_state, workspace_state>;
 
 /**
  * @brief The persisted description of a window.

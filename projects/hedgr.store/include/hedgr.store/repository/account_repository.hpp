@@ -67,6 +67,15 @@ public:
     remove_for_instance(std::string_view instance_id);
 
     /**
+     * @brief Moves the account into @p folder_id, leaving every other column.
+     *
+     * The counterpart of the instance repository's @c set_parent, and a call of
+     * its own for the same reason: a move is a key and a destination.
+     */
+    [[nodiscard]] result<void>
+    set_parent(std::string_view id, std::string_view folder_id);
+
+    /**
      * @brief Stores @p sealed as the account's credential.
      *
      * The value is already sealed by the caller: this class never sees a

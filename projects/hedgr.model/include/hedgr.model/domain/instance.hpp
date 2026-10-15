@@ -46,6 +46,17 @@ struct instance final {
     /** @brief Short human label, unique in the local store. */
     std::string name;
 
+    /**
+     * @brief Key of the folder this instance sits in.
+     *
+     * A key rather than a handle, because an instance is a persisted value
+     * while a handle addresses a row of the live table. It is what the folder
+     * tree is made of: the tree holds folders, and this is the edge that puts
+     * an instance under one. The instances tree's root is the fallback, so the
+     * field is never empty for a row that came from the store.
+     */
+    std::string folder_id;
+
     /** @brief NATS server address, for example nats://localhost:20405. */
     std::string nats_url;
 

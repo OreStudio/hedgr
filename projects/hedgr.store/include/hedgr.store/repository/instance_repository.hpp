@@ -60,6 +60,18 @@ public:
     /** @brief Deletes the instance with @c id, cascading to its accounts. */
     [[nodiscard]] result<void> remove(std::string_view id);
 
+    /**
+     * @brief Moves the instance into @p folder_id, leaving every other column.
+     *
+     * A call of its own rather than a read-modify-write through @c save,
+     * because a move happens when a folder is removed and its contents are
+     * re-homed: that path holds a set of keys and a destination and nothing
+     * else, and reconstructing the whole row to move it would be a way to write
+     * back a stale copy of the rest of it.
+     */
+    [[nodiscard]] result<void>
+    set_parent(std::string_view id, std::string_view folder_id);
+
 private:
     sqlite::database* db_ = nullptr;
 };

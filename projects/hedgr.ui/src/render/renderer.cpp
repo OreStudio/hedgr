@@ -31,7 +31,11 @@ namespace hedgr::ui::render {
  * fails here: the initialiser count no longer matches, and the consteval check
  * below rejects a nil entry, so a kind that has no renderer cannot compile.
  */
-void render_instance_manager(hedgr::model::state::window_handle,
+void render_instances_window(hedgr::model::state::window_handle,
+    const render_input&, window_ui_state&);
+void render_accounts_window(hedgr::model::state::window_handle,
+    const render_input&, window_ui_state&);
+void render_workspace_window(hedgr::model::state::window_handle,
     const render_input&, window_ui_state&);
 void render_chart(hedgr::model::state::window_handle,
     const render_input&, window_ui_state&);
@@ -65,7 +69,9 @@ renderer_fn renderer_for(hedgr::model::domain::window_kind kind) noexcept {
         &render_chart,
         &render_grid,
         &render_notice,
-        &render_instance_manager,
+        &render_instances_window,
+        &render_accounts_window,
+        &render_workspace_window,
     };
     static_assert(every_kind_has_a_renderer(table),
         "every window kind must have a renderer in the table above");
@@ -74,10 +80,6 @@ renderer_fn renderer_for(hedgr::model::domain::window_kind kind) noexcept {
     if (index >= table.size())
         return nullptr;
     return table[index];
-}
-
-bool shows_instances(const render_input& input) noexcept {
-    return input.store_lock == hedgr::model::domain::store_lock::unlocked;
 }
 
 }

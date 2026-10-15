@@ -32,6 +32,10 @@ std::string_view to_string(window_kind value) noexcept {
         return "notice";
     case window_kind::instance_manager:
         return "instance_manager";
+    case window_kind::accounts:
+        return "accounts";
+    case window_kind::workspace:
+        return "workspace";
     }
     return "unknown";
 }
@@ -46,6 +50,10 @@ window_kind_from_string(std::string_view text) {
         return window_kind::notice;
     if (text == "instance_manager")
         return window_kind::instance_manager;
+    if (text == "accounts")
+        return window_kind::accounts;
+    if (text == "workspace")
+        return window_kind::workspace;
     return std::unexpected(std::format("unknown window kind '{}'", text));
 }
 

@@ -37,9 +37,14 @@ fixed set of tiers.
 
 ## Account
 
-A login on exactly one instance. An account has a principal, a name, labels, a
-tenant, and optionally a stored credential. The same username on two instances
+A login on exactly one instance. An account has a principal, a name, a folder,
+labels, and optionally a stored credential. The same username on two instances
 is two accounts.
+
+An account has no tenant. The tenant is what IAM answers with at sign-in, so it
+belongs to the session that learned it rather than to the configuration that
+asked for it. Storing it on the account would let a stale value outlive the
+deployment that issued it.
 
 An account's name is a display string, for example "ops read-only". It is not a
 label. A label is an entity with a colour and a severity, attached by a

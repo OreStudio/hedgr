@@ -40,15 +40,25 @@ namespace hedgr::imgui::app {
  */
 class application final {
 public:
+    /** @brief The frame a capture writes unless the environment asks later. */
+    static constexpr int default_capture_frame = 8;
+
     /**
-     * @brief Takes the configuration and the frame-dump path.
+     * @brief Takes the configuration, the frame-dump path and when to dump.
      *
      * @param capture_path Where to write one finished frame, or empty. A dump
      *                     is how a change is inspected without a person
      *                     watching, so the process leaves once it is written.
+     * @param capture_frame Which frame to write. Eight by default, which is
+     *                     enough for ImGui to have sized every window. A later
+     *                     frame is wanted when the surface being inspected
+     *                     arrives asynchronously, such as a browser that is
+     *                     hidden behind a store whose key derivation is still
+     *                     running on a pool thread.
      */
     explicit application(config::options cfg,
-                         std::filesystem::path capture_path = {});
+                         std::filesystem::path capture_path = {},
+                         int capture_frame = default_capture_frame);
 
     ~application();
 
@@ -68,6 +78,7 @@ private:
 
     config::options cfg_;
     std::filesystem::path capture_path_;
+    int capture_frame_ = default_capture_frame;
     runtime::manager::instance_manager manager_;
     ui::render::workspace workspace_;
     std::string glsl_version_;

@@ -38,12 +38,13 @@ namespace {
  * and label attachments were added and an instance stopped carrying a
  * comma-separated label string, from 3 when an account's free-text `label`
  * column became `name` so that it no longer shares a word with the label
- * entity, and from 4 when the store gained the master table and the account
- * gained its sealed credential. The store is pre-release, so there is no
- * migration: a file written against a different version is refused, and the
- * operator deletes it.
+ * entity, from 4 when the store gained the master table and the account gained
+ * its sealed credential, and from 5 when an instance and an account gained the
+ * folder they sit in. The store is pre-release, so there is no migration: a
+ * file written against a different version is refused, and the operator deletes
+ * it.
  */
-constexpr std::int64_t current_version = 4;
+constexpr std::int64_t current_version = 5;
 
 /**
  * @brief The whole schema, in one place.
@@ -60,6 +61,13 @@ constexpr std::int64_t current_version = 4;
  * @c account.credential and the @c master table are the only two places in this
  * file where a secret is written down, and both hold ciphertext. Nothing here
  * stores the master password, and nothing here can be read without it.
+ *
+ * @c instance.folder_id and @c account.folder_id are the edges of the two
+ * folder trees. They are plain text rather than foreign keys into @c folder,
+ * deliberately: removing a folder does not remove what is in it, so the leaves
+ * are moved to their tree's root first and no cascade ever has to fire. A
+ * foreign key would either take an operator's instances with a folder or refuse
+ * to remove it, and neither is what removing a folder should do.
  */
 constexpr std::array<std::string_view, 11> schema_statements{
     R"(PRAGMA foreign_keys = ON)",
@@ -69,6 +77,7 @@ constexpr std::array<std::string_view, 11> schema_statements{
         nats_url TEXT NOT NULL,
         subject_prefix TEXT NOT NULL,
         wire_format TEXT NOT NULL DEFAULT 'msgpack',
+        folder_id TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     ))",
     /*
@@ -83,6 +92,7 @@ constexpr std::array<std::string_view, 11> schema_statements{
         instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         principal TEXT NOT NULL,
+        folder_id TEXT NOT NULL DEFAULT '',
         credential TEXT,
         UNIQUE(instance_id, principal)
     ))",
@@ -194,6 +204,10 @@ sqlite::store_error version_mismatch(const std::filesystem::path& path,
     };
 }
 
+}
+
+std::int64_t schema_version() noexcept {
+    return current_version;
 }
 
 result<void> apply(sqlite::database& db) {

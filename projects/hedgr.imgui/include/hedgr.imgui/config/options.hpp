@@ -63,6 +63,20 @@ struct options final {
      * windowed desktop behind it, and F11 toggles it either way.
      */
     bool fullscreen = true;
+
+    /**
+     * @brief The master password to open the store with, when one is supplied.
+     *
+     * Empty in every ordinary run, where the password is typed into the prompt
+     * and exists only in that prompt's buffer. A value here comes from the
+     * environment and is for an unattended launch -- a kiosk, a demo, a
+     * screenshot -- where there is nobody to type it. It is never logged, never
+     * written anywhere, and wiped as soon as it has been submitted.
+     *
+     * It is a launch option rather than a stored one for the obvious reason:
+     * anything that could read this out of a file would defeat the store.
+     */
+    std::string master_password;
 };
 
 std::ostream& operator<<(std::ostream& s, const options& v);

@@ -40,6 +40,7 @@ void grow(session_columns& columns, std::size_t count) {
     columns.latency_us.resize(count);
     columns.instance_id.resize(count);
     columns.account_id.resize(count);
+    columns.opened_at_ns.resize(count);
     columns.last_error.resize(count);
     columns.tenant_name.resize(count);
     columns.party_name.resize(count);
@@ -56,6 +57,7 @@ session_table::insert(std::string instance_id, std::string account_id) {
     columns_.status[index] =
         static_cast<std::uint8_t>(domain::session_status::disconnected);
     columns_.latency_us[index] = 0;
+    columns_.opened_at_ns[index] = 0;
     columns_.instance_id[index] = std::move(instance_id);
     columns_.account_id[index] = std::move(account_id);
     columns_.last_error[index].clear();
@@ -106,6 +108,14 @@ std::int64_t session_table::latency_us(session_handle h) const {
 
 void session_table::set_latency_us(session_handle h, std::int64_t value) {
     columns_.latency_us[h.index] = value;
+}
+
+std::int64_t session_table::opened_at_ns(session_handle h) const {
+    return columns_.opened_at_ns[h.index];
+}
+
+void session_table::set_opened_at_ns(session_handle h, std::int64_t value) {
+    columns_.opened_at_ns[h.index] = value;
 }
 
 std::string_view session_table::last_error(session_handle h) const {
