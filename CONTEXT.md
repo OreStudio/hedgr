@@ -53,9 +53,21 @@ exists only for the length of the sign-in attempt.
 
 ## Master password
 
-The single secret that encrypts every stored credential. It is never itself
-stored. Hedgr holds it in memory only while the store is unlocked, and asks for
-it again on the next launch.
+The single secret that protects the whole local store: every credential, every
+instance, every folder and every label. It is never itself stored. Hedgr holds
+it in memory only while the store is unlocked, and asks for it again on the next
+launch.
+
+Because it guards the catalogue and not only the secrets, losing it loses the
+instance list as well as the logins. That is the blast radius of the decision
+and there is no recovery from it.
+
+## Store lock
+
+Whether the local store can be read. Absent when no master password has been set
+yet, locked when one exists and is not held, unlocked when it is held, and
+failed when the last attempt was refused. The store is drawn from only while it
+is unlocked.
 
 ## Session
 
@@ -93,9 +105,14 @@ a second selection.
 
 ## Instances window
 
-The root surface. It manages every instance and the folder tree they sit in. It
-holds no credential. It is always open, because it is the only way to open
-anything else. Closing it closes the windows it opened.
+The root surface. It manages every instance and the folder tree they sit in, and
+it is the only way to open anything else.
+
+It is drawn only while the store is unlocked. On a store with no master password
+it is replaced by the create prompt, and on a store whose master password is not
+held it is replaced by the unlock prompt. Locking the store hides it again,
+along with the windows it opened. It is not that the window needs a secret to
+draw: it is that nothing in the store is readable until the store is open.
 
 ## Accounts window
 

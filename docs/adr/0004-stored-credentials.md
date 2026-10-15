@@ -19,16 +19,22 @@ useless without a secret that is never written down.
 An account may carry a stored credential. It is encrypted, and it is the only
 secret in the file.
 
-- Encryption is AES-256-GCM under a key derived from the master password. Hedgr
-  uses `ores.security::crypto::encryption` rather than writing its own. That is
-  the in-house implementation, it is already PBKDF2-SHA256 at 600,000
-  iterations, and its stored format is `base64(salt(16) || iv(12) || tag(16) ||
-  ciphertext)`. Rolling a second implementation would be the mistake.
+- Encryption is AES-256-GCM under a key derived from the master password, with
+  PBKDF2-SHA256 at 600,000 iterations, in the stored form `base64(salt(16) ||
+  iv(12) || tag(16) || ciphertext)`. This ADR originally said Hedgr would reuse
+  `ores.security::crypto::encryption` for it. That class no longer exists, so
+  Hedgr implements the two primitives itself, on OpenSSL, in one file. See
+  [ADR 6](0006-hedgr-owns-its-cryptography.md), which amends this one and
+  records why the reuse was impossible.
 - The master password is never stored. The store proves it by decrypting a known
   blob, exactly as the Qt manager's `verify_master_password` did.
 - The store has a locked state and an unlocked state. Locked is a state the
-  interface renders, not an error it reports. The Instances window works while
-  locked, because instances carry no credentials.
+  interface renders, not an error it reports. The whole store is behind the
+  password, so the Instances window is drawn only while the store is unlocked
+  and is replaced by the prompt otherwise. An earlier revision of this ADR said
+  the Instances window would work while locked because instances carry no
+  credential. The operator chose the whole-store gate instead, because an
+  instance list names real hosts and tiers and is not public either.
 - Unlock runs as a coroutine on the runtime's pool. Key derivation is slow on
   purpose, and running it on the frame loop would stall the interface for the
   length of the derivation. This is the same rule as every other slow call.
@@ -44,14 +50,15 @@ secret in the file.
 `hedgr.store` gains a dependency on `ores.security`. The dependency graph stays
 one way, and the component still talks to SQLite directly.
 
-The first launch on a new store has no master password. The interface must offer
-to create one, and must also allow running with no stored credentials, because
-an operator who only reads from development instances should not be forced into
-a secret they will lose.
+The first launch on a new store has no master password, so the first surface an
+operator meets is the create prompt. Startup is gated on it. An operator may
+still store no credentials at all, but they set a master password regardless,
+because it guards the instance catalogue and the folders too.
 
-Losing the master password loses every stored credential. There is no recovery
-and there should not be one. The instances, folders and labels survive, so the
-loss is bounded to the secrets.
+Losing the master password loses everything the store holds: the credentials,
+the instances, the folders and the labels. There is no recovery and there should
+not be one. This is wider than the original decision, which bounded the loss to
+the secrets, and it is the price of the whole-store gate.
 
 Key derivation cost becomes a real number in the budget. Unlocking on a slow
 machine takes a noticeable fraction of a second, and the interface must show
