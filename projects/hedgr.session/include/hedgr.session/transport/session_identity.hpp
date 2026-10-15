@@ -25,7 +25,7 @@
 namespace hedgr::session::transport {
 
 /**
- * @brief What the environment says about a signed-in principal.
+ * @brief What the instance says about a signed-in principal.
  *
  * The answer to a successful sign-in: who the deployment thinks this session
  * is, and the bearer token that says so on later calls.

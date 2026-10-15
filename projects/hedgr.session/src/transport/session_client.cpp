@@ -60,7 +60,7 @@ using hedgr::session::transport::translate_connect_error;
  * A connection that never opened is reported as unreachable when the wrapped
  * client does not say why: whatever the cause -- a missing certificate, a
  * broker that refuses -- nothing answered, and a protocol error would tell the
- * reader the environment replied, which it did not.
+ * reader the instance replied, which it did not.
  */
 [[nodiscard]] std::unexpected<session_error>
 connect_failure(const std::exception& error) {
@@ -107,7 +107,7 @@ result<void> session_client::connect() {
         /*
          * Refused rather than defaulted: a session that encodes msgpack while
          * the deployment decodes json answers every request with a decode
-         * failure, which reads as the environment being broken.
+         * failure, which reads as the instance being broken.
          */
         return fail(session_errc::protocol_error,
             std::format("the wire format '{}' is not one this client understands",
@@ -194,7 +194,7 @@ result<session_identity> session_client::authenticate(std::string_view principal
         const auto& answer = *reply;
         if (!answer.success) {
             /*
-             * The environment's own words, because it is the only party that
+             * The instance's own words, because it is the only party that
              * knows why it refused -- a locked account and a wrong password
              * are not the same thing to the person reading this.
              */
@@ -203,7 +203,7 @@ result<session_identity> session_client::authenticate(std::string_view principal
             return std::unexpected(session_error{
                 .code = session_errc::authentication_rejected,
                 .message = message.empty()
-                    ? std::string("the environment rejected these credentials")
+                    ? std::string("the instance rejected these credentials")
                     : message,
                 .detail = answer.error_code.empty()
                     ? answer.error_message
@@ -263,7 +263,7 @@ result<void> session_client::select_party(std::string_view party_id) {
             return std::unexpected(session_error{
                 .code = session_errc::authentication_rejected,
                 .message = answer.message.empty()
-                    ? std::string("the environment refused this party")
+                    ? std::string("the instance refused this party")
                     : answer.message,
                 .detail = std::format("{} answered success=false",
                     select_party_request::nats_subject)});
@@ -322,7 +322,7 @@ result<void> session_client::logout() {
                 return std::unexpected(session_error{
                     .code = session_errc::authentication_rejected,
                     .message = reply->message.empty()
-                        ? std::string("the environment refused the sign-out")
+                        ? std::string("the instance refused the sign-out")
                         : reply->message,
                     .detail = std::format("{} answered success=false",
                         logout_request::nats_subject)});
@@ -336,7 +336,7 @@ result<void> session_client::logout() {
     }();
 
     /*
-     * The credential is dropped whatever the environment answered: a caller
+     * The credential is dropped whatever the instance answered: a caller
      * that asked to sign out must not still be holding a token afterwards,
      * and a call that could not be delivered must not leave the session
      * looking signed in.
@@ -352,7 +352,7 @@ result<std::string> session_client::request(std::string_view relative_subject,
 
     if (!is_connected()) {
         return fail(session_errc::closed,
-            "a request needs an open connection to the environment");
+            "a request needs an open connection to the instance");
     }
 
     try {
@@ -372,7 +372,7 @@ session_client::authenticated_request(std::string_view relative_subject,
 
     if (!is_connected()) {
         return fail(session_errc::closed,
-            "a request needs an open connection to the environment");
+            "a request needs an open connection to the instance");
     }
 
     if (!is_authenticated()) {

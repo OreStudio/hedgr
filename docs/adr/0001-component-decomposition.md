@@ -6,7 +6,7 @@
 
 Hedgr began as one component, `hedgr.imgui`, holding the GLFW window, the frame
 loop, the NATS connection, the IAM login round trip and every widget. That was
-correct for one connection to one environment.
+correct for one connection to one instance.
 
 The requirement is now many instances, each with identities and sessions, and
 hundreds of floating windows over the top. A single component cannot carry that:

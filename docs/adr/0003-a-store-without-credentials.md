@@ -1,6 +1,8 @@
 # 3. A local store that holds no credentials
 
-**Status.** Accepted.
+**Status.** Superseded by [ADR 4](0004-stored-credentials.md). Kept for the
+record, because the reasoning it gives up is worth knowing before changing the
+store again.
 
 ## Context
 

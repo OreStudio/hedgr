@@ -33,7 +33,7 @@ namespace hedgr::session::transport {
 /**
  * @brief One blocking connection from one identity to one instance.
  *
- * Every call here blocks until the environment answers or the request times
+ * Every call here blocks until the instance answers or the request times
  * out, because the transport underneath is blocking and pretending otherwise
  * would be a lie. Concurrency is the caller's: the runtime runs each session
  * on a thread-pool thread, so a blocked call costs one pool thread rather than
@@ -85,24 +85,24 @@ public:
     /** @brief Whether a connection to the instance is open. */
     [[nodiscard]] bool is_connected() const noexcept;
 
-    /** @brief Whether this session holds a credential the environment issued. */
+    /** @brief Whether this session holds a credential the instance issued. */
     [[nodiscard]] bool is_authenticated() const noexcept;
 
     /**
-     * @brief Signs in, and holds the token the environment issues.
+     * @brief Signs in, and holds the token the instance issues.
      *
      * The token is a secret kept for the session's lifetime and never
-     * persisted. A refusal from the environment is reported as
-     * session_errc::authentication_rejected carrying the environment's own
+     * persisted. A refusal from the instance is reported as
+     * session_errc::authentication_rejected carrying the instance's own
      * message, because that message names the reason a person must act on.
      *
      * An account with more than one party signs in with a single-use token
      * that only select_party may present; the caller follows this call with
      * select_party() in that case.
      *
-     * @param principal the username presented to the environment.
-     * @param password the secret presented to the environment.
-     * @return who the environment says this session is, or why it refused.
+     * @param principal the username presented to the instance.
+     * @param password the secret presented to the instance.
+     * @return who the instance says this session is, or why it refused.
      */
     [[nodiscard]] result<session_identity>
     authenticate(std::string_view principal, std::string_view password);
@@ -115,23 +115,23 @@ public:
      *
      * @pre the session is authenticated.
      * @param party_id the party to scope the session to.
-     * @return nothing on success, or why the environment refused.
+     * @return nothing on success, or why the instance refused.
      */
     [[nodiscard]] result<void> select_party(std::string_view party_id);
 
     /**
-     * @brief Signs out, and gives up the token whatever the environment says.
+     * @brief Signs out, and gives up the token whatever the instance says.
      *
      * A sign-out is a state rather than an event: the point of it is that this
      * process no longer holds a credential, so the token is dropped even when
      * the request cannot be delivered, and signing out of a session that holds
      * no credential succeeds because that state already holds. The result
-     * reports whether the environment also recorded the sign-out; a caller
+     * reports whether the instance also recorded the sign-out; a caller
      * that is signing out because the session is already broken may ignore it.
      *
      * The connection is left open, so a caller may sign in again over it.
      *
-     * @return nothing when the environment recorded the sign-out.
+     * @return nothing when the instance recorded the sign-out.
      */
     [[nodiscard]] result<void> logout();
 
@@ -157,7 +157,7 @@ public:
      *
      * @pre the session is authenticated; without a credential this fails with
      * session_errc::not_authenticated rather than sending an anonymous call
-     * that the environment would reject anyway.
+     * that the instance would reject anyway.
      * @param relative_subject the subject as the deployment names it.
      * @param json the request body, already encoded in the session's format.
      * @return the reply body.
@@ -175,7 +175,7 @@ public:
      */
     [[nodiscard]] std::string subject(std::string_view suffix) const;
 
-    /** @brief Who this session is, empty until the environment says. */
+    /** @brief Who this session is, empty until the instance says. */
     [[nodiscard]] const session_identity& identity() const noexcept;
 
     /** @brief Where this session connects and how. */

@@ -125,7 +125,7 @@ TEST_CASE("disconnecting a session that was never connected is safe",
     REQUIRE_FALSE(session.is_authenticated());
 }
 
-TEST_CASE("a broken service behind the broker reads as the environment being down",
+TEST_CASE("a broken service behind the broker reads as the instance being down",
     "[transport]") {
     const ores::nats::service::nats_connect_error refused(
         ores::nats::service::nats_error_kind::services_unavailable,
@@ -136,11 +136,11 @@ TEST_CASE("a broken service behind the broker reads as the environment being dow
 
     REQUIRE(error.code == session_errc::services_unavailable);
     REQUIRE(error.message ==
-        "the environment is not responding; contact your system administrator");
+        "the instance is not responding; contact your system administrator");
     REQUIRE(error.detail == refused.what());
 }
 
-TEST_CASE("an unreachable broker reads as the environment being unreachable",
+TEST_CASE("an unreachable broker reads as the instance being unreachable",
     "[transport]") {
     const ores::nats::service::nats_connect_error refused(
         ores::nats::service::nats_error_kind::server_unreachable,

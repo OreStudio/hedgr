@@ -34,7 +34,7 @@ namespace hedgr::session::transport {
  * @brief Why a session operation failed, in the terms a window renders.
  *
  * One code per thing a person can be told to do about it: wait for the
- * environment, ask an administrator, fix the certificate, sign in again. The
+ * instance, ask an administrator, fix the certificate, sign in again. The
  * transport's own vocabulary -- NATS statuses, TLS handshake reasons, "no
  * responders" -- is deliberately absent, because none of it tells a reader
  * what to do next.
@@ -44,11 +44,11 @@ enum class session_errc : std::uint8_t {
     unreachable = 0,
     /** @brief The secure connection could not be established. */
     tls_failed = 1,
-    /** @brief The environment did not answer in time. */
+    /** @brief The instance did not answer in time. */
     timeout = 2,
     /** @brief The broker is up but the services behind it are not. */
     services_unavailable = 3,
-    /** @brief The environment refused the credentials it was presented. */
+    /** @brief The instance refused the credentials it was presented. */
     authentication_rejected = 4,
     /** @brief The operation needs a signed-in session and there is none. */
     not_authenticated = 5,

@@ -67,7 +67,7 @@ public:
      * @brief The default pool size.
      *
      * Hardware concurrency clamped to the range two to four: below two a slow
-     * environment stalls every session, above four the extra threads are idle
+     * instance stalls every session, above four the extra threads are idle
      * because the bound is the round trip, not the CPU.
      */
     [[nodiscard]] static std::size_t default_thread_count() noexcept;

@@ -26,7 +26,7 @@
  * fails and the event path is exercised end to end without a deployment on the
  * other end. Anything that needs an answered round trip -- sign-in, refresh,
  * window data -- is covered by the running application against a real
- * environment, and pinning it here would only make the suite depend on a daemon.
+ * instance, and pinning it here would only make the suite depend on a daemon.
  */
 
 #include "hedgr.model/command/command.hpp"
@@ -411,7 +411,7 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     fact.instance_id = "inst-refused";
     fact.identity_id = "ident-1";
     fact.code = "unreachable";
-    fact.message = "the environment could not be reached";
+    fact.message = "the instance could not be reached";
     manager.events().push(fact);
     manager.pump();
 
@@ -419,7 +419,7 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     REQUIRE(handle.has_value());
     REQUIRE(manager.sessions().status(*handle) == session_status::failed);
     REQUIRE(manager.sessions().last_error(*handle) ==
-        "the environment could not be reached (unreachable)");
+        "the instance could not be reached (unreachable)");
 
     manager.stop();
 }

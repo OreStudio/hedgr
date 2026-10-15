@@ -58,7 +58,7 @@ struct session_job final {
  * Connects, authenticates, then refreshes until asked to stop. Every outcome is
  * posted to @p events as a fact; nothing is written anywhere else. A connect
  * failure is reported and the coroutine ends rather than retrying, because an
- * environment that answers nothing needs a decision from the operator and not
+ * instance that answers nothing needs a decision from the operator and not
  * a retry storm. A retry belongs behind an explicit operator action.
  *
  * @pre Run on an executor thread. Never call this from the frame loop.

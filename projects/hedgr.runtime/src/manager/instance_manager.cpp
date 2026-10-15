@@ -307,7 +307,7 @@ void instance_manager::seed_first_run() {
 
     /*
      * The seed is the reason a fresh checkout is usable without typing an
-     * address: the environment describes the local deployment, and this is
+     * address: the caller's configuration describes the local deployment, and this is
      * where that description becomes a row.
      */
 }

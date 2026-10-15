@@ -43,7 +43,7 @@ namespace hedgr::ui::render {
  * The order is the whole point of the surface. The headline and the plain
  * message come first, because that is what the person needs; the low-level
  * detail comes last and dimmed, because it is what an administrator will ask
- * for and noise to everybody else. This is the shape the "environment is down,
+ * for and noise to everybody else. This is the shape the "instance is down,
  * contact your system administrator" case renders in.
  */
 void render_notice(window_handle handle, const render_input& input,

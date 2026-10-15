@@ -152,7 +152,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
 
             /*
              * The event has no principal field because the session key already
-             * names the identity. What the environment answered with is still
+             * names the identity. What the instance answered with is still
              * worth carrying, and payload is the one free-form field, so it
              * travels there for the log rather than being dropped.
              */

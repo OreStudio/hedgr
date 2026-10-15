@@ -38,24 +38,24 @@ using hedgr::session::transport::session_errc;
 
     switch (code) {
         case unreachable:
-            return "the environment is not reachable";
+            return "the instance is not reachable";
         case tls_failed:
-            return "the secure connection to the environment could not be established";
+            return "the secure connection to the instance could not be established";
         case timeout:
-            return "the environment did not answer in time";
+            return "the instance did not answer in time";
         case services_unavailable:
             /*
              * The commonest failure in practice: the broker is up but the
              * services behind it are not, so nothing answers. A reader cannot
              * act on "no responders" -- only an administrator can.
              */
-            return "the environment is not responding; contact your system administrator";
+            return "the instance is not responding; contact your system administrator";
         case authentication_rejected:
-            return "the environment rejected the credentials";
+            return "the instance rejected the credentials";
         case not_authenticated:
             return "this session is not signed in";
         case protocol_error:
-            return "the environment answered something this client could not understand";
+            return "the instance answered something this client could not understand";
         case closed:
             return "the session is not connected";
     }

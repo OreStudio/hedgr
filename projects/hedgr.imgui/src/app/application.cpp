@@ -81,7 +81,7 @@ void application::run() {
     BOOST_LOG_SEV(lg(), info) << "Starting Hedgr.";
 
     /*
-     * The environment describes the instance to seed on a first run. After the
+     * The configuration describes the instance to seed on a first run. After the
      * store has an instance of its own it is authoritative, so this is read but
      * usually ignored.
      */
