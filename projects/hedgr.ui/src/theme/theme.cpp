@@ -208,6 +208,30 @@ const char* status_icon(hedgr::model::domain::session_status value) noexcept {
     return icon::information;
 }
 
+ImU32 reachability_colour(hedgr::model::domain::reachability value) noexcept {
+    switch (value) {
+    case hedgr::model::domain::reachability::unknown:
+        return IM_COL32(128, 128, 128, 255);
+    case hedgr::model::domain::reachability::unreachable:
+        return IM_COL32(255, 23, 68, 255);
+    case hedgr::model::domain::reachability::reachable:
+        return IM_COL32(0, 200, 83, 255);
+    }
+    return IM_COL32(212, 212, 212, 255);
+}
+
+ImU32 readiness_colour(hedgr::model::domain::readiness value) noexcept {
+    switch (value) {
+    case hedgr::model::domain::readiness::unknown:
+        return IM_COL32(128, 128, 128, 255);
+    case hedgr::model::domain::readiness::bootstrapping:
+        return IM_COL32(255, 193, 7, 255);
+    case hedgr::model::domain::readiness::ready:
+        return IM_COL32(0, 200, 83, 255);
+    }
+    return IM_COL32(212, 212, 212, 255);
+}
+
 const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     switch (value) {
     case hedgr::model::domain::window_kind::chart:

@@ -55,6 +55,10 @@ std::string_view to_string(command_kind value) noexcept {
         return "attach_label";
     case command_kind::detach_label:
         return "detach_label";
+    case command_kind::probe_instance:
+        return "probe_instance";
+    case command_kind::probe_all:
+        return "probe_all";
     }
     return "unknown";
 }

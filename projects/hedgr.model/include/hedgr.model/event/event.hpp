@@ -20,6 +20,7 @@
 #ifndef HEDGR_MODEL_EVENT_EVENT_HPP
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
@@ -45,6 +46,8 @@ enum class event_kind : std::uint8_t {
     session_data = 3,
     /** @brief A window's data was refreshed and is ready to draw. */
     window_data = 4,
+    /** @brief A probe finished, whatever it found. */
+    probe_result = 5,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -95,6 +98,21 @@ struct event final {
 
     /** @brief The payload, for session_data and window_data. */
     std::string payload;
+
+    /** @brief What the broker answered, for probe_result. */
+    domain::reachability reach = domain::reachability::unknown;
+
+    /** @brief What IAM answered, for probe_result. */
+    domain::readiness ready = domain::readiness::unknown;
+
+    /**
+     * @brief The low-level cause, for probe_result.
+     *
+     * A field of its own rather than @c payload, because payload is documented
+     * as a data payload and this is the sentence that explains an unhealthy
+     * instance: the subject with no responder, the address that refused.
+     */
+    std::string detail;
 };
 
 }

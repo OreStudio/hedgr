@@ -123,6 +123,25 @@ inline constexpr const char* clock = ICON_FA_CLOCK;
 /** @brief A connection between two things. */
 inline constexpr const char* link = ICON_FA_LINK;
 
+/**
+ * @brief A probe: whether the deployment answers at all.
+ *
+ * A filled circle, because a reachability is a dot beside an instance's name
+ * rather than an action: the colour carries the answer and the glyph only has
+ * to be the same shape on every row so the column reads as a column.
+ */
+inline constexpr const char* probe = ICON_FA_CIRCLE;
+
+/**
+ * @brief Readiness: whether the deployment has been bootstrapped.
+ *
+ * A ticked circle rather than a plain one, so the two indicators beside an
+ * instance's name are told apart by shape as well as by colour: one reports on
+ * the broker, the other on the service behind it, and a reader who cannot
+ * distinguish red-green still has to be able to tell which is which.
+ */
+inline constexpr const char* ready = ICON_FA_CIRCLE_CHECK;
+
 /*
  * Paging, for a paged table. The spec's list of semantic names stops at link;
  * these four are added because a paged grid's controls are icons here like

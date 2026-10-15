@@ -73,6 +73,10 @@ enum class command_kind : std::uint8_t {
     attach_label = 14,
     /** @brief Detach a label from an instance or an account. */
     detach_label = 15,
+    /** @brief Probe one instance now, rather than at its next deadline. */
+    probe_instance = 16,
+    /** @brief Probe every instance now. */
+    probe_all = 17,
 };
 
 /** @brief The canonical text of a command kind, for logs. */

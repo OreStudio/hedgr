@@ -20,10 +20,13 @@
 #include "hedgr.session/transport/session_client.hpp"
 
 #include <format>
+#include <span>
 #include <string>
 #include <utility>
 #include "ores.iam.api/messaging/account_operations_protocol.hpp"
+#include "ores.iam.api/messaging/bootstrap_protocol.hpp"
 #include "ores.iam.api/messaging/login_protocol.hpp"
+#include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "ores.nats/service/request_helpers.hpp"
@@ -390,6 +393,63 @@ session_client::authenticated_request(std::string_view relative_subject,
     } catch (...) {
         return transport_failure();
     }
+}
+
+result<bootstrap_status> session_client::bootstrap_status() const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "a request needs an open connection to the instance");
+    }
+
+    /*
+     * The body is encoded here rather than by the transport's own helper,
+     * because that helper encodes with the process-wide codec while this
+     * session's format is the one the deployment is listening in. A probe
+     * holds one connection to one instance, so the format on its options is
+     * the only answer that is right for it.
+     */
+    const auto format = ores::nats::parse_wire_format(options_.wire_format);
+    if (!format) {
+        return fail(session_errc::protocol_error,
+            std::format("the wire format '{}' is not one this client understands",
+                options_.wire_format));
+    }
+
+    using ores::iam::messaging::bootstrap_status_request;
+    using ores::iam::messaging::bootstrap_status_response;
+
+    const ores::nats::wire_codec codec(*format);
+    const auto encoded = codec.encode(bootstrap_status_request{});
+    const std::string body(reinterpret_cast<const char*>(encoded.data()),
+        encoded.size());
+
+    /*
+     * The unauthenticated request path and nothing else: asking whether a
+     * deployment has been set up cannot require having been set up.
+     */
+    const auto reply = request(bootstrap_status_request::nats_subject, body);
+    if (!reply)
+        return std::unexpected(reply.error());
+
+    const auto bytes = std::as_bytes(
+        std::span<const char>(reply->data(), reply->size()));
+    const auto decoded = codec.decode<bootstrap_status_response>(bytes);
+    if (!decoded) {
+        return fail(session_errc::protocol_error,
+            std::format("the bootstrap answer could not be decoded: {}",
+                decoded.error().what()));
+    }
+
+    const auto& answer = *decoded;
+    /*
+     * Qualified because the method shares its name with the type it returns,
+     * and an unqualified use inside the method finds the method.
+     */
+    return transport::bootstrap_status{
+        .is_in_bootstrap_mode = answer.is_in_bootstrap_mode,
+        .has_tenant = answer.has_tenant,
+        .message = answer.message,
+        .version = answer.version};
 }
 
 std::string session_client::subject(std::string_view suffix) const {

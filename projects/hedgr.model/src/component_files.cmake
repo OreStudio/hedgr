@@ -11,6 +11,7 @@ set(files
     "command/command.cpp"
     "domain/folder.cpp"
     "domain/label.cpp"
+    "domain/probe.cpp"
     "domain/session.cpp"
     "domain/window.cpp"
     "domain/window_json_io.cpp"
@@ -21,6 +22,7 @@ set(files
     "state/instance_table.cpp"
     "state/label_table.cpp"
     "state/labelling_table.cpp"
+    "state/probe_table.cpp"
     "state/session_table.cpp"
     "state/window_table.cpp"
 )
@@ -36,6 +38,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/instance.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/label.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/labelling.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/probe.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/session.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window_json_io.hpp"
@@ -45,5 +48,6 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/hedgr.model.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/handle.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/hedgr.model.state.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/probe_table.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/tables.hpp"
 )

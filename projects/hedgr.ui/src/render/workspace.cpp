@@ -118,6 +118,19 @@ void draw_toolbar(const hedgr::ui::render::render_input& input) {
     }
 
     ImGui::SameLine();
+    if (icon_button("probe", icon::probe, "Probe every instance now")) {
+        /*
+         * One command for the whole set rather than one per instance: the
+         * runtime owns the schedule, so asking it to bring every deadline
+         * forward leaves it to decide what is already being probed and in what
+         * order the rest follow.
+         */
+        hedgr::model::command::command request;
+        request.kind = command_kind::probe_all;
+        input.commands.push(std::move(request));
+    }
+
+    ImGui::SameLine();
     if (icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
         /*
          * Full screen is a property of the GLFW window, which this library

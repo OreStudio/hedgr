@@ -31,6 +31,38 @@
 namespace hedgr::session::transport {
 
 /**
+ * @brief What a deployment says about its own setup.
+ *
+ * The answer to the one question that can be asked before anybody signs in, so
+ * it is also the question a probe asks: a deployment that still needs its first
+ * administrator is not ready, and one that has been set up is.
+ */
+struct bootstrap_status final {
+    /**
+     * @brief Whether the deployment still needs its first administrator.
+     *
+     * True means setup is incomplete. It is the deployment's own words, read
+     * from the setting that governs whether the initial-admin screen is the
+     * one a person belongs on.
+     */
+    bool is_in_bootstrap_mode = false;
+
+    /** @brief Whether the deployment has a tenant that somebody set up. */
+    bool has_tenant = false;
+
+    /**
+     * @brief What IAM said about its own state.
+     *
+     * Empty on the success path, because IAM only fills this in to explain a
+     * failure.
+     */
+    std::string message;
+
+    /** @brief The build the answering service runs, in full. */
+    std::string version;
+};
+
+/**
  * @brief One blocking connection from one account to one instance.
  *
  * Every call here blocks until the instance answers or the request times
@@ -165,6 +197,22 @@ public:
     [[nodiscard]] result<std::string>
     authenticated_request(std::string_view relative_subject,
         std::string_view json) const;
+
+    /**
+     * @brief Asks the deployment whether it has been bootstrapped.
+     *
+     * The one call a probe makes, and the one call that needs no credential:
+     * the deployment cannot ask who is calling before it has anywhere to look
+     * the caller up, so this goes through the unauthenticated request path and
+     * nowhere else. There is no second transport here and no second subject.
+     *
+     * @pre the session is connected.
+     * @return what the deployment said about itself, or why it did not say.
+     * A broker with no IAM behind it answers nothing at all, which arrives as
+     * session_errc::services_unavailable: the broker is up, the services are
+     * not, and the caller is owed that distinction.
+     */
+    [[nodiscard]] result<bootstrap_status> bootstrap_status() const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

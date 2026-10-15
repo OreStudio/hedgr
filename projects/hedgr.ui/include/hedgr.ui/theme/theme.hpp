@@ -21,6 +21,7 @@
 #define HEDGR_UI_THEME_THEME_HPP
 
 #include "hedgr.model/domain/label.hpp"
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
@@ -48,6 +49,28 @@ status_colour(hedgr::model::domain::session_status value) noexcept;
 /** @brief The icon naming a session status. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*
 status_icon(hedgr::model::domain::session_status value) noexcept;
+
+/**
+ * @brief The colour of the reachability dot.
+ *
+ * Grey for unknown, red for unreachable, green for reachable. Grey is not a
+ * shade of either answer: it is the colour of a question nobody has asked yet,
+ * and drawing it as red would report an outage on a first run.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32
+reachability_colour(hedgr::model::domain::reachability value) noexcept;
+
+/**
+ * @brief The colour of the readiness marker.
+ *
+ * Grey for unknown, amber for bootstrapping, green for ready. Unknown and
+ * bootstrapping are deliberately different colours rather than two greys: a
+ * deployment whose IAM is down is not a deployment that is setting itself up,
+ * and an operator who reads one as the other waits for something that is not
+ * happening.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32
+readiness_colour(hedgr::model::domain::readiness value) noexcept;
 
 /** @brief The colour a label's name is drawn in. */
 [[nodiscard]] HEDGR_UI_EXPORT ImU32

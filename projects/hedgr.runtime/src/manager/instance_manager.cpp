@@ -21,10 +21,13 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <format>
@@ -145,6 +148,40 @@ live_indices(const model_state::slab& layout) {
         sqlite::to_string(error.code));
 }
 
+/** @brief The monotonic clock in nanoseconds, which is what deadlines use. */
+[[nodiscard]] std::int64_t steady_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+/**
+ * @brief How often an instance is probed when the last probe answered.
+ *
+ * Ten seconds is a glance rather than a gate: often enough that a status is
+ * never stale when somebody looks at it, rare enough that polling every
+ * instance costs the deployment nothing worth measuring.
+ */
+constexpr std::chrono::milliseconds probe_cadence{10000};
+
+/**
+ * @brief The longest an unreachable instance waits between attempts.
+ *
+ * A deployment that is down is not brought back by being asked faster, and a
+ * fixed retry against twenty unreachable instances is the retry storm the
+ * backoff exists to prevent.
+ */
+constexpr std::chrono::milliseconds probe_cadence_max{60000};
+
+/**
+ * @brief How many probes may be in flight at once.
+ *
+ * Two, from ADR 5: a slow probe cannot starve the other probes, and at most
+ * two connects are in flight at once, which is a bound an operator can reason
+ * about when twenty instances are unreachable.
+ */
+constexpr std::size_t probe_thread_count = 2;
+
 /** @brief The default kind-specific state for a window opened by kind. */
 [[nodiscard]] domain::window_state
 default_state_for(domain::window_kind kind, std::string_view last_error) {
@@ -181,7 +218,7 @@ default_state_for(domain::window_kind kind, std::string_view last_error) {
 }
 
 instance_manager::instance_manager(std::size_t pool_threads)
-    : pool_(pool_threads) {
+    : pool_(pool_threads), probe_pool_(probe_thread_count) {
 }
 
 instance_manager::~instance_manager() {
@@ -196,12 +233,24 @@ void instance_manager::stop() noexcept {
     running_.clear();
 
     /*
+     * The probes are cancelled before the pools are stopped, so a probe
+     * waiting on a connect is told the application is going away and does not
+     * report an outcome nobody is left to read.
+     */
+    for (auto& [instance_id, source] : probing_) {
+        if (source)
+            source->request_stop();
+    }
+    probing_.clear();
+
+    /*
      * The pool is stopped here and not in do_shutdown: pump() may still be
      * called after a shutdown command, because the frame loop decides when the
      * last frame is, and a pump over a stopped context is harmless while a
      * joined one is not.
      */
     pool_.stop();
+    probe_pool_.stop();
     started_ = false;
 }
 
@@ -465,6 +514,13 @@ void instance_manager::pump() {
         handle(request);
     for (const auto& fact : events_.drain())
         apply(fact);
+
+    /*
+     * Last, so a probe asked for by a command this frame starts now rather
+     * than on the next one, and so an answer applied above has already moved
+     * the deadline the schedule reads.
+     */
+    pump_probes();
 }
 
 void instance_manager::handle(const command::command& cmd) {
@@ -514,6 +570,12 @@ void instance_manager::handle(const command::command& cmd) {
     case command::command_kind::refresh_window:
         do_refresh_window(cmd);
         break;
+    case command::command_kind::probe_instance:
+        do_probe_instance(cmd);
+        break;
+    case command::command_kind::probe_all:
+        do_probe_all();
+        break;
     case command::command_kind::shutdown:
         /*
          * Every worker is asked to stop and the manager stops being started,
@@ -525,6 +587,17 @@ void instance_manager::handle(const command::command& cmd) {
                 source->request_stop();
         }
         running_.clear();
+
+        /*
+         * A probe is cancelled here too, and the schedule is left alone: the
+         * probe table is runtime state that dies with the process rather than
+         * something a shutdown has to unwind.
+         */
+        for (auto& [instance_id, source] : probing_) {
+            if (source)
+                source->request_stop();
+        }
+        probing_.clear();
         started_ = false;
         break;
     }
@@ -580,8 +653,16 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
         return;
     }
 
-    if (const auto handle = instances_.find(id))
+    if (const auto handle = instances_.find(id)) {
+        /*
+         * Everything the schedule holds for this instance goes with it, and
+         * the probe already in flight is cancelled: a result for a removed
+         * instance would be applied to whatever takes its slot next, and the
+         * deadline would keep a probe running for a row nobody can read.
+         */
+        forget_probe(*handle, id);
         instances_.remove(*handle);
+    }
 
     /*
      * The cascade is a walk rather than a lookup: what the accounts table is
@@ -1200,7 +1281,170 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     events_.push(std::move(fact));
 }
 
+void instance_manager::do_probe_instance(const command::command& cmd) {
+    /*
+     * Forcing a probe moves the deadline rather than starting the probe here:
+     * the schedule is then the one place that decides whether an instance is
+     * due, and an instance that is already being probed is not probed a second
+     * time by an operator who pressed the button twice.
+     */
+    const auto handle = instances_.find(cmd.instance_id);
+    if (!handle) {
+        last_error_ = std::format("cannot probe: no instance {}", cmd.instance_id);
+        return;
+    }
+
+    probes_.set_next_probe_ns(*handle, 0);
+}
+
+void instance_manager::do_probe_all() {
+    /*
+     * Every instance, including the ones whose probe is in flight: moving a
+     * deadline is always safe, and the in-flight check in pump_probes() is
+     * what stops a sweep from doubling up on an instance.
+     */
+    const auto& layout = instances_.layout();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        probes_.set_next_probe_ns(
+            model_state::instance_handle{index, layout.generation[index]}, 0);
+    }
+}
+
+void instance_manager::pump_probes() {
+    /*
+     * A stopped manager starts no probes: shutting down cancels every probe it
+     * has, and a pump that outlives the shutdown command must not start a new
+     * one behind it.
+     */
+    if (!started_)
+        return;
+
+    const auto now = steady_now_ns();
+    const auto& layout = instances_.layout();
+    const auto rows = instances_.rows();
+
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+
+        const auto& row = rows[index];
+        if (probing_.contains(row.id))
+            continue;
+
+        const model_state::instance_handle handle{index, layout.generation[index]};
+        if (probes_.next_probe_ns(handle) > now)
+            continue;
+
+        spawn_probe_for(row);
+    }
+}
+
+void instance_manager::spawn_probe_for(const domain::instance& row) {
+    /*
+     * Built the way a session builds its own options, from the same seed. The
+     * probe is not a session and does not become one by sharing this: what it
+     * shares is the description of how to reach the deployment, and the client
+     * that uses it is its own.
+     */
+    transport::session_options options;
+    options.nats_url = row.nats_url;
+    options.subject_prefix = row.subject_prefix;
+    options.wire_format = row.wire_format;
+    options.tls_ca = seed_options_.tls_ca;
+    options.tls_cert = seed_options_.tls_cert;
+    options.tls_key = seed_options_.tls_key;
+    options.request_timeout = seed_options_.request_timeout;
+    options.connect_timeout = seed_options_.connect_timeout;
+
+    worker::probe_job job;
+    job.options = std::move(options);
+    job.instance = row;
+
+    auto source = std::make_shared<std::stop_source>();
+    probing_[row.id] = source;
+
+    /*
+     * The deadline is left where it is while the probe is in flight. It is the
+     * answer that moves it, and an instance whose probe never answers is held
+     * back by the in-flight entry rather than by a deadline nobody ever
+     * clears: a deadline pushed forward on spawn would quietly retire an
+     * instance from the schedule if the probe were lost.
+     */
+    worker::spawn_probe(probe_pool_.context(), std::move(job), events_,
+        std::move(source));
+}
+
+void instance_manager::apply_probe_result(const event::event& ev) {
+    /*
+     * The probe is no longer in flight whatever happens next, and leaving the
+     * entry behind would retire the instance from the schedule for the rest of
+     * the run.
+     */
+    probing_.erase(ev.instance_id);
+
+    /*
+     * An instance that has gone since the probe started has nowhere to put the
+     * result, and the handles of the table have moved on. The event is dropped
+     * rather than reported: a fact about a removed instance is a fact about
+     * nothing, and its slot now belongs to somebody else.
+     */
+    const auto handle = instances_.find(ev.instance_id);
+    if (!handle)
+        return;
+
+    domain::probe_result result;
+    result.reach = ev.reach;
+    result.ready = ev.ready;
+    result.latency_us = ev.latency_us;
+    result.observed_at_ns = steady_now_ns();
+    result.detail = ev.detail;
+    probes_.set(*handle, std::move(result));
+
+    /*
+     * A probe that got no answer backs the next attempt off; a probe that got
+     * an answer -- whatever that answer was -- returns to the cadence. A
+     * deployment that is up but not bootstrapped is up, and polling it every
+     * ten seconds is how the operator finds out the moment it is set up.
+     */
+    auto& interval = probe_intervals_[ev.instance_id];
+    if (ev.reach == domain::reachability::reachable)
+        interval = probe_cadence;
+    else
+        interval = std::min(interval.count() == 0
+                ? probe_cadence * 2
+                : interval * 2,
+            probe_cadence_max);
+
+    probes_.set_next_probe_ns(*handle,
+        steady_now_ns() +
+            std::chrono::duration_cast<std::chrono::nanoseconds>(interval).count());
+}
+
+void instance_manager::forget_probe(model_state::instance_handle handle,
+    const std::string& instance_id) {
+    if (const auto found = probing_.find(instance_id); found != probing_.end()) {
+        if (found->second)
+            found->second->request_stop();
+        probing_.erase(found);
+    }
+    probe_intervals_.erase(instance_id);
+    probes_.forget(handle);
+}
+
 void instance_manager::apply(const event::event& ev) {
+    /*
+     * A probe's fact is about an instance and not about a session, so it is
+     * applied before the session lookup below: routing it through a session
+     * key would drop it, because an instance nobody has signed in to has no
+     * session to find.
+     */
+    if (ev.kind == event::event_kind::probe_result) {
+        apply_probe_result(ev);
+        return;
+    }
+
     const auto handle = sessions_.find(ev.instance_id, ev.account_id);
 
     /*
@@ -1241,6 +1485,13 @@ void instance_manager::apply(const event::event& ev) {
          * Nothing to do: the deadline was already moved when the request was
          * made, and the payload is the window id. A real data handler lands
          * here when there is a data protocol to hand it.
+         */
+        break;
+    case event::event_kind::probe_result:
+        /*
+         * Never reached: a probe result is applied above, before the session
+         * lookup. The case exists so that adding it to the enum without a
+         * handler would have been a compile error rather than a silent drop.
          */
         break;
     }

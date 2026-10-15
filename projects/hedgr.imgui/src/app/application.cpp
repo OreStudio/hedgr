@@ -310,6 +310,7 @@ void application::render_loop(GLFWwindow* window) {
             manager_.labels(),
             manager_.labellings(),
             manager_.sessions(),
+            manager_.probes(),
             manager_.windows(),
             manager_.commands(),
             now_ns(),

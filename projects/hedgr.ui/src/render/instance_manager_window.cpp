@@ -43,6 +43,7 @@ using hedgr::model::domain::instance;
 using hedgr::model::domain::label;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
+using hedgr::model::state::instance_handle;
 using hedgr::model::state::session_handle;
 using hedgr::model::state::window_handle;
 using hedgr::ui::render::render_input;
@@ -222,6 +223,62 @@ std::vector<const label*> labels_of_instance(const render_input& input,
 }
 
 /**
+ * @brief The two probe indicators beside an instance's name, and why.
+ *
+ * The colour is the answer and the tooltip is the reason: a red dot tells a
+ * reader the deployment does not answer, and the next question is always why,
+ * which is exactly what probe_result::detail holds. Both indicators carry the
+ * same detail, because it explains the pair rather than either dot on its own.
+ *
+ * An instance no probe has answered for is drawn grey in both, which is what
+ * "unknown" means here: nobody has asked yet, so nothing has been said.
+ */
+void draw_probe_indicators(const render_input& input, instance_handle handle) {
+    namespace icon = hedgr::ui::icon;
+    namespace theme = hedgr::ui::theme;
+    using hedgr::model::domain::reachability;
+    using hedgr::model::domain::readiness;
+
+    const auto* probe = input.probes.get(handle);
+    const auto reach = probe != nullptr ? probe->reach : reachability::unknown;
+    const auto ready = probe != nullptr ? probe->ready : readiness::unknown;
+    const char* detail = probe != nullptr && !probe->detail.empty()
+        ? probe->detail.c_str()
+        : "no probe has answered for this instance yet";
+
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(theme::reachability_colour(reach)));
+    ImGui::TextUnformatted(icon::probe);
+    ImGui::SetItemTooltip("Reachability: %s\n%s",
+        hedgr::model::domain::to_string(reach).data(), detail);
+    ImGui::PopStyleColor();
+
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(theme::readiness_colour(ready)));
+    ImGui::TextUnformatted(icon::ready);
+    ImGui::SetItemTooltip("Readiness: %s\n%s",
+        hedgr::model::domain::to_string(ready).data(), detail);
+    ImGui::PopStyleColor();
+}
+
+/**
+ * @brief The width the two indicators take, and the gap before them.
+ *
+ * Measured rather than guessed because the Selectable that draws the name is
+ * given a width that leaves exactly this much room: a Selectable left at its
+ * default spans the whole column, and the indicators drawn after it would then
+ * begin past the column's right edge, where the table clips them and nobody
+ * ever sees the status of anything.
+ */
+[[nodiscard]] float probe_indicator_width() {
+    const auto glyphs = ImGui::CalcTextSize(hedgr::ui::icon::probe).x
+        + ImGui::CalcTextSize(hedgr::ui::icon::ready).x;
+    return glyphs + 3.0f * ImGui::GetStyle().ItemSpacing.x;
+}
+
+/**
  * @brief One instance row's label names, each in its own colour.
  *
  * The names sit beside the instance name rather than in a column of their own,
@@ -277,9 +334,22 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
 
         ImGui::TableNextColumn();
         const bool selected = selected_instance_id == row.id;
-        if (ImGui::Selectable(row.name.c_str(), selected))
+
+        /*
+         * The name gives up exactly the room the two indicators need, so that
+         * they land inside the column rather than past its right edge, and the
+         * labels follow them.
+         */
+        const float name_width =
+            ImGui::GetContentRegionAvail().x - probe_indicator_width();
+        if (ImGui::Selectable(row.name.c_str(), selected,
+                ImGuiSelectableFlags_None, ImVec2(name_width, 0.0f)))
             selected_instance_id = selected ? std::string{} : row.id;
         ImGui::SetItemTooltip("%s\n%s", row.name.c_str(), row.nats_url.c_str());
+
+        draw_probe_indicators(input,
+            instance_handle{static_cast<std::uint32_t>(index),
+                layout.generation[index]});
         draw_instance_labels(input, row.id);
 
         ImGui::TableNextColumn();

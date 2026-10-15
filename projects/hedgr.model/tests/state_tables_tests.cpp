@@ -22,11 +22,15 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstdint>
+#include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 
 using hedgr::model::domain::account;
@@ -37,6 +41,9 @@ using hedgr::model::domain::instance;
 using hedgr::model::domain::label;
 using hedgr::model::domain::label_severity;
 using hedgr::model::domain::labelling_owner;
+using hedgr::model::domain::probe_result;
+using hedgr::model::domain::reachability;
+using hedgr::model::domain::readiness;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
@@ -45,6 +52,7 @@ using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
 using hedgr::model::state::label_table;
 using hedgr::model::state::labelling_table;
+using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
 using hedgr::model::state::window_table;
 
@@ -82,6 +90,17 @@ using hedgr::model::state::window_table;
     row.id = std::move(id);
     row.name = std::move(name);
     return row;
+}
+
+/** @brief A probe result carrying only what a table test reads back. */
+[[nodiscard]] probe_result make_probe(reachability reach, readiness ready) {
+    probe_result result;
+    result.reach = reach;
+    result.ready = ready;
+    result.latency_us = 4321;
+    result.observed_at_ns = 99;
+    result.detail = "no service is handling subject 'iam.v1.ops.bootstrap_status'";
+    return result;
 }
 
 TEST_CASE("an instance is found by id and read back by handle", "[instance]") {
@@ -410,4 +429,144 @@ TEST_CASE("a label is found by its name as well as its id", "[label]") {
     labels.remove(handle);
     REQUIRE_FALSE(labels.find_by_name("production").has_value());
     REQUIRE(labels.find_by_name("development").has_value());
+}
+
+TEST_CASE("a probe result is read back by the handle it was set with",
+    "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto handle = instances.upsert(make_instance("inst-1", "Local"));
+    probes.set(handle, make_probe(reachability::reachable, readiness::ready));
+
+    REQUIRE(probes.size() == 1);
+    REQUIRE(probes.get(handle) != nullptr);
+    REQUIRE(probes.get(handle)->reach == reachability::reachable);
+    REQUIRE(probes.get(handle)->ready == readiness::ready);
+    REQUIRE(probes.get(handle)->latency_us == 4321);
+    REQUIRE(probes.get(handle)->observed_at_ns == 99);
+    REQUIRE(probes.get(handle)->detail ==
+        "no service is handling subject 'iam.v1.ops.bootstrap_status'");
+
+    /* An instance no probe has answered for has nothing to report. */
+    const auto untouched = instances.upsert(make_instance("inst-2", "Other"));
+    REQUIRE(probes.get(untouched) == nullptr);
+    REQUIRE(probes.size() == 1);
+}
+
+TEST_CASE("a probe result does not follow a handle into the next occupant",
+    "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto first = instances.upsert(make_instance("inst-1", "Local"));
+    probes.set(first, make_probe(reachability::unreachable, readiness::unknown));
+
+    instances.remove(first);
+    const auto second = instances.upsert(make_instance("inst-2", "Other"));
+
+    /* The slot is reused, so only the generation tells the two rows apart. */
+    REQUIRE(second.index == first.index);
+    REQUIRE(second.generation != first.generation);
+
+    /*
+     * The row the probe wrote is not handed to the instance that took the
+     * slot: the generations differ, so the new handle addresses nothing.
+     */
+    REQUIRE(probes.get(second) == nullptr);
+
+    /*
+     * Dropping the row is the runtime's job, done when it removes an instance:
+     * the table cannot see the instance table and so cannot know that a
+     * removal happened at all.
+     */
+    probes.forget(first);
+    REQUIRE(probes.get(first) == nullptr);
+    REQUIRE(probes.size() == 0);
+}
+
+TEST_CASE("forgetting an instance drops its probe row and its deadline",
+    "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto handle = instances.upsert(make_instance("inst-1", "Local"));
+    probes.set(handle, make_probe(reachability::reachable, readiness::ready));
+    probes.set_next_probe_ns(handle, 42);
+
+    REQUIRE(probes.size() == 1);
+    REQUIRE(probes.next_probe_ns(handle) == 42);
+
+    probes.forget(handle);
+
+    REQUIRE(probes.size() == 0);
+    REQUIRE(probes.get(handle) == nullptr);
+    REQUIRE(probes.next_probe_ns(handle) == 0);
+
+    probes.clear();
+    REQUIRE(probes.size() == 0);
+}
+
+TEST_CASE("a probe deadline is kept per instance", "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto first = instances.upsert(make_instance("inst-1", "Local"));
+    const auto second = instances.upsert(make_instance("inst-2", "Other"));
+
+    /* An instance the schedule has not been told about is due now. */
+    REQUIRE(probes.next_probe_ns(first) == 0);
+
+    probes.set_next_probe_ns(first, 900);
+    probes.set_next_probe_ns(second, 100);
+
+    REQUIRE(probes.next_probe_ns(first) == 900);
+    REQUIRE(probes.next_probe_ns(second) == 100);
+    REQUIRE(probes.size() == 2);
+
+    /* Setting a result leaves the deadline beside it alone. */
+    probes.set(first, make_probe(reachability::reachable, readiness::ready));
+    REQUIRE(probes.next_probe_ns(first) == 900);
+}
+
+TEST_CASE("every reachability and readiness has a distinct stable name",
+    "[probe]") {
+    const std::pair<reachability, std::string_view> reaches[] = {
+        {reachability::unknown, "unknown"},
+        {reachability::unreachable, "unreachable"},
+        {reachability::reachable, "reachable"},
+    };
+    std::set<std::string_view> reach_names;
+    for (const auto& [value, expected] : reaches) {
+        REQUIRE(hedgr::model::domain::to_string(value) == expected);
+        reach_names.insert(hedgr::model::domain::to_string(value));
+    }
+    REQUIRE(reach_names.size() == 3);
+
+    const std::pair<readiness, std::string_view> readies[] = {
+        {readiness::unknown, "unknown"},
+        {readiness::bootstrapping, "bootstrapping"},
+        {readiness::ready, "ready"},
+    };
+    std::set<std::string_view> ready_names;
+    for (const auto& [value, expected] : readies) {
+        REQUIRE(hedgr::model::domain::to_string(value) == expected);
+        ready_names.insert(hedgr::model::domain::to_string(value));
+    }
+    REQUIRE(ready_names.size() == 3);
+
+    /*
+     * Every enumerator, walked by value rather than by name, so a fourth
+     * state added without a spelling fails here instead of rendering as an
+     * empty cell.
+     */
+    for (std::uint8_t raw = 0; raw < 3; ++raw) {
+        INFO("reachability " << static_cast<int>(raw));
+        REQUIRE_FALSE(
+            hedgr::model::domain::to_string(static_cast<reachability>(raw))
+                .empty());
+        REQUIRE_FALSE(
+            hedgr::model::domain::to_string(static_cast<readiness>(raw))
+                .empty());
+    }
 }

@@ -35,6 +35,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -67,6 +68,8 @@ using hedgr::model::domain::instance;
 using hedgr::model::domain::label_colour;
 using hedgr::model::domain::label_severity;
 using hedgr::model::domain::labelling_owner;
+using hedgr::model::domain::reachability;
+using hedgr::model::domain::readiness;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
@@ -175,6 +178,19 @@ private:
 }
 
 /**
+ * @brief The monotonic clock the probe schedule is written against.
+ *
+ * The same clock the runtime uses, so a deadline the runtime computed can be
+ * compared with "now" here rather than with a wall-clock instant that means
+ * nothing to either.
+ */
+[[nodiscard]] std::int64_t steady_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+/**
  * @brief The instance row with this id, or nullptr.
  *
  * The table answers a string id with a handle and a handle with a row, so the
@@ -199,6 +215,24 @@ private:
 void push_command(instance_manager& manager, command request) {
     manager.commands().push(std::move(request));
     manager.pump();
+}
+
+/**
+ * @brief An instance nothing listens on, added by command.
+ *
+ * Port one is reserved and nothing binds it, so a connect to it is refused
+ * immediately rather than waiting out a timeout. That is the only kind of
+ * unreachable deployment a test may depend on: everything else a probe could
+ * meet needs a daemon, and a suite that needs a daemon is a suite that fails
+ * on a developer's machine for no reason.
+ */
+void add_unreachable_instance(instance_manager& manager, std::string id) {
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance(std::move(id), "Refused", "ores.test.refused");
+    save.instance_row.nats_url = "nats://127.0.0.1:1";
+    save.instance_id = save.instance_row.id;
+    push_command(manager, save);
 }
 
 /**
@@ -771,6 +805,186 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     REQUIRE(manager.sessions().status(*handle) == session_status::failed);
     REQUIRE(manager.sessions().last_error(*handle) ==
         "the instance could not be reached (unreachable)");
+
+    manager.stop();
+}
+
+/*
+ * The probe tests below use exactly one kind of unreachable deployment: a port
+ * nothing listens on. A probe of a live broker is not tested here on purpose.
+ * It would need the broker, its subject prefix and -- for readiness -- an IAM
+ * service, so the suite would pass or fail on whether a daemon happens to be
+ * running; the answered round trip is covered by running the application
+ * against a real deployment. What is covered here is the part that has no
+ * daemon in it: the translation of a refused connect, the isolation from the
+ * session table, and the schedule the answer feeds.
+ */
+
+TEST_CASE("a probe against a refused port reports unreachable", "[runtime]") {
+    const temporary_database database("probe-unreachable");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+
+    const auto handle = manager.instances().find("inst-refused");
+    REQUIRE(handle.has_value());
+
+    /*
+     * Bounded, so a probe that never reports fails the test rather than
+     * hanging the suite on a worker that never ran.
+     */
+    const auto settled = wait_until([&manager, &handle] {
+        manager.pump();
+        return manager.probes().get(*handle) != nullptr;
+    }, std::chrono::seconds(10));
+    REQUIRE(settled);
+
+    const auto* result = manager.probes().get(*handle);
+    REQUIRE(result != nullptr);
+    REQUIRE(result->reach == reachability::unreachable);
+    REQUIRE(result->ready == readiness::unknown);
+    REQUIRE_FALSE(result->detail.empty());
+    REQUIRE(result->observed_at_ns > 0);
+
+    manager.stop();
+}
+
+TEST_CASE("a probe leaves the session table untouched", "[runtime]") {
+    const temporary_database database("probe-isolation");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
+
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = "inst-refused";
+    connect.account_id = "ident-1";
+    connect.principal = "alice@example.test";
+    connect.password = "not-a-real-secret";
+    push_command(manager, connect);
+
+    const auto handle = manager.instances().find("inst-refused");
+    REQUIRE(handle.has_value());
+    const auto session = manager.sessions().find("inst-refused", "ident-1");
+    REQUIRE(session.has_value());
+    REQUIRE(manager.sessions().size() == 1);
+
+    /*
+     * The session's own attempt is left to settle first, so what the probe is
+     * measured against is a session that has stopped moving and any change to
+     * it can only be the probe's doing.
+     */
+    const auto session_settled = wait_until([&manager, &session] {
+        manager.pump();
+        return manager.sessions().status(*session) == session_status::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(session_settled);
+
+    const auto status_before = manager.sessions().status(*session);
+    REQUIRE(status_before == session_status::failed);
+
+    const auto probed = wait_until([&manager, &handle] {
+        manager.pump();
+        return manager.probes().get(*handle) != nullptr;
+    }, std::chrono::seconds(10));
+    REQUIRE(probed);
+
+    /*
+     * The claim ADR 5 rests on, stated as a count and a status: a probe that
+     * ran to completion next to a session added no session, removed none, and
+     * did not move the one that was there.
+     */
+    REQUIRE(manager.sessions().size() == 1);
+    REQUIRE(manager.sessions().status(*session) == status_before);
+    REQUIRE(manager.sessions().last_error(*session) ==
+        "the instance is not reachable (unreachable)");
+
+    manager.stop();
+}
+
+TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
+    "[runtime]") {
+    const temporary_database database("probe-backoff");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+
+    const auto handle = manager.instances().find("inst-refused");
+    REQUIRE(handle.has_value());
+
+    const auto first = wait_until([&manager, &handle] {
+        manager.pump();
+        return manager.probes().get(*handle) != nullptr;
+    }, std::chrono::seconds(10));
+    REQUIRE(first);
+
+    /*
+     * The first failure waits twenty seconds: the ten-second cadence doubled.
+     * The bounds are literal and a second wide, because the deadline is
+     * written from the runtime's own clock a moment before this reads it.
+     */
+    const auto first_deadline = manager.probes().next_probe_ns(*handle);
+    const auto after_first = steady_now_ns();
+    REQUIRE(first_deadline - after_first > 19'000'000'000);
+    REQUIRE(first_deadline - after_first <= 20'000'000'000);
+
+    /*
+     * A second attempt is forced rather than waited for: the backoff is
+     * twenty seconds long and a suite that sleeps through its own schedules is
+     * a suite nobody runs.
+     */
+    const auto first_observed = manager.probes().get(*handle)->observed_at_ns;
+    command probe;
+    probe.kind = command_kind::probe_instance;
+    probe.instance_id = "inst-refused";
+    push_command(manager, probe);
+
+    const auto second = wait_until([&manager, &handle, first_observed] {
+        manager.pump();
+        const auto* result = manager.probes().get(*handle);
+        return result != nullptr && result->observed_at_ns != first_observed;
+    }, std::chrono::seconds(10));
+    REQUIRE(second);
+
+    const auto second_deadline = manager.probes().next_probe_ns(*handle);
+    const auto after_second = steady_now_ns();
+    REQUIRE(second_deadline - after_second > 39'000'000'000);
+    REQUIRE(second_deadline - after_second <= 40'000'000'000);
+
+    /*
+     * An answered probe returns to the ten-second cadence. The answer is
+     * synthesised rather than fetched, because a real one needs a live broker
+     * and this asserts the schedule's response to an answer, not the wire.
+     */
+    event fact;
+    fact.kind = event_kind::probe_result;
+    fact.instance_id = "inst-refused";
+    fact.reach = reachability::reachable;
+    fact.ready = readiness::ready;
+    fact.detail = "iam.v1.ops.bootstrap_status: in bootstrap mode = false";
+    manager.events().push(fact);
+    manager.pump();
+
+    const auto* answered = manager.probes().get(*handle);
+    REQUIRE(answered != nullptr);
+    REQUIRE(answered->reach == reachability::reachable);
+    REQUIRE(answered->ready == readiness::ready);
+
+    const auto reset_deadline = manager.probes().next_probe_ns(*handle);
+    const auto after_reset = steady_now_ns();
+    REQUIRE(reset_deadline - after_reset > 9'000'000'000);
+    REQUIRE(reset_deadline - after_reset <= 10'000'000'000);
 
     manager.stop();
 }

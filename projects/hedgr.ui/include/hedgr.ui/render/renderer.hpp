@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/export.hpp"
 #include <array>
@@ -91,6 +92,15 @@ struct render_input final {
 
     /** @brief The live sessions. */
     const hedgr::model::state::session_table& sessions;
+
+    /**
+     * @brief The probes' last results and next deadlines.
+     *
+     * Read-only like every other table here, and read for the two indicators
+     * beside each instance's name: what a probe found, and -- through the
+     * tooltip it carries -- why.
+     */
+    const hedgr::model::state::probe_table& probes;
 
     /** @brief The live windows, including the one being drawn. */
     const hedgr::model::state::window_table& windows;
