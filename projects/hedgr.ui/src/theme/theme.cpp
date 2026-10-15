@@ -194,6 +194,33 @@ ImU32 label_colour(hedgr::model::domain::label_colour value) noexcept {
     return IM_COL32(212, 212, 212, 255);
 }
 
+ImU32 text_colour_on(ImU32 background) noexcept {
+    const auto channel = [&](unsigned int shift) {
+        return static_cast<float>((background >> shift) & 0xFFu);
+    };
+
+    /*
+     * Rec. 601 weights, because the eye is far more sensitive to green than to
+     * blue and a plain mean would call a saturated blue bright. The result is
+     * 0..1.
+     */
+    const float luminance =
+        (0.299f * channel(16) + 0.587f * channel(8) + 0.114f * channel(0))
+        / 255.0f;
+
+    /*
+     * Half of the scale, because that is where the label palette changes over:
+     * amber at 0.75, grey at 0.62, blue at 0.56, purple at 0.55 and green at
+     * 0.50 are all pale enough to want dark text, and red at 0.38 wants the
+     * pale one. The threshold has to sit above green -- 0.4 would give a
+     * saturated green dark text, which is the combination a reader finds worst
+     * -- and a declared "dark is under half, light is over half" is the reading
+     * of the scale that needs no second table to justify it.
+     */
+    return luminance > 0.5f ? IM_COL32(24, 24, 24, 255)
+                            : IM_COL32(250, 250, 250, 255);
+}
+
 const char* status_icon(hedgr::model::domain::session_status value) noexcept {
     switch (value) {
     case hedgr::model::domain::session_status::disconnected:

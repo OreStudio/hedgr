@@ -23,6 +23,7 @@
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
+#include "hedgr.ui/widget/label_pill.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -244,6 +245,20 @@ struct browser_model final {
      */
     void (*row_cells)(const tree_leaf&, const hedgr::ui::render::render_input&,
         widget::row_cells&) = nullptr;
+
+    /**
+     * @brief Fills @p cells with one row's labels, one entry per column.
+     *
+     * A separate callback from @c row_cells because a label is not a cell
+     * value: it has a colour and a severity that the palette and the
+     * destructive-action confirmation both read, and the browser draws it as a
+     * pill rather than as text. The host leaves the entry for a column it has
+     * no labels for empty, and the browser then draws that column as ordinary
+     * text. A host with no label columns leaves the callback null.
+     */
+    void (*row_labels)(const tree_leaf&,
+        const hedgr::ui::render::render_input&,
+        std::vector<std::vector<label_pill>>&) = nullptr;
 
     /*
      * The host's callbacks all take the whole window state rather than the

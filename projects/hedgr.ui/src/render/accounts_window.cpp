@@ -155,6 +155,19 @@ void draw_form(const render_input& input, window_ui_state& state) {
     ImGui::InputTextWithHint("##account-principal", "principal",
         state.draft_subject.data(), state.draft_subject.size());
 
+    /*
+     * The labels this account already carries, as the same pills the list
+     * draws, above the field that edits them: the names are what a person
+     * types, and the pills are what those names look like once attached.
+     */
+    const auto attached =
+        forms::labels_of(input, labelling_owner::account, state.browser.form_leaf);
+    if (!attached.empty()) {
+        ImGui::TextDisabled("Attached:");
+        ImGui::SameLine();
+        static_cast<void>(widget::label_pill_row(widget::pills_for(attached), 0.0f));
+    }
+
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##account-labels", "labels, comma separated",
         state.browser.form_labels.data(), state.browser.form_labels.size());
@@ -397,6 +410,9 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
     };
 }
 
+/** @brief The index of the one column whose cells are label pills. */
+constexpr std::size_t account_label_column = 3;
+
 /** @brief Fills one account row's cells. */
 void account_row_cells(const tree_leaf& leaf, const render_input& input,
     widget::row_cells& cells) {
@@ -428,18 +444,6 @@ void account_row_cells(const tree_leaf& leaf, const render_input& input,
             ? std::string{"IAM has not named a tenant for this account yet"}
             : std::format("Tenant {} as of the last sign-in", sign_in.tenant));
 
-    std::vector<std::string> names;
-    std::string colours;
-    for (const auto* attached :
-        forms::labels_of(input, labelling_owner::account, leaf.id)) {
-        names.push_back(attached->name);
-        colours.append(hedgr::model::domain::to_string(attached->colour));
-        colours.push_back(' ');
-    }
-    cells.texts.push_back(widget::join_labels(names));
-    cells.colours.push_back(0);
-    cells.tooltips.push_back(colours);
-
     const auto summary = [&]() -> std::string {
         if (!sign_in.ever_attempted)
             return "never";
@@ -464,6 +468,20 @@ void account_row_cells(const tree_leaf& leaf, const render_input& input,
     cells.tooltips.emplace_back(sign_in.last_error.empty()
             ? std::format("Last sign-in: {}", summary)
             : std::format("Last sign-in failed: {}", sign_in.last_error));
+}
+
+/**
+ * @brief Fills one account row's label column with pills.
+ *
+ * Separate from @c account_row_cells because the labels column is drawn rather
+ * than written: a pill carries the label's colour as its fill and its severity
+ * in its tooltip, and the list cell has room for neither as text.
+ */
+void account_row_labels(const tree_leaf& leaf, const render_input& input,
+    std::vector<std::vector<widget::label_pill>>& cells) {
+    cells.resize(account_columns().size());
+    cells[account_label_column] = widget::pills_for(
+        forms::labels_of(input, labelling_owner::account, leaf.id));
 }
 
 }
@@ -591,6 +609,7 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     model.leaves = account_tree_leaves(input, instance_id);
     model.columns = account_columns();
     model.row_cells = &account_row_cells;
+    model.row_labels = &account_row_labels;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
         open_create_form(window, parent);
     };

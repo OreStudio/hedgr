@@ -20,6 +20,8 @@ set(files
     "render/workspace_window.cpp"
     "theme/theme.cpp"
     "widget/browser.cpp"
+    "widget/label_pill.cpp"
+    "widget/panel_defaults.cpp"
     "widget/panels.cpp"
 )
 
@@ -41,5 +43,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/browser_state.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/controls.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/hedgr.ui.widget.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/label_pill.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/panel_defaults.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/panels.hpp"
 )

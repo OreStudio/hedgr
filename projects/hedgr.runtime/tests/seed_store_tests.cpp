@@ -52,7 +52,19 @@ using hedgr::runtime::manager::instance_manager;
 using hedgr::session::transport::session_options;
 
 /** @brief The password a captured store is seeded with. */
-constexpr std::string_view seed_password = "verify the fifth unit";
+/**
+ * @brief The password the seeded store is sealed with.
+ *
+ * Read from the same variable the run script uses, so a capture unlocks the
+ * store the seeder just made without an override. The fallback matches
+ * run.sh's default; keeping the two in step is the point of reading it at all.
+ */
+[[nodiscard]] std::string seed_password() {
+    if (const char* from_env = std::getenv("HEDGR_MASTER_PASSWORD");
+        from_env != nullptr && *from_env != '\0')
+        return from_env;
+    return "Secure-Password-123";
+}
 
 /**
  * @brief Pumps the manager until @p ready, or the limit passes.
@@ -126,7 +138,7 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
 
     command create;
     create.kind = command_kind::set_master_password;
-    create.password = std::string{seed_password};
+    create.password = std::string{seed_password()};
     REQUIRE(run_until(manager, std::move(create),
         [&manager] { return manager.store_lock() == store_lock::unlocked; }));
 

@@ -175,6 +175,14 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
     ImGui::SameLine();
     ImGui::TextDisabled("%s", instance_name.c_str());
 
+    /*
+     * The same disappearing open state as the Instances window's dashboard: a
+     * CollapsingHeader overwrites the bool it is handed from its own storage,
+     * so the panel is opened here rather than by the window state's initialiser.
+     */
+    ImGui::SetNextItemOpen(
+        widget::panel_default_open(widget::panel_kind::session_facts),
+        ImGuiCond_Appearing);
     if (!ImGui::CollapsingHeader(std::format("{} Session", icon::clock).c_str(),
             &state.panel_open)) {
         ImGui::PopID();

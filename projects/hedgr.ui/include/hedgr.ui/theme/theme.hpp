@@ -77,6 +77,20 @@ readiness_colour(hedgr::model::domain::readiness value) noexcept;
 [[nodiscard]] HEDGR_UI_EXPORT ImU32
 label_colour(hedgr::model::domain::label_colour value) noexcept;
 
+/**
+ * @brief A text colour that stays readable on @p background.
+ *
+ * A label pill fills itself with the label's colour and writes its name on top
+ * of that fill, so the text colour is a function of the fill rather than a
+ * constant: the palette has both a pale amber and a dark purple in it, and a
+ * fixed white would be unreadable on one of them.
+ *
+ * The choice is the background's luminance against a threshold, because that is
+ * the property a reader's eye actually responds to here; a hue-aware contrast
+ * ratio would be a more elaborate answer to the same question.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32 text_colour_on(ImU32 background) noexcept;
+
 /** @brief The icon naming a window kind. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*
 window_kind_icon(hedgr::model::domain::window_kind value) noexcept;

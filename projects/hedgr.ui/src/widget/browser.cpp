@@ -523,21 +523,25 @@ void draw_folder_form(widget::browser_state& state,
     ImGui::EndPopup();
 }
 
-/** @brief One clickable row of the tree, with its drag and drop handlers. */
+/**
+ * @brief One clickable row of the tree, with its drag and drop handlers.
+ *
+ * Root is a row like any other here. It is a folder with no parent drawn at
+ * depth zero, so it shares the tree's indentation, scrolls with the tree and
+ * takes a drop the same way; the one thing that separates it is that
+ * @c affordances_for gives it no rename, no move and no delete, so it is not
+ * draggable and offers no removal.
+ */
 void draw_tree_row(const widget::browser_model& model, const tree_row& row,
     widget::browser_state& state, const render_input& input, bool* row_open) {
     namespace icon = hedgr::ui::icon;
 
     const std::string_view id = id_of(model, row);
     const bool root = is_root_of(model, row);
-    if (root)
-        return;
 
-    const bool selected = root
+    const bool selected = row.kind == widget::node_kind::folder
         ? state.selected_folder == id
-        : (row.kind == widget::node_kind::folder
-                  ? state.selected_folder == id
-                  : state.selected_leaf == id);
+        : state.selected_leaf == id;
     const auto affordances =
         widget::affordances_for(row.kind, root);
     const bool draggable = affordances.move && store_is_open(input);
@@ -553,16 +557,51 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
          * TreeNodeEx that returns true has pushed an id, and ImGui requires the
          * matching TreePop before the next sibling is submitted. The caller
          * closes the nodes that this row opened, by looking at the next row's
-         * depth -- see @c draw_tree -- because only the caller can see where a
-         * subtree ends in a flat list.
+         * depth -- see @c render_browser -- because only the caller can see
+         * where a subtree ends in a flat list.
          */
-        const ImGuiTreeNodeFlags flags =
-            (selected ? ImGuiTreeNodeFlags_Selected : 0)
+        ImGuiTreeNodeFlags flags = (selected ? ImGuiTreeNodeFlags_Selected : 0)
             | ImGuiTreeNodeFlags_OpenOnArrow
             | ImGuiTreeNodeFlags_SpanAvailWidth
             | ImGuiTreeNodeFlags_FramePadding;
+
+        /*
+         * Root opens the first time it is drawn and its own expander owns the
+         * state from then on, so a reader opening Hedgr sees the tree's
+         * contents rather than a single closed name, and a reader who shuts it
+         * keeps it shut.
+         *
+         * The id is taken once, before the node is submitted, and reused after
+         * it. TreeNodeEx pushes the node's own id while it is open, so an id
+         * computed after it is hashed against a different stack and lands in a
+         * different slot: the read would then never see what the write stored,
+         * and a root that had been shut could never be opened again.
+         */
+        const ImGuiID open_state =
+            root ? ImGui::GetID("##hedgr-root-open") : 0;
+        if (root) {
+            ImGui::SetNextItemOpen(
+                ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
+                ImGuiCond_Always);
+        }
+
         *row_open = ImGui::TreeNodeEx("##node", flags, "%s  %s",
-            icon::folder, std::string{name_of(model, row)}.c_str());
+            root ? icon::folder_root : icon::folder,
+            std::string{name_of(model, row)}.c_str());
+
+        if (root) {
+            /*
+             * Written only when the operator worked the expander, and only
+             * after the node: the first frame reads the default above, and
+             * every later frame reads what the last click left.
+             */
+            if (ImGui::IsItemToggledOpen())
+                ImGui::GetStateStorage()->SetInt(open_state, *row_open ? 1 : 0);
+
+            ImGui::SetItemTooltip("%s",
+                "The root of this tree. New folders and entries are created "
+                "here, and it cannot be renamed, moved or removed.");
+        }
 
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
             state.selected_folder = std::string{id};
@@ -682,11 +721,15 @@ void draw_list(const widget::browser_model& model,
         ImGui::TableHeadersRow();
 
         widget::row_cells cells;
+        auto row_labels = std::vector<std::vector<widget::label_pill>>{};
         for (const auto index : kept) {
             const auto& leaf = model.leaves[index];
             cells.clear();
             if (model.row_cells != nullptr)
                 model.row_cells(leaf, input, cells);
+            row_labels.clear();
+            if (model.row_labels != nullptr)
+                model.row_labels(leaf, input, row_labels);
 
             ImGui::TableNextRow();
             ImGui::PushID(leaf.id.c_str());
@@ -697,7 +740,20 @@ void draw_list(const widget::browser_model& model,
                     ? std::string_view{cells.texts[position]}
                     : std::string_view{};
 
-                if (model.columns[position].indicator && position < cells.colours.size()) {
+                const std::vector<widget::label_pill>* pills =
+                    position < row_labels.size() && !row_labels[position].empty()
+                    ? &row_labels[position]
+                    : nullptr;
+
+                if (pills != nullptr) {
+                    /*
+                     * The cell's own width, so a narrow column truncates its
+                     * labels rather than drawing them over the next column.
+                     */
+                    static_cast<void>(widget::label_pill_row(*pills,
+                        ImGui::GetContentRegionAvail().x));
+                } else if (model.columns[position].indicator
+                    && position < cells.colours.size()) {
                     const auto colour = cells.colours[position];
                     ImGui::PushStyleColor(ImGuiCol_Text,
                         ImGui::ColorConvertU32ToFloat4(
@@ -826,39 +882,6 @@ void render_browser(const browser_model& model, window_ui_state& window,
      * browser any more.
      */
     const float body_height = std::max(region.y - 60.0f, 240.0f);
-
-    /*
-     * Root is drawn once, above the two regions rather than inside the tree,
-     * so that "put this back at the top level" has a target that no amount of
-     * scrolling can hide.
-     */
-    const std::string root_id = root_id_of(model);
-    if (!root_id.empty()) {
-        const bool selected = state.selected_folder == root_id;
-        ImGui::PushID("root");
-        const std::string label = std::format("{}  Root", icon::folder_root);
-        if (ImGui::Selectable(label.c_str(), selected, ImGuiSelectableFlags_None,
-                ImVec2(tree_width, 0.0f))) {
-            state.selected_folder = root_id;
-            state.selected_leaf.clear();
-        }
-        ImGui::SetItemTooltip("%s",
-            "The root of this tree. New folders and entries are created here, "
-            "and it cannot be renamed, moved or removed.");
-
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload =
-                    ImGui::AcceptDragDropPayload(drag_payload);
-                payload != nullptr
-                && payload->DataSize == static_cast<int>(sizeof(drag_payload_data))) {
-                accept_drop(model,
-                    *static_cast<const drag_payload_data*>(payload->Data),
-                    drop_target{root_id}, input);
-            }
-            ImGui::EndDragDropTarget();
-        }
-        ImGui::PopID();
-    }
 
     if (ImGui::BeginChild("##browser-tree",
             ImVec2(tree_width, body_height), ImGuiChildFlags_Borders)) {

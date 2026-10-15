@@ -27,6 +27,7 @@
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
+#include "hedgr.ui/widget/panel_defaults.hpp"
 #include "hedgr.ui/export.hpp"
 #include <array>
 #include <cstdint>
@@ -77,8 +78,17 @@ struct window_ui_state final {
      */
     hedgr::ui::widget::browser_state browser;
 
-    /** @brief Whether a collapsible panel is open. */
-    bool panel_open = true;
+    /**
+     * @brief Whether a collapsible panel is open.
+     *
+     * This is the starting value and it is not what opens a panel: a collapsing
+     * header keeps its own state under the header's id and overwrites this on
+     * the first frame it draws. What opens one is the header being preceded by
+     * @c ImGui::SetNextItemOpen, fed from @c panel_default_open -- see
+     * @c panel_defaults.hpp for why the initialiser alone does nothing.
+     */
+    bool panel_open = hedgr::ui::widget::panel_default_open(
+        hedgr::ui::widget::panel_kind::dashboard);
 
     /*
      * The fields an instance or an account form edits.

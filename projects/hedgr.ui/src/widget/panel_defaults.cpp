@@ -1,0 +1,45 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.ui/widget/panel_defaults.hpp"
+
+namespace hedgr::ui::widget {
+
+bool panel_default_open(panel_kind kind) noexcept {
+    switch (kind) {
+    case panel_kind::dashboard:
+        /*
+         * The counts are the first thing the Instances window has to say: they
+         * answer "is anything wrong" before the operator has read a single
+         * row, and a window that opens with the answer hidden behind a click
+         * makes them ask for it.
+         */
+        return true;
+    case panel_kind::session_facts:
+        /*
+         * The session's identity -- which instance, which principal, which
+         * tenant -- is what a Workspace is about, and its title cannot hold all
+         * of it.
+         */
+        return true;
+    }
+    return false;
+}
+
+}

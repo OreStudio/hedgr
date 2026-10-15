@@ -385,6 +385,21 @@ void draw_form(const render_input& input, window_ui_state& state) {
     }
     ImGui::SetItemTooltip("%s", "Wire format");
 
+    /*
+     * The labels this instance already carries, as the same pills the list
+     * draws, above the field that edits them. The field shows names because a
+     * name is what a person types; the pills show the colour and the severity
+     * those names will have, so an edit is made against what the row looks like
+     * rather than against a list of words.
+     */
+    const auto attached =
+        labels_of(input, labelling_owner::instance, state.browser.form_leaf);
+    if (!attached.empty()) {
+        ImGui::TextDisabled("Attached:");
+        ImGui::SameLine();
+        static_cast<void>(widget::label_pill_row(widget::pills_for(attached), 0.0f));
+    }
+
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##instance-labels", "labels, comma separated",
         state.browser.form_labels.data(), state.browser.form_labels.size());
@@ -554,6 +569,16 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 void draw_dashboard(const render_input& input, window_ui_state& state) {
     const auto counts = widget::count_instances(input.instances, input.probes);
 
+    /*
+     * The panel opens the first time it is drawn. A CollapsingHeader carries no
+     * default of its own and overwrites the bool it is handed from its own
+     * storage, so an initialiser in the window state cannot open it: this call
+     * is the only thing that can. Appearing rather than Always, so the operator
+     * can still shut it and have it stay shut.
+     */
+    ImGui::SetNextItemOpen(
+        widget::panel_default_open(widget::panel_kind::dashboard),
+        ImGuiCond_Appearing);
     if (!ImGui::CollapsingHeader(
             std::format("{} Dashboard", icon::dashboard).c_str(),
             &state.panel_open))
@@ -603,6 +628,9 @@ void draw_dashboard(const render_input& input, window_ui_state& state) {
     };
 }
 
+/** @brief The index of the one column whose cells are label pills. */
+constexpr std::size_t instance_label_column = 5;
+
 /** @brief Fills one instance row's cells. */
 void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     widget::row_cells& cells) {
@@ -634,22 +662,21 @@ void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     cells.texts.emplace_back(row != nullptr ? row->subject_prefix : std::string{});
     cells.colours.push_back(0);
     cells.tooltips.push_back(cells.texts.back());
+}
 
-    /*
-     * The labels are names in the cell rather than painted chips, because a
-     * cell holds one string: the colours travel in the tooltip, which is where
-     * a reader looks when a name means nothing.
-     */
-    std::vector<std::string> names;
-    std::string colours;
-    for (const auto* attached : labels_of(input, labelling_owner::instance, leaf.id)) {
-        names.push_back(attached->name);
-        colours.append(hedgr::model::domain::to_string(attached->colour));
-        colours.push_back(' ');
-    }
-    cells.texts.push_back(widget::join_labels(names));
-    cells.colours.push_back(0);
-    cells.tooltips.push_back(colours);
+/**
+ * @brief Fills one instance row's label column with pills.
+ *
+ * Separate from @c instance_row_cells because the labels column is the one
+ * column whose cells are drawn rather than written: a label is a name with a
+ * colour and a severity, and the colour list that used to travel in a tooltip
+ * is what the pill's own fill now shows.
+ */
+void instance_row_labels(const tree_leaf& leaf, const render_input& input,
+    std::vector<std::vector<widget::label_pill>>& cells) {
+    cells.resize(instance_columns().size());
+    cells[instance_label_column] = widget::pills_for(
+        labels_of(input, labelling_owner::instance, leaf.id));
 }
 
 }
@@ -744,6 +771,7 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.leaves = instance_tree_leaves(input);
     model.columns = instance_columns();
     model.row_cells = &instance_row_cells;
+    model.row_labels = &instance_row_labels;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
         open_create_form(window, parent);
     };

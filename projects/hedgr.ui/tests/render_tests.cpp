@@ -257,6 +257,19 @@ TEST_CASE("a failed lock is drawn as a failure and a working one is not",
  * What is worth a test is everything a renderer decides before it draws.
  */
 
+/*
+ * The widget layer's decisions, tested as values rather than as pixels.
+ *
+ * Nothing here draws a pill, a row or a frame. Painting goes through
+ * ImGui::GetWindowDrawList and ImGui::CalcTextSize, and both need a live
+ * context, a font atlas and a backend; ImGui::NewFrame aborts rather than
+ * returning an error without them, so there is no way to run a renderer in
+ * this binary and no reason to want one. What is worth a test is everything the
+ * drawing decides before it paints -- which text colour a fill earns, how many
+ * pills fit in a width, what a model label turns into -- and each of those is a
+ * free function over plain values, callable from here.
+ */
+
 using hedgr::ui::widget::affordances_for;
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::can_drop_onto;
@@ -317,6 +330,131 @@ TEST_CASE("a folder cannot be dropped into itself or its own subtree",
 
     /* Nothing is dropped onto nothing. */
     REQUIRE_FALSE(can_drop_onto("a", "", {}));
+}
+
+TEST_CASE("a pill's text colour is chosen from its fill's luminance",
+    "[theme]") {
+    using hedgr::ui::theme::text_colour_on;
+
+    /*
+     * The rule that makes a label pill readable: the fill is the label's own
+     * colour, so the text on it cannot be a constant. This is a pure function
+     * of a colour and needs no window, which is why it is the half of the
+     * pill's drawing that is tested here.
+     */
+    const auto dark_text = text_colour_on(IM_COL32(255, 255, 255, 255));
+    const auto light_text = text_colour_on(IM_COL32(0, 0, 0, 255));
+
+    REQUIRE(dark_text != light_text);
+
+    /* Luminance, not a plain mean: the red channel carries the least weight. */
+    REQUIRE(text_colour_on(IM_COL32(255, 255, 255, 255)) == dark_text);
+    REQUIRE(text_colour_on(IM_COL32(128, 128, 128, 255)) == dark_text);
+    REQUIRE(text_colour_on(IM_COL32(0, 0, 0, 255)) == light_text);
+    REQUIRE(text_colour_on(IM_COL32(0, 0, 255, 255)) == light_text);
+
+    /*
+     * And the choice is the right way round for every colour the theme actually
+     * paints a label with. The split is not the one the names suggest: all of
+     * the palette is pale enough for dark text except red, green included --
+     * a saturated green is the entry nearest the line, which is why the rule
+     * is stated over luminance rather than picked per entry: a change to the
+     * palette cannot leave one label unreadable.
+     */
+    using hedgr::model::domain::label_colour;
+
+    const auto on = [&](label_colour entry) {
+        return text_colour_on(hedgr::ui::theme::label_colour(entry));
+    };
+
+    for (const auto entry : { label_colour::amber, label_colour::grey,
+             label_colour::blue, label_colour::purple, label_colour::green }) {
+        INFO("pale label colour " << static_cast<std::size_t>(entry));
+        REQUIRE(on(entry) == dark_text);
+    }
+
+    INFO("dark label colour " << static_cast<std::size_t>(label_colour::red));
+    REQUIRE(on(label_colour::red) == light_text);
+}
+
+TEST_CASE("a collapsible panel opens the first time it is drawn", "[widget]") {
+    using hedgr::ui::widget::panel_default_open;
+    using hedgr::ui::widget::panel_kind;
+
+    /*
+     * The rule the two collapsible headers apply through ImGui's
+     * SetNextItemOpen. It is a pure function of a panel, so it is checked here
+     * rather than in a frame: what a header does with it is ImGui's, and what
+     * this decides is whether the operator has to click to see a summary.
+     */
+    REQUIRE(panel_default_open(panel_kind::dashboard));
+    REQUIRE(panel_default_open(panel_kind::session_facts));
+
+    /*
+     * And the window state starts the same way, so a header drawn before
+     * anything sets it is not briefly shut. This is a guard on the initialiser
+     * rather than on the drawing: it is the value the two windows hand ImGui on
+     * their first frame.
+     */
+    const window_ui_state state;
+    REQUIRE(state.panel_open);
+}
+
+TEST_CASE("a row of pills keeps only what fits whole", "[widget]") {
+    using hedgr::ui::widget::pill_fits;
+    using hedgr::ui::widget::pills_that_fit;
+
+    /*
+     * The layout rule, as arithmetic over widths: the drawing needs a window
+     * and a font atlas, but the decision of how many pills are drawn does not.
+     * A pill is drawn whole or not at all, because the one outcome a row of
+     * labels must never have is two pills overlapping.
+     */
+    const std::vector<float> widths{ 40.0f, 40.0f, 40.0f };
+    constexpr float gap = 6.0f;
+
+    /* Three at 40 with two 6-wide gaps come to 132. */
+    REQUIRE(pills_that_fit(widths, gap, 132.0f) == 3);
+    REQUIRE(pills_that_fit(widths, gap, 131.0f) == 2);
+    REQUIRE(pills_that_fit(widths, gap, 86.0f) == 2);
+    REQUIRE(pills_that_fit(widths, gap, 85.0f) == 1);
+    REQUIRE(pills_that_fit(widths, gap, 40.0f) == 1);
+    REQUIRE(pills_that_fit(widths, gap, 39.0f) == 0);
+    REQUIRE(pills_that_fit(widths, gap, 0.0f) == 0);
+
+    /* The gap belongs after a pill, so the first one needs none. */
+    REQUIRE(pill_fits(40.0f, 0.0f, 40.0f));
+    REQUIRE_FALSE(pill_fits(40.0f, gap, 40.0f));
+    REQUIRE(pill_fits(40.0f, gap, 46.0f));
+}
+
+TEST_CASE("a label is turned into a pill in the theme's own colour",
+    "[widget]") {
+    using hedgr::model::domain::label;
+    using hedgr::model::domain::label_colour;
+    using hedgr::model::domain::label_severity;
+    using hedgr::ui::widget::pills_for;
+
+    label amber;
+    amber.id = "label:production";
+    amber.name = "production";
+    amber.colour = label_colour::amber;
+    amber.severity = label_severity::danger;
+
+    const std::vector<const label*> rows{ &amber };
+    const auto pills = pills_for(rows);
+
+    REQUIRE(pills.size() == 1);
+    REQUIRE(pills[0].text == "production");
+    REQUIRE(pills[0].id == "label:production");
+    REQUIRE(pills[0].severity == label_severity::danger);
+    REQUIRE(pills[0].background
+        == static_cast<std::uint32_t>(hedgr::ui::theme::label_colour(amber.colour)));
+
+    /* A missing row is skipped rather than drawn as a pill with no name. */
+    const std::vector<const label*> with_hole{ nullptr, &amber };
+    REQUIRE(pills_for(with_hole).size() == 1);
+    REQUIRE(pills_for({}).empty());
 }
 
 TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {

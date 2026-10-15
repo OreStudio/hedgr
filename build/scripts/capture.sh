@@ -44,6 +44,10 @@ fi
 rm -rf "${data_dir}"
 mkdir -p "${data_dir}"
 
+# Exported rather than passed inline so the seeder and the client below
+# seal and open the store with the same password.
+export HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}"
+
 HEDGR_SEED_DB="${data_dir}/hedgr/hedgr.db" \
     "${tests}" "[seed]" > /dev/null
 
@@ -59,7 +63,7 @@ export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
 XDG_DATA_HOME="${data_dir}" \
     HEDGR_CAPTURE="${capture}" \
     HEDGR_CAPTURE_FRAME="${frame}" \
-    HEDGR_MASTER_PASSWORD="verify the fifth unit" \
+    HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}" \
     "${repo_dir}/build/scripts/run.sh"
 
 echo "captured ${capture}"
