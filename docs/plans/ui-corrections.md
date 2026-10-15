@@ -224,3 +224,24 @@ This is the same discipline the store, the transport and the runtime already fol
 What was missing was only the last step: an error that is propagated to the manager
 and then read by nothing is, from where the operator sits, the same as an error that
 was never detected.
+
+## One set of icons, and the state lives on it
+
+Operator, after items 15 and 16 landed: "you are still not using tree icons for the
+status, i see 'list icons' which we do not want", and then "only one set of icons".
+
+Checked in the frame before briefing it: the tree and the list already draw the same
+server glyph, so the glyph was never the problem. What the operator sees is the same
+icon drawn twice per entry, once in each surface, with the state tint only on the
+list's. Two sets of one thing, and the one in the tree says nothing.
+
+The reading applied: **the tree's leaf icon carries the state, and the list loses its
+leading icon column.** One icon per entry, in the tree, coloured. The list is then
+name, host, subject and labels.
+
+Follows from all three parts of what the operator said. The tree icons were not being
+used for the status, the list's were unwanted, and there should be one set.
+
+Items 15 and 16 said the *row* icon carries the state and the two indicator columns
+go. They were written before this refinement and this entry supersedes the "row" part
+of them.
