@@ -65,7 +65,12 @@ written down before it is started so that none of it is lost.
     it is **the same icon the tree already draws** for the entry. Two surfaces
     showing the same entry should show the same glyph, tinted, rather than each
     inventing its own or the list adding a second marker beside the first.
-17. **Labels use a much smaller font.** The pills are too large.
+17. **Labels use a much smaller font.** The pills are too large. Being done in
+    the unit in flight, because it lands in the same rows.
+
+    Small enough to read as a badge rather than as text, and the padding, corner
+    radius and row height scale with the text rather than staying at the size
+    they were, which would give a large box with small writing in it.
 18. **The dashboard is always visible and is not collapsible.**
 19. **The dashboard becomes a plot**, collecting the counts over the polling
     time rather than showing only the current numbers. This means the runtime
