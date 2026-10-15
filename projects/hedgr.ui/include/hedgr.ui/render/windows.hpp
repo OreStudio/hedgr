@@ -48,14 +48,6 @@ HEDGR_UI_EXPORT void render_instances_window(
 HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 
 /**
- * @brief Opens the dashboard panel, for a capture that has to show it.
- *
- * The header's open state is ImGui's own and survives a frame, so a frame that
- * has to contain the counts cannot rely on it being open.
- */
-HEDGR_UI_EXPORT void open_dashboard_for_capture();
-
-/**
  * @brief Opens the instance form on one row, for a capture that has to show it.
  *
  * The form is otherwise reached by clicking a row's edit icon, and a capture is

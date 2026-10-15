@@ -439,19 +439,19 @@ TEST_CASE("a collapsible panel opens the first time it is drawn", "[widget]") {
     using hedgr::ui::widget::panel_kind;
 
     /*
-     * The rule the two collapsible headers apply through ImGui's
+     * The rule the Workspace's collapsible header applies through ImGui's
      * SetNextItemOpen. It is a pure function of a panel, so it is checked here
      * rather than in a frame: what a header does with it is ImGui's, and what
-     * this decides is whether the operator has to click to see a summary.
+     * this decides is whether the operator has to click to see a summary. The
+     * Instances window's chart is not a panel and has no rule here.
      */
-    REQUIRE(panel_default_open(panel_kind::dashboard));
     REQUIRE(panel_default_open(panel_kind::session_facts));
 
     /*
      * And the window state starts the same way, so a header drawn before
      * anything sets it is not briefly shut. This is a guard on the initialiser
-     * rather than on the drawing: it is the value the two windows hand ImGui on
-     * their first frame.
+     * rather than on the drawing: it is the value the window hands ImGui on its
+     * first frame.
      */
     const window_ui_state state;
     REQUIRE(state.panel_open);

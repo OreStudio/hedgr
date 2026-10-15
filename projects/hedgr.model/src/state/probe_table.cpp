@@ -66,6 +66,47 @@ probe_table::get(instance_handle h) const noexcept {
     return std::addressof(*slot->result);
 }
 
+void probe_table::record_snapshot(std::int64_t observed_at_ns,
+    std::size_t total) {
+    estate_sample sample;
+    sample.observed_at_ns = observed_at_ns;
+
+    for (const auto& slot : rows_) {
+        if (slot.generation == 0 || !slot.result)
+            continue;
+
+        /*
+         * The three states are read in the order the tree's own colour helper
+         * reads them, because an unreachable broker has said nothing about IAM
+         * and counting it as merely not ready would turn an outage into a
+         * deployment that is halfway through setting itself up.
+         */
+        if (slot.result->reach == domain::reachability::unreachable)
+            ++sample.unreachable;
+        else if (slot.result->ready == domain::readiness::ready)
+            ++sample.ready;
+        else
+            ++sample.not_ready;
+    }
+
+    /*
+     * The remainder is every live instance with no answer yet, which includes
+     * one whose first probe is still in flight. It is the fourth colour the
+     * tree draws rather than a gap, so the four counts always sum to the
+     * estate.
+     */
+    const auto answered = static_cast<std::size_t>(
+        sample.ready + sample.not_ready + sample.unreachable);
+    sample.unknown = static_cast<std::int32_t>(
+        total > answered ? total - answered : 0);
+
+    estate_.append(sample);
+}
+
+const estate_history& probe_table::estate() const noexcept {
+    return estate_;
+}
+
 void probe_table::forget(instance_handle h) {
     if (find(h) == nullptr)
         return;
@@ -83,6 +124,7 @@ std::size_t probe_table::size() const noexcept {
 
 void probe_table::clear() noexcept {
     rows_.clear();
+    estate_.clear();
 }
 
 void probe_table::set_next_probe_ns(instance_handle h, std::int64_t value) {

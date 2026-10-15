@@ -119,9 +119,6 @@ void application::run() {
      */
     if (const char* folder = std::getenv("HEDGR_CAPTURE_SELECT_FOLDER"))
         ui::render::select_folder_for_capture(folder);
-    if (const char* dashboard = std::getenv("HEDGR_CAPTURE_SHOW_DASHBOARD");
-        dashboard != nullptr && *dashboard != '\0')
-        ui::render::open_dashboard_for_capture();
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
         ui::render::open_instance_form_for_capture(editing);
@@ -240,10 +237,17 @@ GLFWwindow* application::initialise_graphics() {
     io.IniFilename = ini_path_.c_str();
 
     ui::theme::apply_theme();
-    ui::icon::load_ui_fonts(15.0f);
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version_.c_str());
+
+    /*
+     * After the backend, because the atlas registers its icons as custom
+     * rectangles and only a backend that announces texture updates hands those
+     * pixels to the GPU. Loaded first, the rectangles would be written into a
+     * texture the renderer never uploads and every glyph would draw blank.
+     */
+    ui::icon::load_ui_fonts(15.0f);
 
     /*
      * After both backends, because it replaces the GLFW callback the backend

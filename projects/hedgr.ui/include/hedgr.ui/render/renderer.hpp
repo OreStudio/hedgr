@@ -90,7 +90,7 @@ struct window_ui_state final {
      * @c panel_defaults.hpp for why the initialiser alone does nothing.
      */
     bool panel_open = hedgr::ui::widget::panel_default_open(
-        hedgr::ui::widget::panel_kind::dashboard);
+        hedgr::ui::widget::panel_kind::session_facts);
 
     /*
      * The fields an instance or an account form edits.

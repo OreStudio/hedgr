@@ -22,6 +22,7 @@
 
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include <cstdint>
 #include <optional>
@@ -50,6 +51,11 @@ namespace hedgr::model::state {
  * deadline for its instance, so "when is this due" is answered from the same
  * place as "what did it last say". A row may hold a deadline and no result,
  * which is the state an instance is in before its first probe has answered.
+ *
+ * The table also carries one ring of estate polls beside the rows. It sits here
+ * rather than on a table of its own because a poll is a fold over exactly these
+ * rows, and a second table would be a second place for the same counts to be
+ * computed and to drift.
  */
 class HEDGR_MODEL_EXPORT probe_table final {
 public:
@@ -73,6 +79,25 @@ public:
      */
     [[nodiscard]] const domain::probe_result*
     get(instance_handle h) const noexcept;
+
+    /**
+     * @brief Records a poll of the whole estate, counting the rows by state.
+     *
+     * @p total is every live instance rather than the number of rows, because
+     * an instance whose first probe is still in flight has no row and is not
+     * nothing: it is an instance nothing is known about yet, and it is counted
+     * as unknown so the counts sum to the estate. The states are the four the
+     * instance tree draws, so an unreachable instance is not also counted as
+     * not ready and no instance is counted twice.
+     *
+     * Called by the runtime once per poll sweep rather than once per result,
+     * because a chart wants the state of the estate at a poll and not a step
+     * for every instance that happened to answer within it.
+     */
+    void record_snapshot(std::int64_t observed_at_ns, std::size_t total);
+
+    /** @brief The recent polls of the estate, oldest first. */
+    [[nodiscard]] const estate_history& estate() const noexcept;
 
     /**
      * @brief Drops the row for @p h, result and deadline together.
@@ -125,6 +150,14 @@ private:
     [[nodiscard]] row& resolve(instance_handle h);
 
     std::vector<row> rows_;
+
+    /*
+     * The estate's own history, kept beside the rows it is folded from. It is
+     * written by record_snapshot and read by the chart, and it is deliberately
+     * not keyed by instance, because a poll describes the estate rather than
+     * any one row in it.
+     */
+    estate_history estate_;
 };
 
 }

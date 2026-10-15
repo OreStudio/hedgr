@@ -32,7 +32,10 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "imgui.h"
+#include "implot.h"
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <format>
@@ -55,6 +58,7 @@ using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::probe_result;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
+using hedgr::model::state::estate_history;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::browser_state;
@@ -634,48 +638,182 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
     ImGui::EndPopup();
 }
 
-/** @brief The dashboard: four numbers, in the window they belong to. */
-void draw_dashboard(const render_input& input, window_ui_state& state) {
-    const auto counts = widget::count_instances(input.instances, input.probes);
+/**
+ * @brief The four states a row of the instance tree can stand in.
+ *
+ * The order is the order a bar is drawn in, from the top of the stack down,
+ * because ImPlot paints each item over the ones before it. The bottom colour
+ * therefore has to be drawn last to stay visible, and the legend then reads
+ * from the top of a bar downwards, which is how a stack is read.
+ */
+enum class estate_state : std::uint8_t {
+    unknown,
+    unreachable,
+    not_ready,
+    ready,
+};
 
+/**
+ * @brief The colour of @p state, from the theme helpers the row glyph uses.
+ *
+ * Not one hex value is repeated here. A row is red or amber or green because
+ * the theme says so, and these are the theme's own entries for those colours,
+ * so a palette change moves the rows and the bars together.
+ */
+[[nodiscard]] ImVec4 state_colour(estate_state state) {
+    switch (state) {
+    case estate_state::ready:
+        return ImGui::ColorConvertU32ToFloat4(
+            theme::readiness_colour(readiness::ready));
+    case estate_state::not_ready:
+        return ImGui::ColorConvertU32ToFloat4(
+            theme::readiness_colour(readiness::bootstrapping));
+    case estate_state::unreachable:
+        return ImGui::ColorConvertU32ToFloat4(
+            theme::reachability_colour(reachability::unreachable));
+    case estate_state::unknown:
+        return ImGui::ColorConvertU32ToFloat4(
+            theme::readiness_colour(readiness::unknown));
+    }
+    return ImGui::ColorConvertU32ToFloat4(
+        theme::readiness_colour(readiness::unknown));
+}
+
+/** @brief The word this state carries in the legend. */
+[[nodiscard]] const char* state_label(estate_state state) {
+    switch (state) {
+    case estate_state::ready:
+        return "Ready";
+    case estate_state::not_ready:
+        return "Not ready";
+    case estate_state::unreachable:
+        return "Unreachable";
+    case estate_state::unknown:
+        return "Unknown";
+    }
+    return "Unknown";
+}
+
+/**
+ * @brief Instances by state over polling time, as one stacked bar a poll.
+ *
+ * The panel is not a collapsible header and carries no title. The operator
+ * asked for the chart to be part of the window rather than a thing to open, so
+ * there is nothing to collapse and nothing above it to say what it is: the axis
+ * labels and the legend say that on their own.
+ *
+ * A bar a poll rather than a line an instance, because the first question the
+ * window is asked is about the estate and not about one deployment: how many
+ * rows are green, how many amber, how many red, and how that has moved. The
+ * height of a bar is the instance count at that poll, so a bar from a poll
+ * where the estate was larger is taller and the chart never pretends the estate
+ * has always had its present size.
+ */
+void draw_dashboard(const render_input& input) {
     /*
-     * The panel opens the first time it is drawn. A CollapsingHeader carries no
-     * default of its own and overwrites the bool it is handed from its own
-     * storage, so an initialiser in the window state cannot open it: this call
-     * is the only thing that can. Appearing rather than Always, so the operator
-     * can still shut it and have it stay shut.
+     * A strip and not a chart window. The tree and the list already floor their
+     * body at two hundred and forty pixels, and this sits above them, so the
+     * plot is given the smaller fixed height of a hundred and thirty rather
+     * than a share of what is left. The rows are what the window is for and the
+     * chart is a glance across the top of it.
      */
-    ImGui::SetNextItemOpen(
-        widget::panel_default_open(widget::panel_kind::dashboard),
-        ImGuiCond_Appearing);
-    if (!ImGui::CollapsingHeader(
-            std::format("{} Dashboard", icon::dashboard).c_str(),
-            &state.panel_open))
-        return;
+    constexpr float plot_height = 130.0f;
+    const ImVec2 plot_size(-1.0f, plot_height);
 
-    constexpr ImGuiTableFlags flags =
-        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginChild("##instances-estate-plot", plot_size,
+            ImGuiChildFlags_Borders)) {
+        const auto& history = input.probes.estate();
+        const auto count = history.size();
 
-    if (!ImGui::BeginTable("##instances-dashboard", 4, flags))
-        return;
+        constexpr ImPlotFlags plot_flags = ImPlotFlags_None;
 
-    const auto cell = [](const char* heading, std::size_t value, ImU32 colour) {
-        ImGui::TableNextColumn();
-        ImGui::TextDisabled("%s", heading);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
-        ImGui::Text("%zu", value);
-        ImGui::PopStyleColor();
-    };
+        /*
+         * The x axis is inverted because its values count backwards from the
+         * newest poll, so the strip reads left to right as the last minutes and
+         * ends at now. The y axis fits the counts, whose top is the largest the
+         * estate has been in the window.
+         */
+        constexpr ImPlotAxisFlags x_flags =
+            ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Invert;
+        constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit;
 
-    ImGui::TableNextRow();
-    cell("Instances", counts.total, ImGui::GetColorU32(ImGuiCol_Text));
-    cell("Ready", counts.ready, theme::readiness_colour(readiness::ready));
-    cell("Bootstrapping", counts.bootstrapping,
-        theme::readiness_colour(readiness::bootstrapping));
-    cell("Unreachable", counts.unreachable,
-        theme::reachability_colour(reachability::unreachable));
+        if (ImPlot::BeginPlot(
+                "##estate-over-time", ImVec2(-1.0f, -1.0f), plot_flags)) {
+            ImPlot::SetupAxes(
+                "time (seconds ago)", "instances", x_flags, y_flags);
 
-    ImGui::EndTable();
+            /*
+             * An empty history draws the axes and no bars rather than a crash,
+             * and it draws no legend, because no item was created to name.
+             */
+            if (count > 0) {
+                const auto* samples = history.data();
+                const auto newest_ns = samples[count - 1].observed_at_ns;
+
+                /*
+                 * The bar width is the latest poll interval rather than a
+                 * constant, so the bars stay one a poll whatever cadence the
+                 * runtime keeps. The floor stops a single poll from drawing a
+                 * bar of no width.
+                 */
+                double bar_width = 5.0;
+                if (count > 1) {
+                    const double gap = static_cast<double>(
+                        newest_ns - samples[count - 2].observed_at_ns) / 1e9;
+                    bar_width = std::max(0.5, gap);
+                }
+
+                /*
+                 * One array per state, each holding the top of that state's
+                 * slice rather than its own count. ImPlot draws a bar from zero
+                 * to its value, so a stack is painted by drawing the full bar
+                 * first and each shorter bar over it in turn. The arrays live
+                 * on the stack because the ring's capacity is a compile time
+                 * bound.
+                 */
+                std::array<double, estate_history::capacity> xs{};
+                std::array<double, estate_history::capacity> ready_top{};
+                std::array<double, estate_history::capacity> not_ready_top{};
+                std::array<double, estate_history::capacity> unreachable_top{};
+                std::array<double, estate_history::capacity> unknown_top{};
+
+                for (std::size_t index = 0; index < count; ++index) {
+                    const auto& sample = samples[index];
+                    xs[index] = static_cast<double>(
+                        newest_ns - sample.observed_at_ns) / 1e9;
+                    ready_top[index] = static_cast<double>(sample.ready);
+                    not_ready_top[index] =
+                        ready_top[index] + sample.not_ready;
+                    unreachable_top[index] =
+                        not_ready_top[index] + sample.unreachable;
+                    unknown_top[index] =
+                        unreachable_top[index] + sample.unknown;
+                }
+
+                /*
+                 * Drawn from the top of the stack down, so the colour at the
+                 * bottom of a bar is the last one painted and stays visible.
+                 */
+                const auto stack = [&](estate_state state,
+                                       const std::array<double,
+                                           estate_history::capacity>& tops) {
+                    const ImVec4 colour = state_colour(state);
+                    const ImPlotSpec spec(ImPlotProp_FillColor, colour,
+                        ImPlotProp_LineColor, colour);
+                    ImPlot::PlotBars(state_label(state), xs.data(), tops.data(),
+                        static_cast<int>(count), bar_width, spec);
+                };
+
+                stack(estate_state::unknown, unknown_top);
+                stack(estate_state::unreachable, unreachable_top);
+                stack(estate_state::not_ready, not_ready_top);
+                stack(estate_state::ready, ready_top);
+            }
+
+            ImPlot::EndPlot();
+        }
+    }
+    ImGui::EndChild();
 }
 
 /** @brief The four columns of the instance list. */
@@ -869,9 +1007,6 @@ namespace {
  */
 std::string pending_capture_folder;
 
-/** @brief Whether a capture asked for the dashboard to be open. */
-bool capture_dashboard_open = false;
-
 /**
  * @brief The instance row a capture asked to see the form for, on the next draw.
  *
@@ -884,10 +1019,6 @@ std::string pending_capture_edit_instance;
 
 void select_folder_for_capture(std::string_view folder_id) {
     pending_capture_folder = std::string{folder_id};
-}
-
-void open_dashboard_for_capture() {
-    capture_dashboard_open = true;
 }
 
 void open_instance_form_for_capture(std::string_view instance_id) {
@@ -1081,11 +1212,6 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         state.browser.selected_leaf.clear();
         pending_capture_folder.clear();
     }
-    if (capture_dashboard_open) {
-        state.panel_open = true;
-        capture_dashboard_open = false;
-        ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-    }
     if (!pending_capture_edit_instance.empty()) {
         /*
          * The same scratch a click on the row's edit icon writes, and no more:
@@ -1166,6 +1292,14 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.can_write = true;
     model.can_refresh = true;
 
+    /*
+     * The chart, above the browser and with no header of its own. It answers
+     * "is anything wrong" before a single row has been read, and it stays drawn
+     * rather than being folded away, because a panel an operator has to open is
+     * a panel that hides the one thing the window opens to show.
+     */
+    draw_dashboard(input);
+
     widget::render_browser(model, state, input);
 
 
@@ -1186,9 +1320,9 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     /*
      * The status bar, last, so that its reservation is made after everything
      * else has taken the height it needs and its own foot is measured back
-     * from the window's edge. It carries the lock control, which is the only
-     * way the password form is opened, so it is deliberately drawn in every
-     * state rather than only while the store is open.
+     * from the window's edge. It carries the runtime's messages and nothing
+     * else: the lock control used to live here and moved into the window's one
+     * toolbar, so the bar is read and not operated.
      */
     draw_status_foot(status, input.now_ns);
 

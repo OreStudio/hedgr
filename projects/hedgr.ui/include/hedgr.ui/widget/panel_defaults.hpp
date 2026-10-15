@@ -28,16 +28,13 @@ namespace hedgr::ui::widget {
 /**
  * @brief A collapsible panel a window draws.
  *
- * One value per panel rather than an anonymous bool, because the panels do not
- * answer the same question: a summary is what the operator came to read, while
- * a detail table is something they open when they want it. Naming them is what
- * lets the difference be stated once, here, and tested.
+ * Named rather than an anonymous bool, so a panel's default is stated once,
+ * here, and a test can read it. The Instances window's chart is not one of
+ * these: it is drawn in the window and has no collapsed state to default.
  */
 enum class panel_kind : std::uint8_t {
-    /** @brief The Instances window's counts: total, ready, bootstrapping, down. */
-    dashboard = 0,
     /** @brief The Workspace's session facts: instance, principal, tenant. */
-    session_facts = 1,
+    session_facts = 0,
 };
 
 /**
@@ -51,10 +48,10 @@ enum class panel_kind : std::uint8_t {
  * it is drawn. That is why this rule has to be applied as a call rather than as
  * an initialiser, and why it is a function here that a test can read.
  *
- * Both panels are summaries of what their window is about, so both open. The
- * state is the interface's own scratch and is not persisted between runs; it is
- * not written to the store, and the ini carries window geometry rather than the
- * open state of a header.
+ * The remaining panel is a summary of what its window is about, so it opens.
+ * The state is the interface's own scratch and is not persisted between runs;
+ * it is not written to the store, and the ini carries window geometry rather
+ * than the open state of a header.
  */
 [[nodiscard]] HEDGR_UI_EXPORT bool panel_default_open(panel_kind kind) noexcept;
 

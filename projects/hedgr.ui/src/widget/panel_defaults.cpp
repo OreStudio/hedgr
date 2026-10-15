@@ -23,14 +23,6 @@ namespace hedgr::ui::widget {
 
 bool panel_default_open(panel_kind kind) noexcept {
     switch (kind) {
-    case panel_kind::dashboard:
-        /*
-         * The counts are the first thing the Instances window has to say: they
-         * answer "is anything wrong" before the operator has read a single
-         * row, and a window that opens with the answer hidden behind a click
-         * makes them ask for it.
-         */
-        return true;
     case panel_kind::session_facts:
         /*
          * The session's identity -- which instance, which principal, which

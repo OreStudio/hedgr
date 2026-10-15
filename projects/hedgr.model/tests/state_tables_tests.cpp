@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
@@ -48,6 +49,8 @@ using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
 using hedgr::model::state::account_table;
+using hedgr::model::state::estate_history;
+using hedgr::model::state::estate_sample;
 using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
 using hedgr::model::state::label_table;
@@ -101,6 +104,19 @@ using hedgr::model::state::window_table;
     result.observed_at_ns = 99;
     result.detail = "no service is handling subject 'iam.v1.ops.bootstrap_status'";
     return result;
+}
+
+/** @brief An estate sample carrying only what a ring test reads back. */
+[[nodiscard]] estate_sample make_sample(std::int64_t observed_at_ns,
+    std::int32_t ready, std::int32_t not_ready, std::int32_t unreachable,
+    std::int32_t unknown) {
+    estate_sample sample;
+    sample.observed_at_ns = observed_at_ns;
+    sample.ready = ready;
+    sample.not_ready = not_ready;
+    sample.unreachable = unreachable;
+    sample.unknown = unknown;
+    return sample;
 }
 
 TEST_CASE("an instance is found by id and read back by handle", "[instance]") {
@@ -569,4 +585,113 @@ TEST_CASE("every reachability and readiness has a distinct stable name",
             hedgr::model::domain::to_string(static_cast<readiness>(raw))
                 .empty());
     }
+}
+
+TEST_CASE("an estate window reads its polls back in the order they arrived",
+    "[probe]") {
+    estate_history history;
+    REQUIRE(history.empty());
+
+    history.append(make_sample(100, 1, 0, 0, 2));
+    history.append(make_sample(200, 2, 0, 0, 1));
+    history.append(make_sample(300, 0, 1, 0, 2));
+
+    REQUIRE(history.size() == 3);
+    REQUIRE(history.at(0).observed_at_ns == 100);
+    REQUIRE(history.at(0).total() == 3);
+    REQUIRE(history.at(1).observed_at_ns == 200);
+    REQUIRE(history.at(1).ready == 2);
+    REQUIRE(history.at(2).observed_at_ns == 300);
+
+    /*
+     * The array a plot walks is the same run the indexed reader sees, so the
+     * chart never has to join two halves of a wrapped ring itself.
+     */
+    for (std::size_t index = 0; index < history.size(); ++index) {
+        REQUIRE(history.data()[index].observed_at_ns
+            == history.at(index).observed_at_ns);
+    }
+}
+
+TEST_CASE("a full estate window drops the oldest poll and keeps the newest",
+    "[probe]") {
+    estate_history history;
+
+    constexpr std::size_t overflow = 5;
+    const auto appended = estate_history::capacity + overflow;
+    for (std::size_t index = 0; index < appended; ++index) {
+        history.append(make_sample(static_cast<std::int64_t>(index) * 10,
+            1, 0, 0, 0));
+    }
+
+    /* The ring is full, so the first overflow samples have been overwritten. */
+    REQUIRE(history.size() == estate_history::capacity);
+    REQUIRE(history.at(0).observed_at_ns
+        == static_cast<std::int64_t>(overflow) * 10);
+    REQUIRE(history.at(history.size() - 1).observed_at_ns
+        == static_cast<std::int64_t>(appended - 1) * 10);
+
+    /* Every step forward in the run is a step forward in time. */
+    for (std::size_t index = 1; index < history.size(); ++index) {
+        REQUIRE(history.at(index).observed_at_ns
+            > history.at(index - 1).observed_at_ns);
+    }
+}
+
+TEST_CASE("a poll where nothing is known is still a sample", "[probe]") {
+    estate_history history;
+    history.append(make_sample(100, 0, 0, 0, 3));
+
+    /*
+     * An estate nobody has answered for is a poll of three unknown instances,
+     * not an empty poll. Dropping it would leave a gap in the timeline where
+     * the chart would draw nothing at all.
+     */
+    REQUIRE(history.size() == 1);
+    REQUIRE(history.at(0).unknown == 3);
+    REQUIRE(history.at(0).total() == 3);
+
+    history.clear();
+    REQUIRE(history.empty());
+    REQUIRE(history.size() == 0);
+}
+
+TEST_CASE("a probe table records one estate poll per sweep", "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto ready = instances.upsert(make_instance("inst-ready", "Ready"));
+    const auto silent = instances.upsert(make_instance("inst-silent", "Silent"));
+    const auto down = instances.upsert(make_instance("inst-down", "Down"));
+    static_cast<void>(instances.upsert(make_instance("inst-new", "New")));
+
+    probes.set(ready, make_probe(reachability::reachable, readiness::ready));
+    probes.set(silent,
+        make_probe(reachability::reachable, readiness::unknown));
+    probes.set(down,
+        make_probe(reachability::unreachable, readiness::unknown));
+
+    probes.record_snapshot(1000, instances.size());
+
+    REQUIRE(probes.estate().size() == 1);
+    const auto& first = probes.estate().at(0);
+    REQUIRE(first.ready == 1);
+    REQUIRE(first.not_ready == 1);
+    REQUIRE(first.unreachable == 1);
+    REQUIRE(first.unknown == 1);
+    REQUIRE(first.total() == 4);
+
+    /*
+     * The estate shrinks, and the next poll's total follows the estate at that
+     * poll rather than reusing the total the earlier bar was drawn with.
+     */
+    probes.forget(down);
+    instances.remove(down);
+    probes.record_snapshot(2000, instances.size());
+
+    REQUIRE(probes.estate().size() == 2);
+    const auto& second = probes.estate().at(1);
+    REQUIRE(second.total() == 3);
+    REQUIRE(second.unreachable == 0);
+    REQUIRE(probes.estate().at(0).total() == 4);
 }
