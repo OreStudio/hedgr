@@ -93,3 +93,22 @@ is modal.
   keyed by what it is editing, rather than being a single global draft. The
   forms currently draw as windows; several will be open at once once they stop
   being modal.
+
+## Queued separately: signals and sound
+
+Not part of the interface corrections. Recorded here so the queue is in one
+place.
+
+- A generic **named signal** raised from anywhere, with **sound as one
+  subscriber** and a status bar expected to be the second. See
+  `docs/adr/0008-named-signals-and-sound.md`.
+- The first signals are **transitions**, not polls: a deployment that stops
+  being ready, drops into bootstrapping, or becomes unreachable, and the inverse
+  of each. A signal fires on the change, so twenty consecutive failed probes are
+  one signal rather than twenty.
+- Sounds come from Kenney's UI and interface packs, which are CC0. A **curated
+  subset is vendored** into `assets/sounds/`; a submodule was considered and
+  rejected because the pack is mostly files this application will never use.
+- The backend is **miniaudio**, already in Hedgr's vcpkg.
+- The default registration should be **no sound at all**. Every sound is a noise
+  heard repeatedly in a room where other people work, so an operator opts in.

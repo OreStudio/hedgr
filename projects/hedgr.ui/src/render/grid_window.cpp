@@ -78,7 +78,8 @@ namespace hedgr::ui::render {
  * "rows 1-40 of 200" answers the question a person is actually asking.
  */
 void render_grid(window_handle handle, const render_input& input,
-    window_ui_state& state) {
+    window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
     using hedgr::model::domain::grid_state;
 
     const auto& grid = std::get<grid_state>(input.windows.state(handle));

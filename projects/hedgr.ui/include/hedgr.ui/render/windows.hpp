@@ -34,7 +34,7 @@ namespace hedgr::ui::render {
  */
 HEDGR_UI_EXPORT void render_instances_window(
     hedgr::model::state::window_handle handle, const render_input& input,
-    window_ui_state& state);
+    window_ui_state& state, hedgr::ui::widget::status_bar& status);
 
 /**
  * @brief Selects a folder in the Instances window, on the next frame it draws.
@@ -62,7 +62,7 @@ HEDGR_UI_EXPORT void open_dashboard_for_capture();
  */
 HEDGR_UI_EXPORT void render_accounts_window(
     hedgr::model::state::window_handle handle, const render_input& input,
-    window_ui_state& state);
+    window_ui_state& state, hedgr::ui::widget::status_bar& status);
 
 /**
  * @brief The live session for one account on one instance.
@@ -73,7 +73,7 @@ HEDGR_UI_EXPORT void render_accounts_window(
  */
 HEDGR_UI_EXPORT void render_workspace_window(
     hedgr::model::state::window_handle handle, const render_input& input,
-    window_ui_state& state);
+    window_ui_state& state, hedgr::ui::widget::status_bar& status);
 
 }
 

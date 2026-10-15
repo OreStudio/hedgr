@@ -708,8 +708,74 @@ void open_dashboard_for_capture() {
     capture_dashboard_open = true;
 }
 
+namespace {
+
+/**
+ * @brief The status line's own metrics.
+ *
+ * Two text rows and a little air, measured from the current font rather than
+ * fixed, so a theme that installs a larger face does not clip the message.
+ *
+ * Two and not one because the messages are sentences and the window can be
+ * made narrow: a single row would either clip the end of the sentence or be
+ * elided, and a fact that is worth announcing is worth announcing in full.
+ * The second row costs nothing when the sentence fits on one.
+ */
+constexpr int status_row_lines = 2;
+constexpr float status_row_extra = 8.0f;
+
+}
+
+/**
+ * @brief Draws the window's status line: the last thing that happened.
+ *
+ * The bar itself decides what is on it and whether its time is up; this only
+ * gives it a row, the frame's clock, and the moment to age itself. Reading the
+ * clock here rather than keeping one is what makes the fade frame-rate
+ * independent without a timer anywhere in the interface.
+ */
+void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
+    status.advance(now_ns);
+
+    const float text_height = ImGui::GetTextLineHeight()
+            * static_cast<float>(status_row_lines)
+        + status_row_extra;
+    const float height = text_height + ImGui::GetStyle().ItemSpacing.y;
+
+    /*
+     * Pinned to the foot of the window rather than left wherever the browser
+     * stopped. The browser's body is a fixed height and leaves the rest of the
+     * window empty, so a line drawn after it would float in the middle of that
+     * gap and move whenever the table above it changed size.
+     */
+    const float bottom = ImGui::GetWindowContentRegionMax().y;
+    ImGui::SetCursorPosY(bottom - height);
+
+    ImGui::Separator();
+    if (!ImGui::BeginChild("##hedgr-status", ImVec2(0.0f, text_height),
+            ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar)) {
+        ImGui::EndChild();
+        return;
+    }
+
+    /*
+     * The fade is a style alpha rather than a colour of its own, so the line
+     * keeps the interface's disabled text colour on the way out. A message
+     * that changed colour as it went would read as a second message.
+     */
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s", status.message().c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar();
+
+    ImGui::EndChild();
+}
+
 void render_instances_window(hedgr::model::state::window_handle handle,
-    const render_input& input, window_ui_state& state) {
+    const render_input& input, window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
     /*
      * The Instances window is root: it ignores whether the window table thinks
      * it is open, because closing it would leave an interface with no way to
@@ -812,6 +878,18 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.can_refresh = true;
 
     widget::render_browser(model, state, input);
+
+    /*
+     * The status line, at the foot of the window and below everything else.
+     * The browser's body stops short of it by exactly its height, so a message
+     * appearing does not move the table: a row that shifted every time
+     * something happened would be a row being clicked at the wrong moment.
+     *
+     * Nothing is drawn when there is nothing to say, so the common case costs
+     * the table no height at all.
+     */
+    if (!status.empty())
+        draw_status_line(status, input.now_ns);
 
     /*
      * A form the callbacks above opened but did not fill is filled here, once

@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
 #include <string>
 #include <unordered_map>
@@ -162,6 +163,26 @@ private:
      * toolbar carries a note while this is true.
      */
     bool environment_unlock_ = false;
+
+    /**
+     * @brief Whether the environment's own notice has been put on the bar.
+     *
+     * Once per run, because the notice describes the moment the store opened
+     * and not the state it is in: a bar that announced it again every time the
+     * operator came back to the window would be reporting history as news.
+     */
+    bool environment_announced_ = false;
+
+    /**
+     * @brief The one-line notices the windows show and the frame ages.
+     *
+     * Interface scratch, owned here rather than by the window that draws it,
+     * because the fact being announced is about the run and not about a
+     * window, and because the bar outlives any one window being open. See
+     * @c hedgr::ui::widget::status_bar for what it carries and for what
+     * happens when two things want to say something at once.
+     */
+    hedgr::ui::widget::status_bar status_;
 
     /*
      * There is deliberately no "I have submitted a password" flag here. The

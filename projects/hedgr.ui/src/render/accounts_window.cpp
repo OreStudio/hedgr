@@ -489,7 +489,8 @@ void account_row_labels(const tree_leaf& leaf, const render_input& input,
 namespace hedgr::ui::render {
 
 void render_accounts_window(hedgr::model::state::window_handle handle,
-    const render_input& input, window_ui_state& state) {
+    const render_input& input, window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
     /*
      * The window's own state says which instance it shows. A window whose state
      * is not the accounts shape, or which names an instance that has gone, is

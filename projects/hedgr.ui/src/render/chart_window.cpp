@@ -64,7 +64,8 @@ namespace hedgr::ui::render {
  * arrive later.
  */
 void render_chart(window_handle handle, const render_input& input,
-    window_ui_state& state) {
+    window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
     using hedgr::model::domain::chart_state;
 
     const auto& chart = std::get<chart_state>(input.windows.state(handle));

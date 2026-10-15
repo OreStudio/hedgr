@@ -87,29 +87,17 @@ std::string lock_tooltip(hedgr::model::domain::store_lock value) {
 }
 
 /**
- * @brief The note the toolbar carries while the environment holds the store.
+ * @brief What the status line says when the environment opened the store.
  *
- * Written here rather than at the drawing so the sentence is one thing a reader
- * can find. It is deliberately short: the toolbar has one line and the note
- * sits at the end of it, so the first words have to be the ones that matter.
- *
- * The variable's name is not in it. The note says who opened the store, which
- * is what a person needs to know; the variable is in the longer sentence the
- * prompt carries and in the tooltip, where there is room for it and where the
- * reader is the one who can go and unset it.
+ * Written here rather than at the call so the sentence is one thing a reader
+ * can find, and phrased as something that happened, because that is what it
+ * is: the notice is on the bar for a few seconds and then it is history. The
+ * variable is named in it because the reader is the person who can unset it,
+ * and "the environment" alone would send them looking for which variable.
  */
-constexpr std::string_view environment_note = "opened from the environment";
-
-/**
- * @brief The tooltip that explains the note, for whoever wants the detail.
- *
- * The variable is named here because the reader of a tooltip is looking for
- * what to change, and a sentence that said only "the environment" would send
- * them through the environment looking for which variable.
- */
-constexpr std::string_view environment_note_tooltip =
-    "HEDGR_MASTER_PASSWORD held the password that opened this store. Nobody "
-    "pressed Unlock. Lock the store to return to a run you opened yourself.";
+constexpr std::string_view environment_event =
+    "The store was opened with the password from the environment "
+    "(HEDGR_MASTER_PASSWORD), not by pressing Unlock.";
 
 }
 
@@ -173,6 +161,20 @@ void workspace::render(const render_input& input) {
      */
     lock_prompt_dismissed_ = false;
     clear_password_buffers();
+
+    /*
+     * The one announcement a store opened from the environment gets, said on
+     * the frame the catalogue first appears. Here rather than at the moment
+     * the password was armed, because between the two the derivation runs and
+     * the prompt is what is on screen: a notice posted then would spend most
+     * of its few seconds on a frame nobody was reading, and the first thing
+     * the operator saw of the open store would say nothing about how it got
+     * that way.
+     */
+    if (!environment_announced_ && environment_unlock_) {
+        status_.show_event(environment_event, input.now_ns);
+        environment_announced_ = true;
+    }
 
     const auto& layout = input.windows.layout();
 
@@ -272,7 +274,7 @@ void workspace::render(const render_input& input) {
         const auto key = std::string{input.windows.id(handle)};
         window_ui_state& state = ui_state_[key];
         if (const auto draw = renderer_for(kind))
-            draw(handle, input, state);
+            draw(handle, input, state, status_);
 
         ImGui::End();
     }
@@ -365,8 +367,8 @@ void workspace::draw_toolbar(const render_input& input) {
             /*
              * The operator has taken the store back, so the run is theirs
              * again and the environment's password is no longer what holds it
-             * open. The toolbar's note goes with it: a line that outlived the
-             * thing it described would be read as noise on every later run.
+             * open. The flag goes with it, so a later unlock that a person
+             * performs is announced as theirs and not as the environment's.
              */
             environment_unlock_ = false;
         }
@@ -395,21 +397,6 @@ void workspace::draw_toolbar(const render_input& input) {
         hedgr::model::command::command request;
         request.kind = command_kind::shutdown;
         input.commands.push(std::move(request));
-    }
-
-    /*
-     * The environment note, at the end of the chrome rather than on a strip of
-     * its own. A store opened from the environment must not look like one a
-     * person opened, and that is the whole job of these four words. Anything
-     * louder would be an alarm about a supported way to start the client.
-     *
-     * It is the same disabled text colour the rest of the interface uses for a
-     * second-order fact, so it reads as chrome and not as a problem.
-     */
-    if (environment_unlock_) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", environment_note.data());
-        ImGui::SetItemTooltip("%s", environment_note_tooltip.data());
     }
 
     ImGui::End();
@@ -532,17 +519,6 @@ void workspace::draw_lock_prompt(const render_input& input) {
     } else {
         ImGui::TextWrapped("Enter the master password to read the store.");
     }
-
-    /*
-     * The environment's password is named here as well as in the toolbar,
-     * because this is the one frame in which the prompt is filling itself in
-     * and the operator is watching it happen. Disabled text and no colour of
-     * its own: the fact is worth stating and not worth alarm, since an
-     * unattended launch is a supported way to start the client.
-     */
-    if (environment_unlock_)
-        ImGui::TextDisabled(
-            "Submitted from HEDGR_MASTER_PASSWORD; nothing here needs typing.");
 
     ImGui::Spacing();
 

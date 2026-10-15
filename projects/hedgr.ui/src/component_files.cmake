@@ -24,6 +24,7 @@ set(files
     "widget/panel_defaults.cpp"
     "widget/panels.cpp"
     "widget/password_meter.cpp"
+    "widget/status_bar.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
@@ -48,4 +49,5 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/panel_defaults.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/panels.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/password_meter.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/status_bar.hpp"
 )

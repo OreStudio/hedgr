@@ -28,6 +28,7 @@
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
+#include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
 #include "hedgr.ui/export.hpp"
 #include <array>
@@ -208,10 +209,16 @@ struct render_input final {
  * its size constraints, so a renderer is only ever responsible for what goes
  * in the body. That is what lets the culling in workspace::render skip a
  * window's body entirely without the renderer knowing it happened.
+ *
+ * The status bar is passed to every renderer although only one of them draws
+ * it, because the bar belongs to the frame and not to the window that happens
+ * to carry it: the workspace owns it, and a renderer that had no way to reach
+ * it would have to be handed it by a global instead.
  */
 using renderer_fn = void (*)(hedgr::model::state::window_handle,
                              const render_input&,
-                             window_ui_state&);
+                             window_ui_state&,
+                             hedgr::ui::widget::status_bar&);
 
 /**
  * @brief The renderer registered for a window kind.

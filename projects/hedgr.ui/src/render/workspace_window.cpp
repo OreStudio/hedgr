@@ -77,7 +77,14 @@ void fact_row(const char* glyph, const char* name, std::string_view value) {
 namespace hedgr::ui::render {
 
 void render_workspace_window(hedgr::model::state::window_handle handle,
-    const render_input& input, window_ui_state& state) {
+    const render_input& input, window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
+    /*
+     * Only the Instances window carries the status line today. The parameter
+     * is here because every renderer takes it, so a window that later has
+     * something to announce needs no change to the frame.
+     */
+    static_cast<void>(status);
     static_cast<void>(state);
 
     /*
@@ -165,11 +172,12 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
 
     ImGui::Separator();
 
-    const auto status = std::string{hedgr::model::domain::to_string(facts.status)};
+    const auto status_name =
+        std::string{hedgr::model::domain::to_string(facts.status)};
     ImGui::PushStyleColor(ImGuiCol_Text,
         ImGui::ColorConvertU32ToFloat4(theme::status_colour(facts.status)));
     ImGui::Text("%s  %.*s", theme::status_icon(facts.status),
-        static_cast<int>(status.size()), status.data());
+        static_cast<int>(status_name.size()), status_name.data());
     ImGui::PopStyleColor();
 
     ImGui::SameLine();

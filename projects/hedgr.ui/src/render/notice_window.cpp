@@ -47,7 +47,8 @@ namespace hedgr::ui::render {
  * contact your system administrator" case renders in.
  */
 void render_notice(window_handle handle, const render_input& input,
-    window_ui_state& state) {
+    window_ui_state& state,
+    hedgr::ui::widget::status_bar& status) {
     using hedgr::model::domain::notice_state;
 
     const auto& notice = std::get<notice_state>(input.windows.state(handle));
