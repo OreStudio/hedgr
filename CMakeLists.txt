@@ -52,7 +52,7 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
 endif()
 
 project(Hedgr VERSION 0.0.1 LANGUAGES CXX
-    DESCRIPTION "Remote ImGui/ImPlot client for OreStudio.")
+    DESCRIPTION "Multi-instance ImGui/ImPlot client for OreStudio.")
 
 # Copy all binaries into the publish directory.
 set(HEDGR_PUBLISH_DIRECTORY ${CMAKE_BINARY_DIR}/publish)

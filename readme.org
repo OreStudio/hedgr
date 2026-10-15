@@ -1,9 +1,12 @@
 #+title: Hedgr
-#+description: A remote ImGui client for OreStudio.
+#+description: A multi-instance ImGui client for OreStudio.
 
-Hedgr is a desktop client for OreStudio over NATS. It holds many instances at
-once, each with its own identities and sessions, and draws each session's work
-in its own floating window.
+Hedgr is a multi-instance desktop client for OreStudio over NATS. It holds many
+instances at once, each with its own accounts and sessions, and draws each
+session's work in its own floating window.
+
+There is no per-window marker option and no notion of "the" instance. One Hedgr
+process holds the whole set, so there is nothing to tell apart.
 
 * Layout
 
