@@ -1,0 +1,52 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.model/domain/window.hpp"
+#include <format>
+
+namespace hedgr::model::domain {
+
+std::string_view to_string(window_kind value) noexcept {
+    switch (value) {
+    case window_kind::chart:
+        return "chart";
+    case window_kind::grid:
+        return "grid";
+    case window_kind::notice:
+        return "notice";
+    case window_kind::instance_manager:
+        return "instance_manager";
+    }
+    return "unknown";
+}
+
+std::expected<window_kind, std::string>
+window_kind_from_string(std::string_view text) {
+    if (text == "chart")
+        return window_kind::chart;
+    if (text == "grid")
+        return window_kind::grid;
+    if (text == "notice")
+        return window_kind::notice;
+    if (text == "instance_manager")
+        return window_kind::instance_manager;
+    return std::unexpected(std::format("unknown window kind '{}'", text));
+}
+
+}

@@ -1,0 +1,29 @@
+:PROPERTIES:
+:ID: hedgr.model
+:END:
+#+title: hedgr.model
+#+description: Hedgr domain model
+
+* Summary
+
+Hedgr domain model
+
+* Inputs
+
+None yet.
+
+* Outputs
+
+None yet.
+
+* Entry points
+
+None yet.
+
+* Dependencies
+
+None yet.
+
+* See also
+
+- [[file:hedgr.model.puml][Class diagram source]]

@@ -1,0 +1,4 @@
+@startuml hedgr.model
+' Component skeleton. Fill in as the component grows.
+title hedgr.model
+@enduml

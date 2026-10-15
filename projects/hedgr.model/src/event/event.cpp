@@ -1,0 +1,40 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.model/event/event.hpp"
+
+namespace hedgr::model::event {
+
+std::string_view to_string(event_kind value) noexcept {
+    switch (value) {
+    case event_kind::session_status_changed:
+        return "session_status_changed";
+    case event_kind::session_authenticated:
+        return "session_authenticated";
+    case event_kind::session_failed:
+        return "session_failed";
+    case event_kind::session_data:
+        return "session_data";
+    case event_kind::window_data:
+        return "window_data";
+    }
+    return "unknown";
+}
+
+}
