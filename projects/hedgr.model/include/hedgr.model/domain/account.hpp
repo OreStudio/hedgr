@@ -40,8 +40,8 @@ struct account final {
     /** @brief Key of the instance this login belongs to. */
     std::string instance_id;
 
-    /** @brief Short human label, for example "ops read-only". */
-    std::string label;
+    /** @brief Short human name, for example "ops read-only". */
+    std::string name;
 
     /** @brief The principal as IAM sees it, for example user@host. */
     std::string principal;

@@ -110,6 +110,18 @@ live_accounts(const model_state::account_table& accounts) {
     return result;
 }
 
+/** @brief The live slot index of every row of a table, holes skipped. */
+[[nodiscard]] std::vector<std::uint32_t>
+live_indices(const model_state::slab& layout) {
+    std::vector<std::uint32_t> result;
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        result.push_back(index);
+    }
+    return result;
+}
+
 /**
  * @brief The current UTC instant as ISO-8601, for a creation timestamp.
  *
@@ -223,6 +235,12 @@ instance_manager::start(const std::filesystem::path& database_path,
         *database_);
     account_repo_ = std::make_unique<store::repository::account_repository>(
         *database_);
+    folder_repo_ = std::make_unique<store::repository::folder_repository>(
+        *database_);
+    label_repo_ = std::make_unique<store::repository::label_repository>(
+        *database_);
+    labelling_repo_ = std::make_unique<store::repository::labelling_repository>(
+        *database_);
     window_repo_ = std::make_unique<store::repository::window_repository>(
         *database_);
 
@@ -254,6 +272,36 @@ instance_manager::start(const std::filesystem::path& database_path,
     for (const auto& row : accounts.value())
         static_cast<void>(accounts_.upsert(row));
 
+    auto folders = folder_repo_->list();
+    if (!folders) {
+        last_error_ = store_failure("cannot read the stored folders",
+            folders.error());
+        return std::unexpected(last_error_);
+    }
+    folders_.clear();
+    for (const auto& row : folders.value())
+        static_cast<void>(folders_.upsert(row));
+
+    auto labels = label_repo_->list();
+    if (!labels) {
+        last_error_ = store_failure("cannot read the stored labels",
+            labels.error());
+        return std::unexpected(last_error_);
+    }
+    labels_.clear();
+    for (const auto& row : labels.value())
+        static_cast<void>(labels_.upsert(row));
+
+    auto labellings = labelling_repo_->list();
+    if (!labellings) {
+        last_error_ = store_failure("cannot read the stored label attachments",
+            labellings.error());
+        return std::unexpected(last_error_);
+    }
+    labellings_.clear();
+    for (const auto& row : labellings.value())
+        labellings_.add(row.owner, row.owner_id, row.label_id);
+
     auto windows = window_repo_->list();
     if (!windows) {
         last_error_ = store_failure("cannot read the stored windows",
@@ -279,6 +327,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     }
 
     seed_first_run();
+    ensure_roots();
     ensure_instance_manager_window();
 
     /*
@@ -330,6 +379,67 @@ void instance_manager::seed_first_run() {
      */
 }
 
+void instance_manager::ensure_roots() {
+    /*
+     * The instances tree is anchored once and never again. Its root has no
+     * owner, because there is exactly one such tree and nothing distinguishes
+     * it from another; the partial unique index in the schema is what holds
+     * that to one row.
+     */
+    if (!folders_.find(domain::instances_root_id)) {
+        domain::folder root;
+        root.id = std::string{domain::instances_root_id};
+        root.parent_id.clear();
+        root.owner_id.clear();
+        root.name = "Instances";
+        root.tree = domain::folder_tree::instances;
+        static_cast<void>(folders_.upsert(root));
+
+        if (folder_repo_) {
+            if (auto saved = folder_repo_->save(root); !saved) {
+                last_error_ = store_failure(
+                    std::format("cannot save the instances root {}", root.id),
+                    saved.error());
+            }
+        }
+    }
+
+    /*
+     * Every instance owns an accounts tree, so this runs over the instances
+     * rather than over the folders: an instance stored by a build that did not
+     * create roots gets its own here, which is what makes the step idempotent
+     * across a version change as well as across a restart.
+     */
+    for (const auto index : live_indices(instances_.layout())) {
+        const auto& row = instances_.rows()[index];
+        ensure_accounts_root(row.id);
+    }
+}
+
+void instance_manager::ensure_accounts_root(const std::string& instance_id) {
+    if (instance_id.empty())
+        return;
+
+    const auto id = domain::accounts_root_id_for(instance_id);
+    if (folders_.find(id))
+        return;
+
+    domain::folder root;
+    root.id = id;
+    root.parent_id.clear();
+    root.owner_id = instance_id;
+    root.name = "Accounts";
+    root.tree = domain::folder_tree::accounts;
+    static_cast<void>(folders_.upsert(root));
+
+    if (!folder_repo_)
+        return;
+    if (auto saved = folder_repo_->save(root); !saved) {
+        last_error_ = store_failure(
+            std::format("cannot save the accounts root {}", id), saved.error());
+    }
+}
+
 void instance_manager::ensure_instance_manager_window() {
     if (windows_.find("instance-manager"))
         return;
@@ -370,6 +480,24 @@ void instance_manager::handle(const command::command& cmd) {
         break;
     case command::command_kind::remove_account:
         do_remove_account(cmd);
+        break;
+    case command::command_kind::save_folder:
+        do_save_folder(cmd);
+        break;
+    case command::command_kind::remove_folder:
+        do_remove_folder(cmd);
+        break;
+    case command::command_kind::save_label:
+        do_save_label(cmd);
+        break;
+    case command::command_kind::remove_label:
+        do_remove_label(cmd);
+        break;
+    case command::command_kind::attach_label:
+        do_attach_label(cmd);
+        break;
+    case command::command_kind::detach_label:
+        do_detach_label(cmd);
         break;
     case command::command_kind::connect_session:
         do_connect_session(cmd);
@@ -428,7 +556,15 @@ void instance_manager::do_save_instance(const command::command& cmd) {
         last_error_ = store_failure(
             std::format("cannot save instance {}", cmd.instance_row.id),
             saved.error());
+        return;
     }
+
+    /*
+     * The instance is stored, so it needs somewhere for its accounts to live.
+     * The root is created here rather than lazily on the first account, because
+     * a tree with no root is a shape the Browser cannot draw.
+     */
+    ensure_accounts_root(cmd.instance_row.id);
 }
 
 void instance_manager::do_remove_instance(const command::command& cmd) {
@@ -455,6 +591,45 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
     for (const auto account : live_accounts(accounts_)) {
         if (accounts_.get(account)->instance_id == id)
             accounts_.remove(account);
+    }
+
+    /*
+     * The instance's own folders go with it: every root of an accounts tree
+     * names the instance as its owner, so the tree is found by the owner rather
+     * than by walking the folders.
+     */
+    {
+        const auto accounts_root = folders_.root(domain::folder_tree::accounts, id);
+        const auto doomed = accounts_root
+            ? folders_.descendants_of(folders_.get(*accounts_root)->id)
+            : std::vector<std::string>{};
+        if (accounts_root)
+            folders_.remove(*accounts_root);
+        for (const auto& folder_id : doomed) {
+            if (const auto handle = folders_.find(folder_id))
+                folders_.remove(*handle);
+        }
+    }
+    if (folder_repo_) {
+        if (auto removed = folder_repo_->remove_tree(
+                domain::folder_tree::accounts, id);
+            !removed) {
+            last_error_ = store_failure(
+                std::format("cannot remove the folders of instance {}", id),
+                removed.error());
+        }
+    }
+
+    /* A label attachment is the instance's, so it goes with the instance. */
+    labellings_.remove_owner(domain::labelling_owner::instance, id);
+    if (labelling_repo_) {
+        if (auto removed = labelling_repo_->remove_owner(
+                domain::labelling_owner::instance, id);
+            !removed) {
+            last_error_ = store_failure(
+                std::format("cannot remove the labels of instance {}", id),
+                removed.error());
+        }
     }
 
     /*
@@ -566,6 +741,292 @@ void instance_manager::do_remove_account(const command::command& cmd) {
     }
     if (auto saved = save_windows(); !saved)
         last_error_ = saved.error();
+}
+
+void instance_manager::do_save_folder(const command::command& cmd) {
+    if (!folder_repo_) {
+        last_error_ = "cannot save a folder: the store is not open";
+        return;
+    }
+
+    const auto& incoming = cmd.folder_row;
+    if (incoming.id.empty()) {
+        last_error_ = "cannot save a folder: no folder was named";
+        return;
+    }
+    if (incoming.id == domain::instances_root_id) {
+        last_error_ = std::format(
+            "cannot re-parent folder {}: it is the root of the instances tree",
+            incoming.id);
+        return;
+    }
+    if (incoming.name.empty()) {
+        last_error_ = std::format("cannot save folder {}: it has no name",
+            incoming.id);
+        return;
+    }
+
+    const auto existing = folders_.find(incoming.id);
+    const auto previous = existing
+        ? std::optional<domain::folder>(*folders_.get(*existing))
+        : std::nullopt;
+
+    /*
+     * The tree and the owner are a property of where a folder sits, not of the
+     * folder, so they come from the parent rather than from the command. Asking
+     * the caller to repeat them would be a second place they could be wrong,
+     * and getting them wrong would put a folder in a tree it does not belong
+     * to.
+     */
+    domain::folder row = incoming;
+    if (const auto parent = folders_.find(incoming.parent_id)) {
+        const auto& parent_row = *folders_.get(*parent);
+        row.tree = parent_row.tree;
+        row.owner_id = parent_row.owner_id;
+    } else if (previous) {
+        row.tree = previous->tree;
+        row.owner_id = previous->owner_id;
+    } else {
+        last_error_ = std::format(
+            "cannot save folder {}: no parent folder {}", incoming.id,
+            incoming.parent_id.empty() ? "<none>" : incoming.parent_id);
+        return;
+    }
+    if (row.parent_id.empty()) {
+        last_error_ = std::format(
+            "cannot save folder {}: only a root has no parent", incoming.id);
+        return;
+    }
+
+    /*
+     * A cycle is refused by the table as well, because a table is reachable
+     * without this handler. It is reported here too so that the sentence names
+     * the folder the operator asked about rather than the id the table saw.
+     */
+    if (row.id == row.parent_id) {
+        last_error_ = std::format("cannot parent folder {} to itself", row.id);
+        return;
+    }
+
+    auto handle = folders_.upsert(row);
+    if (!handle) {
+        last_error_ = handle.error();
+        return;
+    }
+
+    if (auto saved = folder_repo_->save(row); !saved) {
+        if (previous)
+            static_cast<void>(folders_.upsert(*previous));
+        else
+            folders_.remove(*handle);
+        last_error_ = store_failure(
+            std::format("cannot save folder {}", row.id), saved.error());
+    }
+}
+
+void instance_manager::do_remove_folder(const command::command& cmd) {
+    if (!folder_repo_) {
+        last_error_ = "cannot remove a folder: the store is not open";
+        return;
+    }
+
+    const std::string id = cmd.folder_row.id.empty() ? cmd.payload
+                                                    : cmd.folder_row.id;
+    if (id.empty()) {
+        last_error_ = "cannot remove a folder: no folder was named";
+        return;
+    }
+
+    /*
+     * The root of a tree is what the tree is anchored by: removing it would
+     * leave every folder below it unreachable, so the refusal is here in the
+     * runtime and not only in whatever surfaced the request.
+     */
+    if (id == domain::instances_root_id) {
+        last_error_ = std::format(
+            "cannot remove folder {}: it is the root of the instances tree", id);
+        return;
+    }
+    if (const auto handle = folders_.find(id)) {
+        if (folders_.get(*handle)->parent_id.empty()) {
+            last_error_ = std::format(
+                "cannot remove folder {}: it is a root of its tree", id);
+            return;
+        }
+    }
+
+    /*
+     * The children are collected before anything goes, because a removal
+     * releases the slot and a walk from a released row would find nothing.
+     */
+    const auto doomed = folders_.descendants_of(id);
+
+    if (const auto handle = folders_.find(id))
+        folders_.remove(*handle);
+    for (const auto& folder_id : doomed) {
+        if (const auto handle = folders_.find(folder_id))
+            folders_.remove(*handle);
+    }
+
+    /*
+     * The store is asked for the same cascade by id rather than left to a
+     * foreign key: a folder's parent is a folder, so a self-referencing cascade
+     * would need a constraint this schema does not carry, and the removal would
+     * then depend on the order the rows were walked in.
+     */
+    if (auto removed = folder_repo_->remove(id); !removed) {
+        last_error_ = store_failure(
+            std::format("cannot remove folder {}", id), removed.error());
+    }
+    for (const auto& folder_id : doomed) {
+        if (auto removed = folder_repo_->remove(folder_id); !removed) {
+            last_error_ = store_failure(
+                std::format("cannot remove folder {}", folder_id),
+                removed.error());
+        }
+    }
+}
+
+void instance_manager::do_save_label(const command::command& cmd) {
+    if (!label_repo_) {
+        last_error_ = "cannot save a label: the store is not open";
+        return;
+    }
+
+    const auto& row = cmd.label_row;
+    if (row.id.empty()) {
+        last_error_ = "cannot save a label: no label was named";
+        return;
+    }
+    if (row.name.empty()) {
+        last_error_ = std::format("cannot save label {}: it has no name",
+            row.id);
+        return;
+    }
+
+    const auto existing = labels_.find(row.id);
+    const auto previous = existing
+        ? std::optional<domain::label>(*labels_.get(*existing))
+        : std::nullopt;
+
+    const auto handle = labels_.upsert(row);
+
+    if (auto saved = label_repo_->save(row); !saved) {
+        if (previous)
+            static_cast<void>(labels_.upsert(*previous));
+        else
+            labels_.remove(handle);
+        last_error_ = store_failure(
+            std::format("cannot save label {}", row.id), saved.error());
+    }
+}
+
+void instance_manager::do_remove_label(const command::command& cmd) {
+    if (!label_repo_) {
+        last_error_ = "cannot remove a label: the store is not open";
+        return;
+    }
+
+    const std::string id = cmd.label_row.id.empty() ? cmd.payload
+                                                   : cmd.label_row.id;
+    if (id.empty()) {
+        last_error_ = "cannot remove a label: no label was named";
+        return;
+    }
+
+    /*
+     * A label is removed together with its attachments, in both the table and
+     * the store, so no attachment is left naming a label that is gone. The
+     * store would cascade on its own; saying it here as well keeps the two
+     * agreeing even if a later schema drops the cascade.
+     */
+    const auto attachments = labellings_.rows();
+    if (const auto handle = labels_.find(id))
+        labels_.remove(*handle);
+    for (const auto& row : attachments) {
+        if (row.label_id != id)
+            continue;
+        labellings_.remove(row.owner, row.owner_id, row.label_id);
+        if (auto detached = labelling_repo_->remove(row); !detached) {
+            last_error_ = store_failure(
+                std::format("cannot detach label {} from {}", id, row.owner_id),
+                detached.error());
+        }
+    }
+
+    if (auto removed = label_repo_->remove(id); !removed) {
+        last_error_ = store_failure(
+            std::format("cannot remove label {}", id), removed.error());
+    }
+}
+
+void instance_manager::do_attach_label(const command::command& cmd) {
+    if (!labelling_repo_) {
+        last_error_ = "cannot attach a label: the store is not open";
+        return;
+    }
+
+    const auto& row = cmd.labelling_row;
+    if (row.owner_id.empty() || row.label_id.empty()) {
+        last_error_ = "cannot attach a label: the owner and the label must be "
+                      "named";
+        return;
+    }
+
+    /*
+     * Both ends are resolved before the attachment is written: an attachment to
+     * a row that does not exist is a foreign key the store would refuse, and
+     * refusing it here says which end was missing.
+     */
+    if (row.owner == domain::labelling_owner::instance) {
+        if (!instances_.find(row.owner_id)) {
+            last_error_ = std::format("cannot attach a label: no instance {}",
+                row.owner_id);
+            return;
+        }
+    } else if (!accounts_.find(row.owner_id)) {
+        last_error_ = std::format("cannot attach a label: no account {}",
+            row.owner_id);
+        return;
+    }
+    if (!labels_.find(row.label_id)) {
+        last_error_ = std::format("cannot attach a label: no label {}",
+            row.label_id);
+        return;
+    }
+
+    labellings_.add(row.owner, row.owner_id, row.label_id);
+
+    if (auto saved = labelling_repo_->save(row); !saved) {
+        labellings_.remove(row.owner, row.owner_id, row.label_id);
+        last_error_ = store_failure(
+            std::format("cannot attach label {} to {}", row.label_id,
+                row.owner_id),
+            saved.error());
+    }
+}
+
+void instance_manager::do_detach_label(const command::command& cmd) {
+    if (!labelling_repo_) {
+        last_error_ = "cannot detach a label: the store is not open";
+        return;
+    }
+
+    const auto& row = cmd.labelling_row;
+    if (row.owner_id.empty() || row.label_id.empty()) {
+        last_error_ = "cannot detach a label: the owner and the label must be "
+                      "named";
+        return;
+    }
+
+    labellings_.remove(row.owner, row.owner_id, row.label_id);
+
+    if (auto removed = labelling_repo_->remove(row); !removed) {
+        last_error_ = store_failure(
+            std::format("cannot detach label {} from {}", row.label_id,
+                row.owner_id),
+            removed.error());
+    }
 }
 
 void instance_manager::do_connect_session(const command::command& cmd) {

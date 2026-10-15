@@ -21,12 +21,16 @@
 #define HEDGR_MODEL_STATE_TABLES_HPP
 
 #include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/folder.hpp"
 #include "hedgr.model/domain/instance.hpp"
+#include "hedgr.model/domain/label.hpp"
+#include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include <cstdint>
+#include <expected>
 #include <optional>
 #include <span>
 #include <string>
@@ -144,6 +148,192 @@ private:
     slab layout_;
     std::vector<domain::account> rows_;
     std::unordered_map<std::string, account_handle> by_id_;
+};
+
+/**
+ * @brief The folders of every tree, addressed by handle.
+ *
+ * Cold, like the instance table, and shaped the same way: a sparse slab, a map
+ * from the persisted id, and @c rows() and @c layout() both including the holes
+ * a removal leaves behind.
+ *
+ * The interface walks folders parent by parent rather than id by id, so
+ * @c children_of and @c root scan the slab instead of consulting an index. The
+ * tables are tens of rows, so a scan is cheaper than the bookkeeping a
+ * parent-to-children map would need on every removal.
+ */
+class HEDGR_MODEL_EXPORT folder_table final {
+public:
+    /**
+     * @brief Adds @p row, or replaces the row carrying the same id.
+     *
+     * Refuses @p row when it would make the folder its own ancestor, because
+     * the tree is walked by following @c parent_id upwards and a cycle would
+     * make that walk never terminate. The refusal is returned rather than
+     * silently repaired, so the caller learns that the move it asked for was
+     * not applied.
+     */
+    [[nodiscard]] std::expected<folder_handle, std::string>
+    upsert(domain::folder row);
+
+    void remove(folder_handle h);
+
+    [[nodiscard]] bool contains(folder_handle h) const noexcept;
+
+    [[nodiscard]] std::size_t size() const noexcept;
+
+    /** @brief The handle carrying this persisted id, when there is one. */
+    [[nodiscard]] std::optional<folder_handle> find(std::string_view id) const;
+
+    /** @brief The row a handle addresses, or nullptr when it is stale. */
+    [[nodiscard]] const domain::folder* get(folder_handle h) const noexcept;
+    [[nodiscard]] domain::folder* get(folder_handle h) noexcept;
+
+    /** @brief The folders whose parent is @p parent_id, holes skipped. */
+    [[nodiscard]] std::vector<const domain::folder*>
+    children_of(std::string_view parent_id) const;
+
+    /**
+     * @brief The root of one tree owned by one owner.
+     *
+     * A root is the folder with no parent. The instances tree has one ownerless
+     * root; each instance owns its own accounts root. The owner is part of the
+     * question rather than an afterthought, because that is what makes the
+     * answer unique.
+     */
+    [[nodiscard]] std::optional<folder_handle>
+    root(domain::folder_tree tree, std::string_view owner_id) const;
+
+    /**
+     * @brief Every folder below @p folder_id, depth first, excluding it.
+     *
+     * This is the list a cascade removes, and the list a reparent must not name
+     * as a new parent.
+     */
+    [[nodiscard]] std::vector<std::string>
+    descendants_of(std::string_view folder_id) const;
+
+    /**
+     * @brief Every folder above @p folder_id, nearest first, excluding it.
+     *
+     * This is what a containment check walks: a folder contains another exactly
+     * when the other's ancestors include it.
+     */
+    [[nodiscard]] std::vector<std::string>
+    ancestors_of(std::string_view folder_id) const;
+
+    /** @brief Aliveness and generations, holes included. */
+    [[nodiscard]] const slab& layout() const noexcept { return layout_; }
+
+    /** @brief Every row, holes included, for a whole-table walk. */
+    [[nodiscard]] std::span<const domain::folder> rows() const noexcept {
+        return rows_;
+    }
+
+    void clear() noexcept;
+
+private:
+    /** @brief Whether @p candidate lies on the parent chain of @p id. */
+    [[nodiscard]] bool is_ancestor_of(std::string_view candidate,
+                                      std::string_view id) const;
+
+    slab layout_;
+    std::vector<domain::folder> rows_;
+    std::unordered_map<std::string, folder_handle> by_id_;
+};
+
+/**
+ * @brief The labels known to this process, addressed by handle.
+ *
+ * Cold, and shaped like the instance table. It is keyed by name as well as by
+ * id because a label is written by a person and read back by the name typed
+ * into a filter, while the junction that attaches it speaks ids. Two indexes
+ * over a table of tens of rows is cheaper than making either caller translate.
+ */
+class HEDGR_MODEL_EXPORT label_table final {
+public:
+    /**
+     * @brief Adds @p row, or replaces the row carrying the same id.
+     *
+     * A replacement keeps the handle the previous row held, so a junction that
+     * already resolved this label keeps addressing it.
+     */
+    [[nodiscard]] label_handle upsert(domain::label row);
+
+    void remove(label_handle h);
+
+    [[nodiscard]] bool contains(label_handle h) const noexcept;
+
+    [[nodiscard]] std::size_t size() const noexcept;
+
+    /** @brief The handle carrying this persisted id, when there is one. */
+    [[nodiscard]] std::optional<label_handle> find(std::string_view id) const;
+
+    /** @brief The handle carrying this name, when there is one. */
+    [[nodiscard]] std::optional<label_handle>
+    find_by_name(std::string_view name) const;
+
+    /** @brief The row a handle addresses, or nullptr when it is stale. */
+    [[nodiscard]] const domain::label* get(label_handle h) const noexcept;
+    [[nodiscard]] domain::label* get(label_handle h) noexcept;
+
+    /** @brief Aliveness and generations, holes included. */
+    [[nodiscard]] const slab& layout() const noexcept { return layout_; }
+
+    /** @brief Every row, holes included, for a whole-table walk. */
+    [[nodiscard]] std::span<const domain::label> rows() const noexcept {
+        return rows_;
+    }
+
+    void clear() noexcept;
+
+private:
+    slab layout_;
+    std::vector<domain::label> rows_;
+    std::unordered_map<std::string, label_handle> by_id_;
+    std::unordered_map<std::string, label_handle> by_name_;
+};
+
+/**
+ * @brief The label attachments, as a plain list of pairs.
+ *
+ * A linear scan is correct at this size and is simpler than an index: an
+ * operator has tens of labels, an attachment is two strings, and every question
+ * asked of this table is "which labels does this owner have" or "does this pair
+ * exist", both of which a scan of a few dozen elements answers. The hand-rolled
+ * buckets an index would need, and their invalidation on every attach, would
+ * cost more than they save and be a second place for the pair identity to be
+ * got wrong.
+ */
+class HEDGR_MODEL_EXPORT labelling_table final {
+public:
+    /** @brief Attaches @p label_id to the owner; does nothing if already
+     * attached. */
+    void add(domain::labelling_owner owner, std::string owner_id,
+             std::string label_id);
+
+    /** @brief Detaches @p label_id from the owner; does nothing if absent. */
+    void remove(domain::labelling_owner owner, std::string owner_id,
+                std::string label_id);
+
+    /** @brief Detaches every label from the owner. */
+    void remove_owner(domain::labelling_owner owner, std::string_view owner_id);
+
+    /** @brief The label ids attached to the owner, in insertion order. */
+    [[nodiscard]] std::vector<std::string>
+    labels_of(domain::labelling_owner owner, std::string_view owner_id) const;
+
+    /** @brief Every attachment, for a whole-table walk. */
+    [[nodiscard]] const std::vector<domain::labelling>& rows() const noexcept {
+        return rows_;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return rows_.size(); }
+
+    void clear() noexcept { rows_.clear(); }
+
+private:
+    std::vector<domain::labelling> rows_;
 };
 
 /**

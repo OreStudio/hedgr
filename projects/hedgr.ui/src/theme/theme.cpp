@@ -176,6 +176,24 @@ ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {
     return IM_COL32(212, 212, 212, 255);
 }
 
+ImU32 label_colour(hedgr::model::domain::label_colour value) noexcept {
+    switch (value) {
+    case hedgr::model::domain::label_colour::grey:
+        return IM_COL32(158, 158, 158, 255);
+    case hedgr::model::domain::label_colour::blue:
+        return IM_COL32(64, 160, 255, 255);
+    case hedgr::model::domain::label_colour::green:
+        return IM_COL32(0, 200, 83, 255);
+    case hedgr::model::domain::label_colour::amber:
+        return IM_COL32(255, 193, 7, 255);
+    case hedgr::model::domain::label_colour::red:
+        return IM_COL32(255, 23, 68, 255);
+    case hedgr::model::domain::label_colour::purple:
+        return IM_COL32(186, 104, 200, 255);
+    }
+    return IM_COL32(212, 212, 212, 255);
+}
+
 const char* status_icon(hedgr::model::domain::session_status value) noexcept {
     switch (value) {
     case hedgr::model::domain::session_status::disconnected:

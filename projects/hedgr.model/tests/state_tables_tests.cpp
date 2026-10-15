@@ -18,7 +18,10 @@
  *
  */
 #include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/folder.hpp"
 #include "hedgr.model/domain/instance.hpp"
+#include "hedgr.model/domain/label.hpp"
+#include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
@@ -27,12 +30,21 @@
 #include <utility>
 
 using hedgr::model::domain::account;
+using hedgr::model::domain::combine;
+using hedgr::model::domain::folder;
+using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
+using hedgr::model::domain::label;
+using hedgr::model::domain::label_severity;
+using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
 using hedgr::model::state::account_table;
+using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
+using hedgr::model::state::label_table;
+using hedgr::model::state::labelling_table;
 using hedgr::model::state::session_table;
 using hedgr::model::state::window_table;
 
@@ -49,6 +61,26 @@ using hedgr::model::state::window_table;
     account row;
     row.id = std::move(id);
     row.instance_id = std::move(instance_id);
+    return row;
+}
+
+/** @brief A folder row with its parent and its place in a tree named. */
+[[nodiscard]] folder make_folder(std::string id, std::string parent_id,
+    folder_tree tree, std::string owner_id = {}) {
+    folder row;
+    row.id = std::move(id);
+    row.parent_id = std::move(parent_id);
+    row.owner_id = std::move(owner_id);
+    row.name = row.id;
+    row.tree = tree;
+    return row;
+}
+
+/** @brief A label row carrying only what a table test reads back. */
+[[nodiscard]] label make_label(std::string id, std::string name) {
+    label row;
+    row.id = std::move(id);
+    row.name = std::move(name);
     return row;
 }
 
@@ -204,4 +236,178 @@ TEST_CASE("a window description round-trips through the table", "[window]") {
     REQUIRE(recovered.session->account_id == "id-1");
 
     REQUIRE(windows.specs(sessions).size() == 1);
+}
+
+TEST_CASE("a folder table reports only the direct children of a folder",
+    "[folder]") {
+    folder_table folders;
+    static_cast<void>(folders.upsert(
+        make_folder("root", "", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("child", "root", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("grandchild", "child", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("sibling", "root", folder_tree::instances)));
+
+    const auto children = folders.children_of("root");
+    REQUIRE(children.size() == 2);
+    REQUIRE(children[0]->id == "child");
+    REQUIRE(children[1]->id == "sibling");
+
+    /* The grandchild is below the child, not beside it. */
+    const auto child_children = folders.children_of("child");
+    REQUIRE(child_children.size() == 1);
+    REQUIRE(child_children[0]->id == "grandchild");
+
+    /* The children are the folder's own, not the whole tree. */
+    REQUIRE(folders.children_of("grandchild").empty());
+}
+
+TEST_CASE("a folder table resolves the root of each tree by owner",
+    "[folder]") {
+    folder_table folders;
+    static_cast<void>(folders.upsert(
+        make_folder("instances-root", "", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("accounts-root:inst-1", "", folder_tree::accounts,
+            "inst-1")));
+    static_cast<void>(folders.upsert(
+        make_folder("accounts-root:inst-2", "", folder_tree::accounts,
+            "inst-2")));
+    static_cast<void>(folders.upsert(
+        make_folder("child", "accounts-root:inst-1", folder_tree::accounts,
+            "inst-1")));
+
+    const auto instances = folders.root(folder_tree::instances, "");
+    REQUIRE(instances.has_value());
+    REQUIRE(folders.get(*instances)->id == "instances-root");
+
+    const auto first = folders.root(folder_tree::accounts, "inst-1");
+    REQUIRE(first.has_value());
+    REQUIRE(folders.get(*first)->id == "accounts-root:inst-1");
+
+    const auto second = folders.root(folder_tree::accounts, "inst-2");
+    REQUIRE(second.has_value());
+    REQUIRE(folders.get(*second)->id == "accounts-root:inst-2");
+
+    /* An owner with no accounts tree answers with nothing, not with a guess. */
+    REQUIRE_FALSE(folders.root(folder_tree::accounts, "inst-3").has_value());
+}
+
+TEST_CASE("a folder cannot be made its own ancestor", "[folder]") {
+    folder_table folders;
+    static_cast<void>(folders.upsert(
+        make_folder("root", "", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("child", "root", folder_tree::instances)));
+    static_cast<void>(folders.upsert(
+        make_folder("grandchild", "child", folder_tree::instances)));
+
+    /* Root parented to its own grandchild would close the loop. */
+    const auto cyclic = folders.upsert(make_folder("root", "grandchild",
+        folder_tree::instances));
+    REQUIRE_FALSE(cyclic.has_value());
+    REQUIRE(cyclic.error() ==
+        "cannot parent folder root to grandchild: it would contain itself");
+
+    /* The refusal leaves the tree exactly as it was. */
+    REQUIRE(folders.get(*folders.find("root"))->parent_id == "");
+
+    /* A folder is likewise not its own parent. */
+    const auto self = folders.upsert(make_folder("child", "child",
+        folder_tree::instances));
+    REQUIRE_FALSE(self.has_value());
+
+    /* The descendants are what the containment check walks. */
+    const auto descendants = folders.descendants_of("root");
+    REQUIRE(descendants.size() == 2);
+    const auto ancestors = folders.ancestors_of("grandchild");
+    REQUIRE(ancestors.size() == 2);
+    REQUIRE(ancestors[0] == "child");
+    REQUIRE(ancestors[1] == "root");
+}
+
+TEST_CASE("combining two severities keeps the higher one", "[label]") {
+    REQUIRE(combine(label_severity::none, label_severity::none)
+        == label_severity::none);
+    REQUIRE(combine(label_severity::none, label_severity::caution)
+        == label_severity::caution);
+    REQUIRE(combine(label_severity::caution, label_severity::none)
+        == label_severity::caution);
+    REQUIRE(combine(label_severity::caution, label_severity::danger)
+        == label_severity::danger);
+    REQUIRE(combine(label_severity::danger, label_severity::caution)
+        == label_severity::danger);
+
+    /* The fold over a label set does not depend on the order it is walked. */
+    auto severity = label_severity::none;
+    for (const auto value : {label_severity::caution, label_severity::danger,
+             label_severity::none}) {
+        severity = combine(severity, value);
+    }
+    REQUIRE(severity == label_severity::danger);
+}
+
+TEST_CASE("attaching a label twice is the same as attaching it once",
+    "[labelling]") {
+    labelling_table labellings;
+
+    labellings.add(labelling_owner::instance, "inst-1", "lbl-prod");
+    labellings.add(labelling_owner::instance, "inst-1", "lbl-prod");
+
+    REQUIRE(labellings.size() == 1);
+
+    labellings.add(labelling_owner::instance, "inst-1", "lbl-ops");
+    labellings.add(labelling_owner::instance, "inst-2", "lbl-prod");
+    REQUIRE(labellings.size() == 3);
+}
+
+TEST_CASE("a label list is scoped to its owner", "[labelling]") {
+    labelling_table labellings;
+    labellings.add(labelling_owner::instance, "inst-1", "lbl-prod");
+    labellings.add(labelling_owner::instance, "inst-1", "lbl-ops");
+
+    /*
+     * The account carries the same id as the instance on purpose: the kind is
+     * part of the identity, so the two owners must not share a label list.
+     */
+    labellings.add(labelling_owner::account, "inst-1", "lbl-staging");
+
+    const auto instance_labels =
+        labellings.labels_of(labelling_owner::instance, "inst-1");
+    REQUIRE(instance_labels.size() == 2);
+    REQUIRE(instance_labels[0] == "lbl-prod");
+    REQUIRE(instance_labels[1] == "lbl-ops");
+
+    const auto account_labels =
+        labellings.labels_of(labelling_owner::account, "inst-1");
+    REQUIRE(account_labels.size() == 1);
+    REQUIRE(account_labels[0] == "lbl-staging");
+
+    labellings.remove(labelling_owner::instance, "inst-1", "lbl-prod");
+    REQUIRE(labellings.labels_of(labelling_owner::instance, "inst-1").size()
+        == 1);
+
+    labellings.remove_owner(labelling_owner::instance, "inst-1");
+    REQUIRE(labellings.labels_of(labelling_owner::instance, "inst-1").empty());
+    REQUIRE(labellings.size() == 1);
+}
+
+TEST_CASE("a label is found by its name as well as its id", "[label]") {
+    label_table labels;
+    label p = make_label("lbl-prod", "production");
+    p.severity = label_severity::danger;
+    const auto handle = labels.upsert(p);
+    static_cast<void>(labels.upsert(make_label("lbl-dev", "development")));
+
+    REQUIRE(labels.size() == 2);
+    REQUIRE(labels.find("lbl-prod") == handle);
+    REQUIRE(labels.find_by_name("production") == handle);
+    REQUIRE(labels.get(handle)->severity == label_severity::danger);
+    REQUIRE_FALSE(labels.find_by_name("staging").has_value());
+
+    labels.remove(handle);
+    REQUIRE_FALSE(labels.find_by_name("production").has_value());
+    REQUIRE(labels.find_by_name("development").has_value());
 }

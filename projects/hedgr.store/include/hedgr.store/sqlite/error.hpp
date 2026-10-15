@@ -49,6 +49,16 @@ enum class store_errc : std::uint8_t {
     not_found,
     /** @brief A stored value could not be parsed back into its domain type. */
     corrupt_row,
+    /**
+     * @brief The file was written against a different schema version.
+     *
+     * A distinct code rather than a generic failure, because the cause is the
+     * file rather than the operation and the remedy is the operator's: the
+     * store is pre-release, so the file is to be deleted and rebuilt. Nothing
+     * in the application deletes it, so a caller that sees this must never
+     * treat it as retryable.
+     */
+    schema_mismatch,
     /** @brief The operation needed an open database and did not get one. */
     closed,
 };

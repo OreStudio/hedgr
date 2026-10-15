@@ -37,6 +37,8 @@ std::string_view to_string(store_errc value) noexcept {
         return "not_found";
     case store_errc::corrupt_row:
         return "corrupt_row";
+    case store_errc::schema_mismatch:
+        return "schema_mismatch";
     case store_errc::closed:
         return "closed";
     }

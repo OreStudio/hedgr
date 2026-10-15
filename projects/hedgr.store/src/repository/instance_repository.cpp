@@ -31,8 +31,8 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, name, nats_url, subject_prefix, wire_format, labels, "
-    "created_at FROM instance ORDER BY name";
+    "SELECT id, name, nats_url, subject_prefix, wire_format, created_at "
+    "FROM instance ORDER BY name";
 
 /** @brief Reads the row the statement is currently parked on. */
 dom::instance read_row(const sqlite::statement& query) {
@@ -42,8 +42,7 @@ dom::instance read_row(const sqlite::statement& query) {
     row.nats_url = std::string(query.column_text(2));
     row.subject_prefix = std::string(query.column_text(3));
     row.wire_format = std::string(query.column_text(4));
-    row.labels = std::string(query.column_text(5));
-    row.created_at = std::string(query.column_text(6));
+    row.created_at = std::string(query.column_text(5));
     return row;
 }
 
@@ -74,11 +73,11 @@ sqlite::result<void> instance_repository::save(const dom::instance& row) {
     sqlite::statement insert(
         db_->handle(),
         "INSERT INTO instance (id, name, nats_url, subject_prefix, "
-        "wire_format, labels) VALUES (?, ?, ?, ?, ?, ?) "
+        "wire_format) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
         "nats_url = excluded.nats_url, "
         "subject_prefix = excluded.subject_prefix, "
-        "wire_format = excluded.wire_format, labels = excluded.labels");
+        "wire_format = excluded.wire_format");
     if (!insert.is_valid())
         return std::unexpected(insert.step().error());
 
@@ -93,8 +92,6 @@ sqlite::result<void> instance_repository::save(const dom::instance& row) {
     if (auto bound = insert.bind(4, row.subject_prefix); !bound)
         return bound;
     if (auto bound = insert.bind(5, row.wire_format); !bound)
-        return bound;
-    if (auto bound = insert.bind(6, row.labels); !bound)
         return bound;
 
     auto stepped = insert.step();

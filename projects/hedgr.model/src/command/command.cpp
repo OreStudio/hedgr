@@ -43,6 +43,18 @@ std::string_view to_string(command_kind value) noexcept {
         return "refresh_window";
     case command_kind::shutdown:
         return "shutdown";
+    case command_kind::save_folder:
+        return "save_folder";
+    case command_kind::remove_folder:
+        return "remove_folder";
+    case command_kind::save_label:
+        return "save_label";
+    case command_kind::remove_label:
+        return "remove_label";
+    case command_kind::attach_label:
+        return "attach_label";
+    case command_kind::detach_label:
+        return "detach_label";
     }
     return "unknown";
 }

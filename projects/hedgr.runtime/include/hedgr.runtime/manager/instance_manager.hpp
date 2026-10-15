@@ -26,7 +26,10 @@
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
+#include "hedgr.store/repository/folder_repository.hpp"
 #include "hedgr.store/repository/instance_repository.hpp"
+#include "hedgr.store/repository/label_repository.hpp"
+#include "hedgr.store/repository/labelling_repository.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <cstdint>
@@ -89,6 +92,19 @@ public:
         return accounts_;
     }
 
+    [[nodiscard]] const model::state::folder_table& folders() const noexcept {
+        return folders_;
+    }
+
+    [[nodiscard]] const model::state::label_table& labels() const noexcept {
+        return labels_;
+    }
+
+    [[nodiscard]] const model::state::labelling_table& labellings() const
+        noexcept {
+        return labellings_;
+    }
+
     [[nodiscard]] const model::state::session_table& sessions() const noexcept {
         return sessions_;
     }
@@ -125,6 +141,12 @@ private:
     void do_remove_instance(const model::command::command& cmd);
     void do_save_account(const model::command::command& cmd);
     void do_remove_account(const model::command::command& cmd);
+    void do_save_folder(const model::command::command& cmd);
+    void do_remove_folder(const model::command::command& cmd);
+    void do_save_label(const model::command::command& cmd);
+    void do_remove_label(const model::command::command& cmd);
+    void do_attach_label(const model::command::command& cmd);
+    void do_detach_label(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
     void do_disconnect_session(const model::command::command& cmd);
     void do_open_window(const model::command::command& cmd);
@@ -133,11 +155,27 @@ private:
 
     void seed_first_run();
     void ensure_instance_manager_window();
+
+    /**
+     * @brief Creates the folders a tree is anchored by, when they are missing.
+     *
+     * Idempotent, and run on every start: an instance added by a build that did
+     * not create accounts roots still gets one, which is what stops a start
+     * from depending on the order the store was written in.
+     */
+    void ensure_roots();
+
+    /** @brief Creates the accounts root of one instance, if it has none. */
+    void ensure_accounts_root(const std::string& instance_id);
+
     void stop_session(const std::string& window_or_session_id);
 
     async::executor pool_;
     model::state::instance_table instances_;
     model::state::account_table accounts_;
+    model::state::folder_table folders_;
+    model::state::label_table labels_;
+    model::state::labelling_table labellings_;
     model::state::session_table sessions_;
     model::state::window_table windows_;
     model::command::command_queue commands_;
@@ -146,6 +184,9 @@ private:
     std::unique_ptr<store::sqlite::database> database_;
     std::unique_ptr<store::repository::instance_repository> instance_repo_;
     std::unique_ptr<store::repository::account_repository> account_repo_;
+    std::unique_ptr<store::repository::folder_repository> folder_repo_;
+    std::unique_ptr<store::repository::label_repository> label_repo_;
+    std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
     std::unique_ptr<store::repository::window_repository> window_repo_;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;

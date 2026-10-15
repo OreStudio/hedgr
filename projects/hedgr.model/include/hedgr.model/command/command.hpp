@@ -21,7 +21,10 @@
 #define HEDGR_MODEL_COMMAND_COMMAND_HPP
 
 #include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/folder.hpp"
 #include "hedgr.model/domain/instance.hpp"
+#include "hedgr.model/domain/label.hpp"
+#include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
@@ -58,6 +61,18 @@ enum class command_kind : std::uint8_t {
     refresh_window = 8,
     /** @brief Stop every worker and leave the frame loop. */
     shutdown = 9,
+    /** @brief Add or replace a folder, then persist it. */
+    save_folder = 10,
+    /** @brief Remove a folder and everything below it. */
+    remove_folder = 11,
+    /** @brief Add or replace a label, then persist it. */
+    save_label = 12,
+    /** @brief Remove a label and every attachment of it. */
+    remove_label = 13,
+    /** @brief Attach a label to an instance or an account. */
+    attach_label = 14,
+    /** @brief Detach a label from an instance or an account. */
+    detach_label = 15,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -92,6 +107,22 @@ struct command final {
 
     /** @brief Account row, for save_account. */
     domain::account account_row;
+
+    /** @brief Folder row, for save_folder. */
+    domain::folder folder_row;
+
+    /** @brief Label row, for save_label. */
+    domain::label label_row;
+
+    /**
+     * @brief The attachment, for attach_label and detach_label.
+     *
+     * The junction names the owner by kind and id, so the kind travels here
+     * rather than the runtime inferring it from which id field happens to be
+     * set: an instance and an account can carry the same id, and guessing would
+     * attach the label to the wrong one.
+     */
+    domain::labelling labelling_row;
 
     /** @brief Principal for connect_session. Never persisted. */
     std::string principal;

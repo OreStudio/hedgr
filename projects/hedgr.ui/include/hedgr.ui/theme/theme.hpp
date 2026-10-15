@@ -20,6 +20,7 @@
 #ifndef HEDGR_UI_THEME_THEME_HPP
 #define HEDGR_UI_THEME_THEME_HPP
 
+#include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
@@ -47,6 +48,10 @@ status_colour(hedgr::model::domain::session_status value) noexcept;
 /** @brief The icon naming a session status. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*
 status_icon(hedgr::model::domain::session_status value) noexcept;
+
+/** @brief The colour a label's name is drawn in. */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32
+label_colour(hedgr::model::domain::label_colour value) noexcept;
 
 /** @brief The icon naming a window kind. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*

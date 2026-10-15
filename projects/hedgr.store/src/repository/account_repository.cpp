@@ -32,13 +32,13 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, instance_id, label, principal FROM account";
+    "SELECT id, instance_id, name, principal FROM account";
 
 dom::account read_row(const sqlite::statement& query) {
     dom::account row;
     row.id = std::string(query.column_text(0));
     row.instance_id = std::string(query.column_text(1));
-    row.label = std::string(query.column_text(2));
+    row.name = std::string(query.column_text(2));
     row.principal = std::string(query.column_text(3));
     return row;
 }
@@ -72,24 +72,24 @@ account_repository::account_repository(sqlite::database& db) noexcept
 
 sqlite::result<std::vector<dom::account>> account_repository::list() const {
     const std::string sql =
-        std::string(select_columns) + " ORDER BY instance_id, label";
+        std::string(select_columns) + " ORDER BY instance_id, name";
     return collect(*db_, sql, {});
 }
 
 sqlite::result<std::vector<dom::account>>
 account_repository::list_for_instance(std::string_view instance_id) const {
     const std::string sql = std::string(select_columns) +
-                            " WHERE instance_id = ? ORDER BY label";
+                            " WHERE instance_id = ? ORDER BY name";
     return collect(*db_, sql, instance_id);
 }
 
 sqlite::result<void> account_repository::save(const dom::account& row) {
     sqlite::statement insert(
         db_->handle(),
-        "INSERT INTO account (id, instance_id, label, principal) "
+        "INSERT INTO account (id, instance_id, name, principal) "
         "VALUES (?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET instance_id = excluded.instance_id, "
-        "label = excluded.label, principal = excluded.principal");
+        "name = excluded.name, principal = excluded.principal");
     if (!insert.is_valid())
         return std::unexpected(insert.step().error());
 
@@ -97,7 +97,7 @@ sqlite::result<void> account_repository::save(const dom::account& row) {
         return bound;
     if (auto bound = insert.bind(2, row.instance_id); !bound)
         return bound;
-    if (auto bound = insert.bind(3, row.label); !bound)
+    if (auto bound = insert.bind(3, row.name); !bound)
         return bound;
     if (auto bound = insert.bind(4, row.principal); !bound)
         return bound;

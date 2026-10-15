@@ -31,7 +31,10 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/folder.hpp"
 #include "hedgr.model/domain/instance.hpp"
+#include "hedgr.model/domain/label.hpp"
+#include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -44,6 +47,7 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -57,7 +61,12 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::chart_state;
 using hedgr::model::domain::account;
+using hedgr::model::domain::accounts_root_id_for;
+using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
+using hedgr::model::domain::label_colour;
+using hedgr::model::domain::label_severity;
+using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
@@ -67,16 +76,36 @@ using hedgr::runtime::manager::instance_manager;
 using hedgr::session::transport::session_options;
 
 /**
+ * @brief A token no other process or run is likely to pick.
+ *
+ * The suite opens real files, so a path derived only from a counter is unique
+ * within one process and repeats on the next run. Two runs at once, or a run
+ * that was killed before its destructors, would then share a file and a test
+ * would inherit state it never created. A value drawn from the machine's
+ * entropy makes that collision impossible rather than unlikely.
+ */
+[[nodiscard]] std::string unique_token() {
+    std::random_device source;
+    return std::format("{:08x}{:08x}", source(), source());
+}
+
+/**
  * @brief A database file that deletes itself, sidecars included.
  *
  * Every test gets its own path, because a shared one would make the suite pass
- * or fail on the order the tests happen to run in.
+ * or fail on the order the tests happen to run in, and the name carries a
+ * per-run token so that a file left behind by a killed run can never be picked
+ * up by the next one.
+ *
+ * The constructor erases the path before handing it out as well as after, so a
+ * test begins from a file that does not exist whatever happened last time.
  */
 class temporary_database final {
 public:
     explicit temporary_database(std::string_view tag)
         : path_(std::filesystem::temp_directory_path() /
-              std::format("hedgr.runtime.{}.{}.sqlite", tag, next_serial())) {
+              std::format("hedgr.runtime.{}.{}.{}.sqlite", tag, unique_token(),
+                  next_serial())) {
         erase();
     }
 
@@ -162,7 +191,7 @@ private:
     account row;
     row.id = std::move(id);
     row.instance_id = std::move(instance_id);
-    row.label = "ops read-only";
+    row.name = "ops read-only";
     row.principal = "alice@example.test";
     return row;
 }
@@ -334,6 +363,313 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
     REQUIRE(reopened.accounts().size() == 0);
+    reopened.stop();
+}
+
+TEST_CASE("start creates both roots and is idempotent", "[runtime]") {
+    const temporary_database database("roots");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    /* One instance was seeded, so there is one tree per tree kind. */
+    REQUIRE(manager.instances().size() == 1);
+    REQUIRE(manager.folders().size() == 2);
+
+    const auto instances_root =
+        manager.folders().root(folder_tree::instances, "");
+    REQUIRE(instances_root.has_value());
+    REQUIRE(manager.folders().get(*instances_root)->id == "instances-root");
+    REQUIRE(manager.folders().get(*instances_root)->name == "Instances");
+    REQUIRE(manager.folders().get(*instances_root)->parent_id == "");
+
+    const auto& instance_row = manager.instances().rows()[0];
+    const auto accounts_root =
+        manager.folders().root(folder_tree::accounts, instance_row.id);
+    REQUIRE(accounts_root.has_value());
+    REQUIRE(manager.folders().get(*accounts_root)->id ==
+        "accounts-root:" + instance_row.id);
+    REQUIRE(manager.folders().get(*accounts_root)->owner_id == instance_row.id);
+    REQUIRE(manager.folders().get(*accounts_root)->name == "Accounts");
+
+    /* A second start converges rather than creating a second pair of roots. */
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.folders().size() == 2);
+
+    manager.stop();
+
+    /* Both roots are in the store, not only in the table. */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.folders().size() == 2);
+    REQUIRE(reopened.folders().root(folder_tree::instances, "").has_value());
+    REQUIRE(reopened.folders().root(folder_tree::accounts,
+        reopened.instances().rows()[0].id).has_value());
+    reopened.stop();
+}
+
+TEST_CASE("start gives an already-stored instance its accounts root",
+    "[runtime]") {
+    const temporary_database database("missing-root");
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+        /* A second instance is stored with its root, as a normal save does. */
+        command save;
+        save.kind = command_kind::save_instance;
+        save.instance_row =
+            make_instance("inst-epsilon", "Epsilon", "ores.staging.epsilon");
+        save.instance_id = save.instance_row.id;
+        push_command(manager, save);
+
+        REQUIRE(manager.folders().size() == 3);
+        manager.stop();
+    }
+
+    /*
+     * A second manager over the same file finds an instance that already has a
+     * root and must not create a second one. This is the same convergence the
+     * first start relies on, reached from a store rather than from memory.
+     */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.folders().size() == 3);
+    REQUIRE(reopened.folders().root(folder_tree::accounts, "inst-epsilon")
+                .has_value());
+    reopened.stop();
+}
+
+TEST_CASE("adding an instance creates its accounts root", "[runtime]") {
+    const temporary_database database("instance-root");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.folders().size() == 2);
+
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance("inst-gamma", "Gamma", "ores.staging.gamma");
+    save.instance_id = save.instance_row.id;
+    push_command(manager, save);
+
+    REQUIRE(manager.folders().size() == 3);
+
+    const auto root = manager.folders().find("accounts-root:inst-gamma");
+    REQUIRE(root.has_value());
+    REQUIRE(manager.folders().get(*root)->parent_id == "");
+    REQUIRE(manager.folders().get(*root)->owner_id == "inst-gamma");
+    REQUIRE(manager.folders().get(*root)->tree == folder_tree::accounts);
+
+    /* Saving the same instance again does not add a second root. */
+    push_command(manager, save);
+    REQUIRE(manager.folders().size() == 3);
+
+    manager.stop();
+}
+
+TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
+    const temporary_database database("remove-folders");
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+        command save;
+        save.kind = command_kind::save_instance;
+        save.instance_row = make_instance("inst-delta", "Delta", "ores.staging.delta");
+        save.instance_id = save.instance_row.id;
+        push_command(manager, save);
+
+        command add_folder;
+        add_folder.kind = command_kind::save_folder;
+        add_folder.folder_row.id = "fold-delta";
+        add_folder.folder_row.parent_id = "accounts-root:inst-delta";
+        add_folder.folder_row.name = "Production";
+        push_command(manager, add_folder);
+
+        command add_child;
+        add_child.kind = command_kind::save_folder;
+        add_child.folder_row.id = "fold-delta-nested";
+        add_child.folder_row.parent_id = "fold-delta";
+        add_child.folder_row.name = "Nested";
+        push_command(manager, add_child);
+
+        REQUIRE(manager.folders().size() == 5);
+
+        command remove;
+        remove.kind = command_kind::remove_instance;
+        remove.instance_id = "inst-delta";
+        push_command(manager, remove);
+
+        /* The instance, its root and both folders below it are gone. */
+        REQUIRE(manager.folders().size() == 2);
+        REQUIRE_FALSE(manager.folders().find("accounts-root:inst-delta")
+                          .has_value());
+        REQUIRE_FALSE(manager.folders().find("fold-delta").has_value());
+        REQUIRE_FALSE(manager.folders().find("fold-delta-nested").has_value());
+
+        manager.stop();
+    }
+
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.folders().size() == 2);
+    reopened.stop();
+}
+
+TEST_CASE("a root folder cannot be removed or re-parented", "[runtime]") {
+    const temporary_database database("root-refused");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    /* The one instance the fresh store was seeded with owns the second root. */
+    const auto accounts_root =
+        accounts_root_id_for(manager.instances().rows()[0].id);
+
+    command remove;
+    remove.kind = command_kind::remove_folder;
+    remove.folder_row.id = "instances-root";
+    push_command(manager, remove);
+
+    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().find("instances-root").has_value());
+    REQUIRE(manager.last_error() ==
+        "cannot remove folder instances-root: it is the root of the instances "
+        "tree");
+
+    command move;
+    move.kind = command_kind::save_folder;
+    move.folder_row.id = "instances-root";
+    move.folder_row.parent_id = accounts_root;
+    move.folder_row.name = "Instances";
+    push_command(manager, move);
+
+    REQUIRE(manager.folders().get(*manager.folders().find("instances-root"))
+                ->parent_id == "");
+    REQUIRE(manager.last_error() ==
+        "cannot re-parent folder instances-root: it is the root of the "
+        "instances tree");
+
+    /* An accounts root is refused for the same reason. */
+    command remove_accounts;
+    remove_accounts.kind = command_kind::remove_folder;
+    remove_accounts.folder_row.id = accounts_root;
+    push_command(manager, remove_accounts);
+
+    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.last_error() ==
+        "cannot remove folder " + accounts_root
+        + ": it is a root of its tree");
+
+    manager.stop();
+}
+
+TEST_CASE("a folder is refused when it would contain itself", "[runtime]") {
+    const temporary_database database("folder-cycle");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command parent;
+    parent.kind = command_kind::save_folder;
+    parent.folder_row.id = "fold-a";
+    parent.folder_row.parent_id = "instances-root";
+    parent.folder_row.name = "A";
+    push_command(manager, parent);
+
+    command child;
+    child.kind = command_kind::save_folder;
+    child.folder_row.id = "fold-b";
+    child.folder_row.parent_id = "fold-a";
+    child.folder_row.name = "B";
+    push_command(manager, child);
+
+    /* A is made a child of its own child, which would close the loop. */
+    command cyclic;
+    cyclic.kind = command_kind::save_folder;
+    cyclic.folder_row.id = "fold-a";
+    cyclic.folder_row.parent_id = "fold-b";
+    cyclic.folder_row.name = "A";
+    push_command(manager, cyclic);
+
+    REQUIRE(manager.folders().get(*manager.folders().find("fold-a"))->parent_id
+        == "instances-root");
+    REQUIRE(manager.last_error() ==
+        "cannot parent folder fold-a to fold-b: it would contain itself");
+
+    /* Removing the parent takes the whole branch with it. */
+    command remove;
+    remove.kind = command_kind::remove_folder;
+    remove.folder_row.id = "fold-a";
+    push_command(manager, remove);
+
+    REQUIRE(manager.folders().size() == 2);
+    REQUIRE_FALSE(manager.folders().find("fold-b").has_value());
+
+    manager.stop();
+}
+
+TEST_CASE("a label is attached, listed and detached by command", "[runtime]") {
+    const temporary_database database("labels");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command save;
+    save.kind = command_kind::save_label;
+    save.label_row.id = "lbl-prod";
+    save.label_row.name = "production";
+    save.label_row.colour = label_colour::red;
+    save.label_row.severity = label_severity::danger;
+    push_command(manager, save);
+
+    REQUIRE(manager.labels().size() == 1);
+    REQUIRE(manager.labels().get(*manager.labels().find("lbl-prod"))->severity
+        == label_severity::danger);
+
+    const auto& instance_row = manager.instances().rows()[0];
+    command attach;
+    attach.kind = command_kind::attach_label;
+    attach.labelling_row.owner = labelling_owner::instance;
+    attach.labelling_row.owner_id = instance_row.id;
+    attach.labelling_row.label_id = "lbl-prod";
+    push_command(manager, attach);
+
+    REQUIRE(manager.labellings().size() == 1);
+
+    /* Attaching the same pair again changes nothing. */
+    push_command(manager, attach);
+    REQUIRE(manager.labellings().size() == 1);
+
+    const auto attached = manager.labellings().labels_of(
+        labelling_owner::instance, instance_row.id);
+    REQUIRE(attached.size() == 1);
+
+    /* An attachment to a row that does not exist is refused. */
+    command dangling = attach;
+    dangling.labelling_row.owner_id = "inst-missing";
+    push_command(manager, dangling);
+    REQUIRE(manager.labellings().size() == 1);
+    REQUIRE(manager.last_error() ==
+        "cannot attach a label: no instance inst-missing");
+
+    command detach;
+    detach.kind = command_kind::detach_label;
+    detach.labelling_row = attach.labelling_row;
+    push_command(manager, detach);
+
+    REQUIRE(manager.labellings().size() == 0);
+
+    manager.stop();
+
+    /* The label is in the store even though its attachment was removed. */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.labels().size() == 1);
+    REQUIRE(reopened.labellings().size() == 0);
     reopened.stop();
 }
 

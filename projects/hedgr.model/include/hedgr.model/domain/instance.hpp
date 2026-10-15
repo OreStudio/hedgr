@@ -34,7 +34,10 @@ namespace hedgr::model::domain {
  * deployment, because the same broker serves many deployments.
  *
  * The struct is a plain value with an explicit key and no owning pointers, so
- * rows join by key rather than by object graph.
+ * rows join by key rather than by object graph. In particular an instance
+ * carries no labels of its own: a label is an entity attached by a
+ * @c labelling junction, so a free-text field here would be a second way to say
+ * the same thing.
  */
 struct instance final {
     /** @brief Stable key, unique in the local store. */
@@ -51,9 +54,6 @@ struct instance final {
 
     /** @brief Wire format of the deployment's messages. */
     std::string wire_format = "msgpack";
-
-    /** @brief Free-form labels, comma separated. Read only when shown. */
-    std::string labels;
 
     /** @brief ISO-8601 creation timestamp. Read only when shown. */
     std::string created_at;

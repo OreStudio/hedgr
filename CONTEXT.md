@@ -37,9 +37,13 @@ fixed set of tiers.
 
 ## Account
 
-A login on exactly one instance. An account has a principal, a label, labels, a
+A login on exactly one instance. An account has a principal, a name, labels, a
 tenant, and optionally a stored credential. The same username on two instances
 is two accounts.
+
+An account's name is a display string, for example "ops read-only". It is not a
+label. A label is an entity with a colour and a severity, attached by a
+junction, and the two are never the same field.
 
 ## Credential
 

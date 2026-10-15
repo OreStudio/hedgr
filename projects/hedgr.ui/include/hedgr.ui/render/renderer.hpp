@@ -80,6 +80,15 @@ struct render_input final {
     /** @brief The accounts known to this process. */
     const hedgr::model::state::account_table& accounts;
 
+    /** @brief The folders of every tree, including each tree's root. */
+    const hedgr::model::state::folder_table& folders;
+
+    /** @brief The labels an operator has declared. */
+    const hedgr::model::state::label_table& labels;
+
+    /** @brief The label attachments. */
+    const hedgr::model::state::labelling_table& labellings;
+
     /** @brief The live sessions. */
     const hedgr::model::state::session_table& sessions;
 

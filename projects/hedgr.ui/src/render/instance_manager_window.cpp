@@ -40,6 +40,7 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
 using hedgr::model::domain::instance;
+using hedgr::model::domain::label;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::state::session_handle;
@@ -144,8 +145,8 @@ std::vector<session_row> collect_sessions(const render_input& input) {
 
 /** @brief The label to show for an account, falling back to its principal. */
 std::string account_label(const account& row) {
-    if (!row.label.empty())
-        return row.label;
+    if (!row.name.empty())
+        return row.name;
     return row.principal;
 }
 
@@ -202,6 +203,46 @@ void draw_add_form(const render_input& input) {
     }
 }
 
+/**
+ * @brief The labels attached to an instance, as name and colour.
+ *
+ * A label attached to the instance whose row has since gone is skipped rather
+ * than drawn as an id: the attachment is a pair of keys, and only one of them
+ * is what a person was shown.
+ */
+std::vector<const label*> labels_of_instance(const render_input& input,
+    std::string_view instance_id) {
+    std::vector<const label*> result;
+    for (const auto& id : input.labellings.labels_of(
+             hedgr::model::domain::labelling_owner::instance, instance_id)) {
+        if (const auto handle = input.labels.find(id))
+            result.push_back(input.labels.get(*handle));
+    }
+    return result;
+}
+
+/**
+ * @brief One instance row's label names, each in its own colour.
+ *
+ * The names sit beside the instance name rather than in a column of their own,
+ * because a label is an attribute of the row and reading it means reading it
+ * together with the name. Nothing else about a label is drawn here: the
+ * severity is what the confirmation reads, and the browser that edits them is
+ * a surface of its own.
+ */
+void draw_instance_labels(const render_input& input,
+    std::string_view instance_id) {
+    const auto attached = labels_of_instance(input, instance_id);
+    for (std::size_t index = 0; index < attached.size(); ++index) {
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(
+                hedgr::ui::theme::label_colour(attached[index]->colour)));
+        ImGui::TextUnformatted(attached[index]->name.c_str());
+        ImGui::PopStyleColor();
+    }
+}
+
 void draw_instances_table(const render_input& input, window_ui_state& state) {
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_RowBg
         | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit
@@ -239,6 +280,7 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
         if (ImGui::Selectable(row.name.c_str(), selected))
             selected_instance_id = selected ? std::string{} : row.id;
         ImGui::SetItemTooltip("%s\n%s", row.name.c_str(), row.nats_url.c_str());
+        draw_instance_labels(input, row.id);
 
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(row.subject_prefix.c_str());

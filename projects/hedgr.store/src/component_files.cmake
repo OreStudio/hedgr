@@ -9,7 +9,10 @@
 #
 set(files
     "repository/account_repository.cpp"
+    "repository/folder_repository.cpp"
     "repository/instance_repository.cpp"
+    "repository/label_repository.cpp"
+    "repository/labelling_repository.cpp"
     "repository/schema.cpp"
     "repository/window_repository.cpp"
     "sqlite/database.cpp"
@@ -22,8 +25,11 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/export.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/hedgr.store.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/account_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/folder_repository.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/hedgr.store.repository.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/instance_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/label_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/labelling_repository.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/schema.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/window_repository.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/sqlite/database.hpp"
