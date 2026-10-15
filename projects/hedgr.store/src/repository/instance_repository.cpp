@@ -1,0 +1,143 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.store/repository/instance_repository.hpp"
+#include "hedgr.store/sqlite/statement.hpp"
+#include <format>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace hedgr::store::repository {
+
+// The repositories are the boundary between stored text and domain values, so
+// the domain namespace is spelled once here rather than in every row.
+namespace dom = model::domain;
+
+namespace {
+
+constexpr std::string_view select_columns =
+    "SELECT id, name, tier, nats_url, subject_prefix, wire_format, labels, "
+    "created_at FROM instance ORDER BY name";
+
+/**
+ * @brief Reads the row the statement is currently parked on.
+ *
+ * A tier that no longer parses is reported as a corrupt row naming the
+ * instance, rather than defaulting to development: defaulting would silently
+ * downgrade the confirmation a destructive action asks for.
+ */
+sqlite::result<dom::instance> read_row(const sqlite::statement& query) {
+    dom::instance row;
+    row.id = std::string(query.column_text(0));
+    row.name = std::string(query.column_text(1));
+    row.nats_url = std::string(query.column_text(3));
+    row.subject_prefix = std::string(query.column_text(4));
+    row.wire_format = std::string(query.column_text(5));
+    row.labels = std::string(query.column_text(6));
+    row.created_at = std::string(query.column_text(7));
+
+    const auto tier = dom::tier_from_string(query.column_text(2));
+    if (!tier)
+        return std::unexpected(sqlite::store_error{
+            .code = sqlite::store_errc::corrupt_row,
+            .message = std::format("instance {} has an unknown tier [{}]: {}",
+                                   row.id, query.column_text(2), tier.error()),
+            .sqlite_code = 0,
+        });
+    row.tier = tier.value();
+    return row;
+}
+
+}
+
+instance_repository::instance_repository(sqlite::database& db) noexcept
+    : db_(&db) {}
+
+sqlite::result<std::vector<dom::instance>> instance_repository::list() const {
+    sqlite::statement query(db_->handle(), select_columns);
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    std::vector<dom::instance> rows;
+    while (true) {
+        auto available = query.step();
+        if (!available)
+            return std::unexpected(available.error());
+        if (!available.value())
+            break;
+
+        auto row = read_row(query);
+        if (!row)
+            return std::unexpected(row.error());
+        rows.push_back(std::move(row).value());
+    }
+    return rows;
+}
+
+sqlite::result<void> instance_repository::save(const dom::instance& row) {
+    sqlite::statement insert(
+        db_->handle(),
+        "INSERT INTO instance (id, name, tier, nats_url, subject_prefix, "
+        "wire_format, labels) VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
+        "tier = excluded.tier, nats_url = excluded.nats_url, "
+        "subject_prefix = excluded.subject_prefix, "
+        "wire_format = excluded.wire_format, labels = excluded.labels");
+    if (!insert.is_valid())
+        return std::unexpected(insert.step().error());
+
+    // created_at is deliberately not written: the stored timestamp records when
+    // the operator first added the instance, which an edit must not move.
+    if (auto bound = insert.bind(1, row.id); !bound)
+        return bound;
+    if (auto bound = insert.bind(2, row.name); !bound)
+        return bound;
+    if (auto bound = insert.bind(3, dom::to_string(row.tier)); !bound)
+        return bound;
+    if (auto bound = insert.bind(4, row.nats_url); !bound)
+        return bound;
+    if (auto bound = insert.bind(5, row.subject_prefix); !bound)
+        return bound;
+    if (auto bound = insert.bind(6, row.wire_format); !bound)
+        return bound;
+    if (auto bound = insert.bind(7, row.labels); !bound)
+        return bound;
+
+    auto stepped = insert.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+sqlite::result<void> instance_repository::remove(std::string_view id) {
+    sqlite::statement query(db_->handle(), "DELETE FROM instance WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, id); !bound)
+        return bound;
+
+    auto stepped = query.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+}

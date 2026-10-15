@@ -1,0 +1,29 @@
+:PROPERTIES:
+:ID: hedgr.store
+:END:
+#+title: hedgr.store
+#+description: Hedgr SQLite persistence
+
+* Summary
+
+Hedgr SQLite persistence
+
+* Inputs
+
+None yet.
+
+* Outputs
+
+None yet.
+
+* Entry points
+
+None yet.
+
+* Dependencies
+
+None yet.
+
+* See also
+
+- [[file:hedgr.store.puml][Class diagram source]]

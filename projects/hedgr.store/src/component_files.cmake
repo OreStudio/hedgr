@@ -1,0 +1,33 @@
+# -*- mode: cmake; cmake-tab-width: 4; indent-tabs-mode: nil -*-
+#
+# Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License as published by the Free Software
+# Foundation; either version 3 of the License, or (at your option) any later
+# version.
+#
+set(files
+    "repository/identity_repository.cpp"
+    "repository/instance_repository.cpp"
+    "repository/schema.cpp"
+    "repository/window_repository.cpp"
+    "sqlite/database.cpp"
+    "sqlite/error.cpp"
+    "sqlite/statement.cpp"
+)
+
+# The headers are listed for the install and IDE targets.
+set(HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/export.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/hedgr.store.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/hedgr.store.repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/identity_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/instance_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/schema.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/repository/window_repository.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/sqlite/database.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/sqlite/error.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/sqlite/hedgr.store.sqlite.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.store/sqlite/statement.hpp"
+)
