@@ -75,12 +75,16 @@ variables and never persists a credential. It starts fullscreen; F11 toggles.
 build/scripts/run.sh
 #+end_src
 
-On a machine with no GPU, EGL cannot create a screen and the window never
-appears. Force software rendering for a run on such a host:
+A Wayland session needs its display named explicitly when the variable is not
+already exported:
 
 #+begin_src sh
-LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe build/scripts/run.sh
+export WAYLAND_DISPLAY=wayland-0
+build/scripts/run.sh
 #+end_src
+
+Mesa prints EGL warnings about a missing driver on a machine with no GPU. They
+are not fatal, and the run still produces a frame.
 
 To check a change without a person watching, ask for one frame; the process
 writes frame eight and leaves.
