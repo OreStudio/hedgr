@@ -35,9 +35,12 @@
 #include "implot.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <format>
 #include <string>
 #include <string_view>
@@ -58,7 +61,6 @@ using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::probe_result;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
-using hedgr::model::state::estate_history;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::browser_state;
@@ -695,18 +697,57 @@ enum class estate_state : std::uint8_t {
 }
 
 /**
- * @brief Instances by state over polling time, as one stacked bar a poll.
+ * @brief The rolling window the chart shows, in minutes.
+ *
+ * Thirty minutes is the span the ring covers at one poll every few seconds, so
+ * the window shows everything that has been kept and a bar leaving the left
+ * edge is a sample being forgotten rather than one silently dropped. It is also
+ * tens of minutes, which is about thirty bars across a strip this size and
+ * leaves each bar wide enough to read a stack out of.
+ */
+constexpr double window_minutes = 30.0;
+
+/** @brief One minute's counts and the wall minute they belong to. */
+struct minute_bar final {
+    /** @brief The minute as wall-clock minutes since the epoch. */
+    std::int64_t minute = 0;
+    std::int32_t ready = 0;
+    std::int32_t not_ready = 0;
+    std::int32_t unreachable = 0;
+    std::int32_t unknown = 0;
+};
+
+/**
+ * @brief Writes a wall-clock minute as HH:MM for the x axis.
+ *
+ * The buckets are placed on the wall clock at draw time, because the samples
+ * are on the monotonic clock, which has no hour in it. A reader wants the axis
+ * in the clock they are living in.
+ */
+int format_clock(double value, char* buffer, int size, void*) {
+    const auto seconds = static_cast<std::time_t>(value * 60.0);
+    std::tm parts{};
+    if (localtime_r(&seconds, &parts) == nullptr) {
+        std::snprintf(buffer, static_cast<std::size_t>(size), "??:??");
+        return 5;
+    }
+    return static_cast<int>(std::strftime(
+        buffer, static_cast<std::size_t>(size), "%H:%M", &parts));
+}
+
+/**
+ * @brief Instances by state over polling time, as one stacked bar a minute.
  *
  * The panel is not a collapsible header and carries no title. The operator
  * asked for the chart to be part of the window rather than a thing to open, so
  * there is nothing to collapse and nothing above it to say what it is: the axis
- * labels and the legend say that on their own.
+ * labels say what is measured and the colours say which state is which.
  *
- * A bar a poll rather than a line an instance, because the first question the
+ * A bar a minute rather than a line an instance, because the first question the
  * window is asked is about the estate and not about one deployment: how many
  * rows are green, how many amber, how many red, and how that has moved. The
- * height of a bar is the instance count at that poll, so a bar from a poll
- * where the estate was larger is taller and the chart never pretends the estate
+ * height of a bar is the instance count at that minute, so a bar from a minute
+ * when the estate was larger is taller and the chart never pretends the estate
  * has always had its present size.
  */
 void draw_dashboard(const render_input& input) {
@@ -725,89 +766,220 @@ void draw_dashboard(const render_input& input) {
         const auto& history = input.probes.estate();
         const auto count = history.size();
 
-        constexpr ImPlotFlags plot_flags = ImPlotFlags_None;
+        /*
+         * No legend, because the colours are the identification. The axis
+         * labels say what is measured, and a key naming red, amber and green
+         * beside a stack drawn in them is the same fact said twice.
+         */
+        constexpr ImPlotFlags plot_flags = ImPlotFlags_NoLegend;
 
         /*
-         * The x axis is inverted because its values count backwards from the
-         * newest poll, so the strip reads left to right as the last minutes and
-         * ends at now. The y axis fits the counts, whose top is the largest the
-         * estate has been in the window.
+         * The x axis is not fitted. Its limits are the rolling window below, so
+         * the bars keep a fixed pixel width and the chart does not rescale as
+         * polls arrive, which is what an autofitting axis does. The y axis fits
+         * the counts, which is the only thing that should move.
          */
-        constexpr ImPlotAxisFlags x_flags =
-            ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Invert;
+        constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_None;
         constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit;
 
         if (ImPlot::BeginPlot(
                 "##estate-over-time", ImVec2(-1.0f, -1.0f), plot_flags)) {
-            ImPlot::SetupAxes(
-                "time (seconds ago)", "instances", x_flags, y_flags);
+            ImPlot::SetupAxes("time", "instances", x_flags, y_flags);
 
             /*
-             * An empty history draws the axes and no bars rather than a crash,
-             * and it draws no legend, because no item was created to name.
+             * The anchor: the newest sample stands in for now, and the wall
+             * clock read at draw time is what the axis is labelled in. The
+             * samples carry a monotonic clock, which has no hour in it, so the
+             * two are married here at the only place a reader looks. The frame's
+             * own monotonic clock is the other half of the pair, which is what
+             * keeps a sample's wall time fixed as the run advances instead of
+             * drifting between polls.
+             */
+            const double now_wall_s = std::chrono::duration<double>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            const double now_minutes = now_wall_s / 60.0;
+            const double window_start = now_minutes - window_minutes;
+
+            /*
+             * The rolling window is explicit and always set, so its right edge
+             * is now and it walks forward on its own. This is one of the three
+             * things that keep a bar a fixed number of pixels for the life of
+             * the run. The others are the bar width of a fixed fraction of a
+             * minute and the plot's own width, which is the window's width on
+             * screen. A bar is therefore always one window-width divided by the
+             * window's minutes, whatever the data does. Letting this axis
+             * autofit would break that and resize every bar as a poll arrived,
+             * so it must not be "fixed" by fitting.
+             */
+            ImPlot::SetupAxisLimits(ImAxis_X1, window_start, now_minutes,
+                ImPlotCond_Always);
+
+            /*
+             * A tick on every minute of the window, and a label only every
+             * fifth one. ImPlot's own locator would choose a round interval like
+             * five or ten minutes and leave the other minutes without a tick,
+             * which would leave bars with no mark to belong to and make the
+             * reader count the wrong number of them. The labels are thinned
+             * instead, because the bars are the data and a label is only there
+             * to date them.
+             */
+            constexpr std::int64_t label_every_minutes = 5;
+            constexpr std::size_t tick_capacity = 32;
+            std::array<std::array<char, 6>, tick_capacity> tick_text{};
+            std::array<const char*, tick_capacity> tick_labels{};
+            std::array<double, tick_capacity> tick_values{};
+            int tick_count = 0;
+            for (std::int64_t minute =
+                     static_cast<std::int64_t>(std::ceil(window_start));
+                 minute <= static_cast<std::int64_t>(std::floor(now_minutes))
+                     && tick_count < static_cast<int>(tick_capacity);
+                 ++minute) {
+                tick_values[tick_count] = static_cast<double>(minute);
+                tick_labels[tick_count] = tick_text[tick_count].data();
+                if (minute % label_every_minutes == 0)
+                    format_clock(static_cast<double>(minute),
+                        tick_text[tick_count].data(), 6, nullptr);
+                else
+                    tick_text[tick_count][0] = '\0';
+                ++tick_count;
+            }
+            if (tick_count > 0)
+                ImPlot::SetupAxisTicks(ImAxis_X1, tick_values.data(),
+                    tick_count, tick_labels.data());
+
+            /*
+             * An empty history draws the axes and no bars rather than a crash.
              */
             if (count > 0) {
                 const auto* samples = history.data();
-                const auto newest_ns = samples[count - 1].observed_at_ns;
+                const auto now_mono_ns = input.now_ns;
 
                 /*
-                 * The bar width is the latest poll interval rather than a
-                 * constant, so the bars stay one a poll whatever cadence the
-                 * runtime keeps. The floor stops a single poll from drawing a
-                 * bar of no width.
+                 * Several polls inside one minute fold into that minute's bar.
+                 * The fold keeps the last poll of the minute, so a bar says
+                 * where the estate stood at the end of its minute, and an
+                 * average would put a fraction of an instance on an axis
+                 * measured in whole ones. A minute with no sample is left out
+                 * entirely, which draws a gap rather than a zero-height stack.
                  */
-                double bar_width = 5.0;
-                if (count > 1) {
-                    const double gap = static_cast<double>(
-                        newest_ns - samples[count - 2].observed_at_ns) / 1e9;
-                    bar_width = std::max(0.5, gap);
-                }
-
-                /*
-                 * One array per state, each holding the top of that state's
-                 * slice rather than its own count. ImPlot draws a bar from zero
-                 * to its value, so a stack is painted by drawing the full bar
-                 * first and each shorter bar over it in turn. The arrays live
-                 * on the stack because the ring's capacity is a compile time
-                 * bound.
-                 */
-                std::array<double, estate_history::capacity> xs{};
-                std::array<double, estate_history::capacity> ready_top{};
-                std::array<double, estate_history::capacity> not_ready_top{};
-                std::array<double, estate_history::capacity> unreachable_top{};
-                std::array<double, estate_history::capacity> unknown_top{};
-
+                constexpr std::size_t bucket_capacity = 64;
+                std::array<minute_bar, bucket_capacity> bars{};
+                std::size_t bar_count = 0;
+                std::int64_t current_minute = -1;
+                const auto first_minute =
+                    static_cast<std::int64_t>(std::floor(now_minutes))
+                    - static_cast<std::int64_t>(window_minutes);
                 for (std::size_t index = 0; index < count; ++index) {
                     const auto& sample = samples[index];
-                    xs[index] = static_cast<double>(
-                        newest_ns - sample.observed_at_ns) / 1e9;
-                    ready_top[index] = static_cast<double>(sample.ready);
-                    not_ready_top[index] =
-                        ready_top[index] + sample.not_ready;
-                    unreachable_top[index] =
-                        not_ready_top[index] + sample.unreachable;
-                    unknown_top[index] =
-                        unreachable_top[index] + sample.unknown;
+                    const double age_s = static_cast<double>(
+                        now_mono_ns - sample.observed_at_ns) / 1e9;
+                    const auto minute = static_cast<std::int64_t>(
+                        std::floor((now_wall_s - age_s) / 60.0));
+                    if (minute < first_minute)
+                        continue;
+                    if (minute != current_minute) {
+                        if (bar_count == bars.size())
+                            break;
+                        bars[bar_count] = minute_bar{};
+                        bars[bar_count].minute = minute;
+                        current_minute = minute;
+                        ++bar_count;
+                    }
+                    auto& bar = bars[bar_count - 1];
+                    bar.ready = sample.ready;
+                    bar.not_ready = sample.not_ready;
+                    bar.unreachable = sample.unreachable;
+                    bar.unknown = sample.unknown;
                 }
 
                 /*
-                 * Drawn from the top of the stack down, so the colour at the
-                 * bottom of a bar is the last one painted and stays visible.
+                 * A bar is a bar and not a band: the slot a bar occupies is one
+                 * minute of x and the bar fills only most of it, so the gap
+                 * between neighbours is part of the arithmetic rather than an
+                 * accident of the width, and a minute with no sample is simply
+                 * absent. The slot and the bar are fractions of the fixed
+                 * window, so a bar's pixel width does not move as polls arrive.
                  */
-                const auto stack = [&](estate_state state,
-                                       const std::array<double,
-                                           estate_history::capacity>& tops) {
+                constexpr double slot_minutes = 1.0;
+                constexpr double bar_minutes = 0.8;
+
+                std::array<double, bucket_capacity> xs{};
+                for (std::size_t index = 0; index < bar_count; ++index) {
+                    /*
+                     * Centred on its own minute, so a bar and the tick beneath
+                     * it agree about which minute the bar is.
+                     */
+                    xs[index] = static_cast<double>(bars[index].minute)
+                        + slot_minutes / 2.0;
+                }
+
+                const auto state_count = [](const minute_bar& bar,
+                                             estate_state state) -> std::int32_t {
+                    switch (state) {
+                    case estate_state::ready:
+                        return bar.ready;
+                    case estate_state::not_ready:
+                        return bar.not_ready;
+                    case estate_state::unreachable:
+                        return bar.unreachable;
+                    case estate_state::unknown:
+                        return bar.unknown;
+                    }
+                    return 0;
+                };
+                const auto state_top = [](const minute_bar& bar,
+                                           estate_state state) -> std::int32_t {
+                    switch (state) {
+                    case estate_state::ready:
+                        return bar.ready;
+                    case estate_state::not_ready:
+                        return bar.ready + bar.not_ready;
+                    case estate_state::unreachable:
+                        return bar.ready + bar.not_ready + bar.unreachable;
+                    case estate_state::unknown:
+                        return bar.ready + bar.not_ready + bar.unreachable
+                            + bar.unknown;
+                    }
+                    return 0;
+                };
+
+                /*
+                 * Drawn from the top of the stack down, because ImPlot paints
+                 * each item over the ones before it, so the colour at the bottom
+                 * of a bar is the last one painted and stays visible. A state is
+                 * given a bar only where it actually has instances, so a state
+                 * with a zero count leaves no segment behind for a border to
+                 * turn into a bar of its own.
+                 */
+                constexpr estate_state draw_order[] = {
+                    estate_state::unknown,
+                    estate_state::unreachable,
+                    estate_state::not_ready,
+                    estate_state::ready,
+                };
+
+                std::array<double, bucket_capacity> segment_xs{};
+                std::array<double, bucket_capacity> segment_tops{};
+                for (const auto state : draw_order) {
+                    std::size_t segments = 0;
+                    for (std::size_t index = 0; index < bar_count; ++index) {
+                        if (state_count(bars[index], state) == 0)
+                            continue;
+                        segment_xs[segments] = xs[index];
+                        segment_tops[segments] =
+                            static_cast<double>(state_top(bars[index], state));
+                        ++segments;
+                    }
+                    if (segments == 0)
+                        continue;
+
                     const ImVec4 colour = state_colour(state);
                     const ImPlotSpec spec(ImPlotProp_FillColor, colour,
                         ImPlotProp_LineColor, colour);
-                    ImPlot::PlotBars(state_label(state), xs.data(), tops.data(),
-                        static_cast<int>(count), bar_width, spec);
-                };
-
-                stack(estate_state::unknown, unknown_top);
-                stack(estate_state::unreachable, unreachable_top);
-                stack(estate_state::not_ready, not_ready_top);
-                stack(estate_state::ready, ready_top);
+                    ImPlot::PlotBars(state_label(state), segment_xs.data(),
+                        segment_tops.data(), static_cast<int>(segments),
+                        bar_minutes, spec);
+                }
             }
 
             ImPlot::EndPlot();
@@ -890,24 +1062,12 @@ void activate_instance(const render_input& input, window_ui_state& state,
 
 void instance_window_actions(const render_input& input, window_ui_state& state) {
     /*
-     * A vertical rule between the browser's own actions and this window's, so
-     * the one row reads as two groups rather than as six unrelated buttons.
-     */
-    ImGui::SameLine();
-    /*
-     * Separator(), not SeparatorText(""). ImGui's Separator() asks the current
-     * layout which way it runs and draws a vertical rule inside a horizontal
-     * strip, which is the whole point here. SeparatorText always draws a
-     * horizontal rule with a label, so inside this strip it ended the row and
-     * pushed the rest of the buttons onto a second one, which read as two
-     * toolbars.
+     * A rule between the browser's own actions and this window's, so the strip
+     * reads as two groups rather than as a column of unrelated buttons.
+     * Separator() asks the current layout which way it runs, and the strip is a
+     * vertical stack, so it draws a horizontal rule across the strip.
      */
     ImGui::Separator();
-    /*
-     * The separator advanced the line, so the first host action has to
-     * rejoin the row or it lands on a second one.
-     */
-    ImGui::SameLine();
 
     /*
      * Probe-all belongs here rather than in the application's toolbar: it acts
@@ -920,7 +1080,6 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
         input.commands.push(std::move(request));
     }
 
-    ImGui::SameLine();
     if (widget::icon_button("open-accounts", icon::account,
             "Open the accounts of the selected instance"))
         open_accounts_window(input, state.browser.selected_leaf);

@@ -513,24 +513,12 @@ void accounts_window_actions(const render_input& input,
     using hedgr::model::domain::store_lock;
 
     /*
-     * A vertical rule between the browser's own actions and this window's, so
-     * the one row reads as two groups rather than as six unrelated buttons.
-     */
-    ImGui::SameLine();
-    /*
-     * Separator(), not SeparatorText(""). ImGui's Separator() asks the current
-     * layout which way it runs and draws a vertical rule inside a horizontal
-     * strip, which is the whole point here. SeparatorText always draws a
-     * horizontal rule with a label, so inside this strip it ended the row and
-     * pushed the rest of the buttons onto a second one, which read as two
-     * toolbars.
+     * A rule between the browser's own actions and this window's, so the strip
+     * reads as two groups rather than as a column of unrelated buttons.
+     * Separator() asks the current layout which way it runs, and the strip is a
+     * vertical stack, so it draws a horizontal rule across the strip.
      */
     ImGui::Separator();
-    /*
-     * The separator advanced the line, so the first host action has to
-     * rejoin the row or it lands on a second one.
-     */
-    ImGui::SameLine();
 
     const bool have_selection = !state.browser.selected_leaf.empty();
     const auto selected = have_selection

@@ -509,7 +509,6 @@ void draw_toolbar(const widget::browser_model& model,
         }
     }
 
-    ImGui::SameLine();
     {
         /*
          * A folder is created inside the selection, root included, which is one
@@ -526,20 +525,18 @@ void draw_toolbar(const widget::browser_model& model,
 
     /*
      * The host's own actions, in the middle of the strip and after the two
-     * "add" controls: the browser's half of the row is what the tree is for,
+     * "add" controls: the browser's half of the column is what the tree is for,
      * and the host's half is what the whole window is for, which is the more
      * prominent thing and belongs where the eye arrives first among the rest.
      */
     if (model.window_actions != nullptr) {
         /*
-         * The browser owns the row and the host contributes to it, rather than
-         * the host having to remember to begin by joining it.
+         * The browser owns the strip and the host contributes to it, rather
+         * than the host having to remember to begin by joining it.
          */
-        ImGui::SameLine();
         model.window_actions(input, window);
     }
 
-    ImGui::SameLine();
     if (widget::icon_button("edit", icon::edit, "Edit the selected entry",
             writable && have_leaf)
         && model.edit_leaf != nullptr) {
@@ -547,7 +544,6 @@ void draw_toolbar(const widget::browser_model& model,
     }
 
     if (model.can_duplicate) {
-        ImGui::SameLine();
         if (widget::icon_button("duplicate", icon::duplicate,
                 "Copy the selected entry", writable && have_leaf)
             && model.duplicate_leaf != nullptr) {
@@ -555,14 +551,13 @@ void draw_toolbar(const widget::browser_model& model,
         }
     }
 
-    ImGui::SameLine();
     {
         /*
          * Removal is offered for a leaf and for a folder that is not the root.
          * The root is not offered it at all -- see @c affordances_for -- and
-         * that is why the button is disabled rather than absent here: the
-         * toolbar is one row, and a button that vanished as the selection moved
-         * would make the row jump under the cursor.
+         * that is why the button is disabled rather than absent here: the strip
+         * is a fixed column, and a button that vanished as the selection moved
+         * would make the column jump under the cursor.
          */
         const bool allowed = writable && (have_leaf || folder_removable);
         if (widget::icon_button("remove", icon::remove,
@@ -573,7 +568,6 @@ void draw_toolbar(const widget::browser_model& model,
     }
 
     if (model.can_refresh) {
-        ImGui::SameLine();
         if (widget::icon_button("probe-one", icon::refresh,
                 "Probe the selected instance now", writable && have_leaf)) {
             command request;
@@ -584,12 +578,15 @@ void draw_toolbar(const widget::browser_model& model,
     }
 
     /*
-     * The padlock closes the strip, after every action. It is the one control
-     * here that is not about the thing being browsed, and putting it at the end
-     * keeps it from reading as one more thing to do to the selected row.
+     * The padlock is the one control here that is not about the thing being
+     * browsed, so it is pushed to the foot of the strip and away from the
+     * actions that change a row. The strip is as tall as the tree beside it, so
+     * the bottom is where the far edge of the old row used to be.
      */
     if (model.lock != nullptr) {
-        ImGui::SameLine();
+        const float foot = ImGui::GetWindowHeight()
+            - ImGui::GetFrameHeight() - ImGui::GetStyle().WindowPadding.y;
+        ImGui::SetCursorPosY(foot);
         draw_lock_button(*model.lock);
     }
 }
@@ -1177,9 +1174,6 @@ void render_browser(const browser_model& model, window_ui_state& window,
     bool any_visible = false;
     mark_visible(model, rows, std::string_view{state.filter.data()}, any_visible);
 
-    draw_toolbar(model, window, input);
-    ImGui::Separator();
-
     /*
      * The filter box sits above the tree, because it narrows the tree and the
      * list together: a box beside either of them would look like it narrowed
@@ -1192,9 +1186,29 @@ void render_browser(const browser_model& model, window_ui_state& window,
         state.filter.data(), state.filter.size());
 
     const ImVec2 region = ImGui::GetContentRegionAvail();
-    const float tree_width = std::max(region.x * 0.34f, 180.0f);
+    const ImGuiStyle& style = ImGui::GetStyle();
+
+    /*
+     * The strip is a column of square icon buttons, so its width is one button
+     * plus the padding a child leaves on each side. Measuring that from the
+     * style rather than naming a number keeps the strip exactly as wide as the
+     * controls it holds, whatever frame height the theme installs.
+     */
+    const float strip_width =
+        ImGui::GetFrameHeight() + style.WindowPadding.x * 2.0f;
+
+    /*
+     * The tree and the list share what the strip does not take, and they divide
+     * it the way they always have: the tree takes a third and the list takes
+     * the rest. The strip's width and the gaps between the three children are
+     * subtracted from the available width rather than guessed at, so the three
+     * fit the window exactly and the split does not depend on a magic number.
+     */
+    const float beside =
+        std::max(region.x - strip_width - style.ItemSpacing.x, 0.0f);
+    const float tree_width = std::max(beside * 0.34f, 180.0f);
     const float list_width =
-        std::max(region.x - tree_width - ImGui::GetStyle().ItemSpacing.x, 200.0f);
+        std::max(beside - tree_width - style.ItemSpacing.x, 200.0f);
     /*
      * A floor on the height as well as the width. A window squeezed by a
      * layout would otherwise clip the tree to one row and the list to none,
@@ -1203,6 +1217,19 @@ void render_browser(const browser_model& model, window_ui_state& window,
      */
     const float body_height = std::max(region.y - 60.0f, 240.0f);
 
+    /*
+     * The strip is a child of its own so the controls inside it stack one to a
+     * row and the tree, which begins on the same line, is not pushed down by
+     * them. Bordered like the tree and the list, so the three read as the three
+     * regions of one body.
+     */
+    if (ImGui::BeginChild("##browser-actions", ImVec2(strip_width, body_height),
+            ImGuiChildFlags_Borders)) {
+        draw_toolbar(model, window, input);
+    }
+    ImGui::EndChild();
+
+    ImGui::SameLine();
     if (ImGui::BeginChild("##browser-tree",
             ImVec2(tree_width, body_height), ImGuiChildFlags_Borders)) {
         /*
