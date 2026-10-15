@@ -44,13 +44,15 @@ constexpr float gap_ratio = 0.5f;
  * @brief The pill's text size, as a fraction of the body's.
  *
  * Small enough to read as a badge rather than as a sentence of the row's own
- * text, and large enough to read without leaning in at 1920 wide. Seven tenths
- * of the body size leaves the pill at about two thirds of a row's height, which
- * is what a badge is; the DPI and main font scale factors are applied on top,
- * so a 4K display scales the badge with everything else rather than leaving it
- * behind at a fixed pixel size.
+ * text, and large enough to read without leaning in at 1920 wide. Just over
+ * half the body size puts the badge a little above half a row's height, which
+ * is what a badge is: the label column is the last one and the name beside it
+ * is what the eye is on, so a pill that competes with the row is a pill that
+ * wins. The DPI and main font scale factors are applied on top, so a 4K display
+ * scales the badge with everything else rather than leaving it behind at a
+ * fixed pixel size.
  */
-constexpr float pill_font_scale = 0.7f;
+constexpr float pill_font_scale = 0.55f;
 
 /** @brief A colour that stands for a whole set: the mean of their fills. */
 [[nodiscard]] std::uint32_t mean_colour(const std::vector<label_pill>& pills,

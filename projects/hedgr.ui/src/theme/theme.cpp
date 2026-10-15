@@ -171,7 +171,7 @@ ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {
     case hedgr::model::domain::session_status::authenticated:
         return IM_COL32(0, 200, 83, 255);
     case hedgr::model::domain::session_status::failed:
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
     }
     return IM_COL32(212, 212, 212, 255);
 }
@@ -187,7 +187,7 @@ ImU32 label_colour(hedgr::model::domain::label_colour value) noexcept {
     case hedgr::model::domain::label_colour::amber:
         return IM_COL32(255, 193, 7, 255);
     case hedgr::model::domain::label_colour::red:
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
     case hedgr::model::domain::label_colour::purple:
         return IM_COL32(186, 104, 200, 255);
     }
@@ -250,7 +250,7 @@ ImU32 reachability_colour(hedgr::model::domain::reachability value) noexcept {
     case hedgr::model::domain::reachability::unknown:
         return IM_COL32(128, 128, 128, 255);
     case hedgr::model::domain::reachability::unreachable:
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
     case hedgr::model::domain::reachability::reachable:
         return IM_COL32(0, 200, 83, 255);
     }
@@ -288,7 +288,7 @@ ImU32 probe_state_colour(
      * story: nothing is known about the service behind it.
      */
     if (result.reach == reachability::unreachable)
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
 
     /*
      * Reachable and not finished. Both readiness answers that are not ready
@@ -356,7 +356,7 @@ ImU32 store_lock_colour(hedgr::model::domain::store_lock value) noexcept {
     case hedgr::model::domain::store_lock::unlocked:
         return IM_COL32(128, 128, 128, 255);
     case hedgr::model::domain::store_lock::failed:
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
     }
     return IM_COL32(212, 212, 212, 255);
 }
@@ -369,7 +369,7 @@ ImU32 strength_colour(int strength) noexcept {
     switch (strength) {
     case 0:
     case 1:
-        return IM_COL32(255, 23, 68, 255);
+        return failure_colour;
     case 2:
         return IM_COL32(255, 193, 7, 255);
     case 3:

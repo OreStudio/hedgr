@@ -607,6 +607,7 @@ instance_manager::start(const std::filesystem::path& database_path,
         last_error_ = store_failure(
             std::format("cannot open the store at {}", database_path.string()),
             opened.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     database_ = std::make_unique<sqlite::database>(std::move(opened).value());
@@ -614,6 +615,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (auto applied = database_->apply_schema(); !applied) {
         last_error_ = store_failure("cannot bring the store up to date",
             applied.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
 
@@ -645,6 +647,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!has_master) {
         last_error_ = store_failure("cannot read the store's master password",
             has_master.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     store_lock_ = has_master.value() ? model::domain::store_lock::locked
@@ -662,6 +665,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!instances) {
         last_error_ = store_failure("cannot read the stored instances",
             instances.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     instances_.clear();
@@ -672,6 +676,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!accounts) {
         last_error_ = store_failure("cannot read the stored accounts",
             accounts.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     accounts_.clear();
@@ -682,6 +687,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!folders) {
         last_error_ = store_failure("cannot read the stored folders",
             folders.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     folders_.clear();
@@ -692,6 +698,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!labels) {
         last_error_ = store_failure("cannot read the stored labels",
             labels.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     labels_.clear();
@@ -702,6 +709,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!labellings) {
         last_error_ = store_failure("cannot read the stored label attachments",
             labellings.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     labellings_.clear();
@@ -712,6 +720,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     if (!windows) {
         last_error_ = store_failure("cannot read the stored windows",
             windows.error());
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
     }
     windows_.clear();
@@ -754,8 +763,10 @@ instance_manager::start(const std::filesystem::path& database_path,
      * would not find the instance and would seed it again, so reporting it now
      * is what stops the interface from showing an instance that no store has.
      */
-    if (!last_error_.empty())
+    if (!last_error_.empty()) {
+        startup_failure_ = last_error_;
         return std::unexpected(last_error_);
+    }
 
     started_ = true;
     return {};
@@ -1073,6 +1084,22 @@ std::string instance_manager::open_accounts_window(const std::string& instance_i
 }
 
 void instance_manager::handle(command::command& cmd) {
+    /*
+     * The previous failure is cleared as the next request starts, so what the
+     * interface shows is the outcome of the last thing the operator asked for
+     * and not the outcome of something they asked for a minute ago. Without
+     * this the note would only ever be written and never read back down: a
+     * removal that succeeded after one that was refused would leave the bar
+     * reporting the refusal, which is a failure the store did not have.
+     *
+     * Cleared for every command and not only for the ones that can fail, so a
+     * command that cannot fail -- a window opening, a probe -- also takes down
+     * a stale note. An error the handler then sets lands after this line and
+     * survives, which is what makes the bar's red mean "the last thing you did
+     * did not work".
+     */
+    last_error_.clear();
+
     switch (cmd.kind) {
     case command::command_kind::save_instance:
         do_save_instance(cmd);

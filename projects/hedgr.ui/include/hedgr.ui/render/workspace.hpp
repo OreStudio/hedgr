@@ -84,6 +84,16 @@ public:
 
 private:
     /**
+     * @brief Draws the notice that says the store could not be opened.
+     *
+     * The only surface this class draws that does not come from a window row,
+     * because it is the report of the failure that leaves the window table
+     * empty. Nothing at all is drawn when the store came up, so a healthy run
+     * is unchanged by it.
+     */
+    void draw_startup_failure(const render_input& input);
+
+    /**
      * @brief Draws the password form, when the operator has opened it.
      *
      * Two modes, chosen by the state and not by the caller: @c absent asks for
@@ -190,6 +200,17 @@ private:
      * operator came back to the window would be reporting history as news.
      */
     bool environment_announced_ = false;
+
+    /**
+     * @brief Whether the startup notice's window is still up.
+     *
+     * Re-armed whenever the notice appears and cleared by the title bar's
+     * close button, which is the same arrangement the password prompt uses.
+     * The notice is not a modal, so putting it down is allowed: the
+     * application behind it still runs, and hiding the report of the failure
+     * does not undo the failure.
+     */
+    bool startup_notice_open_ = true;
 
     /**
      * @brief The one-line notices the windows show and the frame ages.

@@ -141,8 +141,38 @@ struct tree_leaf final {
     /** @brief Shown text in the tree and, by default, in the list. */
     std::string name;
 
-    /** @brief Icon drawn before the name in the list, or empty. */
+    /**
+     * @brief The entry's glyph, or empty.
+     *
+     * Drawn in the tree and nowhere else. There is one set of icons for an
+     * entry: the tree has always drawn one, the list used to draw the same one
+     * again beside it, and an entry wearing the same face twice in one window
+     * reads as two entries rather than as one. The list is name, host, subject
+     * and labels; the glyph is what the tree is for.
+     */
     const char* icon = nullptr;
+
+    /**
+     * @brief The colour the glyph is drawn in, or zero for the ordinary text
+     * colour.
+     *
+     * The state of the entry, which is why the glyph is worth having at all: an
+     * instance's reachability and readiness are one colour on one icon rather
+     * than a column of their own. The host decides what the colour means; the
+     * browser only paints the glyph with it and leaves the name in the ordinary
+     * colour, because a whole row in the state's colour is a row that shouts.
+     */
+    std::uint32_t icon_colour = 0;
+
+    /**
+     * @brief What the glyph's colour means, as a tooltip on the glyph.
+     *
+     * The low-level cause belongs with the state it explains, and the state is
+     * the glyph: hovering the icon that is amber is how a reader asks why it is
+     * amber. It travels as text rather than as a callback because it is a
+     * sentence the host already has.
+     */
+    std::string icon_tooltip;
 
     /**
      * @brief Extra text the filter also reads, beyond the name and the cells.

@@ -90,6 +90,36 @@ shows_instances(const render_input& input) noexcept;
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept;
 
+/**
+ * @brief What the startup notice says, as a heading and the reason under it.
+ *
+ * The reason is the runtime's own sentence, carried through unchanged: it
+ * already names the file, both schema versions where that is the fault, and
+ * the one thing an operator can do about it. Rewriting it here would be a
+ * second copy of the store's diagnosis, free to drift from the first.
+ */
+struct startup_notice final {
+    /** @brief What the notice is about, in a few words. */
+    std::string heading;
+
+    /** @brief The failure as the runtime recorded it. */
+    std::string reason;
+
+    /** @brief Whether there is a notice to draw at all. */
+    [[nodiscard]] bool empty() const noexcept { return reason.empty(); }
+};
+
+/**
+ * @brief The notice for @p startup_failure, which is empty when there is none.
+ *
+ * A pure function of the failure text so that the decision to warn the operator
+ * can be tested without a GL context, which is what every other rule in this
+ * component does. Nothing here reads the store: the whole point of the notice
+ * is that it is the one surface left when the store is what failed.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT startup_notice
+startup_notice_for(std::string_view startup_failure);
+
 }
 
 #endif

@@ -28,6 +28,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <optional>
 #include <string>
@@ -41,6 +42,19 @@ namespace widget = hedgr::ui::widget;
 namespace icon = hedgr::ui::icon;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/**
+ * @brief Whether a capture asked for every folder to be open.
+ *
+ * A capture is not a person and cannot click an expander. Without this, a frame
+ * taken of a tree whose folders happen to be shut shows a tree with no entries
+ * in it, which proves nothing about how an entry is drawn. Read once, because
+ * the environment does not change while the process runs.
+ */
+[[nodiscard]] bool expand_tree_for_capture() {
+    static const bool expand = std::getenv("HEDGR_CAPTURE_EXPAND_TREE") != nullptr;
+    return expand;
+}
 
 /**
  * @brief A folder or a leaf, flattened into one row of the drawn tree.
@@ -91,7 +105,7 @@ struct tree_row final {
 /**
  * @brief Whether the row is the tree's root.
  *
- * Defined ahead of @c icon_of, which is what a folder's glyph depends on.
+ * Defined ahead of @c glyph_of, which is what a folder's glyph depends on.
  */
 [[nodiscard]] bool is_root_of(const widget::browser_model& model,
     const tree_row& row) {
@@ -99,22 +113,38 @@ struct tree_row final {
         && model.folders[row.index].is_root;
 }
 
+/** @brief The row's icon and its colour, whichever list it came from. */
+struct row_glyph final {
+    const char* glyph = nullptr;
+    std::uint32_t colour = 0;
+    const std::string* tooltip = nullptr;
+};
+
 /**
- * @brief The row's glyph, whichever list it came from.
+ * @brief The row's glyph, its colour and its tooltip.
  *
- * A leaf takes its glyph from the model rather than from a constant here, so
- * that the tree and the list are two drawings of one entry rather than two
- * guesses at what an entry looks like: the list has always read the leaf's own
- * icon, and a leaf the tree drew with a different one would be the same entry
- * wearing two faces in one window.
+ * A folder has a glyph chosen from its place in the tree and no colour, which
+ * is why this is a struct and not a single pointer: the leaf's colour and its
+ * tooltip only exist on a leaf, and reaching for them on a folder would be a
+ * read of the wrong list.
+ *
+ * A leaf's glyph and colour come from the model rather than from constants
+ * here, so that the state the host computed is what the tree paints. The list
+ * draws no glyph at all: one entry has one icon, in the tree.
  */
-[[nodiscard]] const char* icon_of(const widget::browser_model& model,
+[[nodiscard]] row_glyph glyph_of(const widget::browser_model& model,
     const tree_row& row) {
     if (row.kind == widget::node_kind::folder) {
-        return is_root_of(model, row) ? icon::folder_root : icon::folder;
+        return row_glyph{
+            .glyph = is_root_of(model, row) ? icon::folder_root : icon::folder,
+        };
     }
-    const auto* leaf_icon = model.leaves[row.index].icon;
-    return leaf_icon != nullptr ? leaf_icon : icon::instance;
+    const auto& leaf = model.leaves[row.index];
+    return row_glyph{
+        .glyph = leaf.icon != nullptr ? leaf.icon : icon::instance,
+        .colour = leaf.icon_colour,
+        .tooltip = leaf.icon_tooltip.empty() ? nullptr : &leaf.icon_tooltip,
+    };
 }
 
 /** @brief The tree's root id, or empty when the model names no root. */
@@ -622,9 +652,11 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
                 ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
                 ImGuiCond_Always);
         }
+        if (expand_tree_for_capture())
+            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
 
         *row_open = ImGui::TreeNodeEx("##node", flags, "%s  %s",
-            icon_of(model, row), std::string{name_of(model, row)}.c_str());
+            glyph_of(model, row).glyph, std::string{name_of(model, row)}.c_str());
 
         if (root) {
             /*
@@ -670,10 +702,76 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
         const float indent =
             ImGui::GetStyle().IndentSpacing * static_cast<float>(row.depth);
         ImGui::Indent(indent);
-        const std::string label =
-            std::format("{}  {}", icon_of(model, row),
-                std::string{name_of(model, row)});
-        if (ImGui::Selectable(label.c_str(), selected)) {
+
+        /*
+         * The row is one selectable over the whole width, with the glyph and
+         * the name painted on top of it. Two items would mean two hit boxes and
+         * a click on the glyph that selected nothing, and it is also what lets
+         * the glyph take the state's colour while the name keeps the ordinary
+         * one: a whole row in the state's colour is a row that shouts, and the
+         * name is what the reader is looking for.
+         *
+         * The label is empty because ImGui draws a non-empty one itself, in one
+         * colour, which is the thing this row exists to avoid.
+         */
+        const float height = ImGui::GetFrameHeight();
+        const bool clicked = ImGui::Selectable("##leaf", selected,
+            ImGuiSelectableFlags_AllowDoubleClick,
+            ImVec2(ImGui::GetContentRegionAvail().x, height));
+
+        const row_glyph glyph = glyph_of(model, row);
+        const std::string_view label = name_of(model, row);
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+
+        /*
+         * Screen coordinates, which is the space a command written into a
+         * window's draw list is measured in: the item's rectangle is already
+         * there, and nothing here may subtract the window position.
+         *
+         * The vertical centre is the item's own top plus the padding ImGui puts
+         * around a row's text, so the glyph and the name sit on the same line
+         * as the folders' labels do.
+         *
+         * Begun where ImGui puts the label of a node, so the entries of one
+         * tree line up whether they are folders drawn by the tree API or
+         * entries drawn by hand.
+         */
+        /*
+         * Both the glyph and the name are submitted through the same calls the
+         * rest of the interface uses, rather than painted into the draw list at
+         * a size chosen here. That is what makes the entries' glyphs the same
+         * size as the folders' above them and as the toolbar's: the size comes
+         * from the font the way it does everywhere else, instead of from a
+         * number this row picked. A row drawn at a size of its own reads as a
+         * row that is shouting.
+         *
+         * They are drawn over the selectable, at the position it starts its own
+         * label at, so an entry lines up with a folder drawn by the tree API.
+         */
+        const ImVec2 row_min = ImGui::GetItemRectMin();
+        ImGui::SetCursorScreenPos(
+            ImVec2(row_min.x + ImGui::GetTreeNodeToLabelSpacing(),
+                row_min.y + ImGui::GetStyle().FramePadding.y));
+
+        if (glyph.colour != 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, glyph.colour);
+            ImGui::TextUnformatted(glyph.glyph);
+            ImGui::PopStyleColor();
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+        }
+        ImGui::TextUnformatted(label.data(), label.data() + label.size());
+
+        /*
+         * The tooltip is the state's own sentence, and it answers on the row:
+         * the glyph is painted by a call that submits no item, so the row is
+         * what the pointer can rest on.
+         */
+        if (glyph.tooltip != nullptr)
+            ImGui::SetItemTooltip("%s", glyph.tooltip->c_str());
+
+
+        if (clicked) {
             state.selected_leaf = std::string{id};
             state.selected_folder.clear();
         }
@@ -790,34 +888,6 @@ void draw_list(const widget::browser_model& model,
                      */
                     static_cast<void>(widget::label_pill_row(*pills,
                         ImGui::GetContentRegionAvail().x));
-                } else if (column == 0 && leaf.icon != nullptr) {
-                    /*
-                     * The icon is submitted as its own item rather than as one
-                     * format string with the name, because the tint below is a
-                     * pushed text colour and would otherwise paint the name as
-                     * well: a whole row in the state's colour is a row that
-                     * shouts, and the name is what the reader is looking for.
-                     * It is also what lets the icon take the colour and the
-                     * name keep the ordinary one.
-                     */
-                    ImGui::AlignTextToFramePadding();
-                    /*
-                     * Pushed as the ImU32 it already is. An earlier version
-                     * unpacked it by hand into IM_COL32 and put red where blue
-                     * belongs, which exchanged the two channels: the icons were
-                     * drawn in the wrong colour while the rectangles beside them
-                     * were right, so it read as a rendering fault rather than as
-                     * arithmetic.
-                     */
-                    if (!cells.colours.empty() && cells.colours.front() != 0)
-                        ImGui::PushStyleColor(ImGuiCol_Text, cells.colours.front());
-                    ImGui::TextUnformatted(leaf.icon);
-                    if (!cells.colours.empty() && cells.colours.front() != 0)
-                        ImGui::PopStyleColor();
-                    if (!text.empty()) {
-                        ImGui::SameLine();
-                        ImGui::TextUnformatted(text.data(), text.data() + text.size());
-                    }
                 } else if (position < cells.colours.size()
                     && cells.colours[position] != 0) {
                     ImGui::PushStyleColor(ImGuiCol_Text, cells.colours[position]);

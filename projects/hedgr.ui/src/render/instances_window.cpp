@@ -106,46 +106,6 @@ void set_buffer(auto& buffer, std::string_view text) {
     return folders;
 }
 
-/** @brief Every live instance, as the browser wants it. */
-[[nodiscard]] std::vector<tree_leaf> instance_tree_leaves(const render_input& input) {
-    std::vector<tree_leaf> leaves;
-    const auto& layout = input.instances.layout();
-    const auto rows = input.instances.rows();
-
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
-        const auto& row = rows[index];
-        leaves.push_back(tree_leaf{row.id, row.folder_id, row.name, icon::instance,
-            std::format("{}\n{}", row.nats_url, row.subject_prefix)});
-    }
-    return leaves;
-}
-
-/** @brief Whether the folder table would accept a move of @p id under @p to. */
-[[nodiscard]] bool folder_move_allowed(const render_input& input,
-    std::string_view id, std::string_view to) {
-    const auto moving = input.folders.find(id);
-    const auto target = input.folders.find(to);
-    if (!moving || !target)
-        return false;
-
-    /* A root is what its tree is anchored by, so it is never moved. */
-    if (input.folders.get(*moving)->parent_id.empty())
-        return false;
-
-    /*
-     * The table refuses a cycle when it is asked to, but asking here is what
-     * keeps the refusal ahead of the attempt: the drop is declined and nothing
-     * is written, rather than written and then rolled back.
-     */
-    for (const auto& above : input.folders.ancestors_of(to)) {
-        if (above == id)
-            return false;
-    }
-    return input.folders.get(*moving)->parent_id != to;
-}
-
 /**
  * @brief What the last probe found about one instance, and whether one did.
  *
@@ -179,6 +139,72 @@ struct instance_status final {
         ? std::string{"the probe reported no detail"}
         : probe->detail;
     return status;
+}
+
+/**
+ * @brief Every live instance, as the browser wants it.
+ *
+ * The glyph carries the state, so the probe is read here rather than in the
+ * list's cells. An entry has one icon and it is in the tree: the state is the
+ * icon's colour, and the sentence behind that colour is the icon's tooltip,
+ * which is where a reader looks for the cause of an amber or a red one.
+ */
+[[nodiscard]] std::vector<tree_leaf> instance_tree_leaves(const render_input& input) {
+    std::vector<tree_leaf> leaves;
+    const auto& layout = input.instances.layout();
+    const auto rows = input.instances.rows();
+
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        const auto& row = rows[index];
+        const auto status = status_of(input, row.id);
+
+        tree_leaf leaf{
+            .id = row.id,
+            .parent_id = row.folder_id,
+            .name = row.name,
+            .icon = icon::instance,
+            .search_text = std::format("{}\n{}", row.nats_url, row.subject_prefix),
+        };
+        leaf.icon_colour =
+            theme::probe_state_colour(status.result, status.observed);
+
+        /*
+         * The state's own word goes first, because that is the fact the reader
+         * is looking at, and the probe's detail follows it, because that is the
+         * only place the cause of an amber or red row is written down.
+         */
+        leaf.icon_tooltip = std::format("{}\n{}",
+            theme::probe_state_word(status.result, status.observed),
+            status.detail);
+        leaves.push_back(std::move(leaf));
+    }
+    return leaves;
+}
+
+/** @brief Whether the folder table would accept a move of @p id under @p to. */
+[[nodiscard]] bool folder_move_allowed(const render_input& input,
+    std::string_view id, std::string_view to) {
+    const auto moving = input.folders.find(id);
+    const auto target = input.folders.find(to);
+    if (!moving || !target)
+        return false;
+
+    /* A root is what its tree is anchored by, so it is never moved. */
+    if (input.folders.get(*moving)->parent_id.empty())
+        return false;
+
+    /*
+     * The table refuses a cycle when it is asked to, but asking here is what
+     * keeps the refusal ahead of the attempt: the drop is declined and nothing
+     * is written, rather than written and then rolled back.
+     */
+    for (const auto& above : input.folders.ancestors_of(to)) {
+        if (above == id)
+            return false;
+    }
+    return input.folders.get(*moving)->parent_id != to;
 }
 
 /** @brief The labels attached to an owner, resolved to rows. */
@@ -753,23 +779,16 @@ constexpr std::size_t instance_label_column = 3;
 void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     widget::row_cells& cells) {
     const bool readable = shows_instances(input);
-    const auto status = status_of(input, leaf.id);
-
-    /*
-     * The row's icon carries its state, and the tooltip is why. The colour goes
-     * in the first column's slot, which is the column the icon is drawn in. The
-     * state's own word goes first in the tooltip, because that is the fact the
-     * reader is looking at, and the probe's detail follows it, because that is
-     * the only place the cause of an amber or red row is written down.
-     */
-    cells.colours.push_back(
-        theme::probe_state_colour(status.result, status.observed));
-    cells.tooltips.push_back(std::format("{}\n{}",
-        theme::probe_state_word(status.result, status.observed), status.detail));
 
     const auto handle = input.instances.find(leaf.id);
     const auto* row = handle ? input.instances.get(*handle) : nullptr;
 
+    /*
+     * Every column is text, including the first. The entry's state is on its
+     * glyph in the tree and nowhere else: the same icon drawn again in the list
+     * was a second copy of one fact, and two copies of one thing read as two
+     * facts.
+     */
     cells.texts.push_back(readable ? leaf.name : std::string{});
     cells.tooltips.emplace_back(readable && row != nullptr ? row->nats_url
                                                            : std::string{});
@@ -864,6 +883,19 @@ namespace {
 constexpr int status_row_lines = 2;
 constexpr float status_row_extra = 8.0f;
 
+/**
+ * @brief The rows an error gets, which is one more than a remark gets.
+ *
+ * The runtime's failures are whole sentences that name the record and the
+ * reason -- "cannot remove folder instance-root: it is the root of the
+ * instances tree" -- and the longest of them, the store's schema refusal,
+ * names a path and two version numbers on top of that. Two rows elide it on a
+ * narrow window, and an error that is elided is an error that will be read as
+ * whatever fits. The extra row is reserved only while an error is on the bar,
+ * so a window showing a remark is exactly the height it always was.
+ */
+constexpr int status_error_row_lines = 3;
+
 }
 
 /**
@@ -873,20 +905,68 @@ constexpr float status_row_extra = 8.0f;
  * gives it the frame's clock and the moment to age itself. Reading the clock
  * here rather than keeping one is what makes the fade frame-rate independent
  * without a timer anywhere in the interface.
+ *
+ * An error is drawn differently from a remark, and it is drawn differently in
+ * two ways at once because the difference has to survive a glance at a line
+ * that may be at the far side of the screen: a glyph in front of it and the
+ * palette's red rather than the dim grey every other message uses. A remark
+ * keeps the disabled text colour, because it is a thing that happened; red on
+ * a fade would read as a second alarm going off.
+ *
+ * The red is the palette's own, named once in the theme rather than borrowed
+ * from the lock's helper, which would tie a message about a refused save to a
+ * fact about the lock.
  */
 void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
     status.advance(now_ns);
 
+    const bool error =
+        status.severity() == widget::status_severity::error;
+
     /*
      * The fade is a style alpha rather than a colour of its own, so the line
      * keeps the interface's disabled text colour on the way out. A message
-     * that changed colour as it went would read as a second message.
+     * that changed colour as it went would read as a second message. An error
+     * never fades, so it keeps its red for as long as it is on the bar.
      */
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
-    ImGui::PushStyleColor(ImGuiCol_Text,
-        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+
+    /*
+     * An error is white behind its red glyph rather than the disabled grey a
+     * remark gets. Disabled grey is what an interface uses for something it is
+     * not offering, and a failure the operator has to act on is the opposite
+     * of that.
+     */
+    if (error) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
+        ImGui::TextUnformatted(hedgr::ui::icon::error);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+
+        /*
+         * Wrapped from where the glyph left off rather than from the line's
+         * start, because these sentences are long: the store's own schema
+         * refusal runs to three lines in this bar, and a wrap position that
+         * ignored the glyph would run the last one off the window's edge.
+         */
+        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x
+            + ImGui::GetContentRegionAvail().x);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+    } else {
+        /*
+         * A remark is wrapped from the line's start, which is where it is
+         * drawn: it has no glyph in front of it.
+         */
+        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x
+            + ImGui::GetContentRegionAvail().x);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    }
+
     ImGui::TextWrapped("%s", status.message().c_str());
     ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
     ImGui::PopStyleVar();
 }
 
@@ -896,8 +976,11 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
  * Counted from the font rather than fixed, so a theme that installs a larger
  * face gets a foot that still fits its own text.
  */
-[[nodiscard]] float status_foot_height() {
-    return ImGui::GetTextLineHeight() * static_cast<float>(status_row_lines)
+[[nodiscard]] float status_foot_height(const widget::status_bar& status) {
+    const int rows = status.severity() == widget::status_severity::error
+        ? status_error_row_lines
+        : status_row_lines;
+    return ImGui::GetTextLineHeight() * static_cast<float>(rows)
         + status_row_extra;
 }
 
@@ -1007,7 +1090,7 @@ void draw_lock_control(lock_control& lock) {
 
 void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
     lock_control& lock) {
-    const float height = status_foot_height();
+    const float height = status_foot_height(status);
 
     /*
      * The reservation: an empty child of exactly the foot's height, which

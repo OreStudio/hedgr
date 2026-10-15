@@ -31,7 +31,6 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
 #include "hedgr.ui/export.hpp"
-#include <string>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -210,6 +209,38 @@ struct render_input final {
      * include it, casts it to the texture id type the backend expects.
      */
     std::uint64_t background_texture = 0;
+
+    /**
+     * @brief Why this process has no store, or empty.
+     *
+     * The one failure that leaves nothing else to draw. When the store cannot
+     * be opened the window table is empty, so every surface the frame walks is
+     * absent and the screen is the background and nothing else; this is the
+     * reason the frame has to report on its own, with no window row and no
+     * status bar to carry it. A sentence rather than a code, because it is
+     * read by the person who has to act on it, and it already names the file
+     * and the remedy.
+     *
+     * A condition and not history: it holds for as long as this process is
+     * running without a store, which is until it is restarted.
+     */
+    std::string startup_failure;
+
+    /**
+     * @brief The runtime's latest failure, or empty.
+     *
+     * The running note @c instance_manager keeps: a save or a removal the
+     * store refused, a root that may not be removed, a credential that would
+     * not open, and the store failing to come up in the first place. Every one
+     * of those is a thing the operator did and has to be told about, so the
+     * frame raises it on the status bar as an error rather than letting it sit
+     * in a log nobody on this host reads.
+     *
+     * It clears when the runtime clears it, which a successful unlock does: a
+     * failure that has been overtaken by the store opening is not news any
+     * more, and the bar is taken down with it.
+     */
+    std::string runtime_error;
 };
 
 /**

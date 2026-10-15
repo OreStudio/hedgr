@@ -24,6 +24,7 @@
 
 using hedgr::ui::widget::status_bar;
 using hedgr::ui::widget::status_event_duration_ns;
+using hedgr::ui::widget::status_severity;
 
 namespace {
 
@@ -125,17 +126,21 @@ TEST_CASE("a condition that changes its message replaces the bar", "[status]") {
 TEST_CASE("an event notice is not wiped by a condition already on the bar",
     "[status]") {
     /*
-     * The reason the raise is idempotent at all. The event is newer than the
-     * condition and is the message the operator has not read; a condition
-     * raised again on the next frame must not take the bar back from it.
+     * A notice may not take the bar from a condition that is still true. The
+     * condition is what the operator has to act on and the notice is a remark
+     * about something that just happened; showing the remark and losing the
+     * problem for a few seconds is how a failure goes unread.
+     *
+     * The raise on the next frame is what a caller does: the condition is
+     * re-announced, and it changes nothing either way.
      */
     status_bar bar;
     bar.show_condition("unreachable", at_start);
     bar.show_event("a row was removed", at_start);
+    REQUIRE(bar.message() == "unreachable");
 
-    /* The next frame's raise, saying exactly what it said before. */
     bar.show_condition("unreachable", at_start);
-    REQUIRE(bar.message() == "a row was removed");
+    REQUIRE(bar.message() == "unreachable");
 }
 
 TEST_CASE("withdrawing a condition leaves an event notice alone", "[status]") {
@@ -165,4 +170,105 @@ TEST_CASE("an empty message is not shown", "[status]") {
     bar.show_condition("unreachable", at_start);
     bar.show_condition("", at_start);
     REQUIRE(bar.empty());
+}
+
+TEST_CASE("an error is held until another error replaces it", "[status]") {
+    /*
+     * An error is not an event. A notice describes something that happened and
+     * is worth missing if the operator looked away; a failure describes the
+     * state of the store, and a refused write that vanished after six seconds
+     * would read as a write that succeeded. So no amount of time takes it
+     * away, and the literal below is what the runtime records for a store that
+     * would not come up.
+     */
+    status_bar bar;
+    const std::string refused =
+        "cannot bring the store up to date: the store at /home/o/.cache/hedgr/"
+        "hedgr.db was written with schema version 6 but this build expects "
+        "version 7; this store is pre-release and is not migrated, so delete "
+        "the file and start again (schema mismatch)";
+
+    bar.show_error(refused, at_start);
+    REQUIRE(bar.message() == refused);
+    REQUIRE(bar.severity() == status_severity::error);
+
+    /* Long past any event's life, and still on the bar. */
+    bar.advance(at_start + status_event_duration_ns * 100);
+    REQUIRE(bar.message() == refused);
+    REQUIRE(bar.alpha(at_start + status_event_duration_ns * 100) == 1.0f);
+
+    /* Raised again on the next frame, which is what the frame does. */
+    bar.show_error(refused, at_start);
+    REQUIRE(bar.message() == refused);
+
+    /* And the next failure replaces it, because it is the newer fact. */
+    bar.show_error("cannot remove the root folder", at_start);
+    REQUIRE(bar.message() == "cannot remove the root folder");
+}
+
+TEST_CASE("a remark does not displace a failure", "[status]") {
+    /*
+     * The reason the bar has a ladder rather than a first-come rule. The store
+     * opening from the environment is a remark about how the store was opened;
+     * a save the store refused is a problem the operator has to act on. Telling
+     * them apart at a glance is the requirement, and losing the problem to the
+     * remark one frame later is the defect.
+     */
+    status_bar bar;
+    bar.show_error("cannot save instance inst-1 (constraint failed)", at_start);
+    bar.show_event("the store was opened from the environment", at_start);
+    bar.show_condition("ores.dev.brave_hopper is unreachable", at_start);
+
+    REQUIRE(bar.message() == "cannot save instance inst-1 (constraint failed)");
+    REQUIRE(bar.severity() == status_severity::error);
+
+    /*
+     * A problem outranks a remark the other way round: a remark may not take
+     * the bar from a condition that is still true either.
+     */
+    status_bar other;
+    other.show_condition("ores.dev.brave_hopper is unreachable", at_start);
+    other.show_event("a row was removed", at_start);
+    REQUIRE(other.message() == "ores.dev.brave_hopper is unreachable");
+    REQUIRE(other.severity() == status_severity::problem);
+
+    /* A notice still takes a bar that is only carrying a notice. */
+    status_bar quiet;
+    quiet.show_event("the store was opened", at_start);
+    quiet.show_event("a row was removed", at_start);
+    REQUIRE(quiet.message() == "a row was removed");
+    REQUIRE(quiet.severity() == status_severity::notice);
+}
+
+TEST_CASE("withdrawing an error leaves everything else alone", "[status]") {
+    /*
+     * The dismissal is the operator saying they have read the failure, and it
+     * is not a general clear: a remark that is still within its life belongs to
+     * somebody who has not asked for it to go.
+     */
+    status_bar bar;
+    bar.show_error("cannot save the seeded instance inst-1", at_start);
+    bar.clear_error();
+    REQUIRE(bar.empty());
+
+    bar.show_condition("unreachable", at_start);
+    bar.clear_error();
+    REQUIRE(bar.message() == "unreachable");
+
+    /*
+     * And an event on the bar is not an error's to take away either. The event
+     * was raised while the problem stood, so it never reached the bar; it is
+     * the problem that is on it, and it stays.
+     */
+    bar.show_event("a row was removed", at_start);
+    bar.clear_error();
+    REQUIRE(bar.message() == "unreachable");
+
+    /*
+     * And the failure is gone rather than merely hidden: the caller's next
+     * raise is the same text, and it comes back because the dismissal cleared
+     * it, which is what makes a dismissal mean anything.
+     */
+    bar.show_error("cannot save the seeded instance inst-1", at_start);
+    REQUIRE(bar.message() == "cannot save the seeded instance inst-1");
 }

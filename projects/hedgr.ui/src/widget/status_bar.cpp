@@ -40,12 +40,25 @@ void status_bar::show_event(std::string_view message, std::int64_t now_ns) {
         clear_condition();
         return;
     }
+
+    /*
+     * A remark may take the bar from another remark, and from nothing, and
+     * from nothing else. A problem that is still true and a failure the
+     * operator has to act on both outrank it, and letting the newest event
+     * through regardless would be the whole defect this ladder exists to
+     * remove: an error displaced by "the store was opened from the
+     * environment" one frame later.
+     */
+    if (weight_of(kind_) > status_severity::notice)
+        return;
+
     kind_ = kind::event;
     message_ = std::string{message};
     shown_at_ns_ = now_ns;
 }
 
-void status_bar::show_condition(std::string_view message, std::int64_t now_ns) {
+void status_bar::show_condition(std::string_view message, std::int64_t now_ns,
+    status_severity level) {
     if (message.empty()) {
         clear_condition();
         return;
@@ -60,30 +73,79 @@ void status_bar::show_condition(std::string_view message, std::int64_t now_ns) {
      * frame's raise take the bar back from a notice the operator has not read,
      * and comparing only by text would miss a condition whose own wording
      * changed.
+     *
+     * The weight is part of the identity for the same reason the text is: a
+     * condition that was a problem and is now a failure is a new fact even
+     * when it is worded the same, and a restatement of it at the new weight is
+     * what makes it outrank the next remark.
      */
-    if (condition_ == message)
+    if (condition_ == message && condition_level_ == level)
+        return;
+
+    /*
+     * Nothing heavier than what is already there. This is what keeps a
+     * failure on the bar while notices come and go, and it is the reason a
+     * lighter raise is not merely deferred but dropped: the operator has to
+     * act on the failure, and a remark that arrives under it is not a fact
+     * they have lost, because the bar never showed it.
+     */
+    if (!condition_.empty() && condition_level_ > level)
         return;
 
     condition_ = std::string{message};
-    kind_ = kind::condition;
+    condition_level_ = level;
+    kind_ = level == status_severity::error ? kind::failure : kind::condition;
     message_ = std::string{message};
     shown_at_ns_ = 0;
     raised_at_ns_ = now_ns;
 }
 
+void status_bar::show_error(std::string_view message, std::int64_t now_ns) {
+    show_condition(message, now_ns, status_severity::error);
+}
+
 void status_bar::clear_condition() {
     condition_.clear();
+    condition_level_ = status_severity::problem;
 
     /*
      * Only the condition leaves the bar. An event notice on the bar describes
      * something else that happened, and it is the message the operator has not
      * finished reading: a condition ending is not a reason to take it away.
      */
-    if (kind_ != kind::condition)
+    if (kind_ != kind::condition && kind_ != kind::failure)
         return;
     kind_ = kind::silent;
     message_.clear();
     shown_at_ns_ = 0;
+}
+
+void status_bar::clear_error() {
+    if (kind_ != kind::failure)
+        return;
+
+    condition_.clear();
+    condition_level_ = status_severity::problem;
+    kind_ = kind::silent;
+    message_.clear();
+    shown_at_ns_ = 0;
+}
+
+status_severity status_bar::severity() const noexcept {
+    return weight_of(kind_);
+}
+
+status_severity status_bar::weight_of(kind value) noexcept {
+    switch (value) {
+    case kind::silent:
+    case kind::event:
+        return status_severity::notice;
+    case kind::condition:
+        return status_severity::problem;
+    case kind::failure:
+        return status_severity::error;
+    }
+    return status_severity::notice;
 }
 
 void status_bar::advance(std::int64_t now_ns) noexcept {

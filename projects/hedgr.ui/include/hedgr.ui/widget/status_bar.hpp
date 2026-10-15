@@ -31,6 +31,31 @@ namespace hedgr::ui::widget {
 inline constexpr std::int64_t status_event_duration_ns = 6'000'000'000;
 
 /**
+ * @brief How heavy what is on the bar is.
+ *
+ * The bar carries one line, so two messages wanting it at once is the case
+ * this decides. It is a ladder and not two flags, because what an operator
+ * must be able to do is tell a problem from a remark at a glance, and a
+ * problem from a remark that is also an error by reading the line.
+ *
+ * The order is deliberate. A notice is something that happened and is
+ * therefore already history: anything may replace it, including another
+ * notice. A problem is something that is still true, and a notice about
+ * something that just happened must not push it off the bar. An error is a
+ * failure the operator has to act on: only another error may replace it,
+ * because a store that refused a write outranks a remark about how the store
+ * was opened.
+ */
+enum class status_severity : std::uint8_t {
+    /** @brief Something that happened. Fades on its own. */
+    notice = 0,
+    /** @brief Something that is true now, until withdrawn or replaced. */
+    problem = 1,
+    /** @brief A failure the operator must act on. Stays until replaced. */
+    error = 2,
+};
+
+/**
  * @brief The short messages a window says about itself, in one line.
  *
  * Two kinds of message, and the difference between them is the whole design.
@@ -62,8 +87,10 @@ public:
     /**
      * @brief Reports something that happened and is now history.
      *
-     * Replaces whatever was on the bar, condition or event, and starts the
-     * clock that takes it away again.
+     * Takes the bar from another notice or from a silent bar, and starts the
+     * clock that takes it away again. It does not take the bar from a problem
+     * or a failure: those outrank it, and a remark about something that just
+     * happened must not be what hides the thing the operator has to act on.
      */
     void show_event(std::string_view message, std::int64_t now_ns);
 
@@ -79,13 +106,35 @@ public:
      * nothing, whether or not that condition is the thing the bar is showing:
      * an event notice may be on the bar over the top of a condition that still
      * holds, and that notice is the message the operator has not read yet.
-     * A raise of a different condition is a new fact and takes the bar.
+     * A raise of a different condition is a new fact and takes the bar, unless
+     * what is on it outranks the raise. See @c status_severity.
      *
      * @param message what is true now.
      * @param now_ns the frame's clock reading, kept for the fade and for callers
      * that want to know when the condition was raised.
+     * @param level how heavy the message is, which decides what may replace it.
      */
-    void show_condition(std::string_view message, std::int64_t now_ns);
+    void show_condition(std::string_view message, std::int64_t now_ns,
+        status_severity level = status_severity::problem);
+
+    /**
+     * @brief Reports a failure, which stays until the next one replaces it.
+     *
+     * Shorthand for a condition at @c status_severity::error, because that is
+     * how every failure the runtime records arrives: raised again every frame
+     * by whoever holds it, so it has to be idempotent for the same reason the
+     * other conditions are.
+     *
+     * An error is deliberately not an event. An event notice describes
+     * something that happened, ages out, and is worth missing if the operator
+     * looked away; a failure is a state of the store that is still true when
+     * they look back, and one that vanished after six seconds would let a
+     * refused write read as a successful one. It is deliberately not cleared
+     * by anything except another error or @c clear_error: the operator decides
+     * when they have finished reading it, not the next thing that happens to
+     * the store.
+     */
+    void show_error(std::string_view message, std::int64_t now_ns);
 
     /**
      * @brief Withdraws the condition, if the bar is showing one.
@@ -95,6 +144,16 @@ public:
      * would lose a fact the person has not finished reading.
      */
     void clear_condition();
+
+    /**
+     * @brief Withdraws an error, and only an error.
+     *
+     * What the operator's dismissal means. A notice or a problem on the bar is
+     * left alone, because this is not a general clear: it is the answer to
+     * "I have read the failure", and using it on anything else would take a
+     * message away from somebody who did not ask.
+     */
+    void clear_error();
 
     /**
      * @brief Ages the notice, dropping an event once its time is up.
@@ -110,6 +169,16 @@ public:
 
     /** @brief Whether anything is on the bar. */
     [[nodiscard]] bool empty() const noexcept { return message_.empty(); }
+
+    /**
+     * @brief How heavy what is on the bar is.
+     *
+     * What the bar itself carries, not what the last caller asked to raise: an
+     * error that a notice outranked is not on the bar, and this reports the
+     * bar. Silent is reported as @c status_severity::notice, which is the
+     * lightest thing it could be and never outranks a raise.
+     */
+    [[nodiscard]] status_severity severity() const noexcept;
 
     /**
      * @brief How far through its life an event notice is, from 0 to 1.
@@ -130,7 +199,18 @@ private:
         event = 1,
         /** @brief Something that is true, until withdrawn. */
         condition = 2,
+        /** @brief A failure, which only another failure may replace. */
+        failure = 3,
     };
+
+    /**
+     * @brief How heavy a state is, which is what decides what may replace it.
+     *
+     * A silent bar weighs a notice, which is the lightest thing there is, so
+     * anything may take it. An event weighs a notice too: it is a remark that
+     * has not aged out yet, and a problem or a failure outranks it.
+     */
+    [[nodiscard]] static status_severity weight_of(kind value) noexcept;
 
     kind kind_ = kind::silent;
 
@@ -146,6 +226,15 @@ private:
      * where they differ.
      */
     std::string condition_;
+
+    /**
+     * @brief How heavy the condition that holds is.
+     *
+     * Kept beside @c condition_ for the same reason that one is kept beside
+     * the message: the weight is a property of what is true, and it is what
+     * decides whether the next raise may take the bar.
+     */
+    status_severity condition_level_ = status_severity::problem;
 
     std::int64_t shown_at_ns_ = 0;
     std::int64_t raised_at_ns_ = 0;

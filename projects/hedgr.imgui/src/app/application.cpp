@@ -343,6 +343,8 @@ void application::render_loop(GLFWwindow* window) {
             .lock_message = manager_.lock_error(),
             .now_ns = now_ns(),
             .background_texture = background_texture_,
+            .startup_failure = manager_.startup_failure(),
+            .runtime_error = manager_.last_error(),
         };
         workspace_.render(input);
 

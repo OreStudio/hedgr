@@ -71,6 +71,18 @@ constexpr std::string_view environment_event =
     "The store was opened with the password from the environment "
     "(HEDGR_MASTER_PASSWORD), not by pressing Unlock.";
 
+/**
+ * @brief The size of the startup notice, in pixels.
+ *
+ * Wide enough to carry the store's own refusal, which names a full path and
+ * two version numbers, in four or five lines rather than a dozen: a notice
+ * that wrapped a path across three lines is a path the reader cannot copy.
+ * The height is what that sentence takes plus the headline and the air around
+ * them.
+ */
+constexpr float notice_width = 700.0f;
+constexpr float notice_height = 200.0f;
+
 }
 
 namespace hedgr::ui::render {
@@ -121,6 +133,30 @@ void workspace::render(const render_input& input) {
      * browser's, beside the tree.
      */
     draw_background(input);
+
+    /*
+     * The runtime's latest failure, raised on the status bar before the walk
+     * that draws it. Raised every frame rather than announced once, because
+     * the bar is what remembers it: a failure that is still true is raised
+     * again, which is idempotent by construction, and one the runtime has
+     * cleared takes the bar down with it.
+     *
+     * This is the general rule and the startup notice below is its degenerate
+     * case: every failure the runtime records reaches the bar, except the one
+     * failure that leaves no bar to reach, which has to be drawn by the frame.
+     */
+    if (input.runtime_error.empty())
+        status_.clear_error();
+    else
+        status_.show_error(input.runtime_error, input.now_ns);
+
+    /*
+     * The startup notice, when the store never came up. Before the walk,
+     * because it reports on the state the walk is about to find: an empty
+     * window table is the same fact the notice is describing, and a frame in
+     * which the notice and the table disagree is not a frame this can produce.
+     */
+    draw_startup_failure(input);
 
     /*
      * The open store ends the prompt, and the frame that notices it is the
@@ -355,6 +391,80 @@ void workspace::submit_master_password(const render_input& input) {
     armed_password_ = false;
     master_password_visible_ = false;
     create_mismatch_ = false;
+}
+
+void workspace::draw_startup_failure(const render_input& input) {
+    const auto notice = startup_notice_for(input.startup_failure);
+    if (notice.empty())
+        return;
+
+    /*
+     * Drawn by the frame and not as a window row, because this is the failure
+     * that leaves no rows to draw: the store could not be opened, so the
+     * window table is empty and the walk below has nothing to visit. The
+     * notice has to come from the frame itself.
+     *
+     * It is a window and not a modal, like every other surface here. The
+     * application behind it can still be looked at and closed, and the title
+     * bar puts the notice down for an operator who has read it and wants the
+     * rest of the screen.
+     */
+    const ImVec2 size(notice_width, notice_height);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+
+    /*
+     * Centred horizontally and near the top, the first time. Not centred
+     * vertically, because the eye lands at the top of a screen and a notice
+     * there reads before the background does.
+     */
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->Pos.x + (viewport->Size.x - size.x) / 2.0f,
+            viewport->Pos.y + 80.0f),
+        ImGuiCond_FirstUseEver);
+
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
+        | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
+        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
+
+    /*
+     * The close button is the way out, and it is offered because the
+     * application behind the notice still works and an operator may want to
+     * look at it. The flag is re-armed every time the window appears, exactly
+     * as the password prompt's is: ImGui clears it on the click, and that
+     * clear is the dismissal.
+     */
+    const char title[] = "The store could not be opened###hedgr-startup-failure";
+    if (!ImGui::Begin(title, &startup_notice_open_, flags))
+        return;
+
+    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + notice_width - 40.0f);
+
+    /*
+     * The same shape every other notice in this interface has: a red glyph,
+     * the headline beside it, then the message. A failure read here has to
+     * look like a failure read in a notice window, and the glyph is what makes
+     * it look like one at a glance rather than after reading the sentence.
+     *
+     * The reason below is the runtime's own sentence, unmodified. It names the
+     * file, both schema versions where that is the fault, and the remedy, and
+     * a second wording here would be a second diagnosis to keep in step.
+     */
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
+    ImGui::TextUnformatted(hedgr::ui::icon::error);
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour),
+        "%s", notice.heading.c_str());
+
+    ImGui::Separator();
+    ImGui::TextUnformatted(notice.reason.c_str());
+    ImGui::PopTextWrapPos();
+
+    if (ImGui::IsWindowAppearing())
+        startup_notice_open_ = true;
+    ImGui::End();
 }
 
 void workspace::draw_lock_prompt(const render_input& input) {

@@ -738,3 +738,42 @@ TEST_CASE("every window kind has an icon and a distinct spelling", "[renderer]")
         REQUIRE(*parsed == kind);
     }
 }
+
+TEST_CASE("a store that could not be opened is reported as a notice", "[notice]") {
+    using hedgr::ui::render::startup_notice_for;
+
+    /*
+     * A healthy store produces no notice at all, which is the half of this
+     * that keeps the frame unchanged for everyone whose store is fine: the
+     * frame draws the notice only when there is a reason in it.
+     */
+    const auto none = startup_notice_for({});
+    REQUIRE(none.empty());
+    REQUIRE(none.heading.empty());
+    REQUIRE(none.reason.empty());
+
+    /*
+     * The reason is the store's own sentence and it is carried through
+     * unchanged, because the path, both versions and the remedy are in it and
+     * a second wording here is a second thing to keep in step. The literal is
+     * what the store actually produces for a file left at version 6.
+     */
+    const std::string reason =
+        "cannot bring the store up to date: the store at /home/o/.cache/hedgr/"
+        "hedgr.db was written with schema version 6 but this build expects "
+        "version 7; this store is pre-release and is not migrated, so delete "
+        "the file and start again (schema mismatch)";
+
+    const auto notice = startup_notice_for(reason);
+    REQUIRE_FALSE(notice.empty());
+    REQUIRE(notice.reason == reason);
+    REQUIRE(notice.heading == "Hedgr could not open its store.");
+
+    /*
+     * Both halves of what the operator needs are in the text that reaches the
+     * screen: which file, and what to do with it.
+     */
+    REQUIRE(notice.reason.find("/home/o/.cache/hedgr/hedgr.db") != std::string::npos);
+    REQUIRE(notice.reason.find("delete the file and start again")
+        != std::string::npos);
+}

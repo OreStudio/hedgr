@@ -71,9 +71,13 @@ using hedgr::ui::widget::tree_leaf;
         const auto& row = rows[index];
         if (row.instance_id != instance_id)
             continue;
-        leaves.push_back(tree_leaf{row.id, row.folder_id,
-            row.name.empty() ? row.principal : row.name, icon::account,
-            std::format("{}\n{}", row.principal, row.name)});
+        leaves.push_back(tree_leaf{
+            .id = row.id,
+            .parent_id = row.folder_id,
+            .name = row.name.empty() ? row.principal : row.name,
+            .icon = icon::account,
+            .search_text = std::format("{}\n{}", row.principal, row.name),
+        });
     }
     return leaves;
 }

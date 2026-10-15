@@ -154,4 +154,26 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     return false;
 }
 
+startup_notice startup_notice_for(std::string_view startup_failure) {
+    /*
+     * Empty in, empty out. There is nothing to warn about, and the frame reads
+     * @c empty as the instruction not to draw the notice at all, so a healthy
+     * store draws exactly what it drew before this existed.
+     */
+    if (startup_failure.empty())
+        return startup_notice{};
+
+    /*
+     * The heading names the fault and the reason below it is the runtime's own
+     * sentence, unchanged. The store whose schema version is refused is the one
+     * that reaches an operator: its sentence names the file, both versions and
+     * the remedy, and restating any of that here would be a second copy of the
+     * store's diagnosis for the two to drift apart.
+     */
+    return startup_notice{
+        .heading = "Hedgr could not open its store.",
+        .reason = std::string{startup_failure},
+    };
+}
+
 }

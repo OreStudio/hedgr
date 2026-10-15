@@ -181,6 +181,25 @@ public:
     }
 
     /**
+     * @brief Why the store could not be brought up, or empty.
+     *
+     * Kept apart from @c last_error, which every command that fails writes and
+     * which a successful unlock clears: that one is the runtime's running note
+     * about whatever it last did, and this one is the reason this process has
+     * no store at all. Both are worth reading, and only this one decides
+     * whether the interface draws the startup notice, so a command that fails
+     * later cannot be shown as a store that never opened.
+     *
+     * Nothing clears it. A process whose store was refused has no way back --
+     * the remedy is to delete the file and start again -- so a notice that
+     * later activity could clear would be reporting a state this process
+     * cannot leave.
+     */
+    [[nodiscard]] const std::string& startup_failure() const noexcept {
+        return startup_failure_;
+    }
+
+    /**
      * @brief Where the master password stands.
      *
      * The interface gates every catalogue surface on this: while it is not
@@ -500,6 +519,9 @@ private:
     session::transport::session_options seed_options_;
 
     std::string last_error_;
+
+    /** @brief Why the store could not be brought up. See @c startup_failure(). */
+    std::string startup_failure_;
 
     /** @brief Why the last unlock was refused. See @c lock_error(). */
     std::string lock_error_;

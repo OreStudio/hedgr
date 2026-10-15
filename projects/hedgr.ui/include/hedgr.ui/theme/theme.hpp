@@ -40,6 +40,18 @@ namespace hedgr::ui::theme {
 HEDGR_UI_EXPORT void apply_theme();
 
 /**
+ * @brief The palette's red, for anything that reports a failure.
+ *
+ * Every refusal in the interface is drawn in this colour: a refused unlock, an
+ * unreachable instance, a failed sign-in, and the runtime's own error line.
+ * It is named and exported rather than reached through one of the helpers
+ * below, because a failure is not a fact about a lock or a session and the
+ * next surface that reports one should not have to pick a neighbour to borrow
+ * a colour from. The helpers agree on this value; this is the value.
+ */
+inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
+
+/**
  * @brief The colour of a session status.
  *
  * Disconnected grey, connecting amber, authenticated green, failed red.
