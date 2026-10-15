@@ -922,9 +922,11 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
  * of them is looking at.
  */
 void draw_list(const widget::browser_model& model,
-    const std::vector<tree_row>& rows, const widget::browser_state& state,
+    const std::vector<tree_row>& rows, window_ui_state& window,
     const render_input& input, float width, float height) {
     namespace icon = hedgr::ui::icon;
+
+    widget::browser_state& state = window.browser;
 
     if (!ImGui::BeginChild("##browser-list", ImVec2(width, height),
             ImGuiChildFlags_Borders)) {
@@ -1001,8 +1003,67 @@ void draw_list(const widget::browser_model& model,
 
             ImGui::TableNextRow();
             ImGui::PushID(leaf.id.c_str());
+
+            /*
+             * One selectable across the whole row, submitted in the first
+             * column and told to span the rest. Without it a list row was a
+             * handful of text items, and text is not a row: clicking one
+             * selected nothing and clicking it twice opened nothing, which is
+             * what the operator reported.
+             *
+             * AllowOverlap is what makes the spanned selectable the thing the
+             * pointer hits rather than the cell texts drawn over it, and
+             * AllowDoubleClick is what lets the same item answer the second
+             * click. Both are the pair ImGui documents for selecting a row.
+             */
+            ImGui::TableSetColumnIndex(0);
+            const ImVec2 row_top = ImGui::GetCursorScreenPos();
+            const bool selected = state.selected_leaf == leaf.id;
+            const bool clicked = ImGui::Selectable("##row", selected,
+                ImGuiSelectableFlags_SpanAllColumns
+                    | ImGuiSelectableFlags_AllowOverlap
+                    | ImGuiSelectableFlags_AllowDoubleClick,
+                ImVec2(0.0f, ImGui::GetFrameHeight()));
+
+            /*
+             * The selectable advances the cursor past itself, and the cells are
+             * drawn over it rather than under it, so the first cell's cursor is
+             * put back where the row began. Without this the name was drawn a
+             * line below the columns beside it, which reads as a row with a
+             * blank name.
+             */
+            ImGui::TableSetColumnIndex(0);
+            ImGui::SetCursorScreenPos(row_top);
+
+            /*
+             * Recorded here rather than after the cells, because this is where
+             * ImGui's own rectangle for the row is still the current item's.
+             * The list carries the qualifier "list" so a script can name a row
+             * in the list rather than the row of the same name in the tree:
+             * both are on screen, and both are called the same thing.
+             */
+            widget::capture_element element;
+            const ImVec2 item_min = ImGui::GetItemRectMin();
+            const ImVec2 item_max = ImGui::GetItemRectMax();
+            element.min_x = item_min.x;
+            element.min_y = item_min.y;
+            element.max_x = item_max.x;
+            element.max_y = item_max.y;
+            element.label_min_x = item_min.x;
+            element.label = "list";
+            widget::observe_capture_element(leaf.name, element);
+
+            if (clicked) {
+                state.selected_leaf = leaf.id;
+                state.selected_folder.clear();
+            }
+
+            if (clicked && model.activate_leaf != nullptr
+                && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                model.activate_leaf(input, window, leaf.id);
+
             for (int column = 0; column < columns; ++column) {
-                ImGui::TableNextColumn();
+                ImGui::TableSetColumnIndex(column);
                 const auto position = static_cast<std::size_t>(column);
                 const std::string_view text = position < cells.texts.size()
                     ? std::string_view{cells.texts[position]}
@@ -1214,7 +1275,7 @@ void render_browser(const browser_model& model, window_ui_state& window,
     ImGui::EndChild();
 
     ImGui::SameLine();
-    draw_list(model, rows, state, input, list_width, body_height);
+    draw_list(model, rows, window, input, list_width, body_height);
 
     if (model.sign_in_form != nullptr)
         model.sign_in_form(input, window);

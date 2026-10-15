@@ -126,13 +126,15 @@ struct capture_run final {
 /**
  * @brief Whether @p target and @p label name the same element as @p element.
  *
- * A label of its own is what tells two toolbar buttons apart when a row and a
- * button share a name, and an empty label matches any, which is how a step
- * names a tree row without having to know that rows carry no label.
+ * A step with a label means a thing wearing that label, and a step without one
+ * means a row, which wears none. Either way the two have to be equal, because
+ * rows of the same name are on screen at once: an entry appears in the tree and
+ * again in the list, and a search that took the label loosely would answer a
+ * step about a tree row with the list row drawn over it.
  */
 [[nodiscard]] bool names_same(const widget::capture_element& element,
     std::string_view target, std::string_view label) {
-    return element.target == target && (label.empty() || element.label == label);
+    return element.target == target && element.label == label;
 }
 
 /**
@@ -163,11 +165,33 @@ find_element(const capture_run& state, const widget::capture_step& step) {
     return search(state.elements);
 }
 
-/** @brief Reports a step that cannot be driven, and where it was written. */
-void report_unreachable(std::string_view target, std::size_t line,
-    const char* reason) {
+/**
+ * @brief Reports a step that cannot be driven, and where it was written.
+ *
+ * What was on screen is printed with it. A step that names a row under a folder
+ * that is shut, or a row the filter removed, is the common case, and the answer
+ * to "why is it not there" is the list of what is. Without it a script's author
+ * is left guessing whether the name is wrong, the row is hidden, or the hook
+ * never recorded it at all.
+ */
+void report_unreachable(const capture_run& state, std::string_view target,
+    std::string_view label, std::size_t line, const char* reason) {
     std::fprintf(stderr, "hedgr capture: line %zu: no %s named \"%s\"\n", line,
         reason, std::string{target}.c_str());
+
+    const auto& pool = state.last_frame.empty() ? state.elements
+                                                : state.last_frame;
+    std::fprintf(stderr, "  on screen:");
+    std::size_t shown = 0;
+    for (const auto& element : pool) {
+        if (element.target.empty() || shown++ >= 24)
+            continue;
+        std::fprintf(stderr, " %s%s%s", element.target.c_str(),
+            element.label.empty() ? "" : " [", element.label.c_str());
+        if (!element.label.empty())
+            std::fprintf(stderr, "]");
+    }
+    std::fprintf(stderr, "%s\n", label.empty() ? "" : " (and others)");
 }
 
 /**
@@ -279,15 +303,18 @@ void schedule(capture_run& state, const widget::capture_step& step,
     const widget::capture_step& step, std::size_t gesture) {
     const auto* element = find_element(state, step);
     if (element == nullptr) {
-        report_unreachable(step.target, step.line, "row on screen");
+        report_unreachable(state, step.target, step.label, step.line,
+            "row on screen");
         return false;
     }
     if (!still_on_screen(state, *element)) {
-        report_unreachable(step.target, step.line, "row still on screen");
+        report_unreachable(state, step.target, step.label, step.line,
+            "row still on screen");
         return false;
     }
     if (element->arrow_width <= 0.0f && wants_arrow(step)) {
-        report_unreachable(step.target, step.line, "row with an expander");
+        report_unreachable(state, step.target, step.label, step.line,
+            "row with an expander");
         return false;
     }
 
