@@ -120,6 +120,40 @@ inline constexpr const char* dashboard = ICON_FA_CIRCLE_PLAY;
 /** @brief A point in time, or an elapsed time. */
 inline constexpr const char* clock = ICON_FA_CLOCK;
 
+/**
+ * @brief The store is unlocked and the master password is held.
+ *
+ * An open padlock rather than a key, because the question the toolbar answers
+ * is whether the lock is open, not whether the operator has a key.
+ */
+inline constexpr const char* lock_open = ICON_FA_LOCK_OPEN;
+
+/** @brief The store is locked: a master password exists and is not held. */
+inline constexpr const char* lock_closed = ICON_FA_LOCK;
+
+/**
+ * @brief There is no master password yet.
+ *
+ * The warning triangle rather than a padlock, because this is not a lock state
+ * to be read but a first run that wants an action: the operator has to create
+ * one before anything can be read.
+ */
+inline constexpr const char* lock_absent = ICON_FA_TRIANGLE_EXCLAMATION;
+
+/** @brief Lock the store, dropping the held master password. */
+inline constexpr const char* lock = ICON_FA_LOCK;
+
+/**
+ * @brief Enter the master password.
+ *
+ * A key and not an open padlock, deliberately. The open padlock is what the
+ * indicator shows when the store *is* unlocked, and an action and a state drawn
+ * with the same glyph in the same toolbar is a row that cannot be read: an
+ * operator glancing at it would take an invitation to unlock for a statement
+ * that the store already is.
+ */
+inline constexpr const char* unlock = ICON_FA_KEY;
+
 /** @brief A connection between two things. */
 inline constexpr const char* link = ICON_FA_LINK;
 

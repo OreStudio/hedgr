@@ -31,6 +31,11 @@ target_link_libraries(${lib_target_name}
     PUBLIC
         reflectcpp::reflectcpp
         magic_enum::magic_enum
+    PRIVATE
+        # secret_string wipes with OPENSSL_cleanse. Private because no public
+        # header here mentions OpenSSL: the dependency is an implementation
+        # detail of one destructor.
+        OpenSSL::Crypto
 )
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)

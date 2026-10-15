@@ -76,4 +76,8 @@ renderer_fn renderer_for(hedgr::model::domain::window_kind kind) noexcept {
     return table[index];
 }
 
+bool shows_instances(const render_input& input) noexcept {
+    return input.store_lock == hedgr::model::domain::store_lock::unlocked;
+}
+
 }

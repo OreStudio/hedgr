@@ -21,6 +21,8 @@
 #define HEDGR_RUNTIME_MANAGER_INSTANCE_MANAGER_HPP
 
 #include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/secret.hpp"
+#include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -31,6 +33,7 @@
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/label_repository.hpp"
 #include "hedgr.store/repository/labelling_repository.hpp"
+#include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <chrono>
@@ -75,6 +78,11 @@ public:
      * which the application builds from the environment, so a fresh checkout is
      * usable without typing an address. It also makes sure the Instance Manager
      * window exists, because every other window is opened from it.
+     *
+     * Reports the lock in @c store_lock(), which the interface gates the whole
+     * of its catalogue on: a store with a master row starts @c locked and one
+     * without starts @c absent. Nothing here reads a credential, so a store
+     * that never gets unlocked still starts.
      */
     [[nodiscard]] std::expected<void, std::string>
     start(const std::filesystem::path& database_path,
@@ -141,13 +149,58 @@ public:
         return last_error_;
     }
 
+    /**
+     * @brief Where the master password stands.
+     *
+     * The interface gates every catalogue surface on this: while it is not
+     * @c unlocked the store cannot be read, because every read is a decryption
+     * of something only the master password opens. @c absent and @c locked are
+     * therefore states to draw and not errors to report -- @c failed is the
+     * only one that describes an attempt.
+     */
+    [[nodiscard]] model::domain::store_lock store_lock() const noexcept {
+        return store_lock_;
+    }
+
+    /**
+     * @brief Whether an unlock is being derived right now.
+     *
+     * The derivation is deliberately slow, so a prompt that shows nothing for
+     * half a second reads as a hung application. This is what lets it say it is
+     * working instead.
+     */
+    [[nodiscard]] bool is_unlocking() const noexcept { return unlocking_; }
+
+    /**
+     * @brief Why the last unlock was refused, or empty.
+     *
+     * Separate from @c last_error because the two go to different places: a
+     * refused password is shown inline beside the prompt that asked for it,
+     * while a store failure is a banner. Folding them would either put an
+     * infrastructure failure in a password box or a typo in a banner, and both
+     * send the operator to the wrong place.
+     *
+     * Never a secret: the sentence says the password was not accepted and
+     * nothing about what was tried.
+     */
+    [[nodiscard]] const std::string& lock_error() const noexcept {
+        return lock_error_;
+    }
+
     [[nodiscard]] bool is_started() const noexcept { return started_; }
 
     /** @brief Stops every session and joins the pool. Idempotent. */
     void stop() noexcept;
 
 private:
-    void handle(const model::command::command& cmd);
+    /**
+     * @brief Applies one command, then wipes the password it carried.
+     *
+     * A mutable reference rather than a const one for exactly that reason: the
+     * command is drained into a local vector that dies with the frame, and a
+     * secret in a buffer nobody wipes is a secret left for the next allocation.
+     */
+    void handle(model::command::command& cmd);
     void apply(const model::event::event& ev);
 
     void do_save_instance(const model::command::command& cmd);
@@ -162,6 +215,9 @@ private:
     void do_detach_label(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
     void do_disconnect_session(const model::command::command& cmd);
+    void do_set_master_password(const model::command::command& cmd);
+    void do_unlock_store(const model::command::command& cmd);
+    void do_lock_store();
     void do_open_window(const model::command::command& cmd);
     void do_close_window(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
@@ -197,6 +253,52 @@ private:
 
     void seed_first_run();
     void ensure_instance_manager_window();
+
+    /**
+     * @brief Hands one connect attempt to the session pool.
+     *
+     * The tail of @c do_connect_session, split out because a connect whose
+     * credential is stored reaches it from a coroutine instead: the sealed
+     * secret can only be opened off the frame loop, so the attempt is started
+     * after that work lands rather than before.
+     *
+     * @p sealed_credential is empty for a password typed at the prompt and
+     * holds the stored blob when there is one. Exactly one of the two carries
+     * the secret, and the worker refuses to treat them as alternatives.
+     */
+    void start_session_for(const model::command::command& cmd,
+                           model::domain::credential credential,
+                           std::string sealed_credential = {});
+
+    /**
+     * @brief Opens the account's stored credential off the frame loop.
+     *
+     * Derives the key on the pool and, when it opens, starts the session from
+     * there. Every failure comes back as an event, so the frame loop never
+     * waits on the derivation and never sees the plaintext.
+     */
+    void start_stored_connect(const model::command::command& cmd,
+                              std::string sealed);
+
+    /**
+     * @brief Posts the fact that a store operation was refused.
+     *
+     * Used by the paths that run on the pool, which must not touch the state
+     * tables: the frame loop applies the fact and the refusal reads to the
+     * operator exactly as it would had it been decided in @c handle.
+     */
+    void report_store_failure(const std::string& instance_id,
+                              const std::string& account_id,
+                              std::string message);
+
+    /**
+     * @brief Forgets the held master password and returns to @c locked.
+     *
+     * @p deliberate is the operator having asked for it, which leaves the store
+     * @c locked; anything else is a check that failed, which leaves it
+     * @c failed. The distinction is the whole reason the two states exist.
+     */
+    void drop_master_password(bool deliberate);
 
     /**
      * @brief Creates the folders a tree is anchored by, when they are missing.
@@ -245,6 +347,36 @@ private:
     std::unique_ptr<store::repository::label_repository> label_repo_;
     std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
     std::unique_ptr<store::repository::window_repository> window_repo_;
+    std::unique_ptr<store::repository::master_repository> master_repo_;
+
+    /**
+     * @brief The master password, held only while the store is unlocked.
+     *
+     * A @c secret_string and not a @c std::string, because this one has to
+     * survive between frames: it is the copy most likely to be forgotten, and
+     * the type is what stops it being copied somewhere else and wipes the bytes
+     * when the lock closes. It is never logged, never placed on an event and
+     * never written to a window's state; the only reader is the seal and the
+     * session job that opens one credential with it.
+     */
+    model::domain::secret_string master_password_;
+
+    /**
+     * @brief The password a pool thread has verified and is handing over.
+     *
+     * Written by the unlock coroutine and picked up by @c apply on the frame
+     * loop, and never both at once: only one unlock runs at a time and the
+     * frame loop is the only reader. It exists because @c master_password_
+     * itself may not be assigned from a pool thread -- the frame loop reads it
+     * on every connect -- so the handover needs a slot that is written once,
+     * before the event that announces it, and read once, after.
+     */
+    model::domain::secret_string pending_master_password_;
+
+    model::domain::store_lock store_lock_ = model::domain::store_lock::absent;
+
+    /** @brief Whether a derivation is running on the pool right now. */
+    bool unlocking_ = false;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
 
@@ -278,6 +410,9 @@ private:
     session::transport::session_options seed_options_;
 
     std::string last_error_;
+
+    /** @brief Why the last unlock was refused. See @c lock_error(). */
+    std::string lock_error_;
     std::uint64_t next_window_serial_ = 1;
     bool started_ = false;
 };

@@ -21,6 +21,7 @@
 #define HEDGR_RUNTIME_WORKER_SESSION_WORKER_HPP
 
 #include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.runtime/export.hpp"
@@ -47,6 +48,27 @@ struct session_job final {
 
     /** @brief The secret for this attempt. Cleared when authenticate returns. */
     model::domain::credential credential;
+
+    /**
+     * @brief The stored credential, still sealed, when one has to be opened.
+     *
+     * Either this or @c credential is filled, never both. A credential typed at
+     * the prompt travels in @c credential; a credential remembered by the store
+     * travels here still sealed, and the worker opens it on its own thread,
+     * because the key derivation behind it would stall the frame loop. Opening
+     * it is the worker's first act, so the plaintext exists for exactly as long
+     * as the sign-in does and never reaches a caller of the manager.
+     */
+    std::string sealed_credential;
+
+    /**
+     * @brief The master password this attempt may open @c sealed_credential
+     * with.
+     *
+     * Required when @c sealed_credential is set and ignored otherwise, so the
+     * two cannot disagree about which secret is being used.
+     */
+    model::domain::secret_string master_password;
 
     /** @brief How long to wait between refresh round trips once authenticated. */
     std::chrono::milliseconds refresh_interval{2000};

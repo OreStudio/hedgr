@@ -47,12 +47,12 @@ using sqlite::result;
  * a rebuild would be worse than refusing to start. See the sentence in the
  * returned error for the remedy.
  *
- * No table has a credential column and none may gain one. The store this
- * replaces, OreStudio's @c ores.connections, kept an AES-256-GCM encrypted
- * password alongside a master password. Hedgr deliberately does not: a
- * credential exists only for the length of one connect attempt, so persisting
- * it would put a secret at rest that the application never reads back. See the
- * @c Credential entry in CONTEXT.md.
+ * One table holds a secret and one column on another does, and both hold
+ * ciphertext. The @c master table keeps a known sentence sealed under the
+ * master password, which is how the password is checked without ever being
+ * stored; @c account.credential keeps a credential sealed the same way. Nothing
+ * here can be read without the master password, and nothing here contains it.
+ * See ADR 4 and the @c Master @c password entry in CONTEXT.md.
  */
 [[nodiscard]] HEDGR_STORE_EXPORT result<void> apply(database& db);
 

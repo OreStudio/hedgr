@@ -24,8 +24,14 @@
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
 #include <algorithm>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -49,6 +55,7 @@ namespace domain = hedgr::model::domain;
 namespace event = hedgr::model::event;
 namespace model_state = hedgr::model::state;
 namespace sqlite = hedgr::store::sqlite;
+namespace store_crypto = hedgr::store::crypto;
 namespace transport = hedgr::session::transport;
 
 /**
@@ -292,6 +299,26 @@ instance_manager::start(const std::filesystem::path& database_path,
         *database_);
     window_repo_ = std::make_unique<store::repository::window_repository>(
         *database_);
+    master_repo_ = std::make_unique<store::repository::master_repository>(
+        *database_);
+
+    /*
+     * The lock is read before anything else, because it says whether the rows
+     * below can be trusted to mean anything: the whole catalogue sits behind
+     * the master password, so a store with a master row that is not held is a
+     * store whose contents are ciphertext. @c absent means a first launch, and
+     * the interface offers to create one; @c locked means the operator has been
+     * here before and is asked for the password. Neither is a failure, and
+     * neither stops the start.
+     */
+    auto has_master = master_repo_->has_master();
+    if (!has_master) {
+        last_error_ = store_failure("cannot read the store's master password",
+            has_master.error());
+        return std::unexpected(last_error_);
+    }
+    store_lock_ = has_master.value() ? model::domain::store_lock::locked
+                                     : model::domain::store_lock::absent;
 
     /*
      * The seed carries what is the same for every instance -- the TLS material
@@ -510,7 +537,14 @@ void instance_manager::ensure_instance_manager_window() {
 }
 
 void instance_manager::pump() {
-    for (const auto& request : commands_.drain())
+    /*
+     * Draining into a local and passing each command by mutable reference, so
+     * that @c handle can wipe the password the command carried once it has been
+     * used. The alternative leaves a secret in the vector's buffer until it is
+     * overwritten by an unrelated allocation, which is the same defect @c
+     * secret_string exists to prevent everywhere else.
+     */
+    for (auto& request : commands_.drain())
         handle(request);
     for (const auto& fact : events_.drain())
         apply(fact);
@@ -523,7 +557,7 @@ void instance_manager::pump() {
     pump_probes();
 }
 
-void instance_manager::handle(const command::command& cmd) {
+void instance_manager::handle(command::command& cmd) {
     switch (cmd.kind) {
     case command::command_kind::save_instance:
         do_save_instance(cmd);
@@ -576,6 +610,15 @@ void instance_manager::handle(const command::command& cmd) {
     case command::command_kind::probe_all:
         do_probe_all();
         break;
+    case command::command_kind::set_master_password:
+        do_set_master_password(cmd);
+        break;
+    case command::command_kind::unlock_store:
+        do_unlock_store(cmd);
+        break;
+    case command::command_kind::lock_store:
+        do_lock_store();
+        break;
     case command::command_kind::shutdown:
         /*
          * Every worker is asked to stop and the manager stops being started,
@@ -601,6 +644,20 @@ void instance_manager::handle(const command::command& cmd) {
         started_ = false;
         break;
     }
+
+    /*
+     * The password is wiped once the command has been acted on, on every path
+     * including the ones that refused it. Nothing below this point needs it --
+     * a credential is handed to a worker during the dispatch above, not after
+     * it -- so the only thing a surviving copy could do is be read by whoever
+     * gets that allocation next.
+     *
+     * The same three steps the session worker uses, for the same reason: clear()
+     * alone leaves the bytes in the allocation.
+     */
+    std::fill(cmd.password.begin(), cmd.password.end(), '\0');
+    cmd.password.clear();
+    cmd.password.shrink_to_fit();
 }
 
 void instance_manager::do_save_instance(const command::command& cmd) {
@@ -1114,7 +1171,8 @@ void instance_manager::do_connect_session(const command::command& cmd) {
     /*
      * Both ids arrive as text from the interface, so both are resolved here:
      * the instance's row is read for the connection settings, and the account
-     * has only to exist, since the credential travels in the command.
+     * has to exist, because its identity is also what a stored credential is
+     * looked up by.
      */
     const auto instance = instances_.find(cmd.instance_id);
     if (!instance) {
@@ -1129,6 +1187,61 @@ void instance_manager::do_connect_session(const command::command& cmd) {
             cmd.account_id);
         return;
     }
+
+    /*
+     * A credential typed for this attempt wins over a stored one. The operator
+     * who has just filled in a password prompt is asking for that password to
+     * be used, and quietly preferring the remembered one would make the prompt
+     * a lie.
+     */
+    if (!cmd.password.empty()) {
+        start_session_for(cmd, domain::credential{cmd.principal, cmd.password});
+        return;
+    }
+
+    /*
+     * No password and a closed lock is a refusal, and the sentence says which
+     * of the two things went wrong. "The password was wrong" would be wrong:
+     * nothing was tried, and an operator who is told their password is bad will
+     * retype a password that was never the problem.
+     */
+    if (store_lock_ != domain::store_lock::unlocked) {
+        last_error_ = std::format(
+            "cannot connect to {}: the store is {}, so no password is "
+            "available and none was supplied",
+            instance_row->name, domain::to_string(store_lock_));
+        return;
+    }
+
+    auto sealed = account_repo_->credential_of(cmd.account_id);
+    if (!sealed) {
+        last_error_ = store_failure("cannot read the stored credential",
+            sealed.error());
+        return;
+    }
+    if (!sealed.value()) {
+        last_error_ = std::format(
+            "cannot connect to {}: the account has no stored credential and "
+            "no password was supplied",
+            instance_row->name);
+        return;
+    }
+
+    /*
+     * The sealed value goes to the pool to be opened. It is ciphertext and safe
+     * to hold here; what comes out of it is not, so it never travels back
+     * through this thread.
+     */
+    auto blob = std::move(sealed).value();
+    start_stored_connect(cmd, std::move(blob.value()));
+}
+
+void instance_manager::start_session_for(const command::command& cmd,
+    domain::credential credential, std::string sealed_credential) {
+    const auto instance = instances_.find(cmd.instance_id);
+    if (!instance)
+        return;
+    const auto* instance_row = instances_.get(*instance);
 
     /*
      * Reconnecting a pair resumes the same session rather than making a second
@@ -1158,7 +1271,19 @@ void instance_manager::do_connect_session(const command::command& cmd) {
     worker::session_job job;
     job.options = std::move(options);
     job.key = domain::session_key{cmd.instance_id, cmd.account_id};
-    job.credential = domain::credential{cmd.principal, cmd.password};
+    job.credential = std::move(credential);
+
+    /*
+     * A stored credential travels sealed, with the password that opens it, and
+     * the worker opens it on its own thread. The password is copied out of the
+     * held secret here and moved into the job, so the job's copy is wiped when
+     * the worker is done with it and the held copy survives for the next
+     * attempt.
+     */
+    if (!sealed_credential.empty()) {
+        job.sealed_credential = std::move(sealed_credential);
+        job.master_password = master_password_;
+    }
 
     const auto key = running_key(cmd.instance_id, cmd.account_id);
     if (const auto previous = running_.find(key); previous != running_.end()) {
@@ -1180,6 +1305,262 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * is no second place a secret could be read from.
      */
     worker::spawn_session(pool_.context(), std::move(job), events_, std::move(source));
+}
+
+void instance_manager::start_stored_connect(const command::command& cmd,
+    std::string sealed) {
+    /*
+     * The password is copied out of the held secret once, here, and moved into
+     * the coroutine. The coroutine wipes its copy when it ends, so this is the
+     * second and last copy that exists: the interface never sees one, the
+     * session table never holds one, and no event carries one.
+     */
+    auto password = master_password_;
+
+    const auto instance_id = cmd.instance_id;
+    const auto account_id = cmd.account_id;
+    const auto principal = cmd.principal;
+
+    boost::asio::co_spawn(pool_.context(),
+        [this, instance_id, account_id, principal,
+            sealed = std::move(sealed), password = std::move(password)]() mutable
+        -> boost::asio::awaitable<void> {
+            /*
+             * Handed to the pool before anything slow happens. The spawn above
+             * may have come from the frame loop, and the derivation below is
+             * half a second of deliberate work that must not happen there.
+             */
+            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+                boost::asio::use_awaitable);
+
+            auto opened = store_crypto::secret_box::open(password.view(), sealed);
+
+            /*
+             * The sealed value is wiped whatever happened: it is still a secret
+             * in the only sense that matters, because the master password opens
+             * it, and an allocation handed back with a credential still in it is
+             * a credential left for the next claimant.
+             */
+            std::fill(sealed.begin(), sealed.end(), '\0');
+            sealed.clear();
+            sealed.shrink_to_fit();
+
+            /*
+             * The password dies here. The derivation is over and nothing below
+             * needs it, so it does not stay in this frame while the command is
+             * built. @c co_return rather than a fall through, so the wipe is on
+             * the success path too and not only the failure one.
+             */
+            password.clear();
+
+            if (!opened) {
+                report_store_failure(instance_id, account_id,
+                    std::format("the stored credential for account {} could not "
+                                "be opened ({})",
+                        account_id, store_crypto::to_string(opened.error().code)));
+                co_return;
+            }
+
+            command::command retry;
+            retry.kind = command::command_kind::connect_session;
+            retry.instance_id = instance_id;
+            retry.account_id = account_id;
+            retry.principal = principal;
+
+            /*
+             * The one place a decrypted secret is written outside the worker.
+             * It is moved straight into a command, which is where a password an
+             * operator typed would have travelled, and the buffer that held it
+             * is wiped before this frame ends: the only copy left is the
+             * command's, and the worker wipes that the moment the sign-in
+             * resolves.
+             */
+            retry.password = std::move(opened).value();
+            commands_.push(std::move(retry));
+        },
+        boost::asio::detached);
+}
+
+void instance_manager::report_store_failure(const std::string& instance_id,
+    const std::string& account_id, std::string message) {
+    event::event fact;
+    fact.kind = event::event_kind::store_lock_failed;
+    fact.instance_id = instance_id;
+    fact.account_id = account_id;
+    fact.lock = store_lock_;
+    fact.message = std::move(message);
+    events_.push(std::move(fact));
+}
+
+void instance_manager::do_set_master_password(const command::command& cmd) {
+    if (!master_repo_) {
+        last_error_ = "cannot set a master password: the store is not open";
+        return;
+    }
+
+    /*
+     * Refused when one already exists. Replacing it would be worse than
+     * useless: the credentials in the store were sealed under the old password,
+     * so the store would look healthy and open nothing.
+     */
+    auto existing = master_repo_->has_master();
+    if (!existing) {
+        last_error_ = store_failure("cannot read the store's master password",
+            existing.error());
+        return;
+    }
+    if (existing.value()) {
+        last_error_ =
+            "this store already has a master password; unlock it instead";
+        return;
+    }
+
+    if (cmd.password.empty()) {
+        last_error_ = "the master password cannot be empty";
+        return;
+    }
+
+    /*
+     * The sealing is a derivation and therefore slow, so it happens on the pool
+     * like every other slow call and reports through the same two events an
+     * unlock does. The store ends up unlocked either way: the operator has just
+     * chosen the password and holding it is what they asked for.
+     */
+    auto password = domain::secret_string{cmd.password};
+
+    unlocking_ = true;
+    boost::asio::co_spawn(pool_.context(),
+        [this, password = std::move(password)]() mutable
+        -> boost::asio::awaitable<void> {
+            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+                boost::asio::use_awaitable);
+
+            auto created = master_repo_->create(password.view());
+
+            event::event fact;
+            if (!created) {
+                fact.kind = event::event_kind::store_lock_failed;
+                fact.lock = store_lock_;
+                fact.message = store_failure(
+                    "the master password could not be created", created.error());
+            } else {
+                fact.kind = event::event_kind::store_unlocked;
+                fact.lock = domain::store_lock::unlocked;
+
+                /*
+                 * The password is left in the handover slot, not written to the
+                 * held secret: assigning that one from here would race the
+                 * frame loop, which reads it on every connect. It is written
+                 * into the slot before the event is pushed, so the frame loop
+                 * cannot see the event without seeing the secret.
+                 */
+                pending_master_password_ = std::move(password);
+            }
+            events_.push(std::move(fact));
+        },
+        boost::asio::detached);
+}
+
+void instance_manager::do_unlock_store(const command::command& cmd) {
+    if (!master_repo_) {
+        last_error_ = "cannot unlock: the store is not open";
+        return;
+    }
+
+    if (cmd.password.empty()) {
+        lock_error_ = "no master password was supplied";
+        store_lock_ = domain::store_lock::failed;
+        return;
+    }
+
+    /*
+     * The row is read here, on the frame loop, because it is a cheap query, and
+     * the derivation that uses it runs on the pool. Reading it here also means
+     * the blob is taken from the store as it is now rather than as it was when
+     * the coroutine happened to start.
+     */
+    auto blob = master_repo_->verification();
+    if (!blob) {
+        last_error_ = store_failure("cannot read the master password",
+            blob.error());
+        return;
+    }
+    if (blob.value().empty()) {
+        store_lock_ = domain::store_lock::absent;
+        lock_error_ = "this store has no master password yet";
+        return;
+    }
+
+    auto password = domain::secret_string{cmd.password};
+    const auto sealed = std::move(blob).value();
+
+    /*
+     * The previous refusal is cleared as the new attempt starts, so the prompt
+     * does not show last time's sentence beside this time's password.
+     */
+    lock_error_.clear();
+    unlocking_ = true;
+    boost::asio::co_spawn(pool_.context(),
+        [this, password = std::move(password), sealed]() mutable
+        -> boost::asio::awaitable<void> {
+            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+                boost::asio::use_awaitable);
+
+            auto opened = store_crypto::secret_box::open(password.view(), sealed);
+
+            event::event fact;
+            if (opened) {
+                fact.kind = event::event_kind::store_unlocked;
+                fact.lock = domain::store_lock::unlocked;
+
+                /*
+                 * The password that worked is left in the handover slot rather
+                 * than written to the held secret, because this runs on a pool
+                 * thread and the frame loop reads the held secret on every
+                 * connect. See the note on @c pending_master_password_.
+                 *
+                 * The plaintext that came out of the verification blob is the
+                 * known sentence and is not needed; it is dropped here, and the
+                 * derivation's own buffers are wiped by @c open before it
+                 * returns.
+                 */
+                pending_master_password_ = std::move(password);
+            } else if (opened.error().code
+                == store_crypto::box_errc::wrong_master_password) {
+                /*
+                 * The one refusal an operator can act on, and the one the
+                 * prompt shows inline. It is not @c last_error: that field
+                 * feeds a general failure banner, and a mistyped password is
+                 * not a store failure.
+                 */
+                fact.kind = event::event_kind::store_lock_failed;
+                fact.lock = domain::store_lock::failed;
+                fact.message = "the master password is not correct";
+            } else {
+                fact.kind = event::event_kind::store_lock_failed;
+                fact.lock = store_lock_;
+                fact.message = std::format("the store could not be unlocked: {}",
+                    opened.error().message);
+            }
+            events_.push(std::move(fact));
+        },
+        boost::asio::detached);
+}
+
+void instance_manager::do_lock_store() {
+    /*
+     * Locking is the interest of the operator and never of a failure path, so
+     * it always lands on @c locked. Everything sealed under the password becomes
+     * unreadable the moment this returns, which is the point of the action.
+     */
+    lock_error_.clear();
+    drop_master_password(true);
+}
+
+void instance_manager::drop_master_password(bool deliberate) {
+    master_password_.clear();
+    store_lock_ = deliberate ? domain::store_lock::locked
+                             : domain::store_lock::failed;
 }
 
 void instance_manager::do_disconnect_session(const command::command& cmd) {
@@ -1435,6 +1816,12 @@ void instance_manager::forget_probe(model_state::instance_handle handle,
 
 void instance_manager::apply(const event::event& ev) {
     /*
+     * Every event that is not a store event is dealt with below, and the two
+     * store events carry their state on the event itself. The handover slot
+     * that accompanies @c store_unlocked is therefore read at that event and
+     * nowhere else; see the store_unlocked case for why the secret does not
+     * ride on the event.
+     *
      * A probe's fact is about an instance and not about a session, so it is
      * applied before the session lookup below: routing it through a session
      * key would drop it, because an instance nobody has signed in to has no
@@ -1442,6 +1829,62 @@ void instance_manager::apply(const event::event& ev) {
      */
     if (ev.kind == event::event_kind::probe_result) {
         apply_probe_result(ev);
+        return;
+    }
+
+    /*
+     * A store fact is about the whole store and not about a session, so it is
+     * applied before the session lookup for the same reason a probe result is:
+     * an unlock has no session to be found by.
+     */
+    if (ev.kind == event::event_kind::store_unlocked) {
+        /*
+         * The derivation succeeded on the pool, so the password that opened it
+         * is now held and every surface that reads the catalogue can be drawn.
+         * The password itself never travelled on the event: what arrives is the
+         * fact that it was accepted, and the secret is collected from the slot
+         * the coroutine left it in.
+         */
+        unlocking_ = false;
+        if (!pending_master_password_.empty())
+            master_password_ = std::move(pending_master_password_);
+        store_lock_ = domain::store_lock::unlocked;
+        last_error_.clear();
+        lock_error_.clear();
+        return;
+    }
+    if (ev.kind == event::event_kind::store_lock_failed) {
+        unlocking_ = false;
+
+        /*
+         * A password that did not verify is dropped rather than kept, so a
+         * refused attempt leaves nothing behind to be retried by accident.
+         */
+        pending_master_password_.clear();
+
+        /*
+         * @c failed only when the attempt was an unlock, which is the one case
+         * an operator is waiting on an answer. An event naming an account is a
+         * credential that would not open during a connect, which is a fact
+         * about that session; the lock itself has not been refused, because
+         * nobody asked it to be. Leaving the lock alone there is what stops a
+         * single unreadable credential from throwing the operator back to the
+         * unlock prompt mid-run.
+         */
+        if (ev.account_id.empty()) {
+            store_lock_ = domain::store_lock::failed;
+            /*
+             * Beside the prompt and not in the banner. The distinction is the
+             * reason @c lock_error exists separately from @c last_error: a
+             * refusal is answered by typing something else, and a banner is
+             * answered by an administrator.
+             */
+            lock_error_ = ev.message;
+            return;
+        }
+
+        if (const auto handle = sessions_.find(ev.instance_id, ev.account_id))
+            sessions_.set_last_error(*handle, ev.message);
         return;
     }
 
@@ -1492,6 +1935,13 @@ void instance_manager::apply(const event::event& ev) {
          * Never reached: a probe result is applied above, before the session
          * lookup. The case exists so that adding it to the enum without a
          * handler would have been a compile error rather than a silent drop.
+         */
+        break;
+    case event::event_kind::store_unlocked:
+    case event::event_kind::store_lock_failed:
+        /*
+         * Never reached either, and for the same reason: both are applied above
+         * where the store is, because neither belongs to a session.
          */
         break;
     }

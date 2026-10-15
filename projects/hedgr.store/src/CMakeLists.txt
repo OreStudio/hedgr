@@ -37,6 +37,12 @@ target_link_libraries(${lib_target_name}
     PUBLIC
         hedgr.model.lib
         unofficial::sqlite3::sqlite3
+    PRIVATE
+        # The sealed credentials. Private because secret_box.hpp names nothing
+        # from OpenSSL: every call to it is inside one translation unit, which
+        # is the seam ADR 6 describes, and no consumer of this component has to
+        # know which library does the cryptography.
+        OpenSSL::Crypto
 )
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)

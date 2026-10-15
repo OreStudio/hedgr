@@ -23,6 +23,7 @@
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
@@ -79,6 +80,28 @@ label_colour(hedgr::model::domain::label_colour value) noexcept;
 /** @brief The icon naming a window kind. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*
 window_kind_icon(hedgr::model::domain::window_kind value) noexcept;
+
+/**
+ * @brief The icon naming a lock state.
+ *
+ * An open padlock while unlocked, a closed one while locked, and a warning
+ * triangle while absent. The triangle is not a padlock because absent is not a
+ * lock state to read but a first run that wants an action: an operator who is
+ * shown a closed padlock looks for a key they never made.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT const char*
+store_lock_icon(hedgr::model::domain::store_lock value) noexcept;
+
+/**
+ * @brief The colour of the lock indicator.
+ *
+ * Grey while the store is open, because an open lock is a normal condition and
+ * not news; amber while locked or absent, because both want an action from the
+ * operator; and red only after a refused attempt, which is the one state that
+ * describes something that went wrong rather than something that simply is.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32
+store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
 
 }
 

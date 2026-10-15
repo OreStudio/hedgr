@@ -9,6 +9,7 @@
 #
 set(files
     "runtime_tests.cpp"
+    "store_lock_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

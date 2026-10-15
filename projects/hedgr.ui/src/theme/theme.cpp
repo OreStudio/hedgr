@@ -246,4 +246,32 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     return icon::information;
 }
 
+const char* store_lock_icon(hedgr::model::domain::store_lock value) noexcept {
+    switch (value) {
+    case hedgr::model::domain::store_lock::absent:
+        return icon::lock_absent;
+    case hedgr::model::domain::store_lock::locked:
+        return icon::lock_closed;
+    case hedgr::model::domain::store_lock::unlocked:
+        return icon::lock_open;
+    case hedgr::model::domain::store_lock::failed:
+        return icon::lock_closed;
+    }
+    return icon::information;
+}
+
+ImU32 store_lock_colour(hedgr::model::domain::store_lock value) noexcept {
+    switch (value) {
+    case hedgr::model::domain::store_lock::absent:
+        return IM_COL32(255, 193, 7, 255);
+    case hedgr::model::domain::store_lock::locked:
+        return IM_COL32(255, 193, 7, 255);
+    case hedgr::model::domain::store_lock::unlocked:
+        return IM_COL32(128, 128, 128, 255);
+    case hedgr::model::domain::store_lock::failed:
+        return IM_COL32(255, 23, 68, 255);
+    }
+    return IM_COL32(212, 212, 212, 255);
+}
+
 }

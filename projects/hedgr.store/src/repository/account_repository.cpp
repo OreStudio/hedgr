@@ -19,6 +19,7 @@
  */
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/sqlite/statement.hpp"
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -136,6 +137,72 @@ sqlite::result<void> account_repository::remove_for_instance(
     if (!stepped)
         return std::unexpected(stepped.error());
     return {};
+}
+
+sqlite::result<void> account_repository::set_credential(
+    std::string_view account_id, std::string_view sealed) {
+    /*
+     * An UPDATE rather than an upsert: a credential belongs to an account that
+     * exists, and an upsert here would conjure a row with no instance, no name
+     * and no principal for a typo in an id.
+     */
+    sqlite::statement query(db_->handle(),
+        "UPDATE account SET credential = ? WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, sealed); !bound)
+        return std::unexpected(bound.error());
+    if (auto bound = query.bind(2, account_id); !bound)
+        return std::unexpected(bound.error());
+
+    auto stepped = query.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+sqlite::result<void>
+account_repository::clear_credential(std::string_view account_id) {
+    /*
+     * Null rather than the empty string, because the two say different things:
+     * a NULL column is an account nobody has stored a secret for, while an
+     * empty blob would be a secret whose seal produced nothing.
+     */
+    sqlite::statement query(db_->handle(),
+        "UPDATE account SET credential = NULL WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, account_id); !bound)
+        return std::unexpected(bound.error());
+
+    auto stepped = query.step();
+    if (!stepped)
+        return std::unexpected(stepped.error());
+    return {};
+}
+
+sqlite::result<std::optional<std::string>>
+account_repository::credential_of(std::string_view account_id) const {
+    sqlite::statement query(db_->handle(),
+        "SELECT credential FROM account WHERE id = ?");
+    if (!query.is_valid())
+        return std::unexpected(query.step().error());
+
+    if (auto bound = query.bind(1, account_id); !bound)
+        return std::unexpected(bound.error());
+
+    auto row = query.step();
+    if (!row)
+        return std::unexpected(row.error());
+    if (!row.value())
+        return std::optional<std::string>{};
+
+    /* Reading NULL as text yields the empty string, so nullness is asked. */
+    if (query.is_null(0))
+        return std::optional<std::string>{};
+    return std::optional<std::string>{std::string(query.column_text(0))};
 }
 
 }

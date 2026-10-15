@@ -61,6 +61,22 @@ enum class store_errc : std::uint8_t {
     schema_mismatch,
     /** @brief The operation needed an open database and did not get one. */
     closed,
+    /**
+     * @brief The cryptography that guards a credential could not run.
+     *
+     * Distinct from @c wrong_master_password because it is not the operator's
+     * doing: no password they could type would change the outcome, and the
+     * message beside it describes a broken OpenSSL step rather than a refusal.
+     */
+    crypto_failed,
+    /**
+     * @brief The master password did not open the store.
+     *
+     * The one credential failure an operator can act on by typing something
+     * else, which is why it is the one that reaches a prompt as a sentence
+     * rather than as an internal error.
+     */
+    wrong_master_password,
 };
 
 /**

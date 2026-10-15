@@ -21,6 +21,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_error.hpp"
+#include "hedgr.store/crypto/secret_box.hpp"
 #include <algorithm>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -32,6 +33,7 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
+#include <format>
 #include <memory>
 #include <stop_token>
 #include <string>
@@ -125,80 +127,137 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         push_failure(events, key, connected.error());
         status = domain::session_status::failed;
     } else {
-        auto answer = client.authenticate(job.credential.principal,
-            job.credential.password);
-
         /*
-         * The secret dies here, before anything else looks at the answer. It
-         * was copied into this job and nowhere else, so wiping the buffer now
-         * is what makes "the credential exists for the lifetime of one attempt"
-         * true rather than aspirational: clear() alone would leave the bytes in
-         * the string's allocation.
+         * A stored credential is opened here, on a pool thread, and not by the
+         * frame loop that handed it over. The key derivation behind it is half
+         * a second of deliberate work, and running that where the interface
+         * draws would stall every window for its duration.
+         *
+         * The plaintext that comes out is written straight into the job's
+         * credential and never named again, so it lives for exactly this
+         * attempt: it is not returned, not logged, and not placed on an event,
+         * and the wipe below is the only thing that ends it.
          */
-        std::fill(job.credential.password.begin(), job.credential.password.end(), '\0');
-        job.credential.password.clear();
-        job.credential.password.shrink_to_fit();
-
-        if (!answer) {
-            push_failure(events, key, answer.error());
-            status = domain::session_status::failed;
-        } else {
-            const auto& account = answer.value();
-            auto authenticated = for_key(key);
-            authenticated.kind = event::event_kind::session_authenticated;
-            authenticated.token = account.token;
-            authenticated.tenant_name = account.tenant_name;
-            authenticated.party_name = account.party_name;
+        if (!job.sealed_credential.empty()) {
+            auto opened = store::crypto::secret_box::open(
+                job.master_password.view(), job.sealed_credential);
 
             /*
-             * The event has no principal field because the session key already
-             * names the account. What the instance answered with is still
-             * worth carrying, and payload is the one free-form field, so it
-             * travels there for the log rather than being dropped.
+             * The sealed copy is no longer needed whatever happened, and it is
+             * still a secret: it opens with the master password, so leaving it
+             * in the freed allocation is leaving a credential behind for one
+             * attacker with the password.
              */
-            authenticated.payload = account.principal;
-            events.push(std::move(authenticated));
-
-            status = domain::session_status::authenticated;
-            push_status(events, key, status);
-
-            boost::asio::steady_timer timer(co_await boost::asio::this_coro::executor);
+            std::fill(job.sealed_credential.begin(), job.sealed_credential.end(), '\0');
+            job.sealed_credential.clear();
+            job.sealed_credential.shrink_to_fit();
 
             /*
-             * A disconnect is noticed at the next tick rather than interrupting
-             * the wait: the timer is not cancelled from the frame loop, because
-             * cancel() on another thread is not something Asio promises, and
-             * one refresh interval of latency on a disconnect is not worth a
-             * cross-thread cancellation protocol.
+             * The master password is dropped as soon as it has done its one
+             * job. This coroutine runs for the whole life of the session, which
+             * is hours, and a password held in a long-lived frame is a password
+             * held for no reason: nothing after this point can need it.
              */
-            while (!stop->stop_requested()) {
-                timer.expires_after(job.refresh_interval);
-                const auto started = std::chrono::steady_clock::now();
+            job.master_password.clear();
 
-                boost::system::error_code ignored;
-                co_await timer.async_wait(
-                    boost::asio::redirect_error(boost::asio::use_awaitable, ignored));
+            if (!opened) {
+                /*
+                 * A stored credential that will not open is a failure to sign
+                 * in with the same code a refused password gets, because that
+                 * is what it is from the operator's side. The cause is spelled
+                 * with the box code, which distinguishes a wrong master password
+                 * from a broken crypto step without either reaching a log as a
+                 * secret.
+                 */
+                push_failure(events, key, transport::session_error{
+                    .code = transport::session_errc::authentication_rejected,
+                    .message = "the stored credential could not be opened",
+                    .detail = std::format("secret_box: {}",
+                        store::crypto::to_string(opened.error().code)),
+                });
+                status = domain::session_status::failed;
+            } else {
+                job.credential.password = std::move(opened).value();
+            }
+        }
 
-                const auto elapsed = std::chrono::steady_clock::now() - started;
-                if (stop->stop_requested())
-                    break;
+        if (status != domain::session_status::failed) {
+            auto answer = client.authenticate(job.credential.principal,
+                job.credential.password);
+
+            /*
+             * The secret dies here, before anything else looks at the answer. It
+             * was copied into this job and nowhere else, so wiping the buffer now
+             * is what makes "the credential exists for the lifetime of one attempt"
+             * true rather than aspirational: clear() alone would leave the bytes in
+             * the string's allocation.
+             */
+            std::fill(job.credential.password.begin(), job.credential.password.end(), '\0');
+            job.credential.password.clear();
+            job.credential.password.shrink_to_fit();
+
+            if (!answer) {
+                push_failure(events, key, answer.error());
+                status = domain::session_status::failed;
+            } else {
+                const auto& account = answer.value();
+                auto authenticated = for_key(key);
+                authenticated.kind = event::event_kind::session_authenticated;
+                authenticated.token = account.token;
+                authenticated.tenant_name = account.tenant_name;
+                authenticated.party_name = account.party_name;
 
                 /*
-                 * Placeholder data path. There is no live data protocol in
-                 * Hedgr yet, and inventing one here would put a fiction on the
-                 * wire that the first real protocol would have to unpick. So
-                 * the tick is reported as a tick: a fixed deployment-relative
-                 * subject, a note saying what it is, and the elapsed wait as
-                 * the latency, which is the one honest measurement available.
+                 * The event has no principal field because the session key already
+                 * names the account. What the instance answered with is still
+                 * worth carrying, and payload is the one free-form field, so it
+                 * travels there for the log rather than being dropped.
                  */
-                auto tick = for_key(key);
-                tick.kind = event::event_kind::session_data;
-                tick.subject = std::string(placeholder_subject);
-                tick.payload = "refresh tick; no live data path is wired up yet";
-                tick.latency_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                    elapsed)
-                                      .count();
-                events.push(std::move(tick));
+                authenticated.payload = account.principal;
+                events.push(std::move(authenticated));
+
+                status = domain::session_status::authenticated;
+                push_status(events, key, status);
+
+                boost::asio::steady_timer timer(
+                    co_await boost::asio::this_coro::executor);
+
+                /*
+                 * A disconnect is noticed at the next tick rather than interrupting
+                 * the wait: the timer is not cancelled from the frame loop, because
+                 * cancel() on another thread is not something Asio promises, and
+                 * one refresh interval of latency on a disconnect is not worth a
+                 * cross-thread cancellation protocol.
+                 */
+                while (!stop->stop_requested()) {
+                    timer.expires_after(job.refresh_interval);
+                    const auto started = std::chrono::steady_clock::now();
+
+                    boost::system::error_code ignored;
+                    co_await timer.async_wait(
+                        boost::asio::redirect_error(boost::asio::use_awaitable, ignored));
+
+                    const auto elapsed = std::chrono::steady_clock::now() - started;
+                    if (stop->stop_requested())
+                        break;
+
+                    /*
+                     * Placeholder data path. There is no live data protocol in
+                     * Hedgr yet, and inventing one here would put a fiction on the
+                     * wire that the first real protocol would have to unpick. So
+                     * the tick is reported as a tick: a fixed deployment-relative
+                     * subject, a note saying what it is, and the elapsed wait as
+                     * the latency, which is the one honest measurement available.
+                     */
+                    auto tick = for_key(key);
+                    tick.kind = event::event_kind::session_data;
+                    tick.subject = std::string(placeholder_subject);
+                    tick.payload = "refresh tick; no live data path is wired up yet";
+                    tick.latency_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                        elapsed)
+                                          .count();
+                    events.push(std::move(tick));
+                }
             }
         }
     }

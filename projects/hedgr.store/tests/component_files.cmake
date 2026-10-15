@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "secret_store_tests.cpp"
     "store_tests.cpp"
 )
 

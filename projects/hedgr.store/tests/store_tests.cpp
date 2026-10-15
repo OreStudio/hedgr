@@ -544,7 +544,7 @@ TEST_CASE("a file written with another schema version is refused", "[store]") {
     REQUIRE_FALSE(applied.has_value());
     REQUIRE(applied.error().code == store_errc::schema_mismatch);
     REQUIRE(applied.error().message.contains("2"));
-    REQUIRE(applied.error().message.contains("3"));
+    REQUIRE(applied.error().message.contains("4"));
     REQUIRE(applied.error().message.contains(scratch.path().string()));
     REQUIRE(applied.error().message.contains("delete the file"));
 

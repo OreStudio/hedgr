@@ -77,6 +77,22 @@ enum class command_kind : std::uint8_t {
     probe_instance = 16,
     /** @brief Probe every instance now. */
     probe_all = 17,
+    /**
+     * @brief Seal the store under a new master password, then hold it.
+     *
+     * The password travels in @c password, the same field every other secret
+     * crosses in, and the runtime wipes it as soon as the store is sealed.
+     */
+    set_master_password = 18,
+    /**
+     * @brief Derive the key from @c password and verify it against the store.
+     *
+     * Slow on purpose and therefore answered by an event rather than by the
+     * time this returns: @c store_unlocked or @c store_lock_failed.
+     */
+    unlock_store = 19,
+    /** @brief Drop the held password. The store returns to locked. */
+    lock_store = 20,
 };
 
 /** @brief The canonical text of a command kind, for logs. */

@@ -59,6 +59,12 @@ std::string_view to_string(command_kind value) noexcept {
         return "probe_instance";
     case command_kind::probe_all:
         return "probe_all";
+    case command_kind::set_master_password:
+        return "set_master_password";
+    case command_kind::unlock_store:
+        return "unlock_store";
+    case command_kind::lock_store:
+        return "lock_store";
     }
     return "unknown";
 }

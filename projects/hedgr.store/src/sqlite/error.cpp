@@ -41,6 +41,10 @@ std::string_view to_string(store_errc value) noexcept {
         return "schema_mismatch";
     case store_errc::closed:
         return "closed";
+    case store_errc::crypto_failed:
+        return "crypto_failed";
+    case store_errc::wrong_master_password:
+        return "wrong_master_password";
     }
     return "unknown";
 }

@@ -37,19 +37,22 @@ using sqlite::result;
 /**
  * @brief Reads and writes the accounts that may be presented to instances.
  *
- * The repository borrows the connection, so it must not outlive it. Nothing
- * here relates to a credential: an account is a principal, and the secret that
- * authenticates it lives in memory for one connect attempt only.
+ * The repository borrows the connection, so it must not outlive it.
+ *
+ * An account may carry a credential, but only ever as ciphertext: the
+ * credential arrives already sealed and leaves the same way, and no password
+ * and no key is ever named in this class. A decrypted secret exists inside the
+ * runtime's sign-in attempt and nowhere else, and never passes through here.
  */
 class HEDGR_STORE_EXPORT account_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit account_repository(sqlite::database& db) noexcept;
 
-    /** @brief Every account, ordered by instance then label. */
+    /** @brief Every account, ordered by instance then name. */
     [[nodiscard]] result<std::vector<dom::account>> list() const;
 
-    /** @brief The accounts of one instance, ordered by label. */
+    /** @brief The accounts of one instance, ordered by name. */
     [[nodiscard]] result<std::vector<dom::account>>
     list_for_instance(std::string_view instance_id) const;
 
@@ -62,6 +65,34 @@ public:
     /** @brief Deletes every account of one instance. */
     [[nodiscard]] result<void>
     remove_for_instance(std::string_view instance_id);
+
+    /**
+     * @brief Stores @p sealed as the account's credential.
+     *
+     * The value is already sealed by the caller: this class never sees a
+     * password and never derives a key, so there is exactly one place in the
+     * program where a credential becomes ciphertext.
+     */
+    [[nodiscard]] result<void>
+    set_credential(std::string_view account_id, std::string_view sealed);
+
+    /** @brief Forgets the account's credential, leaving the account. */
+    [[nodiscard]] result<void> clear_credential(std::string_view account_id);
+
+    /**
+     * @brief The account's sealed credential, or nothing when it has none.
+     *
+     * Deliberately not part of @c list or @c list_for_instance. A list is for
+     * rendering, and a list that carried every credential in the store would
+     * put every secret in the process on the path a table draws from -- one
+     * forgotten reference away from a window, a diff or a log. A credential is
+     * fetched one account at a time, by the one caller that is about to use it.
+     *
+     * What comes back is still sealed, so even this call hands over nothing
+     * that can be read without the master password.
+     */
+    [[nodiscard]] result<std::optional<std::string>>
+    credential_of(std::string_view account_id) const;
 
 private:
     sqlite::database* db_ = nullptr;

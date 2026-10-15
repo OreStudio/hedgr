@@ -36,25 +36,32 @@ namespace {
  * Bumped from 1 when an instance row stopped carrying a safety classification
  * and the accounts table took its current name, from 2 when the folders, labels
  * and label attachments were added and an instance stopped carrying a
- * comma-separated label string, and from 3 when an account's free-text `label`
+ * comma-separated label string, from 3 when an account's free-text `label`
  * column became `name` so that it no longer shares a word with the label
- * entity. The store is pre-release, so there is no migration: a file written
- * against a different version is refused, and the operator deletes it.
+ * entity, and from 4 when the store gained the master table and the account
+ * gained its sealed credential. The store is pre-release, so there is no
+ * migration: a file written against a different version is refused, and the
+ * operator deletes it.
  */
-constexpr std::int64_t current_version = 3;
+constexpr std::int64_t current_version = 4;
 
 /**
  * @brief The whole schema, in one place.
  *
  * The tables mirror the domain types rather than any view's needs: an instance
- * carries its transport, an account carries no credential, and a window carries
+ * carries its transport, an account carries its sealed credential and nothing
+ * that would let it be read without the master password, and a window carries
  * its kind beside its payload so no variant is ever written out.
  *
  * @c window_spec.session_instance_id and @c window_spec.session_account_id are
  * nullable because a window may be bound to no session at all, which is the
  * normal case for the instance manager.
+ *
+ * @c account.credential and the @c master table are the only two places in this
+ * file where a secret is written down, and both hold ciphertext. Nothing here
+ * stores the master password, and nothing here can be read without it.
  */
-constexpr std::array<std::string_view, 10> schema_statements{
+constexpr std::array<std::string_view, 11> schema_statements{
     R"(PRAGMA foreign_keys = ON)",
     R"(CREATE TABLE IF NOT EXISTS instance (
         id TEXT PRIMARY KEY,
@@ -64,11 +71,19 @@ constexpr std::array<std::string_view, 10> schema_statements{
         wire_format TEXT NOT NULL DEFAULT 'msgpack',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     ))",
+    /*
+     * The credential column is nullable, and NULL is the normal state: a store
+     * with no stored credentials is a valid configuration and the common one
+     * for an operator who only reads from development instances. The column
+     * holds a sealed blob and never a password, so a copy of this file is worth
+     * nothing without the master password, which lives only in memory.
+     */
     R"(CREATE TABLE IF NOT EXISTS account (
         id TEXT PRIMARY KEY,
         instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         principal TEXT NOT NULL,
+        credential TEXT,
         UNIQUE(instance_id, principal)
     ))",
     /*
@@ -121,6 +136,18 @@ constexpr std::array<std::string_view, 10> schema_statements{
     ))",
     R"(CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER NOT NULL
+    ))",
+    /*
+     * One row, keyed by a literal, holding a known sentence sealed under the
+     * master password. Verification opens that sentence; the password itself is
+     * nowhere in this table and nowhere in this file. A row here is what makes
+     * the store locked rather than absent, so its absence is a first launch and
+     * not an error.
+     */
+    R"(CREATE TABLE IF NOT EXISTS master (
+        id TEXT PRIMARY KEY,
+        verification TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
     ))",
 };
 

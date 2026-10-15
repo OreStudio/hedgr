@@ -21,6 +21,7 @@
 #define HEDGR_UI_RENDER_RENDERER_HPP
 
 #include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/probe_table.hpp"
@@ -108,6 +109,34 @@ struct render_input final {
     /** @brief Where a renderer puts work for the runtime. */
     hedgr::model::command::command_queue& commands;
 
+    /**
+     * @brief Where the master password stands.
+     *
+     * The whole of the local store sits behind it, so this gates the catalogue
+     * and not only the credentials: while it is not @c unlocked there is
+     * nothing to draw but the prompt that asks for it. See @c shows_instances.
+     */
+    hedgr::model::domain::store_lock store_lock =
+        hedgr::model::domain::store_lock::absent;
+
+    /**
+     * @brief Whether a derivation is running on the runtime's pool right now.
+     *
+     * The key derivation is deliberately slow, so a prompt that shows nothing
+     * for half a second reads as a hung application. This is what lets it say
+     * it is working.
+     */
+    bool unlocking = false;
+
+    /**
+     * @brief Why the last lock attempt was refused, or empty.
+     *
+     * Shown beside the prompt rather than in a failure banner: a mistyped
+     * password is not a store failure, and an operator who is told the store
+     * broke will look in the wrong place.
+     */
+    std::string lock_message;
+
     /** @brief The frame's monotonic clock, in nanoseconds. */
     std::int64_t now_ns = 0;
 
@@ -141,6 +170,29 @@ using renderer_fn = void (*)(hedgr::model::state::window_handle,
  */
 [[nodiscard]] HEDGR_UI_EXPORT renderer_fn
 renderer_for(hedgr::model::domain::window_kind kind) noexcept;
+
+/**
+ * @brief Whether the Instances window is drawn at all.
+ *
+ * This is the lock gate, and it is a function rather than a condition inside
+ * the drawing loop so that it can be tested without a GL context. The rule is
+ * one line: the catalogue is drawn only while the store is unlocked.
+ *
+ * The reason it is the whole catalogue and not just the accounts is that every
+ * read of the store is a decryption. Instances and folders were never secrets
+ * on their own, but they live in a file that is now unreadable without the
+ * master password, so while it is not held there is genuinely nothing to draw.
+ * The alternative -- showing a catalogue that cannot be written to -- would let
+ * an operator edit rows that would then fail to save, which is worse than
+ * asking for the password first.
+ *
+ * @c absent and @c locked both close the gate. @c absent is the first run,
+ * where the operator has to create a password before there is a store worth
+ * opening; @c failed closed it again after a refusal. Nothing here reports an
+ * error, because a closed lock is a state and not a fault.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool
+shows_instances(const render_input& input) noexcept;
 
 }
 

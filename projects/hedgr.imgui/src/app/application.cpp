@@ -304,17 +304,20 @@ void application::render_loop(GLFWwindow* window) {
         manager_.pump();
 
         const ui::render::render_input input{
-            manager_.instances(),
-            manager_.accounts(),
-            manager_.folders(),
-            manager_.labels(),
-            manager_.labellings(),
-            manager_.sessions(),
-            manager_.probes(),
-            manager_.windows(),
-            manager_.commands(),
-            now_ns(),
-            background_texture_,
+            .instances = manager_.instances(),
+            .accounts = manager_.accounts(),
+            .folders = manager_.folders(),
+            .labels = manager_.labels(),
+            .labellings = manager_.labellings(),
+            .sessions = manager_.sessions(),
+            .probes = manager_.probes(),
+            .windows = manager_.windows(),
+            .commands = manager_.commands(),
+            .store_lock = manager_.store_lock(),
+            .unlocking = manager_.is_unlocking(),
+            .lock_message = manager_.lock_error(),
+            .now_ns = now_ns(),
+            .background_texture = background_texture_,
         };
         workspace_.render(input);
 

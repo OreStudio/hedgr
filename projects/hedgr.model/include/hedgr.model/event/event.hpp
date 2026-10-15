@@ -22,6 +22,7 @@
 
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
 #include <string>
@@ -48,6 +49,22 @@ enum class event_kind : std::uint8_t {
     window_data = 4,
     /** @brief A probe finished, whatever it found. */
     probe_result = 5,
+    /**
+     * @brief The master password was derived and verified, and is now held.
+     *
+     * Carries no secret: the password that was accepted stays in the runtime
+     * and never travels here. See the note on @c event below.
+     */
+    store_unlocked = 6,
+    /**
+     * @brief An attempt to unlock the store was refused.
+     *
+     * The same state as @c store_lock::failed, reported so the interface can
+     * put the sentence beside the prompt. The message names the state and not
+     * the secret, so an operator reading a log learns that an attempt failed
+     * and nothing about what was tried.
+     */
+    store_lock_failed = 7,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -104,6 +121,15 @@ struct event final {
 
     /** @brief What IAM answered, for probe_result. */
     domain::readiness ready = domain::readiness::unknown;
+
+    /**
+     * @brief Where the lock stands, for the store_* kinds.
+     *
+     * Sent rather than inferred so the interface draws the state the runtime
+     * actually holds, including @c failed, rather than the state it hoped for
+     * when it pushed the command.
+     */
+    domain::store_lock lock = domain::store_lock::absent;
 
     /**
      * @brief The low-level cause, for probe_result.
