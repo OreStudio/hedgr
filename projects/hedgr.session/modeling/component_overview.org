@@ -1,0 +1,29 @@
+:PROPERTIES:
+:ID: hedgr.session
+:END:
+#+title: hedgr.session
+#+description: Hedgr NATS session transport
+
+* Summary
+
+Hedgr NATS session transport
+
+* Inputs
+
+None yet.
+
+* Outputs
+
+None yet.
+
+* Entry points
+
+None yet.
+
+* Dependencies
+
+None yet.
+
+* See also
+
+- [[file:hedgr.session.puml][Class diagram source]]

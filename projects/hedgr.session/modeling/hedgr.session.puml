@@ -1,0 +1,4 @@
+@startuml hedgr.session
+' Component skeleton. Fill in as the component grows.
+title hedgr.session
+@enduml
