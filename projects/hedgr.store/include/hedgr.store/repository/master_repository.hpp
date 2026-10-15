@@ -51,6 +51,9 @@ public:
     /** @brief Binds the repository to an open @c db. */
     explicit master_repository(sqlite::database& db) noexcept;
 
+    /** @brief The DDL this build applies for the @c master table. */
+    [[nodiscard]] std::string sql() const;
+
     /** @brief Whether a master password has been created for this store. */
     [[nodiscard]] result<bool> has_master() const;
 

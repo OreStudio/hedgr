@@ -24,6 +24,7 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -40,11 +41,18 @@ using sqlite::result;
  * The repository borrows the connection, so it must not outlive it. It is a
  * thin translation between the @c instance table and the domain value: every
  * column here is stored text or a plain number, so nothing needs parsing.
+ *
+ * The @c instance table is described by @c instance_entity, and the statement
+ * that creates it is the one sqlgen derives from that struct. There is no
+ * second description of the columns here to drift from it.
  */
 class HEDGR_STORE_EXPORT instance_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit instance_repository(sqlite::database& db) noexcept;
+
+    /** @brief The DDL this build applies for the @c instance table. */
+    [[nodiscard]] std::string sql() const;
 
     /** @brief Every configured instance, ordered by name. */
     [[nodiscard]] result<std::vector<dom::instance>> list() const;

@@ -18,10 +18,18 @@
  *
  */
 #include "hedgr.store/repository/labelling_repository.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -31,71 +39,57 @@ namespace dom = model::domain;
 
 namespace {
 
+using namespace sqlgen::literals;
+
 /**
- * @brief The two statements a labelling needs, one per owner kind.
+ * @brief Every instance attachment, in the order the list reports them.
  *
- * The attachment lives in two tables because each foreign key has to name the
- * table it cascades on, so every operation repeats itself over the pair. The
- * pair is spelled once here and the operations loop over it, which is the one
- * place the two tables are visible.
+ * The junction lives in two tables because each foreign key has to name the
+ * table it cascades on, so every operation here is written twice, once per
+ * owner kind. That duplication is the price of the cascade and it is confined
+ * to this file.
  */
-struct junction final {
-    /** @brief Which owner kind this table holds. */
-    dom::labelling_owner owner = dom::labelling_owner::instance;
+sqlite::result<std::vector<dom::labelling>> list_instances(
+    sqlite::database& db) {
+    const auto query = sqlgen::read<std::vector<instance_label_entity>> |
+        sqlgen::order_by("instance_id"_c, "label_id"_c);
 
-    /** @brief The table's name. */
-    std::string_view table;
+    auto rows = rows_of(query(db.connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
 
-    /** @brief The table's owner column name. */
-    std::string_view owner_column;
-
-    /** @brief The statement attaching a pair. */
-    std::string_view insert_sql;
-
-    /** @brief The statement detaching a pair. */
-    std::string_view delete_sql;
-
-    /** @brief The statement detaching every label of one owner. */
-    std::string_view delete_owner_sql;
-};
-
-constexpr junction junctions[] = {
-    {
-        .owner = dom::labelling_owner::instance,
-        .table = "instance_label",
-        .owner_column = "instance_id",
-        .insert_sql =
-            "INSERT INTO instance_label (instance_id, label_id) VALUES (?, ?) "
-            "ON CONFLICT(instance_id, label_id) DO NOTHING",
-        .delete_sql =
-            "DELETE FROM instance_label WHERE instance_id = ? AND label_id = ?",
-        .delete_owner_sql =
-            "DELETE FROM instance_label WHERE instance_id = ?",
-    },
-    {
-        .owner = dom::labelling_owner::account,
-        .table = "account_label",
-        .owner_column = "account_id",
-        .insert_sql =
-            "INSERT INTO account_label (account_id, label_id) VALUES (?, ?) "
-            "ON CONFLICT(account_id, label_id) DO NOTHING",
-        .delete_sql =
-            "DELETE FROM account_label WHERE account_id = ? AND label_id = ?",
-        .delete_owner_sql =
-            "DELETE FROM account_label WHERE account_id = ?",
-    },
-};
-
-/** @brief The junction table holding this owner kind's attachments. */
-[[nodiscard]] const junction& junction_for(dom::labelling_owner owner) {
-    return owner == dom::labelling_owner::account ? junctions[1] : junctions[0];
+    std::vector<dom::labelling> values;
+    values.reserve(rows.value().size());
+    for (const auto& row : rows.value()) {
+        values.push_back(dom::labelling{
+            .owner = dom::labelling_owner::instance,
+            .owner_id = row.instance_id,
+            .label_id = row.label_id,
+        });
+    }
+    return values;
 }
 
-/** @brief The statement that lists one table's attachments. */
-[[nodiscard]] std::string select_sql(const junction& side) {
-    return "SELECT " + std::string{side.owner_column} + ", label_id FROM "
-        + std::string{side.table} + " ORDER BY " + std::string{side.owner_column}
-        + ", label_id";
+/** @brief Every account attachment, in the order the list reports them. */
+sqlite::result<std::vector<dom::labelling>> list_accounts(
+    sqlite::database& db) {
+    const auto query = sqlgen::read<std::vector<account_label_entity>> |
+        sqlgen::order_by("account_id"_c, "label_id"_c);
+
+    auto rows = rows_of(query(db.connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
+
+    std::vector<dom::labelling> values;
+    values.reserve(rows.value().size());
+    for (const auto& row : rows.value()) {
+        values.push_back(dom::labelling{
+            .owner = dom::labelling_owner::account,
+            .owner_id = row.account_id,
+            .label_id = row.label_id,
+        });
+    }
+    return values;
 }
 
 }
@@ -103,78 +97,66 @@ constexpr junction junctions[] = {
 labelling_repository::labelling_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
+std::string labelling_repository::sql() const {
+    return ddl_for(instance_label_entity::tablename) + "\n" +
+        ddl_for(account_label_entity::tablename);
+}
+
 sqlite::result<std::vector<dom::labelling>> labelling_repository::list() const {
-    std::vector<dom::labelling> rows;
-    for (const auto& side : junctions) {
-        sqlite::statement query(db_->handle(), select_sql(side));
-        if (!query.is_valid())
-            return std::unexpected(query.step().error());
+    auto instances = list_instances(*db_);
+    if (!instances)
+        return std::unexpected(instances.error());
 
-        while (true) {
-            auto available = query.step();
-            if (!available)
-                return std::unexpected(available.error());
-            if (!available.value())
-                break;
+    auto accounts = list_accounts(*db_);
+    if (!accounts)
+        return std::unexpected(accounts.error());
 
-            dom::labelling row;
-            row.owner = side.owner;
-            row.owner_id = std::string(query.column_text(0));
-            row.label_id = std::string(query.column_text(1));
-            rows.push_back(std::move(row));
-        }
-    }
-    return rows;
+    auto values = std::move(instances).value();
+    auto more = std::move(accounts).value();
+    values.insert(values.end(), more.begin(), more.end());
+    return values;
 }
 
 sqlite::result<void> labelling_repository::save(const dom::labelling& row) {
-    const auto& side = junction_for(row.owner);
-    sqlite::statement insert(db_->handle(), side.insert_sql);
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
-
-    if (auto bound = insert.bind(1, row.owner_id); !bound)
-        return bound;
-    if (auto bound = insert.bind(2, row.label_id); !bound)
-        return bound;
-
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    if (row.owner == dom::labelling_owner::account) {
+        return upsert(*db_,
+            account_label_entity{
+                .account_id = row.owner_id,
+                .label_id = row.label_id,
+            },
+            {"account_id", "label_id"});
+    }
+    return upsert(*db_,
+        instance_label_entity{
+            .instance_id = row.owner_id,
+            .label_id = row.label_id,
+        },
+        {"instance_id", "label_id"});
 }
 
 sqlite::result<void> labelling_repository::remove(const dom::labelling& row) {
-    const auto& side = junction_for(row.owner);
-    sqlite::statement query(db_->handle(), side.delete_sql);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, row.owner_id); !bound)
-        return bound;
-    if (auto bound = query.bind(2, row.label_id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    if (row.owner == dom::labelling_owner::account) {
+        const auto query = sqlgen::delete_from<account_label_entity> |
+            sqlgen::where("account_id"_c == std::string{row.owner_id} &&
+                          "label_id"_c == std::string{row.label_id});
+        return done(query(db_->connection()));
+    }
+    const auto query = sqlgen::delete_from<instance_label_entity> |
+        sqlgen::where("instance_id"_c == std::string{row.owner_id} &&
+                      "label_id"_c == std::string{row.label_id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> labelling_repository::remove_owner(
     dom::labelling_owner owner, std::string_view owner_id) {
-    const auto& side = junction_for(owner);
-    sqlite::statement query(db_->handle(), side.delete_owner_sql);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, owner_id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    if (owner == dom::labelling_owner::account) {
+        const auto query = sqlgen::delete_from<account_label_entity> |
+            sqlgen::where("account_id"_c == std::string{owner_id});
+        return done(query(db_->connection()));
+    }
+    const auto query = sqlgen::delete_from<instance_label_entity> |
+        sqlgen::where("instance_id"_c == std::string{owner_id});
+    return done(query(db_->connection()));
 }
 
 }

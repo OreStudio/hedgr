@@ -18,9 +18,19 @@
  *
  */
 #include "hedgr.store/repository/instance_repository.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/update.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -30,21 +40,32 @@ namespace dom = model::domain;
 
 namespace {
 
-constexpr std::string_view select_columns =
-    "SELECT id, name, nats_url, subject_prefix, wire_format, folder_id, "
-    "created_at FROM instance ORDER BY name";
+using namespace sqlgen::literals;
 
-/** @brief Reads the row the statement is currently parked on. */
-dom::instance read_row(const sqlite::statement& query) {
-    dom::instance row;
-    row.id = std::string(query.column_text(0));
-    row.name = std::string(query.column_text(1));
-    row.nats_url = std::string(query.column_text(2));
-    row.subject_prefix = std::string(query.column_text(3));
-    row.wire_format = std::string(query.column_text(4));
-    row.folder_id = std::string(query.column_text(5));
-    row.created_at = std::string(query.column_text(6));
-    return row;
+/** @brief The stored row as the domain value the rest of Hedgr speaks. */
+dom::instance to_domain(const instance_entity& row) {
+    dom::instance value;
+    value.id = row.id.get();
+    value.name = row.name.get();
+    value.nats_url = row.nats_url;
+    value.subject_prefix = row.subject_prefix;
+    value.wire_format = row.wire_format;
+    value.folder_id = row.folder_id;
+    value.created_at = row.created_at;
+    return value;
+}
+
+/** @brief The domain value as the entity sqlgen binds. */
+instance_entity to_entity(const dom::instance& row) {
+    return instance_entity{
+        .id = row.id,
+        .name = row.name,
+        .nats_url = row.nats_url,
+        .subject_prefix = row.subject_prefix,
+        .wire_format = row.wire_format,
+        .folder_id = row.folder_id,
+        .created_at = row.created_at,
+    };
 }
 
 }
@@ -52,88 +73,59 @@ dom::instance read_row(const sqlite::statement& query) {
 instance_repository::instance_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
+std::string instance_repository::sql() const {
+    return ddl_for(instance_entity::tablename);
+}
+
 sqlite::result<std::vector<dom::instance>> instance_repository::list() const {
-    sqlite::statement query(db_->handle(), select_columns);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    std::vector<dom::instance> rows;
-    while (true) {
-        auto available = query.step();
-        if (!available)
-            return std::unexpected(available.error());
-        if (!available.value())
-            break;
-
-        rows.push_back(read_row(query));
-    }
-    return rows;
+    const auto query =
+        sqlgen::read<std::vector<instance_entity>> | sqlgen::order_by("name"_c);
+    return rows_of(query(db_->connection()))
+        .transform([](const auto& rows) {
+            std::vector<dom::instance> values;
+            values.reserve(rows.size());
+            for (const auto& row : rows)
+                values.push_back(to_domain(row));
+            return values;
+        });
 }
 
 sqlite::result<void> instance_repository::save(const dom::instance& row) {
-    sqlite::statement insert(
-        db_->handle(),
-        "INSERT INTO instance (id, name, nats_url, subject_prefix, "
-        "wire_format, folder_id) VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
-        "nats_url = excluded.nats_url, "
-        "subject_prefix = excluded.subject_prefix, "
-        "wire_format = excluded.wire_format, "
-        "folder_id = excluded.folder_id");
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
+    auto stored = to_entity(row);
 
-    // created_at is deliberately not written: the stored timestamp records when
-    // the operator first added the instance, which an edit must not move.
-    if (auto bound = insert.bind(1, row.id); !bound)
-        return bound;
-    if (auto bound = insert.bind(2, row.name); !bound)
-        return bound;
-    if (auto bound = insert.bind(3, row.nats_url); !bound)
-        return bound;
-    if (auto bound = insert.bind(4, row.subject_prefix); !bound)
-        return bound;
-    if (auto bound = insert.bind(5, row.wire_format); !bound)
-        return bound;
-    if (auto bound = insert.bind(6, row.folder_id); !bound)
-        return bound;
+    /*
+     * created_at records when the operator first added the instance, and an
+     * edit must not move it. The column used to carry a DEFAULT for that, and
+     * sqlgen cannot express one, so the writer keeps the value instead: an
+     * existing row keeps the stamp it has, and a new row is stamped now.
+     */
+    if (stored.created_at.empty()) {
+        const auto existing = sqlgen::read<std::vector<instance_entity>> |
+            sqlgen::where("id"_c == std::string{row.id});
+        auto found = rows_of(existing(db_->connection()));
+        if (!found)
+            return std::unexpected(found.error());
+        stored.created_at = found.value().empty()
+            ? timestamp_now()
+            : found.value().front().created_at;
+    }
 
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    return upsert(*db_, stored, {"id"});
 }
 
 sqlite::result<void> instance_repository::set_parent(std::string_view id,
     std::string_view folder_id) {
-    sqlite::statement query(
-        db_->handle(), "UPDATE instance SET folder_id = ? WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, folder_id); !bound)
-        return bound;
-    if (auto bound = query.bind(2, id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query =
+        sqlgen::update<instance_entity>(
+            "folder_id"_c.set(std::string{folder_id})) |
+        sqlgen::where("id"_c == std::string{id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> instance_repository::remove(std::string_view id) {
-    sqlite::statement query(db_->handle(), "DELETE FROM instance WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<instance_entity> |
+        sqlgen::where("id"_c == std::string{id});
+    return done(query(db_->connection()));
 }
 
 }

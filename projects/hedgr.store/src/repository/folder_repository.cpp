@@ -18,11 +18,19 @@
  *
  */
 #include "hedgr.store/repository/folder_repository.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
 #include <format>
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -32,9 +40,7 @@ namespace dom = model::domain;
 
 namespace {
 
-constexpr std::string_view select_columns =
-    "SELECT id, parent_id, owner_id, tree, name FROM folder "
-    "ORDER BY tree, owner_id, name";
+using namespace sqlgen::literals;
 
 sqlite::store_error corrupt_row(std::string_view id, std::string_view detail) {
     return sqlite::store_error{
@@ -44,23 +50,32 @@ sqlite::store_error corrupt_row(std::string_view id, std::string_view detail) {
     };
 }
 
-/** @brief Reads the row the statement is currently parked on. */
-sqlite::result<dom::folder> read_row(const sqlite::statement& query) {
-    dom::folder row;
-    row.id = std::string(query.column_text(0));
-    row.parent_id = std::string(query.column_text(1));
-    row.owner_id = std::string(query.column_text(2));
+/** @brief The stored row as a domain value, or why it is not one. */
+sqlite::result<dom::folder> to_domain(const folder_entity& row) {
+    dom::folder value;
+    value.id = row.id.get();
+    value.parent_id = row.parent_id;
+    value.owner_id = row.owner_id;
+    value.name = row.name;
 
-    const auto tree = dom::folder_tree_from_string(query.column_text(3));
+    const auto tree = dom::folder_tree_from_string(row.tree);
     if (!tree) {
         return std::unexpected(corrupt_row(
-            row.id, std::format("unknown tree [{}]: {}", query.column_text(3),
-                                tree.error())));
+            value.id, std::format("unknown tree [{}]: {}", row.tree, tree.error())));
     }
-    row.tree = tree.value();
+    value.tree = tree.value();
+    return value;
+}
 
-    row.name = std::string(query.column_text(4));
-    return row;
+/** @brief The domain value as the entity sqlgen binds. */
+folder_entity to_entity(const dom::folder& row) {
+    return folder_entity{
+        .id = row.id,
+        .parent_id = row.parent_id,
+        .owner_id = row.owner_id,
+        .tree = std::string{dom::to_string(row.tree)},
+        .name = row.name,
+    };
 }
 
 }
@@ -68,85 +83,45 @@ sqlite::result<dom::folder> read_row(const sqlite::statement& query) {
 folder_repository::folder_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
+std::string folder_repository::sql() const {
+    return ddl_for(folder_entity::tablename);
+}
+
 sqlite::result<std::vector<dom::folder>> folder_repository::list() const {
-    sqlite::statement query(db_->handle(), select_columns);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
+    const auto query = sqlgen::read<std::vector<folder_entity>> |
+        sqlgen::order_by("tree"_c, "owner_id"_c, "name"_c);
 
-    std::vector<dom::folder> rows;
-    while (true) {
-        auto available = query.step();
-        if (!available)
-            return std::unexpected(available.error());
-        if (!available.value())
-            break;
+    auto rows = rows_of(query(db_->connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
 
-        auto row = read_row(query);
-        if (!row)
-            return std::unexpected(row.error());
-        rows.push_back(std::move(row).value());
+    std::vector<dom::folder> values;
+    values.reserve(rows.value().size());
+    for (const auto& row : rows.value()) {
+        auto value = to_domain(row);
+        if (!value)
+            return std::unexpected(value.error());
+        values.push_back(std::move(value).value());
     }
-    return rows;
+    return values;
 }
 
 sqlite::result<void> folder_repository::save(const dom::folder& row) {
-    sqlite::statement insert(
-        db_->handle(),
-        "INSERT INTO folder (id, parent_id, owner_id, tree, name) "
-        "VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET parent_id = excluded.parent_id, "
-        "owner_id = excluded.owner_id, tree = excluded.tree, "
-        "name = excluded.name");
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
-
-    if (auto bound = insert.bind(1, row.id); !bound)
-        return bound;
-    if (auto bound = insert.bind(2, row.parent_id); !bound)
-        return bound;
-    if (auto bound = insert.bind(3, row.owner_id); !bound)
-        return bound;
-    if (auto bound = insert.bind(4, dom::to_string(row.tree)); !bound)
-        return bound;
-    if (auto bound = insert.bind(5, row.name); !bound)
-        return bound;
-
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    return upsert(*db_, to_entity(row), {"id"});
 }
 
 sqlite::result<void> folder_repository::remove(std::string_view id) {
-    sqlite::statement query(db_->handle(), "DELETE FROM folder WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<folder_entity> |
+        sqlgen::where("id"_c == std::string{id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> folder_repository::remove_tree(dom::folder_tree tree,
     std::string_view owner_id) {
-    sqlite::statement query(db_->handle(),
-        "DELETE FROM folder WHERE tree = ? AND owner_id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, dom::to_string(tree)); !bound)
-        return bound;
-    if (auto bound = query.bind(2, owner_id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<folder_entity> |
+        sqlgen::where("tree"_c == std::string{dom::to_string(tree)} &&
+                      "owner_id"_c == std::string{owner_id});
+    return done(query(db_->connection()));
 }
 
 }

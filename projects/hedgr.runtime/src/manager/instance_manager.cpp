@@ -26,23 +26,32 @@
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include "ores.logging/boost_severity.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/log/sources/severity_feature.hpp>
 #include <chrono>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <format>
 #include <iomanip>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -57,6 +66,19 @@ namespace model_state = hedgr::model::state;
 namespace sqlite = hedgr::store::sqlite;
 namespace store_crypto = hedgr::store::crypto;
 namespace transport = hedgr::session::transport;
+
+/**
+ * @brief This manager's logger.
+ *
+ * A warning that nothing reads is not a warning, so a checkout the scan could
+ * not use is reported the way the rest of OreStudio reports one: through the
+ * process log, which the application sets up before it starts anything.
+ */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.runtime.manager.instance_manager");
+    return instance;
+}
 
 /**
  * @brief The key a running worker is registered under.
@@ -182,12 +204,248 @@ live_indices(const model_state::slab& layout) {
         sqlite::to_string(error.code));
 }
 
-/** @brief The monotonic clock in nanoseconds, which is what deadlines use. */
+/**
+ * @brief The monotonic clock in nanoseconds, which is what deadlines use.
+ */
 [[nodiscard]] std::int64_t steady_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch())
         .count();
 }
+
+/**
+ * @brief One OreStudio checkout, as far as seeding needs to know about it.
+ *
+ * Read out of the checkout's @c .env, which is the file the deployment itself
+ * uses. Nothing here is invented: the address and the subject prefix are the
+ * ones the environment's own services listen on, taken from the same file the
+ * rest of OreStudio reads.
+ */
+struct environment final {
+    /**
+     * @brief The checkout's label, e.g. @c brave_hopper.
+     *
+     * From @c ORES_CHECKOUT_LABEL, which is the name of the checkout rather
+     * than of the deployment: @c ORES_ENV_NAME disagrees with the directory for
+     * at least one environment (it holds @c festive-dijkstra where the label
+     * holds @c festive_dijkstra), and the tree the operator described is built
+     * from labels.
+     */
+    std::string label;
+
+    /** @brief @c ORES_NATS_URL: the broker this deployment's services use. */
+    std::string nats_url;
+
+    /** @brief @c ORES_NATS_SUBJECT_PREFIX: where its services listen. */
+    std::string subject_prefix;
+
+    /** @brief @c ORES_NATS_WIRE_FORMAT, or @c msgpack when it says nothing. */
+    std::string wire_format = "msgpack";
+
+    /** @brief @c ORES_ENV_TYPE: the tier, e.g. @c development. */
+    std::string type;
+};
+
+/**
+ * @brief The directory the OreStudio checkouts live under.
+ *
+ * Read from @c HEDGR_ORESTUDIO_ROOT when it is set, which is what a test does
+ * to point the scan at a fixture instead of at the operator's machine. An empty
+ * value means no checkouts, deliberately: it is how a run asks for the single
+ * seed from its own options.
+ */
+[[nodiscard]] std::filesystem::path environments_root() {
+    if (const char* root = std::getenv("HEDGR_ORESTUDIO_ROOT"); root != nullptr)
+        return std::filesystem::path{root};
+#ifdef HEDGR_ORESTUDIO_ROOT
+    return std::filesystem::path{HEDGR_ORESTUDIO_ROOT};
+#else
+    return {};
+#endif
+}
+
+/** @brief The value of @p line after the @c =, quotes and padding removed. */
+[[nodiscard]] std::string env_value_of(std::string_view line) {
+    const auto equals = line.find('=');
+    if (equals == std::string_view::npos)
+        return {};
+    std::string value{line.substr(equals + 1)};
+
+    while (!value.empty() && (value.back() == '\r' || value.back() == '\n' ||
+                              value.back() == ' '))
+        value.pop_back();
+    std::size_t start = 0;
+    while (start < value.size() && value[start] == ' ')
+        ++start;
+    value = value.substr(start);
+
+    if (value.size() >= 2 &&
+        ((value.front() == '"' && value.back() == '"') ||
+         (value.front() == '\'' && value.back() == '\''))) {
+        value = value.substr(1, value.size() - 2);
+    }
+    return value;
+}
+
+/** @brief The key of a @c KEY=VALUE line, or empty for a comment or blank. */
+[[nodiscard]] std::string env_key_of(std::string_view line) {
+    std::string_view view{line};
+    while (!view.empty() && (view.front() == ' ' || view.front() == '\t'))
+        view.remove_prefix(1);
+    if (view.empty() || view.front() == '#')
+        return {};
+    const auto equals = view.find('=');
+    if (equals == std::string_view::npos)
+        return {};
+    std::string key{view.substr(0, equals)};
+    while (!key.empty() && key.back() == ' ')
+        key.pop_back();
+    // `export FOO=bar` is how some of these files are written by hand.
+    constexpr std::string_view export_prefix = "export ";
+    if (key.starts_with(export_prefix))
+        key = key.substr(export_prefix.size());
+    return key;
+}
+
+/**
+ * @brief Reads one checkout's environment.
+ *
+ * @return The environment, or nothing when the checkout has to be skipped. A
+ * missing or unreadable @c .env is a warning and never a failure: the seeding
+ * is a convenience, and a store that will not start because one checkout beside
+ * it is half-built would be worse than one that starts a row short.
+ */
+[[nodiscard]] std::optional<environment> read_environment(
+    const std::filesystem::path& checkout) {
+    const auto file = checkout / ".env";
+    std::ifstream input(file);
+    if (!input) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn) << "Skipping the environment at " << checkout
+            << ": its .env cannot be read.";
+        return std::nullopt;
+    }
+
+    std::unordered_map<std::string, std::string> values;
+    std::string line;
+    while (std::getline(input, line)) {
+        auto key = env_key_of(line);
+        /*
+         * Both spellings are kept, because ORES_SHELL_* and ORES_NATS_* name
+         * the same broker and only one of them is guaranteed to exist. The
+         * unprefixed name wins when it is there.
+         */
+        if (!key.empty())
+            values[std::move(key)] = env_value_of(line);
+    }
+
+    const auto lookup = [&values](std::string_view key) -> std::string {
+        const auto found = values.find(std::string{key});
+        return found == values.end() ? std::string{} : found->second;
+    };
+
+    environment result;
+    result.label = lookup("ORES_CHECKOUT_LABEL");
+    if (result.label.empty())
+        result.label = checkout.filename().string();
+    constexpr std::string_view checkout_prefix = "ores_dev_";
+    if (result.label.starts_with(checkout_prefix))
+        result.label = result.label.substr(checkout_prefix.size());
+
+    result.nats_url = lookup("ORES_NATS_URL");
+    result.subject_prefix = lookup("ORES_NATS_SUBJECT_PREFIX");
+    result.type = lookup("ORES_ENV_TYPE");
+    if (const auto wire_format = lookup("ORES_NATS_WIRE_FORMAT");
+        !wire_format.empty())
+        result.wire_format = wire_format;
+
+    if (result.nats_url.empty() || result.subject_prefix.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn) << "Skipping the environment at " << checkout
+            << ": its .env states no ORES_NATS_URL or no "
+               "ORES_NATS_SUBJECT_PREFIX.";
+        return std::nullopt;
+    }
+    return result;
+}
+
+/**
+ * @brief Every OreStudio checkout under @p root, in a stable order.
+ *
+ * A checkout is a directory named @c ores_dev_* that holds a @c .env. Anything
+ * else under the root is not an environment and is not mentioned.
+ */
+[[nodiscard]] std::vector<environment> scan_environments(
+    const std::filesystem::path& root) {
+    std::error_code failure;
+    if (!std::filesystem::is_directory(root, failure)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info) << "No OreStudio checkouts at " << root
+            << "; seeding the deployment this process was pointed at instead.";
+        return {};
+    }
+
+    std::vector<std::filesystem::path> candidates;
+    for (const auto& entry : std::filesystem::directory_iterator(root, failure)) {
+        if (!entry.is_directory(failure))
+            continue;
+        const auto name = entry.path().filename().string();
+        constexpr std::string_view prefix = "ores_dev_";
+        if (!name.starts_with(prefix))
+            continue;
+        candidates.push_back(entry.path());
+    }
+    if (failure) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn) << "Cannot list the OreStudio checkouts at "
+            << root << ": " << failure.message();
+        return {};
+    }
+    // Sorted so the seeded ids and the order rows are written in do not depend
+    // on what the filesystem happens to return first.
+    std::ranges::sort(candidates);
+
+    std::vector<environment> found;
+    for (const auto& checkout : candidates) {
+        if (auto environment = read_environment(checkout))
+            found.push_back(std::move(*environment));
+    }
+    return found;
+}
+
+/**
+ * @brief @c brave_hopper as @c Brave @c Hopper reads in a tree.
+ *
+ * Underscores and hyphens become single spaces and each word is capitalised, so
+ * a label that is a name in the store reads as a name on the screen.
+ */
+[[nodiscard]] std::string display_name(std::string_view label) {
+    std::string result;
+    result.reserve(label.size());
+    bool at_start_of_word = true;
+    for (const char character : label) {
+        if (character == '_' || character == '-' || character == ' ') {
+            if (!result.empty() && result.back() != ' ')
+                result.push_back(' ');
+            at_start_of_word = true;
+            continue;
+        }
+        if (at_start_of_word) {
+            result.push_back(static_cast<char>(
+                std::toupper(static_cast<unsigned char>(character))));
+            at_start_of_word = false;
+            continue;
+        }
+        result.push_back(character);
+    }
+    return result;
+}
+
+/**
+ * @brief The label every seeded development environment carries.
+ *
+ * One name for the tier rather than one per checkout: the label says what kind
+ * of deployment this is and the instance's own name says which one it is. The
+ * severity is `none` and the colour is blue, and ensure_development_label says
+ * why.
+ */
+constexpr std::string_view development_label_name = "development";
 
 /**
  * @brief How often an instance is probed when the last probe answered.
@@ -481,38 +739,158 @@ void instance_manager::seed_first_run() {
     if (instances_.size() != 0)
         return;
 
+    const auto root = environments_root();
+    const auto environments =
+        root.empty() ? std::vector<environment>{} : scan_environments(root);
+
     /*
-     * The id is derived from the clock rather than random: this runs once, on a
-     * store with no instances in it, and a timestamp says plainly where the row
-     * came from. A uuid would imply a distributed uniqueness requirement that
-     * does not exist here.
+     * A machine with no checklist of environments -- a deployed package, or a
+     * test that points the scan at nowhere -- still gets one instance, the one
+     * the process's own options describe. That is the seed this class has
+     * always had, and it stays the degenerate case rather than a special one:
+     * the store always comes up with something to look at.
      */
-    const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::system_clock::now().time_since_epoch())
-                           .count();
+    if (environments.empty()) {
+        /*
+         * The id is derived from the clock rather than random: this runs once,
+         * on a store with no instances in it, and a timestamp says plainly
+         * where the row came from. A uuid would imply a distributed uniqueness
+         * requirement that does not exist here.
+         */
+        const auto stamp = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                               .count();
 
-    domain::instance row;
-    row.id = std::format("inst-{}", stamp);
-    row.name = "local development";
-    row.nats_url = seed_options_.nats_url;
-    row.subject_prefix = seed_options_.subject_prefix;
-    row.wire_format = seed_options_.wire_format;
-    row.folder_id = std::string{domain::instances_root_id};
-    row.created_at = iso8601_now();
+        domain::instance row;
+        row.id = std::format("inst-{}", stamp);
+        row.name = "local development";
+        row.nats_url = seed_options_.nats_url;
+        row.subject_prefix = seed_options_.subject_prefix;
+        row.wire_format = seed_options_.wire_format;
+        row.folder_id = std::string{domain::instances_root_id};
+        row.created_at = iso8601_now();
 
-    static_cast<void>(instances_.upsert(row));
+        static_cast<void>(instances_.upsert(row));
 
-    if (auto saved = instance_repo_->save(row); !saved) {
-        last_error_ = store_failure(
-            std::format("cannot save the seeded instance {}", row.id), saved.error());
+        if (auto saved = instance_repo_->save(row); !saved) {
+            last_error_ = store_failure(std::format(
+                "cannot save the seeded instance {}", row.id), saved.error());
+        }
         return;
     }
 
     /*
-     * The seed is the reason a fresh checkout is usable without typing an
-     * address: the caller's configuration describes the local deployment, and this is
-     * where that description becomes a row.
+     * Every checkout the scan found is a development deployment, so they all go
+     * in one folder rather than at the root: Instances / Development / Brave
+     * Hopper is the tree an operator described, and a flat list often leaves
+     * them asking which of twenty entries is the one they care about.
      */
+    const std::string folder_id = ensure_development_folder();
+    const std::string label_id = ensure_development_label();
+
+    for (const auto& environment : environments) {
+        domain::instance row;
+        /*
+         * The id is derived from the checkout's label rather than the clock,
+         * and that is the whole of the idempotency: seeding a second time
+         * writes the same row over itself instead of adding a twin. The outer
+         * guard on an empty store is what makes this a first-run step; this is
+         * what makes it safe if the guard were ever wrong.
+         */
+        row.id = std::format("inst-env-{}", environment.label);
+        row.name = display_name(environment.label);
+        row.nats_url = environment.nats_url;
+        row.subject_prefix = environment.subject_prefix;
+        row.wire_format = environment.wire_format;
+        row.folder_id = folder_id;
+        row.created_at = iso8601_now();
+
+        if (instances_.find(row.id))
+            continue;
+
+        static_cast<void>(instances_.upsert(row));
+
+        if (auto saved = instance_repo_->save(row); !saved) {
+            last_error_ = store_failure(std::format(
+                "cannot save the seeded instance {}", row.id), saved.error());
+            continue;
+        }
+
+        domain::labelling attachment;
+        attachment.owner = domain::labelling_owner::instance;
+        attachment.owner_id = row.id;
+        attachment.label_id = label_id;
+        labellings_.add(attachment.owner, attachment.owner_id,
+            attachment.label_id);
+        if (auto saved = labelling_repo_->save(attachment); !saved) {
+            last_error_ = store_failure(std::format(
+                "cannot label the seeded instance {}", row.id), saved.error());
+        }
+    }
+}
+
+std::string instance_manager::ensure_development_folder() {
+    /*
+     * A constant id rather than a generated one, so a second seeding writes the
+     * same folder rather than a second one beside it. The partial unique index
+     * over (tree, owner_id) where there is no parent would refuse a second root
+     * anyway; this refuses it earlier and with a name a person recognises.
+     */
+    const std::string id = "folder-development";
+    if (folders_.find(id))
+        return id;
+
+    domain::folder row;
+    row.id = id;
+    row.parent_id = std::string{domain::instances_root_id};
+    row.owner_id.clear();
+    row.name = "Development";
+    row.tree = domain::folder_tree::instances;
+    static_cast<void>(folders_.upsert(row));
+
+    if (folder_repo_) {
+        if (auto saved = folder_repo_->save(row); !saved) {
+            last_error_ = store_failure(
+                std::format("cannot save the Development folder {}", id),
+                saved.error());
+        }
+    }
+    return id;
+}
+
+std::string instance_manager::ensure_development_label() {
+    /*
+     * An operator's own label of this name wins, because a label's name is
+     * unique and the seeded instances should carry the label they already have
+     * rather than one the seeder could not write.
+     */
+    if (const auto existing = labels_.find_by_name(development_label_name))
+        return labels_.get(*existing)->id;
+
+    domain::label row;
+    row.id = "label-development";
+    row.name = std::string{development_label_name};
+    /*
+     * Blue and no severity. Blue is the palette's "informational" entry: a
+     * development deployment is worth naming in a list, and it is not a
+     * warning. The severity is what a destructive-action confirmation reads,
+     * and nothing about a development instance makes removing it more dangerous
+     * than removing any other row -- `none` is the honest answer, and a colour
+     * chosen to look important would be a lie in the one place the interface
+     * trusts.
+     */
+    row.colour = domain::label_colour::blue;
+    row.severity = domain::label_severity::none;
+    static_cast<void>(labels_.upsert(row));
+
+    if (label_repo_) {
+        if (auto saved = label_repo_->save(row); !saved) {
+            last_error_ = store_failure(
+                std::format("cannot save the development label {}", row.id),
+                saved.error());
+        }
+    }
+    return row.id;
 }
 
 void instance_manager::ensure_roots() {

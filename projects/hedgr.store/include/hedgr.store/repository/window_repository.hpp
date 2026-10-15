@@ -24,6 +24,7 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -50,6 +51,9 @@ class HEDGR_STORE_EXPORT window_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit window_repository(sqlite::database& db) noexcept;
+
+    /** @brief The DDL this build applies for the @c window_spec table. */
+    [[nodiscard]] std::string sql() const;
 
     /** @brief Every stored window, ordered by id. */
     [[nodiscard]] result<std::vector<dom::window_spec>> list() const;

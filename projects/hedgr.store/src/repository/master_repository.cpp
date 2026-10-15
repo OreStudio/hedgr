@@ -19,16 +19,25 @@
  */
 #include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
 namespace {
 
 namespace crypto = hedgr::store::crypto;
+
+using namespace sqlgen::literals;
 
 /**
  * @brief The row's primary key: there is exactly one master password.
@@ -64,25 +73,32 @@ sqlite::store_error to_store_error(const crypto::box_error& error) {
     };
 }
 
+/** @brief The one row, when it is there. */
+sqlite::result<std::optional<master_entity>> the_row(sqlite::database& db) {
+    const auto query = sqlgen::read<std::vector<master_entity>> |
+        sqlgen::where("id"_c == std::string{master_row_id});
+
+    auto rows = rows_of(query(db.connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
+    if (rows.value().empty())
+        return std::optional<master_entity>{};
+    return std::optional<master_entity>{rows.value().front()};
+}
+
 }
 
 master_repository::master_repository(sqlite::database& db) noexcept : db_(&db) {}
 
+std::string master_repository::sql() const {
+    return ddl_for(master_entity::tablename);
+}
+
 sqlite::result<bool> master_repository::has_master() const {
-    sqlite::statement query(
-        db_->handle(), "SELECT COUNT(*) FROM master WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, master_row_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto row = query.step();
+    auto row = the_row(*db_);
     if (!row)
         return std::unexpected(row.error());
-    if (!row.value())
-        return false;
-    return query.column_int64(0) > 0;
+    return row.value().has_value();
 }
 
 sqlite::result<void> master_repository::create(std::string_view password) {
@@ -108,20 +124,18 @@ sqlite::result<void> master_repository::create(std::string_view password) {
     if (!sealed)
         return std::unexpected(to_store_error(sealed.error()));
 
-    sqlite::statement insert(db_->handle(),
-        "INSERT INTO master (id, verification) VALUES (?, ?)");
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
-
-    if (auto bound = insert.bind(1, master_row_id); !bound)
-        return std::unexpected(bound.error());
-    if (auto bound = insert.bind(2, sealed.value()); !bound)
-        return std::unexpected(bound.error());
-
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    /*
+     * The creation stamp used to come from a DEFAULT on the column, which
+     * sqlgen cannot express. The writer stamps it instead, which is also the
+     * only place that knows the row is being created rather than replaced.
+     */
+    return upsert(*db_,
+        master_entity{
+            .id = std::string{master_row_id},
+            .verification = std::move(sealed).value(),
+            .created_at = timestamp_now(),
+        },
+        {"id"});
 }
 
 sqlite::result<bool> master_repository::verify(std::string_view password) const {
@@ -158,34 +172,18 @@ sqlite::result<bool> master_repository::verify(std::string_view password) const 
 }
 
 sqlite::result<std::string> master_repository::verification() const {
-    sqlite::statement query(
-        db_->handle(), "SELECT verification FROM master WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, master_row_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto row = query.step();
+    auto row = the_row(*db_);
     if (!row)
         return std::unexpected(row.error());
     if (!row.value())
         return std::string{};
-    return std::string(query.column_text(0));
+    return row.value()->verification;
 }
 
 sqlite::result<void> master_repository::clear() {
-    sqlite::statement query(db_->handle(), "DELETE FROM master WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, master_row_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<master_entity> |
+        sqlgen::where("id"_c == std::string{master_row_id});
+    return done(query(db_->connection()));
 }
 
 }

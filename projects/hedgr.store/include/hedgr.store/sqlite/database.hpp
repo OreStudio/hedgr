@@ -24,22 +24,24 @@
 #include "hedgr.store/sqlite/error.hpp"
 #include <expected>
 #include <filesystem>
+#include <sqlgen/sqlite.hpp>
 #include <string_view>
-
-struct sqlite3;
 
 namespace hedgr::store::sqlite {
 
 /**
  * @brief An open SQLite database, closed when it goes out of scope.
  *
- * The class owns the connection and nothing else: statements are compiled
- * against it and hold no reference back, so a @c statement must not outlive the
- * @c database it was compiled from.
+ * The class owns the one connection to the file and nothing else. There is
+ * exactly one, deliberately: @c PRAGMA @c foreign_keys is per-connection in
+ * SQLite, so a second handle opened behind this one would not enforce the
+ * cascades the schema declares, and a delete would silently leave behind the
+ * rows it was supposed to take with it.
  *
- * Failure to open is reported rather than thrown. The sqlite3 C API is used
- * directly, so the only shared state between this class and the repositories is
- * the raw handle.
+ * The connection is sqlgen's, because the repositories read and write through
+ * it. sqlgen's own error channel is @c rfl::Result, and this class and the
+ * repositories translate it at the boundary: nothing outside this component
+ * sees anything but @c std::expected and @c store_error.
  */
 class HEDGR_STORE_EXPORT database final {
 public:
@@ -72,8 +74,8 @@ public:
     /**
      * @brief Runs one statement and discards its rows.
      *
-     * Use this for pragmas and single-row DDL. Multi-row results and bound
-     * parameters belong in @c statement.
+     * Use this for pragmas and DDL. Reading rows belongs in a repository, which
+     * maps them through an entity rather than by column position.
      */
     [[nodiscard]] result<void> execute(std::string_view sql);
 
@@ -84,26 +86,46 @@ public:
     [[nodiscard]] bool is_open() const noexcept;
 
     /**
-     * @brief The raw handle, for compiling statements.
+     * @brief The open connection, for the repositories in this component.
      *
-     * This exists for the repositories in this component and for tests that
-     * need to plant a row the repositories refuse to write. It is not a public
-     * API: nothing outside this component should call it.
+     * This is what replaced the raw @c sqlite3* handle the repositories used to
+     * compile statements against. It is not a public API: nothing outside this
+     * component should call it.
      */
-    [[nodiscard]] sqlite3* handle() const noexcept;
+    [[nodiscard]] const sqlgen::Ref<sqlgen::sqlite::Connection>&
+    connection() const noexcept;
 
     /** @brief The file backing the database, empty for an in-memory one. */
     [[nodiscard]] std::filesystem::path path() const;
 
 private:
-    /** @brief Adopts an already-open handle and applies the connection pragmas.
-     */
-    [[nodiscard]] static result<database> adopt(sqlite3* raw);
+    /** @brief Adopts an already-open connection and applies its pragmas. */
+    [[nodiscard]] static result<database>
+    adopt(const sqlgen::Ref<sqlgen::sqlite::Connection>& raw,
+          std::filesystem::path path);
 
-    explicit database(sqlite3* raw) noexcept;
+    explicit database(sqlgen::Ref<sqlgen::sqlite::Connection> raw,
+                      std::filesystem::path path) noexcept;
 
-    sqlite3* handle_ = nullptr;
+    sqlgen::Ref<sqlgen::sqlite::Connection> handle_;
+    std::filesystem::path path_;
 };
+
+/**
+ * @brief A sqlgen failure as a store failure.
+ *
+ * sqlgen reports what went wrong as a sentence and nothing else, so the closed
+ * code is decided here from the sentence where SQLite names a constraint and
+ * defaults to @p fallback otherwise. @c store_error::sqlite_code stays 0
+ * because sqlgen does not carry it: a code invented here would be worse than an
+ * absent one.
+ *
+ * The message SQLite writes for a refused write always begins with the kind of
+ * constraint that was refused -- @c "UNIQUE constraint failed: ..." , @c
+ * "FOREIGN KEY constraint failed" -- which is the only signal there is.
+ */
+[[nodiscard]] HEDGR_STORE_EXPORT store_error
+from_sqlgen(const rfl::Error& error, store_errc fallback);
 
 }
 

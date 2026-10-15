@@ -36,3 +36,17 @@ install(TARGETS ${name}.tests RUNTIME DESTINATION bin)
 add_test(NAME ${name}.tests
     COMMAND ${name}.tests
     WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+#
+# The seeder scans a directory of OreStudio checkouts for development
+# deployments, which is a fact about the host and not about this program. A test
+# suite that read the operator's own machine would pass or fail depending on how
+# many checkouts happen to be beside the repository, so the scan is pointed at
+# nowhere here and the suite sees the deployed-package case: no checkouts, one
+# instance from the process's own options.
+#
+# The cases that are about seeding a list of environments set the variable
+# themselves, against a fixture, and say so.
+#
+set_tests_properties(${name}.tests PROPERTIES
+    ENVIRONMENT "HEDGR_ORESTUDIO_ROOT=")

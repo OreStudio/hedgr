@@ -83,9 +83,7 @@ enum class store_errc : std::uint8_t {
  * @brief Why a store operation failed.
  *
  * The message names the row or statement that failed so a log line points at
- * the offending data without a debugger. @c sqlite_code is kept beside the
- * classified code because the classification loses the distinction between,
- * for example, two different constraint failures.
+ * the offending data without a debugger.
  */
 struct store_error final {
     /** @brief The classified failure. */
@@ -94,7 +92,17 @@ struct store_error final {
     /** @brief Human-readable detail, naming the offending row where known. */
     std::string message;
 
-    /** @brief The underlying SQLITE_* result code, 0 when not applicable. */
+    /**
+     * @brief The underlying @c SQLITE_* result code, 0 when not applicable.
+     *
+     * Zero on every failure that came through sqlgen, which does not carry the
+     * code: it reports what went wrong as a sentence and nothing else. The
+     * field is kept because a failure raised inside this component rather than
+     * by a query can still state one, and because dropping it would narrow the
+     * record for the sake of tidiness. A caller that needs to tell one
+     * constraint from another reads @c code, which is why it is the field the
+     * classification exists for.
+     */
     int sqlite_code = 0;
 };
 

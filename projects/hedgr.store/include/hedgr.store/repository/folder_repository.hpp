@@ -24,6 +24,7 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -41,11 +42,17 @@ using sqlite::result;
  * @c tree column needs parsing: it is stored as its canonical text so a person
  * reading the database sees what the application means, and a value that is not
  * one of the known trees is reported as a corrupt row rather than defaulted.
+ *
+ * The @c folder table is described by @c folder_entity, and so is the partial
+ * unique index that makes the single root a database fact.
  */
 class HEDGR_STORE_EXPORT folder_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit folder_repository(sqlite::database& db) noexcept;
+
+    /** @brief The DDL this build applies for the @c folder table. */
+    [[nodiscard]] std::string sql() const;
 
     /** @brief Every folder, ordered by tree then name. */
     [[nodiscard]] result<std::vector<dom::folder>> list() const;

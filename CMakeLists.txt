@@ -149,6 +149,10 @@ find_package(reflectcpp CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
 
+# The store's entities are sqlgen structs, so sqlgen is part of that
+# component's public surface rather than a private implementation detail.
+find_package(sqlgen CONFIG REQUIRED)
+
 # ImGui
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)

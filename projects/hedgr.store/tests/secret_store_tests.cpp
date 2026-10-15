@@ -21,11 +21,11 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
+#include "hedgr.store/repository/entity.hpp"
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/schema.hpp"
 #include "hedgr.store/sqlite/database.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
 #include <cstddef>
@@ -35,6 +35,7 @@
 #include <iterator>
 #include <optional>
 #include <random>
+#include <sqlgen/read.hpp>
 #include <string>
 #include <system_error>
 #include <type_traits>
@@ -50,7 +51,6 @@ using hedgr::store::repository::account_repository;
 using hedgr::store::repository::instance_repository;
 using hedgr::store::repository::master_repository;
 using hedgr::store::sqlite::database;
-using hedgr::store::sqlite::statement;
 using hedgr::store::sqlite::store_errc;
 
 /** @brief An open in-memory store with the schema already applied. */
@@ -375,7 +375,7 @@ TEST_CASE("a list of accounts carries no credential", "[credential]") {
                       .empty());
 }
 
-TEST_CASE("the schema this build writes is version 5", "[schema]") {
+TEST_CASE("the schema this build writes is version 6", "[schema]") {
     const temporary_database scratch;
     {
         auto opened = database::open(scratch.path());
@@ -393,10 +393,12 @@ TEST_CASE("the schema this build writes is version 5", "[schema]") {
     auto reopened = database::open(scratch.path());
     REQUIRE(reopened.has_value());
 
-    hedgr::store::sqlite::statement version(reopened.value().handle(),
-        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1");    REQUIRE(version.is_valid());
-    REQUIRE(version.step().value());
-    REQUIRE(version.column_int64(0)
+    const auto query = sqlgen::read<
+        std::vector<hedgr::store::repository::schema_version_entity>>;
+    const auto rows = query(reopened.value().connection());
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 1);
+    REQUIRE(rows.value().front().version
         == hedgr::store::repository::schema_version());
 }
 

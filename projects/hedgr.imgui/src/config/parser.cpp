@@ -24,6 +24,7 @@
 #include <format>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <boost/program_options.hpp>
 #include <boost/throw_exception.hpp>
 #include "hedgr.imgui/config/parser_exception.hpp"
@@ -108,13 +109,6 @@ read_connection_configuration(const variables_map& vm) {
 }
 
 /**
- * @brief Where the local store lives.
- *
- * Under the user's data directory, honouring XDG_DATA_HOME, because the store
- * belongs to the operator rather than to the installation. Falling back to
- * HOME keeps this working on a machine with no XDG variables set.
- */
-/**
  * @brief The master password for an unattended launch, if one was supplied.
  *
  * Read from the environment rather than from the command line on purpose: a
@@ -128,11 +122,47 @@ std::string read_master_password() {
     return password != nullptr ? std::string{password} : std::string{};
 }
 
+/**
+ * @brief Where the local store lives.
+ *
+ * Three cases, in order.
+ *
+ * An explicit @c XDG_DATA_HOME wins, because a caller that sets it is saying
+ * where the file goes -- an isolated verification run, or a test. It is the
+ * only case an operator can state from outside the build.
+ *
+ * Otherwise a build configured from a source tree keeps its store inside that
+ * tree, under @c .cache, which is already ignored by git. The directory is
+ * baked in at configure time rather than found by walking up from the
+ * executable: the executable lives in @c build/output/<preset>/publish/bin, so
+ * the walk would be four levels of guessing that a relocated package breaks.
+ *
+ * Otherwise -- a package deployed where its source tree never existed, as on
+ * goedel -- the store goes under the user's data directory, honouring @c HOME
+ * and falling back to the temporary directory on a machine that has neither.
+ */
 std::filesystem::path default_database_path() {
+    if (const char* xdg = std::getenv("XDG_DATA_HOME");
+        xdg != nullptr && *xdg != '\0') {
+        return std::filesystem::path(xdg) / "hedgr" / "hedgr.db";
+    }
+
+#ifdef HEDGR_SOURCE_DIR
+    if constexpr (std::string_view{HEDGR_SOURCE_DIR}.size() != 0) {
+        const std::filesystem::path root{HEDGR_SOURCE_DIR};
+        std::error_code ignored;
+        /*
+         * Present, not merely configured: a package built on this host and
+         * deployed elsewhere carries the path of a tree that is not there, and
+         * it must fall through rather than fail to start.
+         */
+        if (std::filesystem::is_directory(root, ignored))
+            return root / ".cache" / "hedgr" / "hedgr.db";
+    }
+#endif
+
     std::filesystem::path base;
-    if (const char* xdg = std::getenv("XDG_DATA_HOME"); xdg != nullptr && *xdg != '\0') {
-        base = xdg;
-    } else if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         base = std::filesystem::path(home) / ".local" / "share";
     } else {
         base = std::filesystem::temp_directory_path();

@@ -24,23 +24,29 @@
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
+#include "hedgr.store/repository/entity.hpp"
 #include "hedgr.store/repository/folder_repository.hpp"
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/label_repository.hpp"
 #include "hedgr.store/repository/labelling_repository.hpp"
+#include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/schema.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <random>
+#include <sqlgen/read.hpp>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace {
 
@@ -62,6 +68,7 @@ using hedgr::store::repository::folder_repository;
 using hedgr::store::repository::instance_repository;
 using hedgr::store::repository::label_repository;
 using hedgr::store::repository::labelling_repository;
+using hedgr::store::repository::master_repository;
 using hedgr::store::repository::window_repository;
 using hedgr::store::sqlite::database;
 using hedgr::store::sqlite::store_errc;
@@ -272,8 +279,8 @@ TEST_CASE("an unknown window kind in a row is reported as a corrupt row",
     window_repository repository(db);
 
     const auto planted = db.execute(
-        "INSERT INTO window_spec (window_id, kind) "
-        "VALUES ('win-bad', 'hologram')");
+        "INSERT INTO window_spec (window_id, kind, cadence_ms, state_json) "
+        "VALUES ('win-bad', 'hologram', 1000, '{}')");
     REQUIRE(planted.has_value());
 
     const auto rows = repository.list();
@@ -561,4 +568,113 @@ TEST_CASE("a file written with another schema version is refused", "[store]") {
     REQUIRE(fresh.has_value());
     REQUIRE(fresh.value().apply_schema().has_value());
     REQUIRE(fresh.value().apply_schema().has_value());
+}
+
+TEST_CASE("every repository reports the DDL of its own table", "[store]") {
+    auto db = fresh_store();
+    instance_repository instances(db);
+    account_repository accounts(db);
+    folder_repository folders(db);
+    label_repository labels(db);
+    labelling_repository labellings(db);
+    window_repository windows(db);
+    master_repository master(db);
+
+    /*
+     * The statement a repository reports is the statement the schema applies,
+     * so this is also the check that a table's definition exists at all. A name
+     * that no entity describes comes back empty rather than throwing, and the
+     * failure below is what notices.
+     */
+    for (const auto& [name, ddl] : std::array<std::pair<std::string, std::string>, 7>{
+             std::pair{std::string{"instance"}, instances.sql()},
+             std::pair{std::string{"account"}, accounts.sql()},
+             std::pair{std::string{"folder"}, folders.sql()},
+             std::pair{std::string{"label"}, labels.sql()},
+             std::pair{std::string{"instance_label"}, labellings.sql()},
+             std::pair{std::string{"window_spec"}, windows.sql()},
+             std::pair{std::string{"master"}, master.sql()},
+         }) {
+        INFO("table " << name);
+        REQUIRE_FALSE(ddl.empty());
+        REQUIRE(ddl.contains("CREATE TABLE"));
+        REQUIRE(ddl.contains(name));
+    }
+
+    /* The junctions are one repository, so both of its tables are reported. */
+    REQUIRE(labellings.sql().contains("account_label"));
+}
+
+TEST_CASE("every entity reads back from the schema this build applies",
+    "[store]") {
+    using hedgr::store::repository::account_credential_entity;
+    using hedgr::store::repository::account_entity;
+    using hedgr::store::repository::account_label_entity;
+    using hedgr::store::repository::folder_entity;
+    using hedgr::store::repository::instance_entity;
+    using hedgr::store::repository::instance_label_entity;
+    using hedgr::store::repository::label_entity;
+    using hedgr::store::repository::master_entity;
+    using hedgr::store::repository::schema_version_entity;
+    using hedgr::store::repository::window_spec_entity;
+
+    auto db = fresh_store();
+
+    /*
+     * The three tables that carry a cascade foreign key are written out by hand
+     * rather than generated, so their columns could drift from the entities the
+     * repositories bind. There is no view of a table's columns to compare
+     * against, but there does not need to be: SQLite refuses a query that names
+     * a column the table does not have, so a read through each entity is the
+     * check, and it is the same read the repositories do.
+     */
+    const auto reads = std::array<std::pair<std::string_view, bool>, 10>{
+        std::pair<std::string_view, bool>{"instance",
+            sqlgen::read<std::vector<instance_entity>>(db.connection()).has_value()},
+        std::pair<std::string_view, bool>{"account",
+            sqlgen::read<std::vector<account_entity>>(db.connection()).has_value()},
+        std::pair<std::string_view, bool>{"account credential",
+            sqlgen::read<std::vector<account_credential_entity>>(db.connection())
+                .has_value()},
+        std::pair<std::string_view, bool>{"folder",
+            sqlgen::read<std::vector<folder_entity>>(db.connection()).has_value()},
+        std::pair<std::string_view, bool>{"label",
+            sqlgen::read<std::vector<label_entity>>(db.connection()).has_value()},
+        std::pair<std::string_view, bool>{"instance_label",
+            sqlgen::read<std::vector<instance_label_entity>>(db.connection())
+                .has_value()},
+        std::pair<std::string_view, bool>{"account_label",
+            sqlgen::read<std::vector<account_label_entity>>(db.connection())
+                .has_value()},
+        std::pair<std::string_view, bool>{"window_spec",
+            sqlgen::read<std::vector<window_spec_entity>>(db.connection())
+                .has_value()},
+        std::pair<std::string_view, bool>{"master",
+            sqlgen::read<std::vector<master_entity>>(db.connection()).has_value()},
+        std::pair<std::string_view, bool>{"schema_version",
+            sqlgen::read<std::vector<schema_version_entity>>(db.connection())
+                .has_value()},
+    };
+    for (const auto& [table, readable] : reads) {
+        INFO("table " << table);
+        REQUIRE(readable);
+    }
+
+    /*
+     * And the two constraints sqlgen cannot state are facts in the file rather
+     * than conventions in the code: the cascade that removes an instance's
+     * accounts and the partial index that refuses a second root.
+     */
+    instance_repository instances(db);
+    REQUIRE(instances.save(sample_instance()).has_value());
+
+    account child;
+    child.id = "id-1";
+    child.instance_id = "inst-1";
+    child.name = "ops read-only";
+    child.principal = "ops@host";
+    REQUIRE(account_repository(db).save(child).has_value());
+
+    REQUIRE(instances.remove("inst-1").has_value());
+    REQUIRE(account_repository(db).list().value().empty());
 }

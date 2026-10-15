@@ -24,6 +24,7 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -46,6 +47,15 @@ class HEDGR_STORE_EXPORT labelling_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit labelling_repository(sqlite::database& db) noexcept;
+
+    /**
+     * @brief The DDL this build applies for both junction tables.
+     *
+     * One method rather than two, because the two tables are one thing to every
+     * caller: the owner kind is a column's worth of distinction, and the pair is
+     * split only because each foreign key has to name the table it cascades on.
+     */
+    [[nodiscard]] std::string sql() const;
 
     /** @brief Every attachment of both kinds. */
     [[nodiscard]] result<std::vector<dom::labelling>> list() const;

@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "environment_seed_tests.cpp"
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
     "store_lock_tests.cpp"

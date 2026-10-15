@@ -39,7 +39,13 @@
         },
         "jwt-cpp",
         "stb",
-        "sqlite3",
+        {
+            "name": "sqlite3",
+            "features": [
+                "math"
+            ]
+        },
+        "sqlgen",
         "catch2"
     ]
 }

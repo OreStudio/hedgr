@@ -18,11 +18,20 @@
  *
  */
 #include "hedgr.store/repository/account_repository.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
 #include <optional>
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/update.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -32,39 +41,40 @@ namespace dom = model::domain;
 
 namespace {
 
-constexpr std::string_view select_columns =
-    "SELECT id, instance_id, name, principal, folder_id FROM account";
+using namespace sqlgen::literals;
 
-dom::account read_row(const sqlite::statement& query) {
-    dom::account row;
-    row.id = std::string(query.column_text(0));
-    row.instance_id = std::string(query.column_text(1));
-    row.name = std::string(query.column_text(2));
-    row.principal = std::string(query.column_text(3));
-    row.folder_id = std::string(query.column_text(4));
-    return row;
+/** @brief The stored row as the domain value the rest of Hedgr speaks. */
+dom::account to_domain(const account_entity& row) {
+    dom::account value;
+    value.id = row.id.get();
+    value.instance_id = row.instance_id;
+    value.name = row.name;
+    value.principal = row.principal;
+    value.folder_id = row.folder_id;
+    return value;
 }
 
-sqlite::result<std::vector<dom::account>>
-collect(sqlite::database& db, std::string_view sql, std::string_view argument) {
-    sqlite::statement query(db.handle(), sql);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-    if (!argument.empty()) {
-        if (auto bound = query.bind(1, argument); !bound)
-            return std::unexpected(bound.error());
-    }
+/** @brief The domain value as the entity sqlgen binds. */
+account_entity to_entity(const dom::account& row) {
+    return account_entity{
+        .id = row.id,
+        .instance_id = row.instance_id,
+        .name = row.name,
+        .principal = row.principal,
+        .folder_id = row.folder_id,
+    };
+}
 
-    std::vector<dom::account> rows;
-    while (true) {
-        auto available = query.step();
-        if (!available)
-            return std::unexpected(available.error());
-        if (!available.value())
-            break;
-        rows.push_back(read_row(query));
-    }
-    return rows;
+/** @brief The rows of a prepared account query, as domain values. */
+sqlite::result<std::vector<dom::account>> collect(const auto& query,
+    sqlite::database& db) {
+    return rows_of(query(db.connection())).transform([](const auto& rows) {
+        std::vector<dom::account> values;
+        values.reserve(rows.size());
+        for (const auto& row : rows)
+            values.push_back(to_domain(row));
+        return values;
+    });
 }
 
 }
@@ -72,93 +82,47 @@ collect(sqlite::database& db, std::string_view sql, std::string_view argument) {
 account_repository::account_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
+std::string account_repository::sql() const {
+    return ddl_for(account_entity::tablename);
+}
+
 sqlite::result<std::vector<dom::account>> account_repository::list() const {
-    const std::string sql =
-        std::string(select_columns) + " ORDER BY instance_id, name";
-    return collect(*db_, sql, {});
+    const auto query = sqlgen::read<std::vector<account_entity>> |
+        sqlgen::order_by("instance_id"_c, "name"_c);
+    return collect(query, *db_);
 }
 
 sqlite::result<std::vector<dom::account>>
 account_repository::list_for_instance(std::string_view instance_id) const {
-    const std::string sql = std::string(select_columns) +
-                            " WHERE instance_id = ? ORDER BY name";
-    return collect(*db_, sql, instance_id);
+    const auto query = sqlgen::read<std::vector<account_entity>> |
+        sqlgen::where("instance_id"_c == std::string{instance_id}) |
+        sqlgen::order_by("name"_c);
+    return collect(query, *db_);
 }
 
 sqlite::result<void> account_repository::save(const dom::account& row) {
-    sqlite::statement insert(
-        db_->handle(),
-        "INSERT INTO account (id, instance_id, name, principal, folder_id) "
-        "VALUES (?, ?, ?, ?, ?) "
-        "ON CONFLICT(id) DO UPDATE SET instance_id = excluded.instance_id, "
-        "name = excluded.name, principal = excluded.principal, "
-        "folder_id = excluded.folder_id");
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
-
-    if (auto bound = insert.bind(1, row.id); !bound)
-        return bound;
-    if (auto bound = insert.bind(2, row.instance_id); !bound)
-        return bound;
-    if (auto bound = insert.bind(3, row.name); !bound)
-        return bound;
-    if (auto bound = insert.bind(4, row.principal); !bound)
-        return bound;
-    if (auto bound = insert.bind(5, row.folder_id); !bound)
-        return bound;
-
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    return upsert(*db_, to_entity(row), {"id"});
 }
 
 sqlite::result<void> account_repository::set_parent(std::string_view id,
     std::string_view folder_id) {
-    sqlite::statement query(
-        db_->handle(), "UPDATE account SET folder_id = ? WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, folder_id); !bound)
-        return bound;
-    if (auto bound = query.bind(2, id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query =
+        sqlgen::update<account_entity>("folder_id"_c.set(std::string{folder_id})) |
+        sqlgen::where("id"_c == std::string{id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> account_repository::remove(std::string_view id) {
-    sqlite::statement query(db_->handle(), "DELETE FROM account WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<account_entity> |
+        sqlgen::where("id"_c == std::string{id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> account_repository::remove_for_instance(
     std::string_view instance_id) {
-    sqlite::statement query(db_->handle(),
-                            "DELETE FROM account WHERE instance_id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, instance_id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<account_entity> |
+        sqlgen::where("instance_id"_c == std::string{instance_id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void> account_repository::set_credential(
@@ -168,20 +132,11 @@ sqlite::result<void> account_repository::set_credential(
      * exists, and an upsert here would conjure a row with no instance, no name
      * and no principal for a typo in an id.
      */
-    sqlite::statement query(db_->handle(),
-        "UPDATE account SET credential = ? WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, sealed); !bound)
-        return std::unexpected(bound.error());
-    if (auto bound = query.bind(2, account_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query =
+        sqlgen::update<account_credential_entity>(
+            "credential"_c.set(std::string{sealed})) |
+        sqlgen::where("id"_c == std::string{account_id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<void>
@@ -191,40 +146,24 @@ account_repository::clear_credential(std::string_view account_id) {
      * a NULL column is an account nobody has stored a secret for, while an
      * empty blob would be a secret whose seal produced nothing.
      */
-    sqlite::statement query(db_->handle(),
-        "UPDATE account SET credential = NULL WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, account_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query =
+        sqlgen::update<account_credential_entity>(
+            "credential"_c.set(std::optional<std::string>{})) |
+        sqlgen::where("id"_c == std::string{account_id});
+    return done(query(db_->connection()));
 }
 
 sqlite::result<std::optional<std::string>>
 account_repository::credential_of(std::string_view account_id) const {
-    sqlite::statement query(db_->handle(),
-        "SELECT credential FROM account WHERE id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
+    const auto query = sqlgen::read<std::vector<account_credential_entity>> |
+        sqlgen::where("id"_c == std::string{account_id});
 
-    if (auto bound = query.bind(1, account_id); !bound)
-        return std::unexpected(bound.error());
-
-    auto row = query.step();
-    if (!row)
-        return std::unexpected(row.error());
-    if (!row.value())
+    auto rows = rows_of(query(db_->connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
+    if (rows.value().empty())
         return std::optional<std::string>{};
-
-    /* Reading NULL as text yields the empty string, so nullness is asked. */
-    if (query.is_null(0))
-        return std::optional<std::string>{};
-    return std::optional<std::string>{std::string(query.column_text(0))};
+    return rows.value().front().credential;
 }
 
 }

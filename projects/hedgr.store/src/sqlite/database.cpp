@@ -20,78 +20,75 @@
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/repository/schema.hpp"
 #include <format>
-#include <sqlite3.h>
+#include <string>
 #include <system_error>
 #include <utility>
 
 namespace hedgr::store::sqlite {
 
-namespace {
+store_error from_sqlgen(const rfl::Error& error, store_errc fallback) {
+    const std::string text = error.what();
+    /*
+     * A refused write is the one failure a caller is expected to act on, and
+     * SQLite names it in the message. Everything else keeps the code the
+     * operation asked for, which is why the fallback is a parameter: a failed
+     * compile and a failed step are the same kind of sentence to sqlgen.
+     */
+    const bool constraint = text.find(" constraint failed") != std::string::npos;
 
-store_error make_error(store_errc code, sqlite3* db, int sqlite_code,
-                       std::string_view detail) {
-    const char* text = db == nullptr ? nullptr : sqlite3_errmsg(db);
     return store_error{
-        .code = code,
-        .message = std::format("{}: {}", detail,
-                               text == nullptr ? "no error text" : text),
-        .sqlite_code = sqlite_code,
+        .code = constraint ? store_errc::constraint_violated : fallback,
+        .message = text,
+        .sqlite_code = 0,
     };
 }
 
+namespace {
+
+result<void> pragma(const sqlgen::Ref<sqlgen::sqlite::Connection>& handle,
+    std::string_view sql) {
+    auto applied = handle->execute(std::string(sql));
+    if (!applied) {
+        return std::unexpected(
+            from_sqlgen(applied.error(), store_errc::open_failed));
+    }
+    return {};
 }
 
-database::~database() {
-    if (handle_ != nullptr)
-        sqlite3_close(handle_);
 }
 
-database::database(sqlite3* raw) noexcept : handle_(raw) {}
+database::~database() = default;
 
-database::database(database&& other) noexcept : handle_(other.handle_) {
-    other.handle_ = nullptr;
-}
+database::database(sqlgen::Ref<sqlgen::sqlite::Connection> raw,
+    std::filesystem::path path) noexcept
+    : handle_(std::move(raw)), path_(std::move(path)) {}
+
+database::database(database&& other) noexcept
+    : handle_(std::move(other.handle_)), path_(std::move(other.path_)) {}
 
 database& database::operator=(database&& other) noexcept {
     if (this == &other)
         return *this;
-    if (handle_ != nullptr)
-        sqlite3_close(handle_);
-    handle_ = std::exchange(other.handle_, nullptr);
+    handle_ = std::move(other.handle_);
+    path_ = std::move(other.path_);
     return *this;
 }
 
-result<database> database::adopt(sqlite3* raw) {
-    // Foreign keys are per-connection in SQLite and default to off, so a
-    // repository that relies on ON DELETE CASCADE must see this run first.
-    auto pragma = [raw](std::string_view sql) -> result<void> {
-        char* text = nullptr;
-        const std::string owned(sql);
-        const int rc =
-            sqlite3_exec(raw, owned.c_str(), nullptr, nullptr, &text);
-        if (rc == SQLITE_OK)
-            return {};
-        const std::string message =
-            text == nullptr ? "no error text" : std::string(text);
-        sqlite3_free(text);
-        return std::unexpected(store_error{
-            .code = store_errc::open_failed,
-            .message = std::format("could not set {}: {}", sql, message),
-            .sqlite_code = rc,
-        });
-    };
-
+result<database> database::adopt(
+    const sqlgen::Ref<sqlgen::sqlite::Connection>& raw,
+    std::filesystem::path path) {
+    /*
+     * Foreign keys are per-connection in SQLite and default to off, so a
+     * repository that relies on ON DELETE CASCADE must see this run first.
+     * WAL keeps a client that is killed mid-write from leaving a store that has
+     * to be recovered before it can be read.
+     */
     for (const auto& sql : {std::string_view("PRAGMA foreign_keys = ON"),
                             std::string_view("PRAGMA journal_mode = WAL")}) {
-        if (auto applied = pragma(sql); !applied) {
-            // A connection that does not have the pragmas we require is worse
-            // than no connection, and the raw handle would otherwise leak.
-            store_error error = applied.error();
-            sqlite3_close(raw);
-            return std::unexpected(std::move(error));
-        }
+        if (auto applied = pragma(raw, sql); !applied)
+            return std::unexpected(applied.error());
     }
-    return database(raw);
+    return database(raw, std::move(path));
 }
 
 result<database> database::open(const std::filesystem::path& path) {
@@ -108,64 +105,41 @@ result<database> database::open(const std::filesystem::path& path) {
             });
     }
 
-    sqlite3* raw = nullptr;
-    const int rc = sqlite3_open_v2(
-        path.string().c_str(), &raw,
-        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
-        nullptr);
-    if (rc != SQLITE_OK) {
-        // sqlite3_open_v2 hands back a handle even on failure, and only that
-        // handle knows why the open failed.
-        store_error error = make_error(store_errc::open_failed, raw, rc,
-                                       std::format("could not open {}",
-                                                   path.string()));
-        if (raw != nullptr)
-            sqlite3_close_v2(raw);
-        return std::unexpected(std::move(error));
+    auto opened = sqlgen::sqlite::connect(path.string());
+    if (!opened) {
+        return std::unexpected(
+            from_sqlgen(opened.error(), store_errc::open_failed));
     }
-    return adopt(raw);
+    return adopt(opened.value(), path);
 }
 
 result<database> database::open_in_memory() {
-    sqlite3* raw = nullptr;
-    const int rc = sqlite3_open_v2(":memory:", &raw,
-                                   SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-                                   nullptr);
-    if (rc != SQLITE_OK) {
-        store_error error = make_error(store_errc::open_failed, raw, rc,
-                                       "could not open an in-memory database");
-        if (raw != nullptr)
-            sqlite3_close_v2(raw);
-        return std::unexpected(std::move(error));
+    auto opened = sqlgen::sqlite::connect(":memory:");
+    if (!opened) {
+        return std::unexpected(
+            from_sqlgen(opened.error(), store_errc::open_failed));
     }
-    return adopt(raw);
+    return adopt(opened.value(), {});
 }
 
 result<void> database::execute(std::string_view sql) {
-    if (handle_ == nullptr)
+    if (!is_open())
         return std::unexpected(store_error{
             .code = store_errc::closed,
             .message = "cannot execute on a closed database",
             .sqlite_code = 0,
         });
 
-    char* text = nullptr;
-    const int rc = sqlite3_exec(handle_, std::string(sql).c_str(), nullptr,
-                               nullptr, &text);
-    if (rc == SQLITE_OK)
-        return {};
-    const std::string detail = text == nullptr ? "no error text" : text;
-    sqlite3_free(text);
-    return std::unexpected(store_error{
-        .code = rc == SQLITE_CONSTRAINT ? store_errc::constraint_violated
-                                        : store_errc::step_failed,
-        .message = std::format("could not execute [{}]: {}", sql, detail),
-        .sqlite_code = rc,
-    });
+    auto applied = handle_->execute(std::string(sql));
+    if (!applied) {
+        return std::unexpected(
+            from_sqlgen(applied.error(), store_errc::step_failed));
+    }
+    return {};
 }
 
 result<void> database::apply_schema() {
-    if (handle_ == nullptr)
+    if (!is_open())
         return std::unexpected(store_error{
             .code = store_errc::closed,
             .message = "cannot apply the schema to a closed database",
@@ -174,17 +148,13 @@ result<void> database::apply_schema() {
     return repository::apply(*this);
 }
 
-bool database::is_open() const noexcept { return handle_ != nullptr; }
+bool database::is_open() const noexcept { return handle_.ptr() != nullptr; }
 
-sqlite3* database::handle() const noexcept { return handle_; }
-
-std::filesystem::path database::path() const {
-    if (handle_ == nullptr)
-        return {};
-    const char* name = sqlite3_db_filename(handle_, "main");
-    if (name == nullptr)
-        return {};
-    return std::filesystem::path(name);
+const sqlgen::Ref<sqlgen::sqlite::Connection>&
+database::connection() const noexcept {
+    return handle_;
 }
+
+std::filesystem::path database::path() const { return path_; }
 
 }

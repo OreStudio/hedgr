@@ -19,12 +19,20 @@
  */
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.model/domain/window_json_io.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/repository/query.hpp"
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <sqlgen/delete_from.hpp>
+#include <sqlgen/literals.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/read.hpp>
+#include <sqlgen/where.hpp>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -34,9 +42,7 @@ namespace dom = model::domain;
 
 namespace {
 
-constexpr std::string_view select_columns =
-    "SELECT window_id, kind, session_instance_id, session_account_id, "
-    "cadence_ms, state_json FROM window_spec ORDER BY window_id";
+using namespace sqlgen::literals;
 
 sqlite::store_error corrupt_row(std::string_view window_id,
                                 std::string_view detail) {
@@ -49,40 +55,57 @@ sqlite::store_error corrupt_row(std::string_view window_id,
 
 sqlite::result<std::string> encode_state(const dom::window_spec& spec) {
     auto encoded = dom::window_state_to_json(spec.kind, spec.state);
-    if (!encoded)
+    if (!encoded) {
         return std::unexpected(
             corrupt_row(spec.id, std::format("cannot serialise its state: {}",
                                              encoded.error())));
+    }
     return std::move(encoded).value();
 }
 
-sqlite::result<dom::window_spec> read_row(const sqlite::statement& query) {
-    dom::window_spec spec;
-    spec.id = std::string(query.column_text(0));
+/** @brief The domain value as the entity sqlgen binds. */
+window_spec_entity to_entity(const dom::window_spec& spec,
+    std::string state_json) {
+    window_spec_entity row;
+    row.window_id = spec.id;
+    row.kind = std::string{dom::to_string(spec.kind)};
+    if (spec.session) {
+        row.session_instance_id = spec.session->instance_id;
+        row.session_account_id = spec.session->account_id;
+    }
+    row.cadence_ms = static_cast<std::int64_t>(spec.cadence.count());
+    row.state_json = std::move(state_json);
+    return row;
+}
 
-    const auto kind = dom::window_kind_from_string(query.column_text(1));
-    if (!kind)
-        return std::unexpected(corrupt_row(
-            spec.id, std::format("unknown kind [{}]: {}", query.column_text(1),
-                                 kind.error())));
+/** @brief The stored row as a domain value, or why it is not one. */
+sqlite::result<dom::window_spec> to_domain(const window_spec_entity& row) {
+    dom::window_spec spec;
+    spec.id = row.window_id.get();
+
+    const auto kind = dom::window_kind_from_string(row.kind);
+    if (!kind) {
+        return std::unexpected(corrupt_row(spec.id,
+            std::format("unknown kind [{}]: {}", row.kind, kind.error())));
+    }
     spec.kind = kind.value();
 
     // An absent session is stored as NULL on both columns, so the optional is
     // rebuilt from the instance column alone and cannot be half-present.
-    if (!query.is_null(2)) {
+    if (row.session_instance_id) {
         spec.session = dom::session_key{
-            std::string(query.column_text(2)),
-            std::string(query.column_text(3)),
+            *row.session_instance_id,
+            row.session_account_id.value_or(std::string{}),
         };
     }
 
-    spec.cadence =
-        std::chrono::milliseconds(query.column_int64(4));
+    spec.cadence = std::chrono::milliseconds(row.cadence_ms);
 
-    auto state = dom::window_state_from_json(spec.kind, query.column_text(5));
-    if (!state)
-        return std::unexpected(corrupt_row(
-            spec.id, std::format("cannot parse its state: {}", state.error())));
+    auto state = dom::window_state_from_json(spec.kind, row.state_json);
+    if (!state) {
+        return std::unexpected(corrupt_row(spec.id,
+            std::format("cannot parse its state: {}", state.error())));
+    }
     spec.state = std::move(state).value();
     return spec;
 }
@@ -92,25 +115,27 @@ sqlite::result<dom::window_spec> read_row(const sqlite::statement& query) {
 window_repository::window_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
+std::string window_repository::sql() const {
+    return ddl_for(window_spec_entity::tablename);
+}
+
 sqlite::result<std::vector<dom::window_spec>> window_repository::list() const {
-    sqlite::statement query(db_->handle(), select_columns);
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
+    const auto query = sqlgen::read<std::vector<window_spec_entity>> |
+        sqlgen::order_by("window_id"_c);
 
-    std::vector<dom::window_spec> rows;
-    while (true) {
-        auto available = query.step();
-        if (!available)
-            return std::unexpected(available.error());
-        if (!available.value())
-            break;
+    auto rows = rows_of(query(db_->connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
 
-        auto row = read_row(query);
-        if (!row)
-            return std::unexpected(row.error());
-        rows.push_back(std::move(row).value());
+    std::vector<dom::window_spec> values;
+    values.reserve(rows.value().size());
+    for (const auto& row : rows.value()) {
+        auto value = to_domain(row);
+        if (!value)
+            return std::unexpected(value.error());
+        values.push_back(std::move(value).value());
     }
-    return rows;
+    return values;
 }
 
 sqlite::result<void> window_repository::save(const dom::window_spec& spec) {
@@ -118,60 +143,14 @@ sqlite::result<void> window_repository::save(const dom::window_spec& spec) {
     if (!encoded)
         return std::unexpected(encoded.error());
 
-    sqlite::statement insert(
-        db_->handle(),
-        "INSERT INTO window_spec (window_id, kind, session_instance_id, "
-        "session_account_id, cadence_ms, state_json) "
-        "VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(window_id) DO UPDATE SET kind = excluded.kind, "
-        "session_instance_id = excluded.session_instance_id, "
-        "session_account_id = excluded.session_account_id, "
-        "cadence_ms = excluded.cadence_ms, "
-        "state_json = excluded.state_json");
-    if (!insert.is_valid())
-        return std::unexpected(insert.step().error());
-
-    if (auto bound = insert.bind(1, spec.id); !bound)
-        return bound;
-    if (auto bound = insert.bind(2, dom::to_string(spec.kind)); !bound)
-        return bound;
-    if (spec.session) {
-        if (auto bound = insert.bind(3, spec.session->instance_id); !bound)
-            return bound;
-        if (auto bound = insert.bind(4, spec.session->account_id); !bound)
-            return bound;
-    } else {
-        if (auto bound = insert.bind_null(3); !bound)
-            return bound;
-        if (auto bound = insert.bind_null(4); !bound)
-            return bound;
-    }
-    if (auto bound = insert.bind(
-            5, static_cast<std::int64_t>(spec.cadence.count()));
-        !bound)
-        return bound;
-    if (auto bound = insert.bind(6, encoded.value()); !bound)
-        return bound;
-
-    auto stepped = insert.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    return upsert(*db_, to_entity(spec, std::move(encoded).value()),
+        {"window_id"});
 }
 
 sqlite::result<void> window_repository::remove(std::string_view window_id) {
-    sqlite::statement query(db_->handle(),
-                            "DELETE FROM window_spec WHERE window_id = ?");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
-
-    if (auto bound = query.bind(1, window_id); !bound)
-        return bound;
-
-    auto stepped = query.step();
-    if (!stepped)
-        return std::unexpected(stepped.error());
-    return {};
+    const auto query = sqlgen::delete_from<window_spec_entity> |
+        sqlgen::where("window_id"_c == std::string{window_id});
+    return done(query(db_->connection()));
 }
 
 }

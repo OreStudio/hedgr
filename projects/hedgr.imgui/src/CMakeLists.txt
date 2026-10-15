@@ -25,6 +25,19 @@ set_target_properties(${exe_target_name} PROPERTIES
 target_include_directories(${exe_target_name} PRIVATE
     ${CMAKE_SOURCE_DIR}/projects/hedgr.imgui/include)
 
+#
+# The source tree this build was configured from, baked in.
+#
+# A development build keeps the local store inside the checkout, under .cache,
+# and finding the checkout by walking up from the executable would be four
+# levels of guessing that a relocated package breaks. The value is a string and
+# not a path, so a build made somewhere else carries a path that is simply not
+# there, and the client falls back to the user's data directory rather than
+# refusing to start.
+#
+target_compile_definitions(${exe_target_name} PRIVATE
+    HEDGR_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
 target_link_libraries(${exe_target_name}
     PRIVATE
         hedgr.runtime.lib

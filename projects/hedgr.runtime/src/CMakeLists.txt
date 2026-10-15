@@ -21,6 +21,21 @@ endif()
 
 add_library(${lib_target_name} ${files})
 target_compile_definitions(${lib_target_name} PRIVATE HEDGR_RUNTIME_LIBRARY)
+
+#
+# Where the OreStudio checkouts live, baked in at configure time.
+#
+# The seeder looks for the development deployments beside this repository so a
+# fresh store comes up with the environments an operator actually runs. The
+# lookup is a directory scan rather than a walk up from the executable, for the
+# same reason the store's path is: the executable's location says nothing about
+# where its source came from. A machine with no such tree -- a deployed package
+# -- finds nothing, warns, and falls back to the one instance its own options
+# describe. HEDGR_ORESTUDIO_ROOT overrides it at run time.
+#
+target_compile_definitions(${lib_target_name} PRIVATE
+    HEDGR_ORESTUDIO_ROOT="${CMAKE_SOURCE_DIR}/../../OreStudio")
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${lib_target_name} PRIVATE
         -fvisibility=hidden -fvisibility-inlines-hidden)

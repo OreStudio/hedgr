@@ -278,6 +278,26 @@ private:
                       const std::string& instance_id);
 
     void seed_first_run();
+
+    /**
+     * @brief Makes sure the folder the seeded environments sit in exists.
+     *
+     * @return The folder's id, which is a constant rather than a generated key:
+     * the seeder runs once per store, and the folder is a fact about the
+     * environments it seeds rather than a row an operator named.
+     */
+    [[nodiscard]] std::string ensure_development_folder();
+
+    /**
+     * @brief Makes sure the label the seeded environments carry exists.
+     *
+     * @return The label's id, which is the id of an existing label of the same
+     * name when the operator already has one: a label's name is unique, so a
+     * second row carrying that name would be refused and the seeded instances
+     * would come up unlabelled.
+     */
+    [[nodiscard]] std::string ensure_development_label();
+
     void ensure_instance_manager_window();
 
     /**

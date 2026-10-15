@@ -18,13 +18,18 @@
  *
  */
 #include "hedgr.store/repository/schema.hpp"
-#include "hedgr.store/sqlite/statement.hpp"
-#include <array>
-#include <filesystem>
+#include "hedgr.store/repository/ddl.hpp"
+#include "hedgr.store/repository/entity.hpp"
+#include "hedgr.store/sqlite/database.hpp"
+#include <algorithm>
+#include <cstddef>
 #include <format>
 #include <optional>
+#include <sqlgen/read.hpp>
+#include <sqlgen/order_by.hpp>
+#include <sqlgen/literals.hpp>
 #include <string>
-#include <string_view>
+#include <vector>
 
 namespace hedgr::store::repository {
 
@@ -39,127 +44,14 @@ namespace {
  * comma-separated label string, from 3 when an account's free-text `label`
  * column became `name` so that it no longer shares a word with the label
  * entity, from 4 when the store gained the master table and the account gained
- * its sealed credential, and from 5 when an instance and an account gained the
- * folder they sit in. The store is pre-release, so there is no migration: a
- * file written against a different version is refused, and the operator deletes
- * it.
+ * its sealed credential, from 5 when an instance and an account gained the
+ * folder they sit in, and from 6 when the tables stopped being hand-written
+ * SQL and started being derived from the entity structs, which moved the
+ * `created_at` default out of the table and into the writer. The store is
+ * pre-release, so there is no migration: a file written against a different
+ * version is refused, and the operator deletes it.
  */
-constexpr std::int64_t current_version = 5;
-
-/**
- * @brief The whole schema, in one place.
- *
- * The tables mirror the domain types rather than any view's needs: an instance
- * carries its transport, an account carries its sealed credential and nothing
- * that would let it be read without the master password, and a window carries
- * its kind beside its payload so no variant is ever written out.
- *
- * @c window_spec.session_instance_id and @c window_spec.session_account_id are
- * nullable because a window may be bound to no session at all, which is the
- * normal case for the instance manager.
- *
- * @c account.credential and the @c master table are the only two places in this
- * file where a secret is written down, and both hold ciphertext. Nothing here
- * stores the master password, and nothing here can be read without it.
- *
- * @c instance.folder_id and @c account.folder_id are the edges of the two
- * folder trees. They are plain text rather than foreign keys into @c folder,
- * deliberately: removing a folder does not remove what is in it, so the leaves
- * are moved to their tree's root first and no cascade ever has to fire. A
- * foreign key would either take an operator's instances with a folder or refuse
- * to remove it, and neither is what removing a folder should do.
- */
-constexpr std::array<std::string_view, 11> schema_statements{
-    R"(PRAGMA foreign_keys = ON)",
-    R"(CREATE TABLE IF NOT EXISTS instance (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        nats_url TEXT NOT NULL,
-        subject_prefix TEXT NOT NULL,
-        wire_format TEXT NOT NULL DEFAULT 'msgpack',
-        folder_id TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    ))",
-    /*
-     * The credential column is nullable, and NULL is the normal state: a store
-     * with no stored credentials is a valid configuration and the common one
-     * for an operator who only reads from development instances. The column
-     * holds a sealed blob and never a password, so a copy of this file is worth
-     * nothing without the master password, which lives only in memory.
-     */
-    R"(CREATE TABLE IF NOT EXISTS account (
-        id TEXT PRIMARY KEY,
-        instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        principal TEXT NOT NULL,
-        folder_id TEXT NOT NULL DEFAULT '',
-        credential TEXT,
-        UNIQUE(instance_id, principal)
-    ))",
-    /*
-     * A folder is a node of one of two trees, so it records which tree and, for
-     * an accounts tree, the instance that owns it. The partial unique index is
-     * what makes the single-root rule a database fact rather than a convention:
-     * at most one row per (tree, owner) may have no parent, so a second root in
-     * the instances tree, or a second accounts root for one instance, is
-     * refused by SQLite even if a caller never checks first.
-     */
-    R"(CREATE TABLE IF NOT EXISTS folder (
-        id TEXT PRIMARY KEY,
-        parent_id TEXT NOT NULL DEFAULT '',
-        owner_id TEXT NOT NULL DEFAULT '',
-        tree TEXT NOT NULL,
-        name TEXT NOT NULL
-    ))",
-    R"(CREATE UNIQUE INDEX IF NOT EXISTS folder_root ON folder(tree, owner_id)
-        WHERE parent_id = '')",
-    R"(CREATE TABLE IF NOT EXISTS label (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        colour TEXT NOT NULL,
-        severity TEXT NOT NULL
-    ))",
-    /*
-     * The two attachment tables are separate rather than one table with an
-     * owner-kind column, because each foreign key then names the table it
-     * actually references and SQLite can cascade on it. A removal of an
-     * instance or an account therefore takes its attachments with it without
-     * the runtime having to walk the junction.
-     */
-    R"(CREATE TABLE IF NOT EXISTS instance_label (
-        instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
-        label_id TEXT NOT NULL REFERENCES label(id) ON DELETE CASCADE,
-        PRIMARY KEY (instance_id, label_id)
-    ))",
-    R"(CREATE TABLE IF NOT EXISTS account_label (
-        account_id TEXT NOT NULL REFERENCES account(id) ON DELETE CASCADE,
-        label_id TEXT NOT NULL REFERENCES label(id) ON DELETE CASCADE,
-        PRIMARY KEY (account_id, label_id)
-    ))",
-    R"(CREATE TABLE IF NOT EXISTS window_spec (
-        window_id TEXT PRIMARY KEY,
-        kind TEXT NOT NULL,
-        session_instance_id TEXT,
-        session_account_id TEXT,
-        cadence_ms INTEGER NOT NULL DEFAULT 1000,
-        state_json TEXT NOT NULL DEFAULT '{}'
-    ))",
-    R"(CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER NOT NULL
-    ))",
-    /*
-     * One row, keyed by a literal, holding a known sentence sealed under the
-     * master password. Verification opens that sentence; the password itself is
-     * nowhere in this table and nowhere in this file. A row here is what makes
-     * the store locked rather than absent, so its absence is a first launch and
-     * not an error.
-     */
-    R"(CREATE TABLE IF NOT EXISTS master (
-        id TEXT PRIMARY KEY,
-        verification TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    ))",
-};
+constexpr std::int64_t current_version = 6;
 
 /**
  * @brief The version the file was written with, when it records one.
@@ -169,18 +61,19 @@ constexpr std::array<std::string_view, 11> schema_statements{
  * SQLite happens to return first.
  */
 result<std::optional<std::int64_t>> stored_version(sqlite::database& db) {
-    sqlite::statement query(
-        db.handle(),
-        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1");
-    if (!query.is_valid())
-        return std::unexpected(query.step().error());
+    using namespace sqlgen::literals;
+    const auto query =
+        sqlgen::read<std::vector<schema_version_entity>> |
+        sqlgen::order_by("version"_c.desc());
 
-    auto row = query.step();
-    if (!row)
-        return std::unexpected(row.error());
-    if (!row.value())
+    auto rows = query(db.connection());
+    if (!rows) {
+        return std::unexpected(
+            sqlite::from_sqlgen(rows.error(), sqlite::store_errc::step_failed));
+    }
+    if (rows.value().empty())
         return std::optional<std::int64_t>{};
-    return std::optional<std::int64_t>{query.column_int64(0)};
+    return std::optional<std::int64_t>{rows.value().front().version};
 }
 
 /**
@@ -218,8 +111,21 @@ result<void> apply(sqlite::database& db) {
             .sqlite_code = 0,
         });
 
-    for (const auto& sql : schema_statements) {
-        if (auto applied = db.execute(sql); !applied)
+    /*
+     * The tables are created from the entity structs, so a column renamed in
+     * one place cannot survive in the other: the statement that creates it and
+     * the code that binds it are two readings of one declaration. The three
+     * tables that carry a cascade foreign key, and the two composite keys that
+     * come with them, are the exceptions and are listed with their reason in
+     * ddl.cpp.
+     */
+    for (const auto& table : tables()) {
+        if (auto applied = db.execute(table.text); !applied)
+            return std::unexpected(applied.error());
+    }
+
+    for (const auto& statement : indexes()) {
+        if (auto applied = db.execute(statement); !applied)
             return std::unexpected(applied.error());
     }
 

@@ -24,6 +24,8 @@
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
+#include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -43,11 +45,19 @@ using sqlite::result;
  * credential arrives already sealed and leaves the same way, and no password
  * and no key is ever named in this class. A decrypted secret exists inside the
  * runtime's sign-in attempt and nowhere else, and never passes through here.
+ *
+ * The @c account table is described by two entity structs rather than one, and
+ * the reason is the credential column: @c account_entity does not name it, so
+ * no list selects it and no save writes it, and @c account_credential_entity is
+ * the one type that does.
  */
 class HEDGR_STORE_EXPORT account_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
     explicit account_repository(sqlite::database& db) noexcept;
+
+    /** @brief The DDL this build applies for the @c account table. */
+    [[nodiscard]] std::string sql() const;
 
     /** @brief Every account, ordered by instance then name. */
     [[nodiscard]] result<std::vector<dom::account>> list() const;
