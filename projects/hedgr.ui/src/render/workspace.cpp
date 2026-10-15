@@ -59,34 +59,6 @@ void draw_background(const hedgr::ui::render::render_input& input) {
 }
 
 /**
- * @brief What the lock state means, for the indicator's tooltip.
- *
- * Prose rather than the enum's own spelling, because a tooltip is read by a
- * person deciding what to do next: "absent" tells them nothing and "no master
- * password has been created yet" tells them everything. The state's own name
- * travels in front of it so a reader can match the tooltip to a log line.
- */
-std::string lock_tooltip(hedgr::model::domain::store_lock value) {
-    using hedgr::model::domain::store_lock;
-    switch (value) {
-    case store_lock::absent:
-        return std::format("Store {}: no master password has been created yet",
-            hedgr::model::domain::to_string(value));
-    case store_lock::locked:
-        return std::format("Store {}: the master password is not held; unlock "
-                           "it to read the store",
-            hedgr::model::domain::to_string(value));
-    case store_lock::unlocked:
-        return std::format("Store {}: the master password is held for this run",
-            hedgr::model::domain::to_string(value));
-    case store_lock::failed:
-        return std::format("Store {}: the last master password was refused",
-            hedgr::model::domain::to_string(value));
-    }
-    return "Store: unknown lock state";
-}
-
-/**
  * @brief What the status line says when the environment opened the store.
  *
  * Written here rather than at the call so the sentence is one thing a reader
@@ -118,8 +90,6 @@ void workspace::unlock_with(std::string_view master_password) {
         master_password_.size() - 1);
     std::copy_n(master_password.begin(), length, master_password_.begin());
     master_password_[length] = '\0';
-    lock_prompt_dismissed_ = false;
-    prompt_open_ = true;
 
     /*
      * The interface is told, now and for as long as the run keeps the password
@@ -131,50 +101,55 @@ void workspace::unlock_with(std::string_view master_password) {
 }
 
 void workspace::render(const render_input& input) {
+    /*
+     * The control is told the state it is drawing before any window gets the
+     * chance to draw it, and its answer is read after the walk. It lives on
+     * the Instances window's status bar, so that window's renderer is what
+     * fills it in; these are the defaults for a frame in which it does not.
+     */
+    lock_control_.lock = input.store_lock;
+    lock_control_.form_open = shows_lock_prompt(input);
+    lock_control_.open_requested = false;
+    lock_control_.close_requested = false;
+
     draw_toolbar(input);
     draw_background(input);
 
     /*
-     * The gate. While the store is not unlocked there is nothing behind any of
-     * these windows to draw -- every read of the store is a decryption -- so
-     * the prompt is the only surface, and no window is drawn and no refresh is
-     * requested. This is the whole of the "lock gates the interface" rule.
+     * The open store ends the prompt, and the frame that notices it is the
+     * frame the environment's own unlock, if there was one, gets announced.
+     * Here rather than at the moment the password was armed, because between
+     * the two the derivation runs and the prompt is what is on screen: a
+     * notice posted then would spend most of its few seconds on a frame nobody
+     * was reading.
      */
-    if (!shows_instances(input)) {
-        draw_lock_prompt(input);
+    if (shows_instances(input)) {
+        if (lock_form_open_)
+            close_lock_prompt();
+        clear_password_buffers();
 
-        /*
-         * An unattended launch left a password in the prompt's buffer, so it is
-         * submitted as soon as the store says it wants one. The prompt draws
-         * first, so the frame that carries the submission is a frame a person
-         * could have produced themselves by typing and pressing the button.
-         */
-        if (master_password_[0] != '\0' && !input.unlocking)
-            submit_master_password(input);
-        return;
+        if (!environment_announced_ && environment_unlock_) {
+            status_.show_event(environment_event, input.now_ns);
+            environment_announced_ = true;
+        }
     }
 
     /*
-     * The gate reopened, so the prompt is finished with. Its typed buffer is
-     * wiped rather than kept, and it is armed again for the next lock, so a
-     * password is never sitting in this object while the store is open.
+     * The password form, when it is open. It is a window beside the others and
+     * not a mode: the rest of the interface keeps drawing behind it, and the
+     * one way to open it is the lock control on the status bar.
      */
-    lock_prompt_dismissed_ = false;
-    clear_password_buffers();
+    draw_lock_prompt(input);
 
     /*
-     * The one announcement a store opened from the environment gets, said on
-     * the frame the catalogue first appears. Here rather than at the moment
-     * the password was armed, because between the two the derivation runs and
-     * the prompt is what is on screen: a notice posted then would spend most
-     * of its few seconds on a frame nobody was reading, and the first thing
-     * the operator saw of the open store would say nothing about how it got
-     * that way.
+     * An unattended launch left a password in the form's buffer, so it is
+     * submitted as soon as the store says it wants one. The form draws first,
+     * so the frame that carries the submission is a frame a person could have
+     * produced themselves by typing and pressing the button.
      */
-    if (!environment_announced_ && environment_unlock_) {
-        status_.show_event(environment_event, input.now_ns);
-        environment_announced_ = true;
-    }
+    if (shows_lock_prompt(input) && master_password_[0] != '\0'
+        && !input.unlocking)
+        submit_master_password(input);
 
     const auto& layout = input.windows.layout();
 
@@ -274,9 +249,25 @@ void workspace::render(const render_input& input) {
         const auto key = std::string{input.windows.id(handle)};
         window_ui_state& state = ui_state_[key];
         if (const auto draw = renderer_for(kind))
-            draw(handle, input, state, status_);
+            draw(handle, input, state, status_, lock_control_);
 
         ImGui::End();
+    }
+
+    /*
+     * The lock control's answer, read after the walk that drew it. One control
+     * with two jobs: an open store is closed, anything else asks for the
+     * password. Nothing else in the interface opens the form or locks the
+     * store, which is what makes this the lock control rather than one of two.
+     */
+    if (lock_control_.close_requested) {
+        hedgr::model::command::command request;
+        request.kind = hedgr::model::command::command_kind::lock_store;
+        input.commands.push(std::move(request));
+        close_lock_prompt();
+        environment_unlock_ = false;
+    } else if (lock_control_.open_requested) {
+        open_lock_prompt();
     }
 }
 
@@ -350,35 +341,13 @@ void workspace::draw_toolbar(const render_input& input) {
      * glance, and tooltipped with prose, because the glyph alone does not say
      * which of the three closed-looking states this is.
      */
-    ImGui::SameLine();
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(
-                           hedgr::ui::theme::store_lock_colour(input.store_lock)),
-        "%s", hedgr::ui::theme::store_lock_icon(input.store_lock));
-    ImGui::SetItemTooltip("%s", lock_tooltip(input.store_lock).c_str());
-
-    ImGui::SameLine();
-    if (open) {
-        if (hedgr::ui::widget::icon_button("lock", icon::lock,
-                "Lock the store, forgetting the master password for this run")) {
-            hedgr::model::command::command request;
-            request.kind = command_kind::lock_store;
-            input.commands.push(std::move(request));
-
-            /*
-             * The operator has taken the store back, so the run is theirs
-             * again and the environment's password is no longer what holds it
-             * open. The flag goes with it, so a later unlock that a person
-             * performs is announced as theirs and not as the environment's.
-             */
-            environment_unlock_ = false;
-        }
-    } else {
-        if (hedgr::ui::widget::icon_button("unlock", icon::unlock,
-                "Enter the master password")) {
-            lock_prompt_dismissed_ = false;
-            prompt_open_ = true;
-        }
-    }
+    /*
+     * The lock indicator and its control used to live here and do not any
+     * more. The lock's state and the action on it are one control on the
+     * Instances window's status bar, where the store's own status is read:
+     * a padlock in the chrome that is not the one that opens the store is a
+     * second thing to look at, and the two could disagree.
+     */
 
     ImGui::SameLine();
     if (hedgr::ui::widget::icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
@@ -402,22 +371,42 @@ void workspace::draw_toolbar(const render_input& input) {
     ImGui::End();
 }
 
-bool workspace::prompt_visible(const render_input& input) const noexcept {
-    using hedgr::model::domain::store_lock;
-
+bool workspace::shows_lock_prompt(const render_input& input) const noexcept {
     /*
-     * Never while the store is open: there is nothing to ask for. Never after a
-     * dismissal, so the operator is not asked again this run.
+     * Never while the store is open: there is nothing to ask for, and the
+     * frame that notices it closes the form. Otherwise it is on screen exactly
+     * when it has been opened, which is when the lock control was clicked.
      *
-     * The prompt does stay up while a derivation is running, and that is the
-     * point rather than an oversight: the key derivation is slow on purpose, and
-     * a form that disappears for half a second leaves an operator looking at a
-     * background wondering whether the application has hung. It shows that it is
-     * working instead.
+     * The form stays up while a derivation is running, and that is the point
+     * rather than an oversight: the key derivation is slow on purpose, and a
+     * form that disappears for half a second leaves an operator looking at a
+     * background wondering whether the application has hung. It shows that it
+     * is working instead.
      */
-    if (input.store_lock == store_lock::unlocked)
+    if (!lock_form_open_)
         return false;
-    return !lock_prompt_dismissed_;
+    return input.store_lock != hedgr::model::domain::store_lock::unlocked;
+}
+
+void workspace::open_lock_prompt() {
+    /*
+     * Opening the form is the operator asking to be let in, so whatever they
+     * typed and abandoned last time is gone and the fields start empty. A
+     * password carried over from an earlier attempt would be a field already
+     * filled in with something nobody can see.
+     */
+    clear_password_buffers();
+    master_password_visible_ = false;
+    create_mismatch_ = false;
+    lock_form_open_ = true;
+    prompt_open_ = true;
+}
+
+void workspace::close_lock_prompt() {
+    clear_password_buffers();
+    master_password_visible_ = false;
+    create_mismatch_ = false;
+    lock_form_open_ = false;
 }
 
 void workspace::clear_password_buffers() noexcept {
@@ -455,7 +444,7 @@ void workspace::submit_master_password(const render_input& input) {
 void workspace::draw_lock_prompt(const render_input& input) {
     using hedgr::model::domain::store_lock;
 
-    if (!prompt_visible(input))
+    if (!shows_lock_prompt(input))
         return;
 
     const bool creating = input.store_lock == store_lock::absent;
@@ -622,10 +611,7 @@ void workspace::draw_lock_prompt(const render_input& input) {
              * cancel: an operator who does not have the password right now must
              * be able to put the prompt down and come back to it.
              */
-            clear_password_buffers();
-            master_password_visible_ = false;
-            create_mismatch_ = false;
-            lock_prompt_dismissed_ = true;
+            close_lock_prompt();
         }
 
         /*
@@ -658,12 +644,8 @@ void workspace::draw_lock_prompt(const render_input& input) {
      */
     if (ImGui::IsWindowAppearing())
         prompt_open_ = true;
-    if (!prompt_open_) {
-        clear_password_buffers();
-        master_password_visible_ = false;
-        create_mismatch_ = false;
-        lock_prompt_dismissed_ = true;
-    }
+    if (!prompt_open_)
+        close_lock_prompt();
 
     ImGui::End();
 }

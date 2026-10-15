@@ -612,7 +612,19 @@ TEST_CASE("a catalogue window is culled while the store is locked", "[lock]") {
 
     REQUIRE_FALSE(shows(store_lock::locked, window_kind::accounts));
     REQUIRE_FALSE(shows(store_lock::locked, window_kind::workspace));
-    REQUIRE_FALSE(shows(store_lock::locked, window_kind::instance_manager));
+
+    /*
+     * The Instances window is the exception, and deliberately so: it is the
+     * shell the lock control lives on, and an operator whose whole program
+     * disappeared when the store locked would be looking at something other
+     * than the program they are about to use. It stays drawn, and its rows are
+     * blanked instead. @c shows_instances is what tells its renderer to do
+     * that, and it is still false while the lock is closed.
+     */
+    REQUIRE(shows(store_lock::locked, window_kind::instance_manager));
+    REQUIRE_FALSE(shows_instances(input_with(state, store_lock::locked)));
+    REQUIRE_FALSE(shows_instances(input_with(state, store_lock::absent)));
+    REQUIRE_FALSE(shows_instances(input_with(state, store_lock::failed)));
 
     REQUIRE(shows(store_lock::locked, window_kind::notice));
     REQUIRE(shows(store_lock::locked, window_kind::chart));

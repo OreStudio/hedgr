@@ -78,7 +78,9 @@ namespace hedgr::ui::render {
 
 void render_workspace_window(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
-    hedgr::ui::widget::status_bar& status) {
+    hedgr::ui::widget::status_bar& status,
+    lock_control& lock) {
+    static_cast<void>(lock);
     /*
      * Only the Instances window carries the status line today. The parameter
      * is here because every renderer takes it, so a window that later has

@@ -131,21 +131,22 @@ bool shows_window(domain::window_kind kind, const render_input& input,
      * A closed lock does not hide everything: a notice, a chart and a grid are
      * surfaces whose contents arrive over a session rather than out of the
      * store, and a session is not encrypted by the master password. What the
-     * lock closes is the catalogue -- the instances window, the accounts
-     * windows and the workspaces -- because every one of those reads rows that
-     * only the master password opens.
+     * lock closes is the catalogue -- the accounts windows and the workspaces
+     * -- because every one of those reads rows that only the master password
+     * opens.
      *
-     * The Instances window is the catalogue's root, and while the lock is
-     * closed the whole frame loop is skipped and the lock prompt is drawn
-     * instead, so this function never has to say what happens to it: the caller
-     * has already decided.
+     * The Instances window stays. It is the shell the lock control lives on,
+     * and it is the surface an operator is looking at when they decide to
+     * open the store; taking it away would leave them with a program that had
+     * apparently stopped being the one they were using. Its rows are blanked
+     * instead, by the renderer that knows which part of it is catalogue.
      */
     switch (kind) {
     case domain::window_kind::chart:
     case domain::window_kind::grid:
     case domain::window_kind::notice:
-        return true;
     case domain::window_kind::instance_manager:
+        return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
         return false;

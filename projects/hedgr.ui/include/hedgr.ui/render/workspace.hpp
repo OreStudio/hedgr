@@ -88,7 +88,7 @@ private:
     void draw_toolbar(const render_input& input);
 
     /**
-     * @brief Draws the master password prompt, when the store asks for it.
+     * @brief Draws the password form, when the operator has opened it.
      *
      * Two modes, chosen by the state and not by the caller: @c absent asks for
      * the password twice because it is being created, and @c locked or
@@ -96,8 +96,20 @@ private:
      */
     void draw_lock_prompt(const render_input& input);
 
-    /** @brief Whether the prompt should be on screen this frame. */
-    [[nodiscard]] bool prompt_visible(const render_input& input) const noexcept;
+    /** @brief Whether the form is on screen this frame. */
+    [[nodiscard]] bool shows_lock_prompt(const render_input& input) const noexcept;
+
+    /**
+     * @brief Opens the form and empties its fields.
+     *
+     * Called by the only thing that opens it, which is the lock control on the
+     * status bar. Whatever was typed and abandoned last time is cleared, so a
+     * second attempt never starts with a field nobody can see the contents of.
+     */
+    void open_lock_prompt();
+
+    /** @brief Puts the form down without submitting anything. */
+    void close_lock_prompt();
 
     /** @brief Pushes a set_master_password or an unlock_store command. */
     void submit_master_password(const render_input& input);
@@ -130,15 +142,14 @@ private:
     bool create_mismatch_ = false;
 
     /**
-     * @brief Whether the prompt was dismissed without an answer.
+     * @brief Whether the password form is open.
      *
-     * The gate stays closed, but the operator has said "not now" and is not
-     * asked again this run. Without this the form would reappear the instant
-     * it was put down, which is the interface refusing to take no for an
-     * answer. It clears when the toolbar's unlock action re-arms the prompt,
-     * so no is not permanent either.
+     * The whole of the form's visibility, because nothing else opens it. The
+     * store being locked does not open it -- the operator clicks the lock for
+     * that -- so a launch that nobody touches draws the application with its
+     * content obscured and nothing in the way.
      */
-    bool lock_prompt_dismissed_ = false;
+    bool lock_form_open_ = false;
 
     /**
      * @brief Whether the prompt's window is open, handed to ImGui.
@@ -183,6 +194,16 @@ private:
      * happens when two things want to say something at once.
      */
     hedgr::ui::widget::status_bar status_;
+
+    /**
+     * @brief What the lock control asked for this frame, and what it drew.
+     *
+     * Filled in before the windows are walked and read after it, because the
+     * control is drawn by the Instances window's renderer and acted on here:
+     * the renderer is a plain function pointer and cannot carry an answer
+     * across the boundary. It is scratch, like everything else in this class.
+     */
+    lock_control lock_control_;
 
     /*
      * There is deliberately no "I have submitted a password" flag here. The

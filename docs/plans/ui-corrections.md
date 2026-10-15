@@ -133,5 +133,10 @@ surface. The window is not replaced; its content is blanked.
 6. Colour carries the state: **green unlocked, amber locked, red for a failure**.
    Amber because being locked is a normal state rather than an error, and red
    belongs to something that has actually gone wrong.
-7. The blanked content still reads as the application. The tree and the list are
+7. **Every state carries text as well as an icon.** "The store is locked",
+   "the store is unlocked", and a sentence naming the failure when there is one.
+   An icon alone is a shape that has to be learned, so a person reading it for
+   the first time learns nothing from a padlock. This applies to everything the
+   bar carries, not just the lock.
+8. The blanked content still reads as the application. The tree and the list are
    visibly there and waiting; an empty box or a spinner is not the same thing.

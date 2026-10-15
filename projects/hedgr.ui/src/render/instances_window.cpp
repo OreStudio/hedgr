@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
 #include "hedgr.model/command/command.hpp"
@@ -775,7 +776,91 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
  * The reservation is always made, so nothing below knows whether there is a
  * message; the line is drawn only when there is one.
  */
-void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
+/**
+ * @brief The lock icon, its colour, and the tooltip that names the state.
+ *
+ * Amber while the store is locked and green while it is open, because a closed
+ * lock is the normal condition of a store at rest and not a fault: red is kept
+ * for @c failed, which is the one state that describes an attempt that went
+ * wrong. An operator who reads a locked store as broken will look for a
+ * problem that is not there.
+ *
+ * Clicking it is the only way the password form is opened. Nothing else opens
+ * it, and closing the form is what "not now" means, so a launch nobody touches
+ * draws the application with its contents obscured and nothing in the way.
+ */
+void draw_lock_control(lock_control& lock) {
+    using hedgr::model::domain::store_lock;
+
+    const auto* tooltip = "The store is open. Click to lock it.";
+    switch (lock.lock) {
+    case store_lock::absent:
+        tooltip = "No master password has been set yet. Click to create one.";
+        break;
+    case store_lock::locked:
+        tooltip = "The store is locked. Click to enter the master password.";
+        break;
+    case store_lock::unlocked:
+        tooltip = "The store is open. Click to lock it again.";
+        break;
+    case store_lock::failed:
+        tooltip = "The last master password was refused. Click to try again.";
+        break;
+    }
+
+    /*
+     * The icon button draws in the theme's text colour, so the state's colour
+     * is pushed around it rather than passed to it.
+     */
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(theme::store_lock_colour(lock.lock)));
+    const bool clicked = widget::icon_button("lock-control",
+        theme::store_lock_icon(lock.lock), tooltip);
+    ImGui::PopStyleColor();
+    ImGui::SetItemTooltip("%s", tooltip);
+
+    if (!clicked)
+        return;
+
+    /*
+     * One control, two jobs, chosen by the state it is showing. An open store
+     * is locked; anything else asks for the password. That is what makes the
+     * control the only lock control in the interface rather than one half of a
+     * pair, and it is why the toolbar's padlock came out.
+     */
+    if (lock.lock == store_lock::unlocked) {
+        lock.close_requested = true;
+        return;
+    }
+    lock.open_requested = true;
+}
+
+/**
+ * @brief The veil over the catalogue's rows while the store is locked.
+ *
+ * A near-opaque dark fill over the list, so the rows are there and cannot be
+ * read: the shapes of the table come through enough to show the window is the
+ * one it always was, and not enough to read a host name out of it.
+ *
+ * The line of text is the state's own colour, which is the same amber the lock
+ * control carries, so the veil and the control are one fact stated twice.
+ */
+void draw_locked_veil(const ImVec2& from, const ImVec2& to) {
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilled(from, to, IM_COL32(12, 12, 12, 236));
+
+    const char* message = "The store is locked. Click the padlock below to "
+                          "open it.";
+    const ImVec2 size = ImGui::CalcTextSize(message);
+    const ImVec2 centre((from.x + to.x) / 2.0f, (from.y + to.y) / 2.0f);
+    draw->AddText(ImVec2(centre.x - size.x / 2.0f, centre.y - size.y / 2.0f),
+        hedgr::ui::theme::store_lock_colour(
+            hedgr::model::domain::store_lock::locked),
+        message);
+}
+
+void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
+    lock_control& lock) {
     const float height = status_foot_height();
 
     /*
@@ -798,14 +883,27 @@ void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
 
     ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
         ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    if (!status.empty())
+
+    /*
+     * The lock, at the left of the foot and ahead of everything else on it.
+     * This is the whole of the control: there is no lock button in the toolbar
+     * any more, and nothing else opens the password form. Its colour is the
+     * state -- green open, amber locked, red failed -- so the state is read
+     * without the icon being read.
+     */
+    draw_lock_control(lock);
+    if (!status.empty()) {
+        ImGui::SameLine();
         draw_status_line(status, now_ns);
+    }
+
     ImGui::EndChild();
 }
 
 void render_instances_window(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
-    hedgr::ui::widget::status_bar& status) {
+    hedgr::ui::widget::status_bar& status,
+    lock_control& lock) {
     /*
      * The Instances window is root: it ignores whether the window table thinks
      * it is open, because closing it would leave an interface with no way to
@@ -860,7 +958,20 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     }
 
     ImGui::Separator();
-    draw_dashboard(input, state);
+
+    /*
+     * A closed lock does not take the window away. The surface stays, the tree
+     * and the list are drawn where they always are, and what is behind them is
+     * veiled: an operator who was told the application had gone -- or who was
+     * shown an empty box, or a spinner -- would be looking at a different
+     * program from the one they are about to use.
+     *
+     * The veil is drawn over the table rather than instead of it for the same
+     * reason. The rows are dimmed out of legibility, and the shapes underneath
+     * are what says the catalogue is there and waiting.
+     */
+    const ImVec2 rows_top = ImGui::GetCursorScreenPos();
+    const float rows_width = ImGui::GetContentRegionAvail().x;
 
     widget::browser_model model;
     model.folders = tree_folders(input, folder_tree::instances);
@@ -918,7 +1029,28 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * Nothing is drawn when there is nothing to say, so the common case costs
      * the table no height at all.
      */
-    draw_status_foot(status, input.now_ns);
+    draw_status_foot(status, input.now_ns, lock);
+
+    /*
+     * The veil, after the table has been submitted so that it covers what was
+     * drawn rather than being covered by it. Only while the lock is closed, so
+     * a run that never locks never pays for it.
+     */
+    if (!shows_instances(input)) {
+        /*
+         * The veil runs from the separator down to the foot reserved for the
+         * status bar, and not merely to wherever the browser left the cursor:
+         * the browser's own children reset it, so a rectangle measured from
+         * the cursor covers the last few pixels of the window and nothing
+         * else. The foot's height is known, so the veil's edge is the window's
+         * foot rather than a guess.
+         */
+        const float veil_bottom = ImGui::GetWindowHeight()
+            - status_foot_height() - ImGui::GetStyle().WindowPadding.y;
+        draw_locked_veil(rows_top,
+            ImVec2(rows_top.x + rows_width,
+                std::max(veil_bottom, rows_top.y + 1.0f)));
+    }
 
     /*
      * A form the callbacks above opened but did not fill is filled here, once

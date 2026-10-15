@@ -82,8 +82,10 @@ public:
      * A raise of a different condition is a new fact and takes the bar.
      *
      * @param message what is true now.
+     * @param now_ns the frame's clock reading, kept for the fade and for callers
+     * that want to know when the condition was raised.
      */
-    void show_condition(std::string_view message);
+    void show_condition(std::string_view message, std::int64_t now_ns);
 
     /**
      * @brief Withdraws the condition, if the bar is showing one.
@@ -146,6 +148,7 @@ private:
     std::string condition_;
 
     std::int64_t shown_at_ns_ = 0;
+    std::int64_t raised_at_ns_ = 0;
 };
 
 }

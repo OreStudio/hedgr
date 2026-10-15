@@ -215,10 +215,47 @@ struct render_input final {
  * to carry it: the workspace owns it, and a renderer that had no way to reach
  * it would have to be handed it by a global instead.
  */
+/**
+ * @brief The lock control's own state, as the status bar draws it.
+ *
+ * The lock is the only control for the store's lock, so it is the one thing a
+ * renderer can ask the frame to do that is not a command onto the queue: what
+ * it opens is a form owned by the frame, and there is no runtime state behind
+ * a window that is open.
+ */
+struct lock_control final {
+    /** @brief Where the lock stands, which decides the control's colour. */
+    hedgr::model::domain::store_lock lock =
+        hedgr::model::domain::store_lock::absent;
+
+    /** @brief Whether the password form is already open. */
+    bool form_open = false;
+
+    /**
+     * @brief Asks the frame to open the password form.
+     *
+     * Set to true by the control when it is clicked; the frame reads it after
+     * the draw and opens the form. A flag rather than a callback because the
+     * renderer is a plain function pointer and carries no state across the
+     * boundary.
+     */
+    bool open_requested = false;
+
+    /**
+     * @brief Asks the frame to lock the store.
+     *
+     * The other half of the one control: an open store is locked by the same
+     * icon that opens the form, and the frame turns this into the command the
+     * runtime expects.
+     */
+    bool close_requested = false;
+};
+
 using renderer_fn = void (*)(hedgr::model::state::window_handle,
                              const render_input&,
                              window_ui_state&,
-                             hedgr::ui::widget::status_bar&);
+                             hedgr::ui::widget::status_bar&,
+                             lock_control&);
 
 /**
  * @brief The renderer registered for a window kind.

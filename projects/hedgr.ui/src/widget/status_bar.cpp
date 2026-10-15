@@ -45,7 +45,7 @@ void status_bar::show_event(std::string_view message, std::int64_t now_ns) {
     shown_at_ns_ = now_ns;
 }
 
-void status_bar::show_condition(std::string_view message, std::int64_t) {
+void status_bar::show_condition(std::string_view message, std::int64_t now_ns) {
     if (message.empty()) {
         clear_condition();
         return;
@@ -68,6 +68,7 @@ void status_bar::show_condition(std::string_view message, std::int64_t) {
     kind_ = kind::condition;
     message_ = std::string{message};
     shown_at_ns_ = 0;
+    raised_at_ns_ = now_ns;
 }
 
 void status_bar::clear_condition() {
@@ -94,6 +95,7 @@ void status_bar::advance(std::int64_t now_ns) noexcept {
     kind_ = kind::silent;
     message_.clear();
     shown_at_ns_ = 0;
+    raised_at_ns_ = 0;
 }
 
 float status_bar::alpha(std::int64_t now_ns) const noexcept {

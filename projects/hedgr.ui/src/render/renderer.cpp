@@ -32,17 +32,17 @@ namespace hedgr::ui::render {
  * below rejects a nil entry, so a kind that has no renderer cannot compile.
  */
 void render_instances_window(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_accounts_window(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_workspace_window(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_chart(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_grid(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_notice(hedgr::model::state::window_handle,
-    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&);
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 
 namespace {
 

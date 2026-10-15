@@ -490,7 +490,9 @@ namespace hedgr::ui::render {
 
 void render_accounts_window(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
-    hedgr::ui::widget::status_bar& status) {
+    hedgr::ui::widget::status_bar& status,
+    lock_control& lock) {
+    static_cast<void>(lock);
     /*
      * The window's own state says which instance it shows. A window whose state
      * is not the accounts shape, or which names an instance that has gone, is

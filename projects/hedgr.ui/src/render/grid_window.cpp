@@ -79,7 +79,9 @@ namespace hedgr::ui::render {
  */
 void render_grid(window_handle handle, const render_input& input,
     window_ui_state& state,
-    hedgr::ui::widget::status_bar& status) {
+    hedgr::ui::widget::status_bar& status,
+    lock_control& lock) {
+    static_cast<void>(lock);
     using hedgr::model::domain::grid_state;
 
     const auto& grid = std::get<grid_state>(input.windows.state(handle));
