@@ -21,6 +21,22 @@
 # and a capture of a surface behind it is not on screen by ImGui's usual eighth
 # frame.
 #
+# A frame on its own shows what the interface drew first, and a tree that cannot
+# be expanded draws first just as convincingly as one that can. Two variables
+# drive the interface instead, so the frame shows the result of an interaction:
+#
+#     HEDGR_CAPTURE_INPUT     the gestures, one per line, as
+#                             "<gesture> <row> [label]", where the gestures are
+#                             click, click_arrow, expand, collapse and focus.
+#                             Rows are named as an operator sees them.
+#     HEDGR_CAPTURE_FOCUS     the id of the window the frame is about, which is
+#                             brought to the front for it. Windows float, and a
+#                             frame of a window something else covers shows the
+#                             wrong surface without saying so.
+#
+# The client's own output, including the capture hook's complaints about a step
+# that named nothing, lands in <directory>/client.log.
+#
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -51,19 +67,41 @@ export HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}"
 HEDGR_SEED_DB="${data_dir}/hedgr/hedgr.db" \
     "${tests}" "[seed]" > /dev/null
 
-# The windows are laid out by the client's own imgui.ini rather than by anything
-# here, because that is where a window's position lives. The checked-in file
-# carries a sensible size for each surface; an operator who wants a different
-# arrangement edits it as they would in any ImGui application, and ImGui writes
-# the result back.
+# The windows are laid out from an ini file this script writes, rather than from
+# a file beside the binary, because a capture is about the rows and not about
+# where a window happened to be left. Two things matter in the fixture and both
+# are about being able to read the frame: the Instances window is big enough for
+# its tree and its list to be side by side, and it is written last so that ImGui
+# draws it over the windows that open on top of it. A fresh file each run also
+# makes two runs' frames comparable, since ImGui writes the layout back on exit.
+#
 # The password the seeder sealed the store with, presented without a person.
 # It is a capture fixture and not a secret: it exists only in the store this
 # script has just made under the directory it was given.
+cat > "${data_dir}/imgui.ini" <<'LAYOUT'
+[Window][accounts]
+Pos=700,560
+Size=1180,470
+LastUsed=1
+
+[Window][workspace]
+Pos=560,300
+Size=700,460
+LastUsed=1
+
+[Window][instance-manager]
+Pos=24,24
+Size=1860,1010
+LastUsed=2
+LAYOUT
+
 export WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+export HEDGR_IMGUI_INI="${data_dir}/imgui.ini"
 XDG_DATA_HOME="${data_dir}" \
     HEDGR_CAPTURE="${capture}" \
     HEDGR_CAPTURE_FRAME="${frame}" \
     HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}" \
-    "${repo_dir}/build/scripts/run.sh"
+    "${repo_dir}/build/scripts/run.sh" --log-enabled --log-level info \
+    > "${data_dir}/client.log" 2>&1
 
 echo "captured ${capture}"

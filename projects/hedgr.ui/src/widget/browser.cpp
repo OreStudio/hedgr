@@ -22,6 +22,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/widget/capture.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "imgui.h"
 #include <algorithm>
@@ -42,19 +43,6 @@ namespace widget = hedgr::ui::widget;
 namespace icon = hedgr::ui::icon;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
-
-/**
- * @brief Whether a capture asked for every folder to be open.
- *
- * A capture is not a person and cannot click an expander. Without this, a frame
- * taken of a tree whose folders happen to be shut shows a tree with no entries
- * in it, which proves nothing about how an entry is drawn. Read once, because
- * the environment does not change while the process runs.
- */
-[[nodiscard]] bool expand_tree_for_capture() {
-    static const bool expand = std::getenv("HEDGR_CAPTURE_EXPAND_TREE") != nullptr;
-    return expand;
-}
 
 /**
  * @brief A folder or a leaf, flattened into one row of the drawn tree.
@@ -154,6 +142,30 @@ struct row_glyph final {
             return folder.id;
     }
     return {};
+}
+
+/**
+ * @brief Whether anything in the model hangs below @p row.
+ *
+ * The walk needs this to tell a folder that is shut from one that is empty: a
+ * shut folder's subtree has to be skipped, and an empty folder's does not
+ * exist, so a folder with nothing under it is a leaf wearing a folder's glyph
+ * and must not make the walk wait for a depth that never comes.
+ */
+[[nodiscard]] bool has_children(const widget::browser_model& model,
+    const tree_row& row) {
+    const std::string_view id = id_of(model, row);
+    const auto hangs_below = [&](std::string_view parent) {
+        return parent == id;
+    };
+    return std::any_of(model.folders.begin(), model.folders.end(),
+               [&](const widget::tree_folder& folder) {
+                   return !folder.is_root && hangs_below(folder.parent_id);
+               })
+        || std::any_of(model.leaves.begin(), model.leaves.end(),
+            [&](const widget::tree_leaf& leaf) {
+                return hangs_below(leaf.parent_id);
+            });
 }
 
 /**
@@ -592,190 +604,168 @@ void draw_folder_form(widget::browser_state& state,
 }
 
 /**
- * @brief One clickable row of the tree, with its drag and drop handlers.
+ * @brief One row of the tree, submitted as one ImGui tree node.
+ *
+ * One construction for both kinds of row. A leaf is a tree node carrying
+ * @c ImGuiTreeNodeFlags_Leaf and @c ImGuiTreeNodeFlags_NoTreePushOnOpen: it has
+ * no children, so it never pushes an id and never opens, and it is drawn by the
+ * same code that draws a folder. Two constructions would be two descriptions of
+ * what a row is, and the one that drifts is the one whose rows stop being items
+ * that ImGui knows about -- which is exactly what happened when a leaf was a
+ * hand-painted label over a selectable.
+ *
+ * The glyph is the first thing in the label, submitted as ordinary text, so its
+ * size, its baseline, its spacing and its hit box are the font's and ImGui's
+ * rather than numbers chosen here. That is also what stops a row from being
+ * drawn somewhere its hit box is not.
+ *
+ * The state's colour is pushed around the whole node and colours the name as
+ * well as the glyph. The alternative, a label in the ordinary colour and a
+ * glyph in the state's, means either two items on one row or text painted into
+ * the draw list, and both put the hit box and the pixels in different places.
+ * A uniform tree that works beats a two-colour row that does not.
  *
  * Root is a row like any other here. It is a folder with no parent drawn at
  * depth zero, so it shares the tree's indentation, scrolls with the tree and
  * takes a drop the same way; the one thing that separates it is that
  * @c affordances_for gives it no rename, no move and no delete, so it is not
  * draggable and offers no removal.
+ *
+ * @param opened Set to whether this row's node was pushed, which is what the
+ * caller has to close.
+ * @param element When given, the item as a capture sees it, filled here because
+ * this is where ImGui's own geometry for the row is still current.
  */
 void draw_tree_row(const widget::browser_model& model, const tree_row& row,
-    widget::browser_state& state, const render_input& input, bool* row_open) {
+    widget::browser_state& state, const render_input& input, bool& opened,
+    widget::capture_element* element) {
     namespace icon = hedgr::ui::icon;
 
     const std::string_view id = id_of(model, row);
     const bool root = is_root_of(model, row);
+    const bool leaf = row.kind == widget::node_kind::leaf;
 
-    const bool selected = row.kind == widget::node_kind::folder
-        ? state.selected_folder == id
-        : state.selected_leaf == id;
-    const auto affordances =
-        widget::affordances_for(row.kind, root);
+    const bool selected = leaf ? state.selected_leaf == id
+                               : state.selected_folder == id;
+    const auto affordances = widget::affordances_for(row.kind, root);
     const bool draggable = affordances.move && store_is_open(input);
 
     ImGui::PushID(id.data());
 
-    if (row.kind == widget::node_kind::folder) {
+    ImGuiTreeNodeFlags flags = (selected ? ImGuiTreeNodeFlags_Selected : 0)
+        | ImGuiTreeNodeFlags_OpenOnArrow
+        | ImGuiTreeNodeFlags_SpanAvailWidth;
+    if (leaf) {
+        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    } else {
+        flags |= ImGuiTreeNodeFlags_FramePadding;
+    }
+
+    const row_glyph glyph = glyph_of(model, row);
+    const std::string_view name = name_of(model, row);
+    const std::string label =
+        std::format("{}  {}", glyph.glyph, std::string{name});
+
+    /*
+     * Root opens the first time it is drawn and its own expander owns the state
+     * from then on, so a reader opening Hedgr sees the tree's contents rather
+     * than a single closed name, and a reader who shuts it keeps it shut.
+     *
+     * The id is taken once, before the node is submitted, and reused after it.
+     * TreeNodeEx pushes the node's own id while it is open, so an id computed
+     * after it is hashed against a different stack and lands in a different
+     * slot: the read would then never see what the write stored, and a root
+     * that had been shut could never be opened again.
+     */
+    const ImGuiID open_state = root ? ImGui::GetID("##hedgr-root-open") : 0;
+    if (root) {
+        ImGui::SetNextItemOpen(
+            ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
+            ImGuiCond_Always);
+    }
+    if (glyph.colour != 0)
+        ImGui::PushStyleColor(ImGuiCol_Text, glyph.colour);
+    const bool open = ImGui::TreeNodeEx("##node", flags, "%s", label.c_str());
+    if (glyph.colour != 0)
+        ImGui::PopStyleColor();
+
+    /*
+     * Folders are open when the node says so. A leaf never pushes, so a leaf is
+     * always closed: that flag is what keeps "this row has a subtree below it"
+     * from being true of a row that has none.
+     */
+    opened = !leaf && open;
+
+    if (element != nullptr) {
+        const ImVec2 item_min = ImGui::GetItemRectMin();
+        const ImVec2 item_max = ImGui::GetItemRectMax();
         /*
-         * The expander is ImGui's, keyed by this id, which is what keeps a
-         * folder open across frames without the model having to remember it.
-         *
-         * The rows arrive flattened, but the tree is still drawn nested: a
-         * TreeNodeEx that returns true has pushed an id, and ImGui requires the
-         * matching TreePop before the next sibling is submitted. The caller
-         * closes the nodes that this row opened, by looking at the next row's
-         * depth -- see @c render_browser -- because only the caller can see
-         * where a subtree ends in a flat list.
+         * ImGui's own geometry, read back: an arrow occupies the frame height
+         * at the row's start, and the label begins one GetTreeNodeToLabelSpacing
+         * past it. Worked out here rather than in the capture, which then needs
+         * no opinion about how a tree row is laid out.
          */
-        ImGuiTreeNodeFlags flags = (selected ? ImGuiTreeNodeFlags_Selected : 0)
-            | ImGuiTreeNodeFlags_OpenOnArrow
-            | ImGuiTreeNodeFlags_SpanAvailWidth
-            | ImGuiTreeNodeFlags_FramePadding;
+        const float arrow_width = leaf ? 0.0f : ImGui::GetFrameHeight();
+        element->min_x = item_min.x;
+        element->min_y = item_min.y;
+        element->max_x = item_max.x;
+        element->max_y = item_max.y;
+        element->label_min_x =
+            item_min.x + arrow_width + ImGui::GetTreeNodeToLabelSpacing();
+        element->arrow_width = arrow_width;
+        element->open = opened;
+        element->label.clear();
+    }
 
+    if (root) {
         /*
-         * Root opens the first time it is drawn and its own expander owns the
-         * state from then on, so a reader opening Hedgr sees the tree's
-         * contents rather than a single closed name, and a reader who shuts it
-         * keeps it shut.
-         *
-         * The id is taken once, before the node is submitted, and reused after
-         * it. TreeNodeEx pushes the node's own id while it is open, so an id
-         * computed after it is hashed against a different stack and lands in a
-         * different slot: the read would then never see what the write stored,
-         * and a root that had been shut could never be opened again.
+         * Written only when the operator worked the expander, and only after
+         * the node: the first frame reads the default above, and every later
+         * frame reads what the last click left.
          */
-        const ImGuiID open_state =
-            root ? ImGui::GetID("##hedgr-root-open") : 0;
-        if (root) {
-            ImGui::SetNextItemOpen(
-                ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
-                ImGuiCond_Always);
-        }
-        if (expand_tree_for_capture())
-            ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+        if (ImGui::IsItemToggledOpen())
+            ImGui::GetStateStorage()->SetInt(open_state, open ? 1 : 0);
 
-        *row_open = ImGui::TreeNodeEx("##node", flags, "%s  %s",
-            glyph_of(model, row).glyph, std::string{name_of(model, row)}.c_str());
+        ImGui::SetItemTooltip("%s",
+            "The root of this tree. New folders and entries are created here, "
+            "and it cannot be renamed, moved or removed.");
+    }
+    if (glyph.tooltip != nullptr)
+        ImGui::SetItemTooltip("%s", glyph.tooltip->c_str());
 
-        if (root) {
-            /*
-             * Written only when the operator worked the expander, and only
-             * after the node: the first frame reads the default above, and
-             * every later frame reads what the last click left.
-             */
-            if (ImGui::IsItemToggledOpen())
-                ImGui::GetStateStorage()->SetInt(open_state, *row_open ? 1 : 0);
-
-            ImGui::SetItemTooltip("%s",
-                "The root of this tree. New folders and entries are created "
-                "here, and it cannot be renamed, moved or removed.");
-        }
-
-        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+    /*
+     * A click on the row selects it, and a click on the row's own expander does
+     * not: opening a folder is not choosing it, which is the whole reason the
+     * node is drawn with @c OpenOnArrow. ImGui reports the two separately, so
+     * the rule is its answer rather than a comparison of coordinates.
+     */
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        if (leaf) {
+            state.selected_leaf = std::string{id};
+            state.selected_folder.clear();
+        } else {
             state.selected_folder = std::string{id};
             state.selected_leaf.clear();
         }
+    }
 
-        if (draggable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-            const drag_payload_data payload{widget::node_kind::folder,
-                std::string{id}};
-            ImGui::SetDragDropPayload(drag_payload, &payload, sizeof(payload));
-            ImGui::TextUnformatted(std::string{name_of(model, row)}.c_str());
-            ImGui::EndDragDropSource();
+    if (draggable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+        const drag_payload_data payload{row.kind, std::string{id}};
+        ImGui::SetDragDropPayload(drag_payload, &payload, sizeof(payload));
+        ImGui::TextUnformatted(std::string{name}.c_str());
+        ImGui::EndDragDropSource();
+    }
+
+    if (!leaf && ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* payload =
+                ImGui::AcceptDragDropPayload(drag_payload);
+            payload != nullptr
+            && payload->DataSize == static_cast<int>(sizeof(drag_payload_data))) {
+            accept_drop(model,
+                *static_cast<const drag_payload_data*>(payload->Data),
+                drop_target{std::string{id}}, input);
         }
-
-        if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* payload =
-                    ImGui::AcceptDragDropPayload(drag_payload);
-                payload != nullptr
-                && payload->DataSize == static_cast<int>(sizeof(drag_payload_data))) {
-                accept_drop(model,
-                    *static_cast<const drag_payload_data*>(payload->Data),
-                    drop_target{std::string{id}}, input);
-            }
-            ImGui::EndDragDropTarget();
-        }
-
-    } else {
-        *row_open = false;
-        const float indent =
-            ImGui::GetStyle().IndentSpacing * static_cast<float>(row.depth);
-        ImGui::Indent(indent);
-
-        /*
-         * The row is one selectable over the whole width, with the glyph and
-         * the name painted on top of it. Two items would mean two hit boxes and
-         * a click on the glyph that selected nothing, and it is also what lets
-         * the glyph take the state's colour while the name keeps the ordinary
-         * one: a whole row in the state's colour is a row that shouts, and the
-         * name is what the reader is looking for.
-         *
-         * The label is empty because ImGui draws a non-empty one itself, in one
-         * colour, which is the thing this row exists to avoid.
-         */
-        const float height = ImGui::GetFrameHeight();
-        const bool clicked = ImGui::Selectable("##leaf", selected,
-            ImGuiSelectableFlags_AllowDoubleClick,
-            ImVec2(ImGui::GetContentRegionAvail().x, height));
-
-        const row_glyph glyph = glyph_of(model, row);
-        const std::string_view label = name_of(model, row);
-
-        ImDrawList* draw = ImGui::GetWindowDrawList();
-
-        /*
-         * Screen coordinates, which is the space a command written into a
-         * window's draw list is measured in: the item's rectangle is already
-         * there, and nothing here may subtract the window position.
-         *
-         * The vertical centre is the item's own top plus the padding ImGui puts
-         * around a row's text, so the glyph and the name sit on the same line
-         * as the folders' labels do.
-         *
-         * Begun where ImGui puts the label of a node, so the entries of one
-         * tree line up whether they are folders drawn by the tree API or
-         * entries drawn by hand.
-         */
-        /*
-         * Both the glyph and the name are submitted through the same calls the
-         * rest of the interface uses, rather than painted into the draw list at
-         * a size chosen here. That is what makes the entries' glyphs the same
-         * size as the folders' above them and as the toolbar's: the size comes
-         * from the font the way it does everywhere else, instead of from a
-         * number this row picked. A row drawn at a size of its own reads as a
-         * row that is shouting.
-         *
-         * They are drawn over the selectable, at the position it starts its own
-         * label at, so an entry lines up with a folder drawn by the tree API.
-         */
-        const ImVec2 row_min = ImGui::GetItemRectMin();
-        ImGui::SetCursorScreenPos(
-            ImVec2(row_min.x + ImGui::GetTreeNodeToLabelSpacing(),
-                row_min.y + ImGui::GetStyle().FramePadding.y));
-
-        if (glyph.colour != 0) {
-            ImGui::PushStyleColor(ImGuiCol_Text, glyph.colour);
-            ImGui::TextUnformatted(glyph.glyph);
-            ImGui::PopStyleColor();
-            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-        }
-        ImGui::TextUnformatted(label.data(), label.data() + label.size());
-
-        /*
-         * The tooltip is the state's own sentence, and it answers on the row:
-         * the glyph is painted by a call that submits no item, so the row is
-         * what the pointer can rest on.
-         */
-        if (glyph.tooltip != nullptr)
-            ImGui::SetItemTooltip("%s", glyph.tooltip->c_str());
-
-
-        if (clicked) {
-            state.selected_leaf = std::string{id};
-            state.selected_folder.clear();
-        }
-        ImGui::Unindent(indent);
+        ImGui::EndDragDropTarget();
     }
 
     ImGui::PopID();
@@ -1025,33 +1015,59 @@ void render_browser(const browser_model& model, window_ui_state& window,
             ImGui::PopStyleColor();
         }
         /*
-         * A flattened tree drawn into ImGui's nested tree API: each row that
-         * opened a node is closed before the next row at or above its own depth
-         * is submitted, which is where its subtree ends. The stack size is
-         * carried across rows because a leaf and a folder are drawn by the same
-         * loop and only a folder ever opens anything.
+         * A flattened tree drawn into ImGui's nested tree API. A row is closed
+         * when the next visible row is no deeper than it is, which is where its
+         * subtree ends in a flat list.
+         *
+         * The stack holds the rows that pushed an id, so what it holds is
+         * exactly what has to be popped. A leaf is a tree node with no children
+         * and never pushes, so it is never on the stack and never closed; a
+         * folder that is shut never pushes either, and is never closed. The two
+         * cannot get out of step, because the one condition that pushes also
+         * decides whether a row enters the walk's own bookkeeping.
+         *
+         * A shut folder's subtree is not submitted at all. ImGui does not hide
+         * the children of a shut node -- it never had them, they are separate
+         * items -- so a walk that submitted every row would draw them outside
+         * the folder that holds them, and collapsing would do nothing. Skipping
+         * them is what makes an expander mean something.
          */
-        int open_nodes = 0;
-        std::size_t previous_depth = 0;
+        std::vector<std::size_t> open_rows;
+        std::size_t shut_depth = 0;
+        bool inside_shut_folder = false;
+
         for (const auto& row : rows) {
             if (!row.visible)
                 continue;
 
-            while (open_nodes > 0 && row.depth <= previous_depth) {
+            if (inside_shut_folder) {
+                if (row.depth > shut_depth)
+                    continue;
+                inside_shut_folder = false;
+            }
+
+            while (!open_rows.empty() && row.depth <= open_rows.back()) {
                 ImGui::TreePop();
-                --open_nodes;
-                previous_depth = previous_depth > 0 ? previous_depth - 1 : 0;
+                open_rows.pop_back();
             }
 
             bool opened = false;
-            draw_tree_row(model, row, state, input, &opened);
+            widget::capture_element element;
+            draw_tree_row(model, row, state, input, opened, &element);
+            widget::observe_capture_element(name_of(model, row), element);
+
             if (opened) {
-                ++open_nodes;
-                previous_depth = row.depth;
+                open_rows.push_back(row.depth);
+            } else if (row.kind == widget::node_kind::folder
+                && has_children(model, row)) {
+                inside_shut_folder = true;
+                shut_depth = row.depth;
             }
         }
-        while (open_nodes-- > 0)
+        while (!open_rows.empty()) {
             ImGui::TreePop();
+            open_rows.pop_back();
+        }
     }
     ImGui::EndChild();
 

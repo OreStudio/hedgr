@@ -93,6 +93,35 @@ writes frame eight and leaves.
 HEDGR_CAPTURE=$PWD/.cache/verify/frame.ppm build/scripts/run.sh
 #+end_src
 
+One frame shows what the interface drew first, and an interface that cannot be
+used draws its first frame just as convincingly as one that can. A capture can
+be driven instead, so the frame shows the result of an interaction:
+
+#+begin_src sh
+HEDGR_CAPTURE=$PWD/.cache/verify/frame.ppm \
+HEDGR_CAPTURE_INPUT="expand Development
+click laboratory" \
+build/scripts/run.sh
+#+end_src
+
+The steps are one per line, as =<gesture> <row> [| <label>]+, where the gestures
+are =click=, =click_arrow=, =expand=, =collapse= and =focus=. A row is named as
+an operator sees it, in quotes when the name holds a space. =click= selects the
+row, =click_arrow= works its expander, =expand= and =collapse= state which way
+the expander should end, and =focus= only moves the pointer. A control that is
+not a row -- a toolbar button -- is named by the label after the bar.
+
+Each gesture is a move, a press and a release, three frames apart, and a row is
+resolved against the frame the gesture before it produced. That is what lets one
+script open a folder and then click a row inside it. A step that names nothing
+on screen is reported on stderr with its line number, rather than driving
+whatever happens to be there.
+
+=HEDGR_CAPTURE_FOCUS=<window id>= brings one window to the front for the frame,
+which matters because the windows float over one another, and
+=build/scripts/capture.sh= writes a layout of its own so that two runs' frames
+are comparable.
+
 * Adding a window kind
 
 Three places, and the compiler checks two of them:

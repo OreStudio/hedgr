@@ -9,6 +9,12 @@
 #
 include(${CMAKE_CURRENT_SOURCE_DIR}/component_files.cmake)
 
+# The executable is glue: it opens a GL context, calls the runtime and hands the
+# frame to hedgr.ui. There is no honest unit test for that, because a test which
+# asserted the defaults of a config struct would pass with every function stubbed
+# out. It is verified by running it: build-target.sh, then a capture that drives
+# the interface -- HEDGR_CAPTURE with HEDGR_CAPTURE_INPUT -- and reading the
+# frame it writes.
 if(NOT files)
     message(STATUS "hedgr.imgui: no unit tests; verified by HEDGR_CAPTURE")
     return()

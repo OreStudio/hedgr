@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "capture_tests.cpp"
     "render_tests.cpp"
     "status_bar_tests.cpp"
 )

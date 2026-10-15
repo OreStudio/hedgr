@@ -30,11 +30,27 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstddef>
+#include <cstdlib>
 #include <format>
 #include <string>
+#include <string_view>
 #include <variant>
 
 namespace {
+
+/**
+ * @brief The window a capture asked to see on top, or empty.
+ *
+ * Read once, because the environment does not change while the process runs. An
+ * empty answer matches no window, which is what an ordinary run has.
+ */
+[[nodiscard]] std::string_view capture_focus_id() {
+    static const std::string id = [] {
+        const char* named = std::getenv("HEDGR_CAPTURE_FOCUS");
+        return named != nullptr ? std::string{named} : std::string{};
+    }();
+    return id;
+}
 
 /**
  * @brief The photographic background, drawn under every window.
@@ -258,6 +274,17 @@ void workspace::render(const render_input& input) {
 
         const std::string title =
             window_title(kind, input.windows.state(handle), input);
+
+        /*
+         * A capture names the one window it is about, and ImGui brings it to
+         * the front for that frame. Windows here float over one another, and a
+         * capture of a window that something else happens to be drawn over is a
+         * frame showing the wrong surface without saying so. The name is a
+         * window id rather than a title, because a title changes with the data
+         * and an id does not.
+         */
+        if (capture_focus_id() == input.windows.id(handle))
+            ImGui::SetNextWindowFocus();
 
         /*
          * The visible title can change with the data, so the ImGui id

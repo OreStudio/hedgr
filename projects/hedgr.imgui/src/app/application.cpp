@@ -19,11 +19,13 @@
  */
 #include "hedgr.imgui/app/application.hpp"
 
+#include "hedgr.imgui/app/capture_input.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/capture.hpp"
 #include "ores.logging/make_logger.hpp"
 
 #include <GL/glew.h>
@@ -123,6 +125,15 @@ void application::run() {
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
         ui::render::open_instance_form_for_capture(editing);
+
+    /*
+     * A capture can also be driven, not only described: the script names rows a
+     * person would click and this makes the browser drive those clicks onto its
+     * own hit boxes. It is read here, once, before any frame is drawn, because
+     * a capture that cannot interact has only ever been able to inspect what
+     * the first frame happens to contain, which is how a broken tree shipped.
+     */
+    ui::widget::start_capture_run();
     auto* window = initialise_graphics();
     if (window == nullptr) {
         BOOST_LOG_SEV(lg(), error) << "Failed to initialise graphics.";
@@ -215,13 +226,31 @@ GLFWwindow* application::initialise_graphics() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-    io.IniFilename = "imgui.ini";
+    /*
+     * ImGui writes a window's position back here when the process leaves, so
+     * this path is where a layout lives and a capture that wants the same
+     * arrangement twice has to own it. Named through the environment because a
+     * capture runs from a directory it is given, and the file beside the binary
+     * is one session's arrangement rather than a fixture.
+     */
+    ini_path_ = "imgui.ini";
+    if (const char* ini = std::getenv("HEDGR_IMGUI_INI");
+        ini != nullptr && *ini != '\0')
+        ini_path_ = ini;
+    io.IniFilename = ini_path_.c_str();
 
     ui::theme::apply_theme();
     ui::icon::load_ui_fonts(15.0f);
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version_.c_str());
+
+    /*
+     * After both backends, because it replaces the GLFW callback the backend
+     * installed. The result is used rather than discarded: a capture is the
+     * only run it changes, and a reader of this line is owed that answer.
+     */
+    static_cast<void>(install_capture_input(window));
 
     load_background_texture();
 
@@ -315,7 +344,22 @@ void application::render_loop(GLFWwindow* window) {
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
+
+        /*
+         * A capture's gesture is queued before the frame begins, because ImGui
+         * drains its input queue inside NewFrame: a gesture added after this
+         * point belongs to the frame after this one. The frame boundary is here
+         * rather than in a browser because a frame holds several browsers, and
+         * a gesture queued once per browser would be queued several times.
+         *
+         * Both calls are inert unless the run was given a script.
+         */
+        const std::uint32_t frame = ImGui::GetFrameCount() + 1;
+        ui::widget::begin_capture_frame(frame);
+        ui::widget::drive_capture_steps(frame);
+
         ImGui::NewFrame();
+        ui::widget::hold_capture_pointer();
 
         if (ImGui::IsKeyPressed(ImGuiKey_F11, false))
             toggle_fullscreen(window);
@@ -347,6 +391,13 @@ void application::render_loop(GLFWwindow* window) {
             .runtime_error = manager_.last_error(),
         };
         workspace_.render(input);
+
+        /*
+         * The frame is sealed after it is submitted, which is what a gesture of
+         * a later frame resolves against: a rectangle from a frame nobody saw
+         * the end of is not a rectangle an operator clicked.
+         */
+        ui::widget::end_capture_frame();
 
         ImGui::Render();
         int display_w = 0;

@@ -79,6 +79,12 @@ private:
     config::options cfg_;
     std::filesystem::path capture_path_;
     int capture_frame_ = default_capture_frame;
+    /*
+     * Held rather than left as a literal, because ImGui stores the pointer
+     * rather than copying the name: a temporary would leave it reading freed
+     * memory by the time the frame loop saves the layout.
+     */
+    std::string ini_path_;
     runtime::manager::instance_manager manager_;
     ui::render::workspace workspace_;
     std::string glsl_version_;
