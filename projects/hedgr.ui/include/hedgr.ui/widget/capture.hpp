@@ -133,8 +133,13 @@ struct capture_element final {
  * The steps come from @c HEDGR_CAPTURE_INPUT, one per line, as
  * @c "<gesture> <row> [| <label>]" where the gestures are @c click, @c
  * click_arrow, @c expand, @c collapse and @c focus. A row whose name holds a
- * space is written in quotes, as @c "Brave Hopper"; the control's own label is
- * separated by a bar, and only by one.
+ * space is written in quotes, as @c "Brave Hopper"; the label is separated by a
+ * bar, and only by one.
+ *
+ * The label names which of two things of the same name is meant. An entry is on
+ * screen twice, once in the tree and once in the list, and both are called the
+ * same thing, so @c "click laboratory" means the tree row and
+ * @c "click laboratory | list" means the list row.
  *
  * @c HEDGR_CAPTURE_INPUT_FILE names a file with the same contents, for a script
  * too long to pass through the environment.
