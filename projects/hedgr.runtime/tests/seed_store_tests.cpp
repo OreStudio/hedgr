@@ -338,7 +338,7 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
      * the rows saved above for the same instance.
      */
     REQUIRE(manager.accounts().size() == 4);
-    REQUIRE(manager.folders().size() == 8);
+    REQUIRE(manager.folders().size() == 9);
     REQUIRE(manager.labels().size() == 3);
     for (const auto& id : std::array<std::string, 3>{ seeded_id, "inst-prod",
              "inst-lab" }) {

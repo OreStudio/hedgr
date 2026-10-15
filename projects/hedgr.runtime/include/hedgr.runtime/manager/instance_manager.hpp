@@ -408,6 +408,17 @@ private:
     void ensure_accounts_root(const std::string& instance_id);
 
     /**
+     * @brief Makes sure the folder the seeded logins sit in exists.
+     *
+     * @return The folder's id, which is derived from the instance id rather
+     * than generated. The seeder runs on every start, and the derived key is
+     * what makes a second pass write the same folder rather than a second one
+     * beside it.
+     */
+    [[nodiscard]] std::string ensure_privileged_folder(
+        const std::string& instance_id);
+
+    /**
      * @brief Gives every stored instance the two logins it is seeded with.
      *
      * Run on every start rather than only on the first, because the walk has to

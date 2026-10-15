@@ -207,6 +207,20 @@ live_indices(const model_state::slab& layout) {
 }
 
 /**
+ * @brief The stable id of the folder one instance's seeded logins sit in.
+ *
+ * Derived from the instance the way the seeded accounts' keys are, so a second
+ * seeding writes the same folder over itself rather than a second one beside
+ * it. A constant id would put every instance's folder in one row, and the
+ * schema has no rule that a child folder's name is unique among its owner's
+ * siblings, so the derivation is what holds the two seeds to one folder.
+ */
+[[nodiscard]] std::string
+privileged_folder_id_for(std::string_view instance_id) {
+    return std::format("folder-privileged:{}", instance_id);
+}
+
+/**
  * @brief The monotonic clock in nanoseconds, which is what deadlines use.
  */
 [[nodiscard]] std::int64_t steady_now_ns() {
@@ -467,11 +481,12 @@ constexpr std::string_view development_label_name = "development";
 /**
  * @brief How often an instance is probed when the last probe answered.
  *
- * Ten seconds is a glance rather than a gate: often enough that a status is
- * never stale when somebody looks at it, rare enough that polling every
- * instance costs the deployment nothing worth measuring.
+ * A few seconds is a glance rather than a gate: often enough that the chart the
+ * Instance Manager draws has a shape to show and a status is never stale when
+ * somebody looks at it, rare enough that polling every instance costs the
+ * deployment nothing worth measuring.
  */
-constexpr std::chrono::milliseconds probe_cadence{10000};
+constexpr std::chrono::milliseconds probe_cadence{5000};
 
 /**
  * @brief The longest an unreachable instance waits between attempts.
@@ -1031,6 +1046,37 @@ void instance_manager::seed_instance_accounts() {
         seed_accounts_for_instance(instances_.rows()[index]);
 }
 
+std::string instance_manager::ensure_privileged_folder(
+    const std::string& instance_id) {
+    /*
+     * The id is a function of the instance rather than a constant, because
+     * every instance owns its own accounts tree and so its own Privileged
+     * folder. Deriving it is the whole of the idempotency, because a second
+     * seeding writes the same folder over itself, and the folder is found
+     * before it is made, so the common path is a lookup rather than a write.
+     */
+    const std::string id = privileged_folder_id_for(instance_id);
+    if (folders_.find(id))
+        return id;
+
+    domain::folder row;
+    row.id = id;
+    row.parent_id = domain::accounts_root_id_for(instance_id);
+    row.owner_id = instance_id;
+    row.name = "Privileged";
+    row.tree = domain::folder_tree::accounts;
+    static_cast<void>(folders_.upsert(row));
+
+    if (!folder_repo_)
+        return id;
+    if (auto saved = folder_repo_->save(row); !saved) {
+        last_error_ = store_failure(
+            std::format("cannot save the Privileged folder {}", id),
+            saved.error());
+    }
+    return id;
+}
+
 void instance_manager::seed_accounts_for_instance(
     const domain::instance& instance) {
     if (instance.id.empty())
@@ -1050,12 +1096,14 @@ void instance_manager::seed_accounts_for_instance(
         : instance.subject_prefix;
 
     /*
-     * The account key follows the one the Accounts window builds when an
-     * operator adds a row, so a seeded login and a typed one are the same shape
-     * of key. Deriving it from the instance and the name is also the whole of
-     * the idempotency: seeding twice writes the same two rows over themselves.
+     * Both logins sit in the instance's Privileged folder rather than at the
+     * accounts root, so the deployment's own logins are somewhere an operator
+     * can see apart from the people they add. The folder is made sure of
+     * rather than pointed at blindly, because an account whose folder is
+     * missing must not be written silently into the root; a folder the store
+     * refused leaves last_error_ set, exactly as a refused account write does.
      */
-    const std::string folder_id = domain::accounts_root_id_for(instance.id);
+    const std::string folder_id = ensure_privileged_folder(instance.id);
 
     struct seeded_login final {
         std::string_view name;
@@ -1066,6 +1114,13 @@ void instance_manager::seed_accounts_for_instance(
         { "tenant admin", "tenant-admin" },
     };
 
+    /*
+     * The account key follows the one the Accounts window builds when an
+     * operator adds a row, so a seeded login and a typed one are the same shape
+     * of key. Deriving it from the instance and the name is also the whole of
+     * the idempotency, because seeding twice writes the same two rows over
+     * themselves.
+     */
     for (const auto& login : logins) {
         domain::account row;
         row.id = std::format("acct:{}:{}", instance.id, login.name);
@@ -2432,6 +2487,7 @@ void instance_manager::pump_probes() {
     const auto& layout = instances_.layout();
     const auto rows = instances_.rows();
 
+    bool swept = false;
     for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
         if (!layout.is_alive(index))
             continue;
@@ -2445,7 +2501,18 @@ void instance_manager::pump_probes() {
             continue;
 
         spawn_probe_for(row);
+        swept = true;
     }
+
+    /*
+     * One sample per sweep and not one per probe, because the chart plots the
+     * estate once a poll rather than once an answer. The counts are taken as
+     * the sweep starts, so a bar shows the state the previous sweep left the
+     * estate in, and an instance removed since then is gone from the total
+     * because the total is read here rather than remembered.
+     */
+    if (swept)
+        probes_.record_snapshot(now, instances_.size());
 }
 
 void instance_manager::spawn_probe_for(const domain::instance& row) {
@@ -2508,7 +2575,7 @@ void instance_manager::apply_probe_result(const event::event& ev) {
      * A probe that got no answer backs the next attempt off; a probe that got
      * an answer -- whatever that answer was -- returns to the cadence. A
      * deployment that is up but not bootstrapped is up, and polling it every
-     * ten seconds is how the operator finds out the moment it is set up.
+     * five seconds is how the operator finds out the moment it is set up.
      */
     auto& interval = probe_intervals_[ev.instance_id];
     if (ev.reach == domain::reachability::reachable)

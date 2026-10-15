@@ -25,6 +25,7 @@
 #include "hedgr.session/transport/session_options.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
+#include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -37,6 +38,7 @@ namespace {
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
+using hedgr::model::domain::folder;
 using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
 using hedgr::runtime::manager::instance_manager;
@@ -121,6 +123,42 @@ void pin_no_checkouts() {
     return std::format("acct:{}:{}", instance_id, name);
 }
 
+/**
+ * @brief The one folder named @p name in @p instance_id's accounts tree.
+ *
+ * Found by walking the table rather than by rebuilding the seeder's derived
+ * key, so the case reads what the manager wrote rather than repeating the
+ * formula the manager used. A folder found through a predicted id would not
+ * prove the seeder wrote it.
+ */
+[[nodiscard]] const folder* find_accounts_folder(const instance_manager& manager,
+    std::string_view instance_id, std::string_view name) {
+    for (const auto& row : manager.folders().rows()) {
+        if (row.tree == folder_tree::accounts && row.owner_id == instance_id &&
+            row.name == name)
+            return &row;
+    }
+    return nullptr;
+}
+
+/**
+ * @brief How many folders named @p name sit in @p instance_id's accounts tree.
+ *
+ * A count rather than a lookup, because the point of a second seed is that it
+ * converges on one folder and a lookup could not tell one from two.
+ */
+[[nodiscard]] std::size_t count_accounts_folders(
+    const instance_manager& manager, std::string_view instance_id,
+    std::string_view name) {
+    std::size_t result = 0;
+    for (const auto& row : manager.folders().rows()) {
+        if (row.tree == folder_tree::accounts && row.owner_id == instance_id &&
+            row.name == name)
+            ++result;
+    }
+    return result;
+}
+
 /** @brief The id of the one instance named @p name, or empty. */
 [[nodiscard]] std::string instance_id_named(const instance_manager& manager,
     std::string_view name) {
@@ -180,16 +218,27 @@ TEST_CASE("a started store holds the two seeded accounts of its instance",
     REQUIRE(tenant->principal == "tenant-admin@ores.dev.brave_hopper");
 
     /*
-     * Both sit in the instance's accounts root, which is the one folder the
-     * Accounts window draws its tree from. A row parented anywhere else would
-     * be a row that window could not show.
+     * Both sit in a Privileged folder of the instance's accounts tree, and
+     * that folder hangs off the accounts root. A row parented anywhere else
+     * would be a row the Accounts window could not show under the tree it
+     * draws, and a row written silently into the root would be one the
+     * operator never asked for.
      */
-    const auto expect_folder =
-        std::format("accounts-root:{}", instance_id);
-    REQUIRE(super->folder_id == expect_folder);
-    REQUIRE(tenant->folder_id == expect_folder);
-    REQUIRE(manager.folders().root(folder_tree::accounts, instance_id)
-                .has_value());
+    const auto* privileged =
+        find_accounts_folder(manager, instance_id, "Privileged");
+    REQUIRE(privileged != nullptr);
+    REQUIRE(privileged->tree == folder_tree::accounts);
+    REQUIRE(privileged->owner_id == instance_id);
+    REQUIRE(privileged->parent_id ==
+        std::format("accounts-root:{}", instance_id));
+    REQUIRE(super->folder_id == privileged->id);
+    REQUIRE(tenant->folder_id == privileged->id);
+
+    const auto accounts_root =
+        manager.folders().root(folder_tree::accounts, instance_id);
+    REQUIRE(accounts_root.has_value());
+    REQUIRE(privileged->parent_id ==
+        manager.folders().get(*accounts_root)->id);
 
     manager.stop();
 }
@@ -242,13 +291,39 @@ TEST_CASE("an instance already in the store is seeded on the next start",
         seeded_account_id(late, "super admin"));
     REQUIRE(super != nullptr);
     REQUIRE(super->principal == "super-admin@ores.staging.late");
-    REQUIRE(find_account(reopened,
-        seeded_account_id(late, "tenant admin")) != nullptr);
+    const auto* tenant = find_account(reopened,
+        seeded_account_id(late, "tenant admin"));
+    REQUIRE(tenant != nullptr);
+
+    /*
+     * The instance the restart found gets the same one Privileged folder the
+     * first start gave the instance it seeded, and both of its logins name
+     * it. The folder is the thing the two starts have to agree on for the
+     * tree to hold one folder rather than a mixture.
+     */
+    const std::string local = instance_id_named(reopened, "local development");
+    REQUIRE(!local.empty());
+    REQUIRE(count_accounts_folders(reopened, local, "Privileged") == 1);
+    REQUIRE(count_accounts_folders(reopened, late, "Privileged") == 1);
+    const auto* late_privileged =
+        find_accounts_folder(reopened, late, "Privileged");
+    REQUIRE(late_privileged != nullptr);
+    REQUIRE(late_privileged->parent_id ==
+        std::format("accounts-root:{}", late));
+    REQUIRE(super->folder_id == late_privileged->id);
+    REQUIRE(tenant->folder_id == late_privileged->id);
 
     /* A third start converges on the same four rows rather than adding two. */
     instance_manager again;
     REQUIRE(again.start(database.path(), seed_options()).has_value());
     REQUIRE(again.accounts().size() == 4);
+    /*
+     * One Privileged folder per instance on the third start as on the second.
+     * The derived id is what stops the folder being added again beside the
+     * one an earlier start already wrote.
+     */
+    REQUIRE(count_accounts_folders(again, local, "Privileged") == 1);
+    REQUIRE(count_accounts_folders(again, late, "Privileged") == 1);
     again.stop();
 
     reopened.stop();

@@ -415,9 +415,10 @@ TEST_CASE("start creates both roots and is idempotent", "[runtime]") {
     instance_manager manager;
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
-    /* One instance was seeded, so there is one tree per tree kind. */
+    /* One instance was seeded, so there is one tree per tree kind plus the
+     * Privileged folder its own logins sit in. */
     REQUIRE(manager.instances().size() == 1);
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
 
     const auto instances_root =
         manager.folders().root(folder_tree::instances, "");
@@ -437,14 +438,14 @@ TEST_CASE("start creates both roots and is idempotent", "[runtime]") {
 
     /* A second start converges rather than creating a second pair of roots. */
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
 
     manager.stop();
 
     /* Both roots are in the store, not only in the table. */
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
-    REQUIRE(reopened.folders().size() == 2);
+    REQUIRE(reopened.folders().size() == 3);
     REQUIRE(reopened.folders().root(folder_tree::instances, "").has_value());
     REQUIRE(reopened.folders().root(folder_tree::accounts,
         reopened.instances().rows()[0].id).has_value());
@@ -467,7 +468,7 @@ TEST_CASE("start gives an already-stored instance its accounts root",
         save.instance_id = save.instance_row.id;
         push_command(manager, save);
 
-        REQUIRE(manager.folders().size() == 3);
+        REQUIRE(manager.folders().size() == 4);
         manager.stop();
     }
 
@@ -478,7 +479,7 @@ TEST_CASE("start gives an already-stored instance its accounts root",
      */
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
-    REQUIRE(reopened.folders().size() == 3);
+    REQUIRE(reopened.folders().size() == 5);
     REQUIRE(reopened.folders().root(folder_tree::accounts, "inst-epsilon")
                 .has_value());
     reopened.stop();
@@ -489,7 +490,7 @@ TEST_CASE("adding an instance creates its accounts root", "[runtime]") {
 
     instance_manager manager;
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
 
     command save;
     save.kind = command_kind::save_instance;
@@ -497,7 +498,7 @@ TEST_CASE("adding an instance creates its accounts root", "[runtime]") {
     save.instance_id = save.instance_row.id;
     push_command(manager, save);
 
-    REQUIRE(manager.folders().size() == 3);
+    REQUIRE(manager.folders().size() == 4);
 
     const auto root = manager.folders().find("accounts-root:inst-gamma");
     REQUIRE(root.has_value());
@@ -507,7 +508,7 @@ TEST_CASE("adding an instance creates its accounts root", "[runtime]") {
 
     /* Saving the same instance again does not add a second root. */
     push_command(manager, save);
-    REQUIRE(manager.folders().size() == 3);
+    REQUIRE(manager.folders().size() == 4);
 
     manager.stop();
 }
@@ -539,7 +540,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
         add_child.folder_row.name = "Nested";
         push_command(manager, add_child);
 
-        REQUIRE(manager.folders().size() == 5);
+        REQUIRE(manager.folders().size() == 6);
 
         command remove;
         remove.kind = command_kind::remove_instance;
@@ -547,7 +548,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
         push_command(manager, remove);
 
         /* The instance, its root and both folders below it are gone. */
-        REQUIRE(manager.folders().size() == 2);
+        REQUIRE(manager.folders().size() == 3);
         REQUIRE_FALSE(manager.folders().find("accounts-root:inst-delta")
                           .has_value());
         REQUIRE_FALSE(manager.folders().find("fold-delta").has_value());
@@ -558,7 +559,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
 
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
-    REQUIRE(reopened.folders().size() == 2);
+    REQUIRE(reopened.folders().size() == 3);
     reopened.stop();
 }
 
@@ -577,7 +578,7 @@ TEST_CASE("a root folder cannot be removed or re-parented", "[runtime]") {
     remove.folder_row.id = "instances-root";
     push_command(manager, remove);
 
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
     REQUIRE(manager.folders().find("instances-root").has_value());
     REQUIRE(manager.last_error() ==
         "cannot remove folder instances-root: it is the root of the instances "
@@ -602,7 +603,7 @@ TEST_CASE("a root folder cannot be removed or re-parented", "[runtime]") {
     remove_accounts.folder_row.id = accounts_root;
     push_command(manager, remove_accounts);
 
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
     REQUIRE(manager.last_error() ==
         "cannot remove folder " + accounts_root
         + ": it is a root of its tree");
@@ -649,7 +650,7 @@ TEST_CASE("a folder is refused when it would contain itself", "[runtime]") {
     remove.folder_row.id = "fold-a";
     push_command(manager, remove);
 
-    REQUIRE(manager.folders().size() == 2);
+    REQUIRE(manager.folders().size() == 3);
     REQUIRE_FALSE(manager.folders().find("fold-b").has_value());
 
     manager.stop();
@@ -999,18 +1000,18 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
     REQUIRE(first);
 
     /*
-     * The first failure waits twenty seconds: the ten-second cadence doubled.
+     * The first failure waits ten seconds: the five-second cadence doubled.
      * The bounds are literal and a second wide, because the deadline is
      * written from the runtime's own clock a moment before this reads it.
      */
     const auto first_deadline = manager.probes().next_probe_ns(*handle);
     const auto after_first = steady_now_ns();
-    REQUIRE(first_deadline - after_first > 19'000'000'000);
-    REQUIRE(first_deadline - after_first <= 20'000'000'000);
+    REQUIRE(first_deadline - after_first > 9'000'000'000);
+    REQUIRE(first_deadline - after_first <= 10'000'000'000);
 
     /*
      * A second attempt is forced rather than waited for: the backoff is
-     * twenty seconds long and a suite that sleeps through its own schedules is
+     * ten seconds long and a suite that sleeps through its own schedules is
      * a suite nobody runs.
      */
     const auto first_observed = manager.probes().get(*handle)->observed_at_ns;
@@ -1028,11 +1029,11 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
 
     const auto second_deadline = manager.probes().next_probe_ns(*handle);
     const auto after_second = steady_now_ns();
-    REQUIRE(second_deadline - after_second > 39'000'000'000);
-    REQUIRE(second_deadline - after_second <= 40'000'000'000);
+    REQUIRE(second_deadline - after_second > 19'000'000'000);
+    REQUIRE(second_deadline - after_second <= 20'000'000'000);
 
     /*
-     * An answered probe returns to the ten-second cadence. The answer is
+     * An answered probe returns to the five-second cadence. The answer is
      * synthesised rather than fetched, because a real one needs a live broker
      * and this asserts the schedule's response to an answer, not the wire.
      */
@@ -1052,8 +1053,8 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
 
     const auto reset_deadline = manager.probes().next_probe_ns(*handle);
     const auto after_reset = steady_now_ns();
-    REQUIRE(reset_deadline - after_reset > 9'000'000'000);
-    REQUIRE(reset_deadline - after_reset <= 10'000'000'000);
+    REQUIRE(reset_deadline - after_reset > 4'000'000'000);
+    REQUIRE(reset_deadline - after_reset <= 5'000'000'000);
 
     manager.stop();
 }
