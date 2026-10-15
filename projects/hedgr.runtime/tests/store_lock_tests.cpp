@@ -319,7 +319,12 @@ TEST_CASE("a credential typed for an attempt is used without a stored one",
     save.account_row = row;
     manager.commands().push(std::move(save));
     manager.pump();
-    REQUIRE(manager.accounts().size() == 1);
+    /*
+     * The two logins the start seeded are still there, so this account makes
+     * three. What the case needs is that acct-1 exists, not that it is alone.
+     */
+    REQUIRE(manager.accounts().size() == 3);
+    REQUIRE(manager.accounts().find("acct-1").has_value());
 
     /*
      * The ids are kept, because the command below is moved into the queue and a

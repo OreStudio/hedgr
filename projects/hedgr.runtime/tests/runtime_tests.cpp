@@ -378,7 +378,13 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
         push_command(manager, save_account);
 
         REQUIRE(manager.instances().size() == 2);
-        REQUIRE(manager.accounts().size() == 1);
+        /*
+         * The instance the start seeded already carries its two logins, so the
+         * account this case wrote for inst-beta makes three. Seeding runs at
+         * start, so it has not reached an instance written afterwards.
+         */
+        REQUIRE(manager.accounts().size() == 3);
+        REQUIRE(manager.accounts().find("ident-1").has_value());
 
         command remove;
         remove.kind = command_kind::remove_instance;
@@ -387,7 +393,9 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
 
         REQUIRE(find_instance(manager, "inst-beta") == nullptr);
         REQUIRE(manager.instances().size() == 1);
-        REQUIRE(manager.accounts().size() == 0);
+        /* Only the seeded logins are left, and inst-beta's account is gone. */
+        REQUIRE(manager.accounts().size() == 2);
+        REQUIRE_FALSE(manager.accounts().find("ident-1").has_value());
 
         manager.stop();
     }
@@ -396,7 +404,8 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
-    REQUIRE(reopened.accounts().size() == 0);
+    REQUIRE(reopened.accounts().size() == 2);
+    REQUIRE_FALSE(reopened.accounts().find("ident-1").has_value());
     reopened.stop();
 }
 

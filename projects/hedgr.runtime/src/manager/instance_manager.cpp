@@ -756,6 +756,14 @@ instance_manager::start(const std::filesystem::path& database_path,
      * over the instance the seed just added.
      */
     ensure_roots();
+
+    /*
+     * After the roots rather than before them, so the folder every seeded
+     * account sits in already exists, and after the seed of a first run, so the
+     * instance that seed just added is covered by the same walk that covers the
+     * instances the store already held.
+     */
+    seed_instance_accounts();
     ensure_instance_manager_window();
 
     /*
@@ -1007,6 +1015,71 @@ void instance_manager::ensure_accounts_root(const std::string& instance_id) {
     if (auto saved = folder_repo_->save(root); !saved) {
         last_error_ = store_failure(
             std::format("cannot save the accounts root {}", id), saved.error());
+    }
+}
+
+void instance_manager::seed_instance_accounts() {
+    /*
+     * The walk is over the instances rather than over a list of the ones just
+     * seeded, because the accounts have to cover a store this build did not
+     * write as well as one it did. It runs on every start for the same reason:
+     * an instance added by a build that seeded no accounts still comes up with
+     * them after the next restart, and a second pass over a row that is already
+     * there replaces it rather than adding a twin.
+     */
+    for (const auto index : live_indices(instances_.layout()))
+        seed_accounts_for_instance(instances_.rows()[index]);
+}
+
+void instance_manager::seed_accounts_for_instance(
+    const domain::instance& instance) {
+    if (instance.id.empty())
+        return;
+
+    /*
+     * One login for whoever runs the deployment and one for whoever runs a
+     * tenant inside it, which between them are what a person has to be to reach
+     * anything at all. The principal is the instance's own subject prefix with
+     * the role in front, because that prefix is the name every service of the
+     * deployment already answers to and IAM has to be handed a name it can
+     * match. An instance that names no prefix falls back to its id, so the
+     * principal never shrinks to a bare role with nothing after the at sign.
+     */
+    const std::string realm = instance.subject_prefix.empty()
+        ? instance.id
+        : instance.subject_prefix;
+
+    /*
+     * The account key follows the one the Accounts window builds when an
+     * operator adds a row, so a seeded login and a typed one are the same shape
+     * of key. Deriving it from the instance and the name is also the whole of
+     * the idempotency: seeding twice writes the same two rows over themselves.
+     */
+    const std::string folder_id = domain::accounts_root_id_for(instance.id);
+
+    struct seeded_login final {
+        std::string_view name;
+        std::string_view role;
+    };
+    constexpr seeded_login logins[] = {
+        { "super admin", "super-admin" },
+        { "tenant admin", "tenant-admin" },
+    };
+
+    for (const auto& login : logins) {
+        domain::account row;
+        row.id = std::format("acct:{}:{}", instance.id, login.name);
+        row.instance_id = instance.id;
+        row.name = std::string{login.name};
+        row.folder_id = folder_id;
+        row.principal = std::format("{}@{}", login.role, realm);
+
+        static_cast<void>(accounts_.upsert(row));
+
+        if (auto saved = account_repo_->save(row); !saved) {
+            last_error_ = store_failure(std::format(
+                "cannot save the seeded account {}", row.id), saved.error());
+        }
     }
 }
 

@@ -331,7 +331,13 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
      * of an empty browser and no explanation.
      */
     REQUIRE(manager.instances().size() == 3);
-    REQUIRE(manager.accounts().size() == 2);
+    /*
+     * Two of the four are the seeded instance's own logins, written by the
+     * start before this case added anything: the accounts tree the capture
+     * shows is never empty, which is the point of the seed. The other two are
+     * the rows saved above for the same instance.
+     */
+    REQUIRE(manager.accounts().size() == 4);
     REQUIRE(manager.folders().size() == 8);
     REQUIRE(manager.labels().size() == 3);
     for (const auto& id : std::array<std::string, 3>{ seeded_id, "inst-prod",

@@ -407,6 +407,26 @@ private:
     /** @brief Creates the accounts root of one instance, if it has none. */
     void ensure_accounts_root(const std::string& instance_id);
 
+    /**
+     * @brief Gives every stored instance the two logins it is seeded with.
+     *
+     * Run on every start rather than only on the first, because the walk has to
+     * reach an instance this build never seeded as well as one it just made,
+     * and because a row that is already there is replaced under the same
+     * derived key rather than added to.
+     */
+    void seed_instance_accounts();
+
+    /**
+     * @brief Writes the two logins of one instance, a super admin and a tenant
+     * admin.
+     *
+     * The principals are built from the instance's subject prefix, so they name
+     * the deployment IAM is being asked about; the rows land in that instance's
+     * accounts root.
+     */
+    void seed_accounts_for_instance(const model::domain::instance& instance);
+
     void stop_session(const std::string& window_or_session_id);
 
     async::executor pool_;
