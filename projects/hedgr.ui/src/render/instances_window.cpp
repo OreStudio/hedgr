@@ -629,12 +629,83 @@ void draw_dashboard(const render_input& input, window_ui_state& state) {
     };
 }
 
+/**
+ * @brief Draws the Instances window's own actions, in the browser's toolbar.
+ *
+ * What is left of this window's strip once the actions the browser already
+ * offers -- add, edit, duplicate, remove -- are subtracted. Adding an instance
+ * is the browser's own add, which creates a leaf in the selected folder, and
+ * editing and removing one are the browser's edit and remove, so neither is
+ * repeated here.
+ */
+void instance_window_actions(const render_input& input, window_ui_state& state) {
+    /*
+     * A vertical rule between the browser's own actions and this window's, so
+     * the one row reads as two groups rather than as six unrelated buttons.
+     */
+    ImGui::SameLine();
+    /*
+     * Separator(), not SeparatorText(""). ImGui's Separator() asks the current
+     * layout which way it runs and draws a vertical rule inside a horizontal
+     * strip, which is the whole point here. SeparatorText always draws a
+     * horizontal rule with a label, so inside this strip it ended the row and
+     * pushed the rest of the buttons onto a second one, which read as two
+     * toolbars.
+     */
+    ImGui::Separator();
+    /*
+     * The separator advanced the line, so the first host action has to
+     * rejoin the row or it lands on a second one.
+     */
+    ImGui::SameLine();
+
+    /*
+     * Probe-all belongs here rather than in the application's toolbar: it acts
+     * on the instances this window lists, and a control that acts on one
+     * window's rows belongs with them.
+     */
+    if (widget::icon_button("probe-all", icon::probe, "Probe every instance now")) {
+        command request;
+        request.kind = command_kind::probe_all;
+        input.commands.push(std::move(request));
+    }
+
+    ImGui::SameLine();
+    if (widget::icon_button("open-accounts", icon::account,
+            "Open the accounts of the selected instance")) {
+        /*
+         * The accounts window is found or made by the runtime, which owns the
+         * window table: the interface names the instance it wants and the
+         * runtime answers with the one window showing it. A second request
+         * focuses the window that exists rather than making another.
+         */
+        if (input.instances.find(state.browser.selected_leaf)) {
+            command request;
+            request.kind = command_kind::open_window;
+            request.instance_id = state.browser.selected_leaf;
+            request.new_window_kind = hedgr::model::domain::window_kind::accounts;
+            input.commands.push(std::move(request));
+        }
+    }
+}
+
 /** @brief The index of the one column whose cells are label pills. */
 constexpr std::size_t instance_label_column = 5;
 
-/** @brief Fills one instance row's cells. */
+/**
+ * @brief Fills one instance row's cells.
+ *
+ * While the store is closed every cell that came out of the store is left
+ * empty and only the probe columns are filled, because those are a fact about
+ * the broker rather than a row: a measurement taken minutes ago does not
+ * become a secret when the lock closes. The cells are blanked here, at the
+ * source, rather than covered by something drawn over the table afterwards:
+ * an overlay is a rectangle that has to agree with a layout it does not own,
+ * and text nobody can read is still text that was drawn.
+ */
 void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     widget::row_cells& cells) {
+    const bool readable = shows_instances(input);
     const auto status = status_of(input, leaf.id);
 
     cells.texts.emplace_back(icon::probe);
@@ -650,17 +721,20 @@ void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     const auto handle = input.instances.find(leaf.id);
     const auto* row = handle ? input.instances.get(*handle) : nullptr;
 
-    cells.texts.push_back(leaf.name);
+    cells.texts.push_back(readable ? leaf.name : std::string{});
     cells.colours.push_back(0);
-    cells.tooltips.emplace_back(row != nullptr ? row->nats_url : std::string{});
+    cells.tooltips.emplace_back(readable && row != nullptr ? row->nats_url
+                                                           : std::string{});
 
-    const auto address = row != nullptr ? widget::split_host_port(row->nats_url)
-                                        : widget::host_port{};
+    const auto address = readable && row != nullptr
+        ? widget::split_host_port(row->nats_url)
+        : widget::host_port{};
     cells.texts.push_back(address.host);
     cells.colours.push_back(0);
     cells.tooltips.push_back(address.host);
 
-    cells.texts.emplace_back(row != nullptr ? row->subject_prefix : std::string{});
+    cells.texts.emplace_back(readable && row != nullptr ? row->subject_prefix
+                                                        : std::string{});
     cells.colours.push_back(0);
     cells.tooltips.push_back(cells.texts.back());
 }
@@ -676,6 +750,13 @@ void instance_row_cells(const tree_leaf& leaf, const render_input& input,
 void instance_row_labels(const tree_leaf& leaf, const render_input& input,
     std::vector<std::vector<widget::label_pill>>& cells) {
     cells.resize(instance_columns().size());
+    /*
+     * A label is the operator's own vocabulary for their estates -- the words
+     * "production" and "critical" read the deployment from across the room --
+     * so the pills go with the rest of the row while the store is closed.
+     */
+    if (!shows_instances(input))
+        return;
     cells[instance_label_column] = widget::pills_for(
         labels_of(input, labelling_owner::instance, leaf.id));
 }
@@ -792,32 +873,63 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
 void draw_lock_control(lock_control& lock) {
     using hedgr::model::domain::store_lock;
 
-    const auto* tooltip = "The store is open. Click to lock it.";
+    /*
+     * A sentence per state, in sentence case, beside the icon and saying the
+     * same thing the icon's colour says. The icon alone is not a status: a
+     * padlock is a shape that has to be learned, and a colour has to be
+     * learned with it. The words are what a person reads the first time.
+     *
+     * The same words go in the tooltip's first clause, so hovering adds the
+     * action rather than repeating the state a second time in different words.
+     */
+    const char* state_text = "the store is unlocked";
+    const char* action = "Click to lock it.";
     switch (lock.lock) {
     case store_lock::absent:
-        tooltip = "No master password has been set yet. Click to create one.";
+        state_text = "no master password yet";
+        action = "Click to create one.";
         break;
     case store_lock::locked:
-        tooltip = "The store is locked. Click to enter the master password.";
+        state_text = "the store is locked";
+        action = "Click to enter the master password.";
         break;
     case store_lock::unlocked:
-        tooltip = "The store is open. Click to lock it again.";
+        state_text = "the store is unlocked";
+        action = "Click to lock it.";
         break;
     case store_lock::failed:
-        tooltip = "The last master password was refused. Click to try again.";
+        state_text = "the store could not be unlocked";
+        action = "Click to try again.";
         break;
     }
 
     /*
-     * The icon button draws in the theme's text colour, so the state's colour
-     * is pushed around it rather than passed to it.
+     * The state's colour is pushed around both the icon and the words, so the
+     * two are one statement rather than an icon with a caption beside it that
+     * happens to be grey.
      */
-    ImGui::PushStyleColor(ImGuiCol_Text,
-        ImGui::ColorConvertU32ToFloat4(theme::store_lock_colour(lock.lock)));
+    const auto tone = ImGui::ColorConvertU32ToFloat4(
+        theme::store_lock_colour(lock.lock));
+
+    /*
+     * The reason travels on the words rather than on the icon. When the last
+     * attempt was refused the reason is the whole of what the operator wants
+     * to know, and it belongs on the thing that names the state; the tooltip
+     * has room for it and the bar does not.
+     */
+    const std::string tooltip = lock.lock == store_lock::failed
+            && !lock.reason.empty()
+        ? std::format("{}. {}\n{}", state_text, action, lock.reason)
+        : std::format("{}. {}", state_text, action);
+
+    ImGui::PushStyleColor(ImGuiCol_Text, tone);
     const bool clicked = widget::icon_button("lock-control",
-        theme::store_lock_icon(lock.lock), tooltip);
+        theme::store_lock_icon(lock.lock), tooltip.c_str());
     ImGui::PopStyleColor();
-    ImGui::SetItemTooltip("%s", tooltip);
+    ImGui::SetItemTooltip("%s", tooltip.c_str());
+
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+    ImGui::TextColored(tone, "%s", state_text);
 
     if (!clicked)
         return;
@@ -833,30 +945,6 @@ void draw_lock_control(lock_control& lock) {
         return;
     }
     lock.open_requested = true;
-}
-
-/**
- * @brief The veil over the catalogue's rows while the store is locked.
- *
- * A near-opaque dark fill over the list, so the rows are there and cannot be
- * read: the shapes of the table come through enough to show the window is the
- * one it always was, and not enough to read a host name out of it.
- *
- * The line of text is the state's own colour, which is the same amber the lock
- * control carries, so the veil and the control are one fact stated twice.
- */
-void draw_locked_veil(const ImVec2& from, const ImVec2& to) {
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddRectFilled(from, to, IM_COL32(12, 12, 12, 236));
-
-    const char* message = "The store is locked. Click the padlock below to "
-                          "open it.";
-    const ImVec2 size = ImGui::CalcTextSize(message);
-    const ImVec2 centre((from.x + to.x) / 2.0f, (from.y + to.y) / 2.0f);
-    draw->AddText(ImVec2(centre.x - size.x / 2.0f, centre.y - size.y / 2.0f),
-        hedgr::ui::theme::store_lock_colour(
-            hedgr::model::domain::store_lock::locked),
-        message);
 }
 
 void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
@@ -925,39 +1013,12 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     }
 
     /*
-     * The window's own actions, before the browser's. Everything that depends
-     * on what is selected lives in the browser's toolbar, because the browser
-     * is what knows what is selected; everything here is about the window.
+     * This window's own actions are drawn in the browser's toolbar rather than
+     * in a strip of their own, which is what made one window look like two:
+     * the browser drew a row of controls and the window drew a second row above
+     * it. There is one strip, beside the tree, and @c instance_window_actions
+     * below is this window's share of it.
      */
-    if (widget::icon_button("add-instance", icon::add, "Add an instance"))
-        open_create_form(state, state.browser.selected_folder);
-
-    ImGui::SameLine();
-    if (widget::icon_button("probe-all", icon::probe, "Probe every instance now")) {
-        command request;
-        request.kind = command_kind::probe_all;
-        input.commands.push(std::move(request));
-    }
-
-    ImGui::SameLine();
-    if (widget::icon_button("open-accounts", icon::account,
-            "Open the accounts of the selected instance")) {
-        /*
-         * The accounts window is found or made by the runtime, which owns the
-         * window table: the interface names the instance it wants and the
-         * runtime answers with the one window showing it. A second request
-         * focuses the window that exists rather than making another.
-         */
-        if (input.instances.find(state.browser.selected_leaf)) {
-            command request;
-            request.kind = command_kind::open_window;
-            request.instance_id = state.browser.selected_leaf;
-            request.new_window_kind = hedgr::model::domain::window_kind::accounts;
-            input.commands.push(std::move(request));
-        }
-    }
-
-    ImGui::Separator();
 
     /*
      * A closed lock does not take the window away. The surface stays, the tree
@@ -970,13 +1031,11 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * reason. The rows are dimmed out of legibility, and the shapes underneath
      * are what says the catalogue is there and waiting.
      */
-    const ImVec2 rows_top = ImGui::GetCursorScreenPos();
-    const float rows_width = ImGui::GetContentRegionAvail().x;
-
     widget::browser_model model;
     model.folders = tree_folders(input, folder_tree::instances);
     model.leaves = instance_tree_leaves(input);
     model.columns = instance_columns();
+    model.window_actions = &instance_window_actions;
     model.row_cells = &instance_row_cells;
     model.row_labels = &instance_row_labels;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
@@ -1020,37 +1079,6 @@ void render_instances_window(hedgr::model::state::window_handle handle,
 
     widget::render_browser(model, state, input);
 
-    /*
-     * The status line, at the foot of the window and below everything else.
-     * The browser's body stops short of it by exactly its height, so a message
-     * appearing does not move the table: a row that shifted every time
-     * something happened would be a row being clicked at the wrong moment.
-     *
-     * Nothing is drawn when there is nothing to say, so the common case costs
-     * the table no height at all.
-     */
-    draw_status_foot(status, input.now_ns, lock);
-
-    /*
-     * The veil, after the table has been submitted so that it covers what was
-     * drawn rather than being covered by it. Only while the lock is closed, so
-     * a run that never locks never pays for it.
-     */
-    if (!shows_instances(input)) {
-        /*
-         * The veil runs from the separator down to the foot reserved for the
-         * status bar, and not merely to wherever the browser left the cursor:
-         * the browser's own children reset it, so a rectangle measured from
-         * the cursor covers the last few pixels of the window and nothing
-         * else. The foot's height is known, so the veil's edge is the window's
-         * foot rather than a guess.
-         */
-        const float veil_bottom = ImGui::GetWindowHeight()
-            - status_foot_height() - ImGui::GetStyle().WindowPadding.y;
-        draw_locked_veil(rows_top,
-            ImVec2(rows_top.x + rows_width,
-                std::max(veil_bottom, rows_top.y + 1.0f)));
-    }
 
     /*
      * A form the callbacks above opened but did not fill is filled here, once
@@ -1065,6 +1093,15 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         else if (!state.browser.duplicate_source.empty())
             open_edit_form(input, state, state.browser.duplicate_source, true);
     }
+
+    /*
+     * The status bar, last, so that its reservation is made after everything
+     * else has taken the height it needs and its own foot is measured back
+     * from the window's edge. It carries the lock control, which is the only
+     * way the password form is opened, so it is deliberately drawn in every
+     * state rather than only while the store is open.
+     */
+    draw_status_foot(status, input.now_ns, lock);
 
     ImGui::PopID();
 }

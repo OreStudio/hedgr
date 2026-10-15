@@ -488,6 +488,90 @@ void account_row_labels(const tree_leaf& leaf, const render_input& input,
 
 namespace hedgr::ui::render {
 
+/**
+ * @brief Draws the Accounts window's own action, in the browser's toolbar.
+ *
+ * The sign-in is the one control the browser cannot draw for it, and it is the
+ * window's reason for existing. It keeps its worded form rather than becoming
+ * a glyph: it is the most important thing on the surface and an icon would make
+ * it the least legible.
+ */
+void accounts_window_actions(const render_input& input,
+    window_ui_state& state) {
+    using hedgr::model::domain::store_lock;
+
+    /*
+     * A vertical rule between the browser's own actions and this window's, so
+     * the one row reads as two groups rather than as six unrelated buttons.
+     */
+    ImGui::SameLine();
+    /*
+     * Separator(), not SeparatorText(""). ImGui's Separator() asks the current
+     * layout which way it runs and draws a vertical rule inside a horizontal
+     * strip, which is the whole point here. SeparatorText always draws a
+     * horizontal rule with a label, so inside this strip it ended the row and
+     * pushed the rest of the buttons onto a second one, which read as two
+     * toolbars.
+     */
+    ImGui::Separator();
+    /*
+     * The separator advanced the line, so the first host action has to
+     * rejoin the row or it lands on a second one.
+     */
+    ImGui::SameLine();
+
+    const bool have_selection = !state.browser.selected_leaf.empty();
+    const auto selected = have_selection
+        ? input.accounts.find(state.browser.selected_leaf)
+        : std::optional<hedgr::model::state::account_handle>{};
+
+    if (!have_selection)
+        ImGui::BeginDisabled();
+    const bool sign_in =
+        ImGui::Button(std::format("{} Sign in", icon::sign_in).c_str());
+    if (!have_selection)
+        ImGui::EndDisabled();
+    ImGui::SetItemTooltip("%s",
+        "Sign in with the selected account and open a workspace");
+
+    if (!sign_in || !selected)
+        return;
+
+    const auto* row = input.accounts.get(*selected);
+
+    /*
+     * A stored credential is used when there is one and the store is open;
+     * otherwise a password is asked for. Whether one is stored is not something
+     * this side can see -- the sealed blob never leaves the store -- so the
+     * closed-lock case is the one that can be decided here, and the runtime's
+     * refusal is what raises the prompt in every other case.
+     */
+    if (input.store_lock != store_lock::unlocked) {
+        state.browser.sign_in_open = true;
+        return;
+    }
+
+    command request;
+    request.kind = command_kind::connect_session;
+    request.instance_id = row->instance_id;
+    request.account_id = row->id;
+    request.principal = row->principal;
+    input.commands.push(std::move(request));
+
+    /*
+     * The workspace follows the session, so it is asked for now. The runtime
+     * binds it to the session that the connect command creates, and the frame
+     * loop draws it once the session is up rather than when the command was
+     * pushed.
+     */
+    command open;
+    open.kind = command_kind::open_window;
+    open.instance_id = row->instance_id;
+    open.account_id = row->id;
+    open.new_window_kind = hedgr::model::domain::window_kind::workspace;
+    input.commands.push(std::move(open));
+}
+
 void render_accounts_window(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
@@ -519,95 +603,17 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     if (state.browser.selected_folder.empty() && !root_id.empty())
         state.browser.selected_folder = root_id;
 
-    const bool have_selection = !state.browser.selected_leaf.empty();
-    const auto selected = have_selection
-        ? input.accounts.find(state.browser.selected_leaf)
-        : std::optional<hedgr::model::state::account_handle>{};
-
-    if (widget::icon_button("add-account", icon::add, "Add an account"))
-        open_create_form(state, state.browser.selected_folder);
-
-    ImGui::SameLine();
-    if (widget::icon_button("edit-account", icon::edit,
-            "Edit the selected account", have_selection)
-        && selected) {
-        state.browser.form = widget::form_kind::leaf;
-        state.browser.form_leaf = state.browser.selected_leaf;
-        state.browser.form_duplicating = false;
-        state.draft_name.fill('\0');
-    }
-
-    ImGui::SameLine();
-    if (widget::icon_button("duplicate-account", icon::duplicate,
-            "Copy the selected account", have_selection)
-        && selected) {
-        state.browser.form = widget::form_kind::leaf;
-        state.browser.form_leaf.clear();
-        state.browser.form_duplicating = true;
-        state.browser.duplicate_source = state.browser.selected_leaf;
-        state.draft_name.fill('\0');
-    }
-
-    ImGui::SameLine();
-    if (widget::icon_button("remove-account", icon::remove,
-            "Remove the selected account", have_selection)) {
-        state.browser.confirm_remove_leaf = true;
-    }
-
     /*
-     * The sign-in action is the one prominent control of this window, so it is
-     * a labelled button rather than a bare glyph: it is why the window exists,
-     * and an icon alone would make the most important thing here the least
-     * legible.
+     * This window's actions used to be drawn here, in a strip of their own
+     * above the browser's, which is what made the window look like it had two
+     * toolbars. Adding, editing, duplicating and removing an account are the
+     * browser's own add, edit, duplicate and remove -- an account is a leaf of
+     * the accounts tree -- so what is left of this window's strip is the one
+     * action the browser has no opinion about, the sign-in. It is drawn by
+     * @c accounts_window_actions in the browser's single strip.
      */
-    ImGui::SameLine();
-    if (!have_selection)
-        ImGui::BeginDisabled();
-    const bool sign_in =
-        ImGui::Button(std::format("{} Sign in", icon::sign_in).c_str());
-    if (!have_selection)
-        ImGui::EndDisabled();
-    ImGui::SetItemTooltip("%s",
-        "Sign in with the selected account and open a workspace");
-
-    if (sign_in && selected) {
-        const auto* row = input.accounts.get(*selected);
-
-        /*
-         * A stored credential is used when there is one and the store is open;
-         * otherwise a password is asked for. Whether one is stored is not
-         * something this side can see -- the sealed blob never leaves the store
-         * -- so the closed-lock case is the one that can be decided here, and
-         * the runtime's refusal is what raises the prompt in every other case.
-         */
-        if (input.store_lock != store_lock::unlocked) {
-            state.browser.sign_in_open = true;
-        } else {
-            command request;
-            request.kind = command_kind::connect_session;
-            request.instance_id = row->instance_id;
-            request.account_id = row->id;
-            request.principal = row->principal;
-            input.commands.push(std::move(request));
-
-            /*
-             * The workspace follows the session, so it is asked for now. The
-             * runtime binds it to the session that the connect command creates,
-             * and the frame loop draws it once the session is up rather than
-             * when the command was pushed.
-             */
-            command open;
-            open.kind = command_kind::open_window;
-            open.instance_id = row->instance_id;
-            open.account_id = row->id;
-            open.new_window_kind = hedgr::model::domain::window_kind::workspace;
-            input.commands.push(std::move(open));
-        }
-    }
-
-    ImGui::Separator();
-
     widget::browser_model model;
+    model.window_actions = &accounts_window_actions;
     model.folders = forms::tree_folders(input, folder_tree::accounts);
     model.leaves = account_tree_leaves(input, instance_id);
     model.columns = account_columns();

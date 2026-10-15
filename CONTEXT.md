@@ -71,8 +71,11 @@ and there is no recovery from it.
 
 Whether the local store can be read. Absent when no master password has been set
 yet, locked when one exists and is not held, unlocked when it is held, and
-failed when the last attempt was refused. The store is drawn from only while it
-is unlocked.
+failed when the last attempt was refused.
+
+The state is reported on the status bar with a colour and a sentence: green
+unlocked, amber locked, red failed. Amber rather than red for locked, because a
+closed lock is a normal state rather than something that has gone wrong.
 
 ## Session
 
@@ -113,11 +116,15 @@ a second selection.
 The root surface. It manages every instance and the folder tree they sit in, and
 it is the only way to open anything else.
 
-It is drawn only while the store is unlocked. On a store with no master password
-it is replaced by the create prompt, and on a store whose master password is not
-held it is replaced by the unlock prompt. Locking the store hides it again,
-along with the windows it opened. It is not that the window needs a secret to
-draw: it is that nothing in the store is readable until the store is open.
+It is drawn in every lock state, and its rows are blanked while the store is
+readable only when open. The window is not replaced by a prompt: the operator
+sees the tree and the list still there and waiting, with their contents withheld.
+Replacing the surface would take away the context of where they were.
+
+The lock control is the only way to open the store, and it lives in the status
+bar rather than in the window. Closing the password form without opening the
+store returns to locked and requires the control to be clicked again, so a
+refusal cannot become a loop.
 
 ## Accounts window
 

@@ -268,6 +268,27 @@ struct browser_model final {
      * the widget's interface to grow fields it has no opinion about.
      */
 
+    /**
+     * @brief Draws the host's own actions, in the browser's one toolbar.
+     *
+     * The window is one strip beside the tree, and it carries both what the
+     * browser can do to a tree -- add, edit, duplicate, remove -- and what the
+     * host can do to the thing being browsed. Those are two sets of actions on
+     * one row, so the host draws its share here rather than in a strip of its
+     * own, which is what made two toolbars out of one window.
+     *
+     * The callback is responsible for the separator between the two sets and
+     * for the @c SameLine spacing between its own buttons; it is called where
+     * the strip's own buttons have already been submitted, so the row is
+     * already open.
+     *
+     * @param input everything the host's own actions are allowed to read.
+     * @param window the hosting window's state, which is what its actions act
+     * on: which row is selected, which form is open.
+     */
+    void (*window_actions)(const hedgr::ui::render::render_input&,
+        hedgr::ui::render::window_ui_state&) = nullptr;
+
     /** @brief Starts the host's form for a new leaf inside a folder. */
     void (*create_leaf)(hedgr::ui::render::window_ui_state&,
         std::string_view parent_id) = nullptr;

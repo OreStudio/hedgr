@@ -31,6 +31,7 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
 #include "hedgr.ui/export.hpp"
+#include <string>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -164,9 +165,10 @@ struct render_input final {
     /**
      * @brief Where the master password stands.
      *
-     * The whole of the local store sits behind it, so this gates the catalogue
-     * and not only the credentials: while it is not @c unlocked there is
-     * nothing to draw but the prompt that asks for it. See @c shows_instances.
+     * The whole of the local store sits behind it, so this says whether the
+     * catalogue may be read and not only whether the credentials may be: while
+     * it is not @c unlocked the Instances window is still drawn, and what is
+     * behind its rows is blanked. See @c shows_instances.
      */
     hedgr::model::domain::store_lock store_lock =
         hedgr::model::domain::store_lock::absent;
@@ -230,6 +232,16 @@ struct lock_control final {
 
     /** @brief Whether the password form is already open. */
     bool form_open = false;
+
+    /**
+     * @brief Why the last attempt was refused, or empty.
+     *
+     * Carried here so the control that names the state can also say what the
+     * state came from. A locked store and a store whose password was refused
+     * are told apart by their colour and by their words, and the reason behind
+     * the second is the thing the operator has to act on.
+     */
+    std::string reason;
 
     /**
      * @brief Asks the frame to open the password form.

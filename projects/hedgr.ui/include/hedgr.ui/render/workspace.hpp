@@ -152,6 +152,17 @@ private:
     bool lock_form_open_ = false;
 
     /**
+     * @brief Whether the password in the buffer came from the environment.
+     *
+     * The buffer is shared between the two ways a password arrives: typed into
+     * the form, and handed over by @c unlock_with. Only the second may be
+     * submitted on the operator's behalf, so the two are told apart rather
+     * than inferred from a non-empty buffer -- which would fire the moment
+     * somebody typed their first character.
+     */
+    bool armed_password_ = false;
+
+    /**
      * @brief Whether the prompt's window is open, handed to ImGui.
      *
      * ImGui draws a close button on the title bar only when it is given

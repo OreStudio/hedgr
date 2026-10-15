@@ -393,6 +393,21 @@ void draw_toolbar(const widget::browser_model& model,
         }
     }
 
+    /*
+     * The host's own actions, in the middle of the strip and after the two
+     * "add" controls: the browser's half of the row is what the tree is for,
+     * and the host's half is what the whole window is for, which is the more
+     * prominent thing and belongs where the eye arrives first among the rest.
+     */
+    if (model.window_actions != nullptr) {
+        /*
+         * The browser owns the row and the host contributes to it, rather than
+         * the host having to remember to begin by joining it.
+         */
+        ImGui::SameLine();
+        model.window_actions(input, window);
+    }
+
     ImGui::SameLine();
     if (widget::icon_button("edit", icon::edit, "Edit the selected entry",
             writable && have_leaf)

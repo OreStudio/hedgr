@@ -47,24 +47,24 @@ namespace hedgr::ui::render {
     const render_input& input);
 
 /**
- * @brief Whether the Instances window is drawn at all.
+ * @brief Whether the store's contents can be read.
  *
  * This is the lock gate, and it is a function rather than a condition inside
- * the drawing loop so that it can be tested without a GL context. The rule is
- * one line: the catalogue is drawn only while the store is unlocked.
+ * the drawing loop so that it can be tested without a GL context. It answers
+ * one question: is there anything in the store that may be shown?
  *
- * The reason it is the whole catalogue and not just the accounts is that every
- * read of the store is a decryption. Instances and folders were never secrets
- * on their own, but they live in a file that is now unreadable without the
- * master password, so while it is not held there is genuinely nothing to draw.
- * The alternative -- showing a catalogue that cannot be written to -- would let
- * an operator edit rows that would then fail to save, which is worse than
- * asking for the password first.
+ * Every read of the store is a decryption. Instances and folders were never
+ * secrets on their own, but they live in a file that is unreadable without the
+ * master password, so while it is not held there are rows that must not be
+ * drawn. The alternative -- showing a catalogue that cannot be written to --
+ * would let an operator edit rows that would then fail to save.
  *
- * @c absent and @c locked both close the gate. @c absent is the first run,
- * where the operator has to create a password before there is a store worth
- * opening; @c failed closed it again after a refusal. Nothing here reports an
- * error, because a closed lock is a state and not a fault.
+ * It is deliberately not "is the Instances window drawn". The window is the
+ * shell: the lock control lives on its status bar, so it stays on screen in
+ * every state and its renderer asks this function whether to blank its rows.
+ * @c absent and @c locked both close the gate; @c absent is the first run and
+ * @c failed closed it again after a refusal. Nothing here reports an error,
+ * because a closed lock is a state and not a fault.
  */
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_instances(const render_input& input) noexcept;
@@ -72,14 +72,19 @@ shows_instances(const render_input& input) noexcept;
 /**
  * @brief Whether a window of @p kind is drawn while the store is locked.
  *
- * The same gate as @c shows_instances, asked about one window rather than about
- * the whole interface, so the frame loop can cull a catalogue window without
- * deciding what a catalogue window is. The prompt that asks for the password is
- * not a window and is not gated.
+ * Asked about one window rather than about the whole interface, so the frame
+ * loop can cull a catalogue window without deciding what one is. The password
+ * form is not a window of a kind and is not gated.
  *
- * A window kind that shows something read from the store stays hidden until the
- * store opens, because a surface that holds a stale copy of the catalogue would
- * be worse than an empty screen: it would look like data and be a memory.
+ * The accounts windows and the workspaces stay hidden until the store opens,
+ * because a surface that held a stale copy of the catalogue would be worse
+ * than no surface: it would look like data and be a memory.
+ *
+ * The Instances window is the exception, because it is the shell: the lock
+ * control is on its status bar and an operator whose whole program vanished
+ * when the store locked would be looking at a different program from the one
+ * they are about to use. It is drawn, and its renderer blanks its own rows
+ * from @c shows_instances.
  */
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,

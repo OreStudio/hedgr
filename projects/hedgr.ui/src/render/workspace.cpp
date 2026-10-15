@@ -90,6 +90,7 @@ void workspace::unlock_with(std::string_view master_password) {
         master_password_.size() - 1);
     std::copy_n(master_password.begin(), length, master_password_.begin());
     master_password_[length] = '\0';
+    armed_password_ = true;
 
     /*
      * The interface is told, now and for as long as the run keeps the password
@@ -109,6 +110,7 @@ void workspace::render(const render_input& input) {
      */
     lock_control_.lock = input.store_lock;
     lock_control_.form_open = shows_lock_prompt(input);
+    lock_control_.reason = input.lock_message;
     lock_control_.open_requested = false;
     lock_control_.close_requested = false;
 
@@ -142,13 +144,19 @@ void workspace::render(const render_input& input) {
     draw_lock_prompt(input);
 
     /*
-     * An unattended launch left a password in the form's buffer, so it is
-     * submitted as soon as the store says it wants one. The form draws first,
-     * so the frame that carries the submission is a frame a person could have
-     * produced themselves by typing and pressing the button.
+     * An unattended launch left a password in the buffer, so it is submitted
+     * as soon as the store says it wants one. The form does not have to be
+     * open for that: the environment's password arrives without anybody
+     * clicking the lock, and if the submission needed an open form then an
+     * unattended launch would sit locked until somebody clicked -- which is
+     * the same silent no-op as before, in the other direction.
+     *
+     * It is gated on @c armed_password_ and not merely on a non-empty buffer,
+     * because the buffer is also what the operator types into while the form
+     * is open. Submitting on a non-empty buffer would fire the moment anyone
+     * typed their first character.
      */
-    if (shows_lock_prompt(input) && master_password_[0] != '\0'
-        && !input.unlocking)
+    if (armed_password_ && master_password_[0] != '\0' && !input.unlocking)
         submit_master_password(input);
 
     const auto& layout = input.windows.layout();
@@ -396,6 +404,7 @@ void workspace::open_lock_prompt() {
      * filled in with something nobody can see.
      */
     clear_password_buffers();
+    armed_password_ = false;
     master_password_visible_ = false;
     create_mismatch_ = false;
     lock_form_open_ = true;
@@ -404,6 +413,7 @@ void workspace::open_lock_prompt() {
 
 void workspace::close_lock_prompt() {
     clear_password_buffers();
+    armed_password_ = false;
     master_password_visible_ = false;
     create_mismatch_ = false;
     lock_form_open_ = false;
@@ -437,6 +447,7 @@ void workspace::submit_master_password(const render_input& input) {
      * password it revealed would be showing the next one.
      */
     clear_password_buffers();
+    armed_password_ = false;
     master_password_visible_ = false;
     create_mismatch_ = false;
 }
@@ -505,9 +516,16 @@ void workspace::draw_lock_prompt(const render_input& input) {
             "The whole local store sits behind this password. It cannot be "
             "recovered, and losing it loses the instances and folders as well "
             "as the stored credentials.");
-    } else {
-        ImGui::TextWrapped("Enter the master password to read the store.");
     }
+
+    /*
+     * The unlock form says what it is for and nothing about the store's state.
+     * The state has one home, which is the status bar's own sentence beside the
+     * lock icon: an owner of two places would show "the store is locked" on
+     * this form and again in the bar underneath it, and the operator would read
+     * two facts where there is one. The fields below and the title say what to
+     * do here; the bar says what the store is.
+     */
 
     ImGui::Spacing();
 
