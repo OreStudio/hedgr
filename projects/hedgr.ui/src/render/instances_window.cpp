@@ -643,10 +643,10 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 /**
  * @brief The four states a row of the instance tree can stand in.
  *
- * The order is the order a bar is drawn in, from the top of the stack down,
- * because ImPlot paints each item over the ones before it. The bottom colour
- * therefore has to be drawn last to stay visible, and the legend then reads
- * from the top of a bar downwards, which is how a stack is read.
+ * The order is the order the lines are drawn in, which no longer matters for
+ * what is visible because the lines do not cover one another. It is kept so
+ * that the enum reads the way the estate is explained, from the states nothing
+ * is known about to the one everything is fine in.
  */
 enum class estate_state : std::uint8_t {
     unknown,
@@ -660,7 +660,7 @@ enum class estate_state : std::uint8_t {
  *
  * Not one hex value is repeated here. A row is red or amber or green because
  * the theme says so, and these are the theme's own entries for those colours,
- * so a palette change moves the rows and the bars together.
+ * so a palette change moves the rows and the lines together.
  */
 [[nodiscard]] ImVec4 state_colour(estate_state state) {
     switch (state) {
@@ -681,7 +681,7 @@ enum class estate_state : std::uint8_t {
         theme::readiness_colour(readiness::unknown));
 }
 
-/** @brief The word this state carries in the legend. */
+/** @brief The word this state carries, used as its plot item's id. */
 [[nodiscard]] const char* state_label(estate_state state) {
     switch (state) {
     case estate_state::ready:
@@ -700,15 +700,15 @@ enum class estate_state : std::uint8_t {
  * @brief The rolling window the chart shows, in minutes.
  *
  * Thirty minutes is the span the ring covers at one poll every few seconds, so
- * the window shows everything that has been kept and a bar leaving the left
+ * the window shows everything that has been kept and a point leaving the left
  * edge is a sample being forgotten rather than one silently dropped. It is also
- * tens of minutes, which is about thirty bars across a strip this size and
- * leaves each bar wide enough to read a stack out of.
+ * tens of minutes, which is about thirty minute points across a strip this size
+ * and leaves each point far enough from its neighbour to read a line through.
  */
 constexpr double window_minutes = 30.0;
 
 /** @brief One minute's counts and the wall minute they belong to. */
-struct minute_bar final {
+struct minute_counts final {
     /** @brief The minute as wall-clock minutes since the epoch. */
     std::int64_t minute = 0;
     std::int32_t ready = 0;
@@ -736,55 +736,94 @@ int format_clock(double value, char* buffer, int size, void*) {
 }
 
 /**
- * @brief Instances by state over polling time, as one stacked bar a minute.
+ * @brief Instances by state over polling time, as one line a state.
  *
  * The panel is not a collapsible header and carries no title. The operator
  * asked for the chart to be part of the window rather than a thing to open, so
- * there is nothing to collapse and nothing above it to say what it is: the axis
- * labels say what is measured and the colours say which state is which.
+ * there is nothing to collapse and nothing above it to say what it is: the clock
+ * axis dates the points and the colours say which state is which.
  *
- * A bar a minute rather than a line an instance, because the first question the
- * window is asked is about the estate and not about one deployment: how many
- * rows are green, how many amber, how many red, and how that has moved. The
- * height of a bar is the instance count at that minute, so a bar from a minute
- * when the estate was larger is taller and the chart never pretends the estate
- * has always had its present size.
+ * One line a state rather than a stack, because the first question the window is
+ * asked is about the estate and not about one deployment, and a stack answers it
+ * by hiding the part: ready falling while unreachable rises is two lines
+ * crossing, and one bar of the same total whichever way it moved.
  */
 void draw_dashboard(const render_input& input) {
     /*
      * A strip and not a chart window. The tree and the list already floor their
-     * body at two hundred and forty pixels, and this sits above them, so the
-     * plot is given the smaller fixed height of a hundred and thirty rather
-     * than a share of what is left. The rows are what the window is for and the
-     * chart is a glance across the top of it.
+     * body at two hundred and forty pixels and the browser's own chrome takes
+     * about sixty more, so the strip is given what the window can spare after
+     * those and after the status foot, capped at a hundred and ten and floored
+     * at ninety. The cap is a step down from the hundred and thirty it was, and
+     * the floor is where four y ticks and the HH:MM labels still sit apart at
+     * the theme's font, which is the point below which shrinking would trade a
+     * scrollbar for unreadable marks. Taking the spare rather than a constant is
+     * what makes a shorter window shrink the chart instead of pushing the
+     * browser and the window itself into a scrollbar.
      */
-    constexpr float plot_height = 130.0f;
-    const ImVec2 plot_size(-1.0f, plot_height);
+    constexpr float strip_height = 110.0f;
+    constexpr float strip_floor = 90.0f;
+    constexpr float browser_chrome = 60.0f;
+    constexpr float browser_body_floor = 240.0f;
+    constexpr float status_foot = 50.0f;
+    constexpr float below_strip =
+        browser_chrome + browser_body_floor + status_foot;
+    const float spare = ImGui::GetContentRegionAvail().y - below_strip;
+    const float plot_height = std::clamp(spare, strip_floor, strip_height);
 
-    if (ImGui::BeginChild("##instances-estate-plot", plot_size,
-            ImGuiChildFlags_Borders)) {
+    /*
+     * NoScrollbar makes an overflow show as a clip in a frame rather than as a
+     * scrollbar an operator has to report, and the canvas below is sized to
+     * what is left inside the child so the content box and the canvas are the
+     * same box and no overflow is expected in the first place.
+     */
+    if (ImGui::BeginChild("##instances-estate-plot",
+            ImVec2(-1.0f, plot_height), ImGuiChildFlags_Borders,
+            ImGuiWindowFlags_NoScrollbar)) {
         const auto& history = input.probes.estate();
         const auto count = history.size();
 
         /*
-         * No legend, because the colours are the identification. The axis
-         * labels say what is measured, and a key naming red, amber and green
-         * beside a stack drawn in them is the same fact said twice.
+         * No legend, because the colours are the identification. The clock axis
+         * dates the points, and a key naming red, amber and green beside lines
+         * drawn in them is the same fact said twice.
          */
         constexpr ImPlotFlags plot_flags = ImPlotFlags_NoLegend;
 
         /*
          * The x axis is not fitted. Its limits are the rolling window below, so
-         * the bars keep a fixed pixel width and the chart does not rescale as
-         * polls arrive, which is what an autofitting axis does. The y axis fits
-         * the counts, which is the only thing that should move.
+         * the minute points keep a fixed pixel spacing and the chart does not
+         * rescale as polls arrive, which is what an autofitting axis does. The
+         * y axis fits the counts, which is the only thing that should move.
          */
         constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_None;
         constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit;
 
-        if (ImPlot::BeginPlot(
-                "##estate-over-time", ImVec2(-1.0f, -1.0f), plot_flags)) {
-            ImPlot::SetupAxes("time", "instances", x_flags, y_flags);
+        /*
+         * The canvas takes the leftover box exactly, as a measured positive
+         * size rather than -1. That matters because ImPlot clamps a negative
+         * size up to its PlotMinSize of one hundred and fifty pixels, which is
+         * taller than this strip and was what drew a canvas bigger than the
+         * child and put a scrollbar on it.
+         */
+        const ImVec2 canvas = ImGui::GetContentRegionAvail();
+
+        /*
+         * A little vertical fit padding, because the y axis fits the counts
+         * exactly and a line sitting on the top or the bottom of that range
+         * would be drawn under the plot border. Both a full state and an empty
+         * one are real readings, so both have to be visible.
+         */
+        ImPlot::PushStyleVar(
+            ImPlotStyleVar_FitPadding, ImVec2(0.0f, 0.10f));
+        if (ImPlot::BeginPlot("##estate-over-time", canvas, plot_flags)) {
+            /*
+             * The y axis carries no word. Its ticks are what a reader measures
+             * against and the window already says what is counted, so a label
+             * beside them would cost a strip this size width it cannot spare
+             * without adding a fact the numbers do not already state.
+             */
+            ImPlot::SetupAxes("time", nullptr, x_flags, y_flags);
 
             /*
              * The anchor: the newest sample stands in for now, and the wall
@@ -802,14 +841,14 @@ void draw_dashboard(const render_input& input) {
 
             /*
              * The rolling window is explicit and always set, so its right edge
-             * is now and it walks forward on its own. This is one of the three
-             * things that keep a bar a fixed number of pixels for the life of
-             * the run. The others are the bar width of a fixed fraction of a
-             * minute and the plot's own width, which is the window's width on
-             * screen. A bar is therefore always one window-width divided by the
-             * window's minutes, whatever the data does. Letting this axis
-             * autofit would break that and resize every bar as a poll arrived,
-             * so it must not be "fixed" by fitting.
+             * is now and it walks forward on its own. This is one of the things
+             * that keep the minute points a fixed number of pixels apart for the
+             * life of the run. The others are the one-minute spacing of the
+             * points and the plot's own width, which is the window's width on
+             * screen. A minute is therefore always one window-width divided by
+             * the window's minutes, whatever the data does. Letting this axis
+             * autofit would break that and space the points out as polls
+             * arrived, so it must not be "fixed" by fitting.
              */
             ImPlot::SetupAxisLimits(ImAxis_X1, window_start, now_minutes,
                 ImPlotCond_Always);
@@ -818,9 +857,9 @@ void draw_dashboard(const render_input& input) {
              * A tick on every minute of the window, and a label only every
              * fifth one. ImPlot's own locator would choose a round interval like
              * five or ten minutes and leave the other minutes without a tick,
-             * which would leave bars with no mark to belong to and make the
+             * which would leave points with no mark to belong to and make the
              * reader count the wrong number of them. The labels are thinned
-             * instead, because the bars are the data and a label is only there
+             * instead, because the points are the data and a label is only there
              * to date them.
              */
             constexpr std::int64_t label_every_minutes = 5;
@@ -848,23 +887,23 @@ void draw_dashboard(const render_input& input) {
                     tick_count, tick_labels.data());
 
             /*
-             * An empty history draws the axes and no bars rather than a crash.
+             * An empty history draws the axes and no lines rather than a crash.
              */
             if (count > 0) {
                 const auto* samples = history.data();
                 const auto now_mono_ns = input.now_ns;
 
                 /*
-                 * Several polls inside one minute fold into that minute's bar.
-                 * The fold keeps the last poll of the minute, so a bar says
-                 * where the estate stood at the end of its minute, and an
+                 * Several polls inside one minute fold into that minute's
+                 * point. The fold keeps the last poll of the minute, so a point
+                 * says where the estate stood at the end of its minute, and an
                  * average would put a fraction of an instance on an axis
-                 * measured in whole ones. A minute with no sample is left out
-                 * entirely, which draws a gap rather than a zero-height stack.
+                 * measured in whole ones. A minute with no sample is left out of
+                 * this table, which the lines below turn into a gap.
                  */
                 constexpr std::size_t bucket_capacity = 64;
-                std::array<minute_bar, bucket_capacity> bars{};
-                std::size_t bar_count = 0;
+                std::array<minute_counts, bucket_capacity> counts_by_minute{};
+                std::size_t minute_count = 0;
                 std::int64_t current_minute = -1;
                 const auto first_minute =
                     static_cast<std::int64_t>(std::floor(now_minutes))
@@ -878,112 +917,105 @@ void draw_dashboard(const render_input& input) {
                     if (minute < first_minute)
                         continue;
                     if (minute != current_minute) {
-                        if (bar_count == bars.size())
+                        if (minute_count == counts_by_minute.size())
                             break;
-                        bars[bar_count] = minute_bar{};
-                        bars[bar_count].minute = minute;
+                        counts_by_minute[minute_count] = minute_counts{};
+                        counts_by_minute[minute_count].minute = minute;
                         current_minute = minute;
-                        ++bar_count;
+                        ++minute_count;
                     }
-                    auto& bar = bars[bar_count - 1];
-                    bar.ready = sample.ready;
-                    bar.not_ready = sample.not_ready;
-                    bar.unreachable = sample.unreachable;
-                    bar.unknown = sample.unknown;
+                    auto& counts = counts_by_minute[minute_count - 1];
+                    counts.ready = sample.ready;
+                    counts.not_ready = sample.not_ready;
+                    counts.unreachable = sample.unreachable;
+                    counts.unknown = sample.unknown;
                 }
 
                 /*
-                 * A bar is a bar and not a band: the slot a bar occupies is one
-                 * minute of x and the bar fills only most of it, so the gap
-                 * between neighbours is part of the arithmetic rather than an
-                 * accident of the width, and a minute with no sample is simply
-                 * absent. The slot and the bar are fractions of the fixed
-                 * window, so a bar's pixel width does not move as polls arrive.
+                 * One point per minute and one line per state, not a stack.
+                 * Separate lines let a reader watch ready fall while
+                 * unreachable rises, which a stack hides by construction. The x
+                 * array is the whole window, so the state arrays line up with
+                 * the ticks, and a minute nobody polled carries a NaN in every
+                 * series rather than an x value that is simply absent, because
+                 * a line drawn straight across that minute would invent the
+                 * readings it skipped.
                  */
-                constexpr double slot_minutes = 1.0;
-                constexpr double bar_minutes = 0.8;
+                const auto last_minute =
+                    static_cast<std::int64_t>(std::floor(now_minutes));
+                const std::size_t point_count = last_minute >= first_minute
+                    ? static_cast<std::size_t>(last_minute - first_minute + 1)
+                    : 0;
 
                 std::array<double, bucket_capacity> xs{};
-                for (std::size_t index = 0; index < bar_count; ++index) {
+                std::array<double, bucket_capacity> ready_y{};
+                std::array<double, bucket_capacity> not_ready_y{};
+                std::array<double, bucket_capacity> unreachable_y{};
+                std::array<double, bucket_capacity> unknown_y{};
+
+                std::size_t minute_index = 0;
+                for (std::size_t index = 0; index < point_count; ++index) {
+                    const auto minute =
+                        first_minute + static_cast<std::int64_t>(index);
                     /*
-                     * Centred on its own minute, so a bar and the tick beneath
-                     * it agree about which minute the bar is.
+                     * Centred on its own minute, so a point and the tick
+                     * beneath it agree about which minute the point is.
                      */
-                    xs[index] = static_cast<double>(bars[index].minute)
-                        + slot_minutes / 2.0;
+                    xs[index] = static_cast<double>(minute) + 0.5;
+
+                    const bool sampled = minute_index < minute_count
+                        && counts_by_minute[minute_index].minute == minute;
+                    if (sampled) {
+                        const auto& counts = counts_by_minute[minute_index];
+                        ready_y[index] = static_cast<double>(counts.ready);
+                        not_ready_y[index] =
+                            static_cast<double>(counts.not_ready);
+                        unreachable_y[index] =
+                            static_cast<double>(counts.unreachable);
+                        unknown_y[index] = static_cast<double>(counts.unknown);
+                        ++minute_index;
+                        continue;
+                    }
+
+                    /*
+                     * Nothing was polled this minute, so every line breaks
+                     * here. A zero would be a reading and a join would be an
+                     * invented one; a NaN is neither.
+                     */
+                    ready_y[index] = std::nan("");
+                    not_ready_y[index] = std::nan("");
+                    unreachable_y[index] = std::nan("");
+                    unknown_y[index] = std::nan("");
                 }
 
-                const auto state_count = [](const minute_bar& bar,
-                                             estate_state state) -> std::int32_t {
-                    switch (state) {
-                    case estate_state::ready:
-                        return bar.ready;
-                    case estate_state::not_ready:
-                        return bar.not_ready;
-                    case estate_state::unreachable:
-                        return bar.unreachable;
-                    case estate_state::unknown:
-                        return bar.unknown;
-                    }
-                    return 0;
-                };
-                const auto state_top = [](const minute_bar& bar,
-                                           estate_state state) -> std::int32_t {
-                    switch (state) {
-                    case estate_state::ready:
-                        return bar.ready;
-                    case estate_state::not_ready:
-                        return bar.ready + bar.not_ready;
-                    case estate_state::unreachable:
-                        return bar.ready + bar.not_ready + bar.unreachable;
-                    case estate_state::unknown:
-                        return bar.ready + bar.not_ready + bar.unreachable
-                            + bar.unknown;
-                    }
-                    return 0;
-                };
+                if (point_count > 0) {
+                    const auto line = [&](estate_state state,
+                                          const std::array<double,
+                                              bucket_capacity>& values) {
+                        const ImVec4 colour = state_colour(state);
+                        const ImPlotSpec spec(ImPlotProp_LineColor, colour);
+                        /*
+                         * ImPlot's own line rasteriser joins the minute points,
+                         * and it stops at a NaN. ImPlotLineFlags_SkipNaN is
+                         * deliberately not set, because skipping the NaN would
+                         * join the line across the gap and draw the readings
+                         * that were never taken.
+                         */
+                        ImPlot::PlotLine(state_label(state), xs.data(),
+                            values.data(), static_cast<int>(point_count),
+                            spec);
+                    };
 
-                /*
-                 * Drawn from the top of the stack down, because ImPlot paints
-                 * each item over the ones before it, so the colour at the bottom
-                 * of a bar is the last one painted and stays visible. A state is
-                 * given a bar only where it actually has instances, so a state
-                 * with a zero count leaves no segment behind for a border to
-                 * turn into a bar of its own.
-                 */
-                constexpr estate_state draw_order[] = {
-                    estate_state::unknown,
-                    estate_state::unreachable,
-                    estate_state::not_ready,
-                    estate_state::ready,
-                };
-
-                std::array<double, bucket_capacity> segment_xs{};
-                std::array<double, bucket_capacity> segment_tops{};
-                for (const auto state : draw_order) {
-                    std::size_t segments = 0;
-                    for (std::size_t index = 0; index < bar_count; ++index) {
-                        if (state_count(bars[index], state) == 0)
-                            continue;
-                        segment_xs[segments] = xs[index];
-                        segment_tops[segments] =
-                            static_cast<double>(state_top(bars[index], state));
-                        ++segments;
-                    }
-                    if (segments == 0)
-                        continue;
-
-                    const ImVec4 colour = state_colour(state);
-                    const ImPlotSpec spec(ImPlotProp_FillColor, colour,
-                        ImPlotProp_LineColor, colour);
-                    ImPlot::PlotBars(state_label(state), segment_xs.data(),
-                        segment_tops.data(), static_cast<int>(segments),
-                        bar_minutes, spec);
+                    line(estate_state::ready, ready_y);
+                    line(estate_state::not_ready, not_ready_y);
+                    line(estate_state::unreachable, unreachable_y);
+                    line(estate_state::unknown, unknown_y);
                 }
             }
 
             ImPlot::EndPlot();
         }
+        ImPlot::PopStyleVar();
     }
     ImGui::EndChild();
 }
