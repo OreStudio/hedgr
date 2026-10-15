@@ -1,1 +1,83 @@
-Test
+#+title: Hedgr
+#+description: A remote ImGui client for OreStudio.
+
+Hedgr is a desktop client for OreStudio over NATS. It holds many instances at
+once, each with its own identities and sessions, and draws each session's work
+in its own floating window.
+
+* Layout
+
+Hedgr follows the OreStudio component conventions. Each component is a
+single-module component: a CMake root that adds =src=, =tests= and =modeling=,
+with =include/<component>/= holding one folder per facet.
+
+| Component         | Holds                                                       |
+|-------------------+-------------------------------------------------------------|
+| =hedgr.model=     | Value types, live state tables, commands and events.        |
+| =hedgr.store=     | The SQLite schema and its repositories.                     |
+| =hedgr.session=   | The blocking NATS transport and the IAM login round trip.   |
+| =hedgr.runtime=   | The thread pool, the session workers and the state owner.   |
+| =hedgr.ui=        | ImGui and ImPlot rendering, icons and theme.                |
+| =hedgr.imgui=     | The executable: the GLFW window, the frame loop, the wiring. |
+
+Dependencies run one way only. =hedgr.model= depends on nothing else in Hedgr,
+and =hedgr.ui= does not depend on =hedgr.runtime=: the interface reads the state
+tables and pushes commands, and the runtime applies them.
+
+* Where the reasoning lives
+
+- =CONTEXT.md= is the glossary. Read it before naming anything.
+- =docs/adr/= holds the decisions that were hard to reverse, with the
+  alternatives that lost.
+
+* Building
+
+Hedgr consumes a pre-built OreStudio: its headers come from the OreStudio
+source tree and its shared libraries from an OreStudio build output.
+
+#+begin_src sh
+build/scripts/build.sh                    # configure and build everything
+build/scripts/build-target.sh hedgr.ui.lib  # one target, no reconfigure
+#+end_src
+
+The release build lands in =build/output/linux-clang-release/publish/=.
+
+* Running
+
+The environment supplies the connection settings; Hedgr reads the =ORES_HEDGR_*=
+variables and never persists a credential. It starts fullscreen; F11 toggles.
+
+#+begin_src sh
+build/scripts/run.sh
+#+end_src
+
+On a machine with no GPU, EGL cannot create a screen and the window never
+appears. Force software rendering for a run on such a host:
+
+#+begin_src sh
+LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe build/scripts/run.sh
+#+end_src
+
+To check a change without a person watching, ask for one frame; the process
+writes frame eight and leaves.
+
+#+begin_src sh
+HEDGR_CAPTURE=$PWD/.cache/verify/frame.ppm build/scripts/run.sh
+#+end_src
+
+* Adding a window kind
+
+Three places, and the compiler checks two of them:
+
+1. a new alternative in =model::domain::window_state= and a new enumerator in
+   =model::domain::window_kind=;
+2. a renderer in the table in =hedgr.ui/src/render/renderer.cpp=, which is a
+   =constexpr std::array= indexed by kind, so a missing entry fails to compile;
+3. an entry in the Instance Manager's open-window action.
+
+* Tests
+
+#+begin_src sh
+build/scripts/build-target.sh hedgr.model.tests
+build/output/linux-clang-release/publish/bin/hedgr.model.tests
+#+end_src

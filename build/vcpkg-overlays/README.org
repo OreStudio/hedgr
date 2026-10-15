@@ -1,0 +1,28 @@
+# -*- mode: org; tab-width: 4; indent-tabs-mode: nil -*-
+#+TITLE: Hedgr vcpkg overlay ports
+
+Overlay ports owned by Hedgr, passed to vcpkg through
+~VCPKG_OVERLAY_PORTS~.
+
+* glew
+
+A copy of the stock ~glew~ port with two changes:
+
+1. ~-DGLEW_EGL=ON~ is added to the CMake options. Upstream builds GLEW for
+   GLX only by default, which cannot initialise on the EGL context GLFW
+   creates under Wayland (~glewInit()~ then fails or crashes). Enabling EGL
+   adds the ~eglew~ support alongside the GLX support, so one build works on
+   both backends.
+2. ~vcpkg_fixup_pkgconfig()~ is removed from ~portfile.cmake~.
+
+The stock port's pkg-config fixup runs ~pkg-config --exists glew~, and the
+generated ~glew.pc~ declares ~Requires.private: glu~. On a host without
+~libglu1-mesa-dev~ there is no ~glu.pc~, so the check fails and the port
+cannot build. The GLU dependency is not real: the stock port already patches
+~GL/glew.h~ to disable ~GLEW_NO_GLU~, so nothing in the built library needs
+GLU. Dropping the fixup lets the port build; the only consequence is that the
+absolute paths baked into the shipped ~glew.pc~ are left alone, which does not
+affect Hedgr (it consumes the CMake config, not pkg-config).
+
+Both changes can be dropped once the host has ~libglu1-mesa-dev~ and once
+Wayland is no longer a target.

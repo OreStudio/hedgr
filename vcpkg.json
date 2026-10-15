@@ -12,7 +12,12 @@
             ]
         },
         "implot",
-        "glfw3",
+        {
+            "name": "glfw3",
+            "features": [
+                "wayland"
+            ]
+        },
         "glew",
         "openssl",
         "boost-log",
@@ -25,7 +30,16 @@
         "boost-process",
         "boost-program-options",
         "magic-enum",
-        "reflectcpp",
-        "stb"
+        {
+            "name": "reflectcpp",
+            "features": [
+                "xml",
+                "msgpack"
+            ]
+        },
+        "jwt-cpp",
+        "stb",
+        "sqlite3",
+        "catch2"
     ]
 }

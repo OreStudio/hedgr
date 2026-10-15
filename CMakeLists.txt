@@ -20,12 +20,36 @@ cmake_minimum_required(VERSION 3.28 FATAL_ERROR)
 #
 # vcpkg
 #
+# Hedgr owns its own vcpkg checkout. It deliberately does not reuse the copy
+# vendored inside the OreStudio submodule: the two projects have different
+# dependency sets and must be able to move their pins independently.
+#
 set(CMAKE_TOOLCHAIN_FILE
-    ${CMAKE_CURRENT_SOURCE_DIR}/external/OreStudio/vcpkg/scripts/buildsystems/vcpkg.cmake
+    ${CMAKE_CURRENT_SOURCE_DIR}/external/vcpkg/scripts/buildsystems/vcpkg.cmake
     CACHE STRING "Vcpkg toolchain file")
+
+#
+# vcpkg overlay ports owned by Hedgr. These are stock ports with the minimal
+# change needed to build on a machine that lacks the corresponding system
+# development package; see build/vcpkg-overlays/README.org.
+#
+set(VCPKG_OVERLAY_PORTS
+    ${CMAKE_CURRENT_SOURCE_DIR}/build/vcpkg-overlays
+    CACHE STRING "vcpkg overlay ports owned by Hedgr")
 
 # Log CMake version. Useful for debugging CMake problems.
 message(STATUS "CMake Version: ${CMAKE_VERSION}")
+
+#
+# C++ standard. OreStudio's public headers require C++23 (std::expected,
+# std::unreachable), so we default to it when no preset or command line has
+# stated a standard.
+#
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+    set(CMAKE_CXX_STANDARD 23)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+endif()
 
 project(Hedgr VERSION 0.0.1 LANGUAGES CXX
     DESCRIPTION "Remote ImGui/ImPlot client for OreStudio.")
@@ -114,12 +138,24 @@ find_package(Boost REQUIRED COMPONENTS
 # OpenSSL
 find_package(OpenSSL REQUIRED)
 
+# Third-party headers pulled in by OreStudio's public headers
+find_package(reflectcpp CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
+find_package(jwt-cpp CONFIG REQUIRED)
+
 # ImGui
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)
+
+# Embedded store and tests
+find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(Catch2 CONFIG REQUIRED)
+
+# Tests are registered with CTest in every component's tests/ directory.
+enable_testing()
 
 #
 # OreStudio (pre-built)

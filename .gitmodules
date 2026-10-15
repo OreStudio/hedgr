@@ -1,3 +1,6 @@
 [submodule "external/OreStudio"]
 	path = external/OreStudio
 	url = git@github.com:OreStudio/OreStudio.git
+[submodule "external/vcpkg"]
+	path = external/vcpkg
+	url = https://github.com/microsoft/vcpkg.git

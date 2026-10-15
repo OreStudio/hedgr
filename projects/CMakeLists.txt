@@ -31,4 +31,11 @@ add_compile_options(
 #
 # Projects
 #
+# Each is a single-module component: cmake root, include/, src/, tests/ and
+# modeling/ directly under the component. Dependencies run one way only.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.model)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.store)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.session)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.runtime)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.ui)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/hedgr.imgui)

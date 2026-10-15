@@ -14,6 +14,7 @@ Thumbs.db
 
 # build directory
 build/output
+build/*.log
 
 # .Net ignores
 packages
@@ -34,6 +35,9 @@ compile_commands.json
 
 # vcpkg
 vcpkg_installed
+
+# ImGui runtime state
+imgui.ini
 
 # Qt Designer
 CMakeLists.txt.user
