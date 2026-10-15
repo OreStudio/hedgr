@@ -21,6 +21,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
@@ -243,6 +244,18 @@ struct environment final {
     /** @brief @c ORES_NATS_WIRE_FORMAT, or @c msgpack when it says nothing. */
     std::string wire_format = "msgpack";
 
+    /**
+     * @brief The deployment's TLS material, as its own @c .env names it.
+     *
+     * Read here so that the seeded row carries it: the paths are what makes a
+     * store created on this host open a session on it with nothing further to
+     * fill in, and they are the deployment's own answer rather than one this
+     * process had to be told twice.
+     */
+    std::string tls_ca;
+    std::string tls_cert;
+    std::string tls_key;
+
     /** @brief @c ORES_ENV_TYPE: the tier, e.g. @c development. */
     std::string type;
 };
@@ -354,6 +367,9 @@ struct environment final {
 
     result.nats_url = lookup("ORES_NATS_URL");
     result.subject_prefix = lookup("ORES_NATS_SUBJECT_PREFIX");
+    result.tls_ca = lookup("ORES_NATS_TLS_CA");
+    result.tls_cert = lookup("ORES_NATS_TLS_CERT");
+    result.tls_key = lookup("ORES_NATS_TLS_KEY");
     result.type = lookup("ORES_ENV_TYPE");
     if (const auto wire_format = lookup("ORES_NATS_WIRE_FORMAT");
         !wire_format.empty())
@@ -635,10 +651,10 @@ instance_manager::start(const std::filesystem::path& database_path,
                                      : model::domain::store_lock::absent;
 
     /*
-     * The seed carries what is the same for every instance -- the TLS material
-     * and the timeouts -- because those are process-wide settings rather than
-     * per-instance columns. It is kept, not just read, because a session opened
-     * an hour from now must be built from the same material.
+     * The seed carries what is the same for every instance -- the timeouts, and
+     * the TLS material of an instance that has none of its own. It is kept, not
+     * just read, because a session opened an hour from now must fall back to
+     * the same material it would have been built from now.
      */
     seed_options_ = seed;
 
@@ -777,6 +793,16 @@ void instance_manager::seed_first_run() {
         row.nats_url = seed_options_.nats_url;
         row.subject_prefix = seed_options_.subject_prefix;
         row.wire_format = seed_options_.wire_format;
+        /*
+         * The material this process was started with is written into the row
+         * rather than left to the fallback it would have reached anyway. The
+         * store is the thing that has to keep working, and a path recorded once
+         * is a path the operator can see, correct and copy to the next host;
+         * one that only ever existed in this process's environment is not.
+         */
+        row.tls_ca = seed_options_.tls_ca;
+        row.tls_cert = seed_options_.tls_cert;
+        row.tls_key = seed_options_.tls_key;
         row.folder_id = std::string{domain::instances_root_id};
         row.created_at = iso8601_now();
 
@@ -812,6 +838,15 @@ void instance_manager::seed_first_run() {
         row.nats_url = environment.nats_url;
         row.subject_prefix = environment.subject_prefix;
         row.wire_format = environment.wire_format;
+        /*
+         * The checkout's own certificates, because they are what its broker
+         * expects and what the operator has already provisioned there. A store
+         * created on this host therefore works on this host with nothing typed
+         * in, which is the whole point of seeding from the environment at all.
+         */
+        row.tls_ca = environment.tls_ca;
+        row.tls_cert = environment.tls_cert;
+        row.tls_key = environment.tls_key;
         row.folder_id = folder_id;
         row.created_at = iso8601_now();
 
@@ -1839,21 +1874,8 @@ void instance_manager::start_session_for(const command::command& cmd,
         handle = sessions_.insert(cmd.instance_id, cmd.account_id);
     sessions_.set_status(*handle, domain::session_status::connecting);
 
-    transport::session_options options;
-    options.nats_url = instance_row->nats_url;
-    options.subject_prefix = instance_row->subject_prefix;
-    options.wire_format = instance_row->wire_format;
-
-    /*
-     * The TLS material and the timeouts come from the seed the process was
-     * started with: they describe this machine's client, not the deployment,
-     * so they are not columns on an instance row.
-     */
-    options.tls_ca = seed_options_.tls_ca;
-    options.tls_cert = seed_options_.tls_cert;
-    options.tls_key = seed_options_.tls_key;
-    options.request_timeout = seed_options_.request_timeout;
-    options.connect_timeout = seed_options_.connect_timeout;
+    transport::session_options options =
+        connection_options_for(*instance_row, seed_options_, database_->path());
 
     worker::session_job job;
     job.options = std::move(options);
@@ -2328,20 +2350,15 @@ void instance_manager::pump_probes() {
 
 void instance_manager::spawn_probe_for(const domain::instance& row) {
     /*
-     * Built the way a session builds its own options, from the same seed. The
-     * probe is not a session and does not become one by sharing this: what it
-     * shares is the description of how to reach the deployment, and the client
-     * that uses it is its own.
+     * Built by the same call a session builds its own options with, because a
+     * probe asks exactly the question a session asks first -- can this client
+     * reach this deployment -- and an instance whose certificate path is wrong
+     * is unreachable from here for the same reason it is unreachable there.
+     * The probe is still not a session: what it borrows is the description of
+     * how to reach the deployment, and the client that uses it is its own.
      */
-    transport::session_options options;
-    options.nats_url = row.nats_url;
-    options.subject_prefix = row.subject_prefix;
-    options.wire_format = row.wire_format;
-    options.tls_ca = seed_options_.tls_ca;
-    options.tls_cert = seed_options_.tls_cert;
-    options.tls_key = seed_options_.tls_key;
-    options.request_timeout = seed_options_.request_timeout;
-    options.connect_timeout = seed_options_.connect_timeout;
+    transport::session_options options =
+        connection_options_for(row, seed_options_, database_->path());
 
     worker::probe_job job;
     job.options = std::move(options);
@@ -2409,12 +2426,11 @@ void instance_manager::apply_probe_result(const event::event& ev) {
 
 void instance_manager::fetch_password_policy() {
     /*
-     * Built the way a probe builds its own options, and from the same seed: an
-     * instance row carries what differs between deployments, but there is no
-     * row to read at the moment the create prompt is drawn, because the store
-     * is still shut. The deployment the process was pointed at is therefore
-     * the only one that can be asked, and it is the right one to ask: a first
-     * run seeds its single instance from exactly this description.
+     * The one place that builds options from the seed alone, because there is
+     * no row to read: the create prompt is drawn while the store is still shut,
+     * so the deployment the process was pointed at is the only one that can be
+     * asked. It is the right one to ask, since a first run seeds its single
+     * instance from exactly this description.
      */
     transport::session_options options;
     options.nats_url = seed_options_.nats_url;

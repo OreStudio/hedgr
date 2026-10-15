@@ -54,6 +54,10 @@ namespace hedgr::store::repository {
  *
  * @c name is unique in the store, so an operator cannot hold two rows for the
  * same deployment under different labels.
+ *
+ * The three TLS columns hold file paths and never certificate or key material,
+ * which is what keeps the one secret of the trio on the filesystem where its
+ * permissions apply rather than in a file the operator copies between hosts.
  */
 struct instance_entity final {
     /** @brief The table this struct describes. */
@@ -65,6 +69,9 @@ struct instance_entity final {
     std::string subject_prefix;
     std::string wire_format;
     std::string folder_id;
+    std::string tls_ca;
+    std::string tls_cert;
+    std::string tls_key;
     std::string created_at;
 };
 

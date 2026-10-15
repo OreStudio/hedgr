@@ -809,6 +809,67 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     manager.stop();
 }
 
+TEST_CASE("an instance whose certificate cannot be opened names the file",
+    "[runtime]") {
+    const temporary_database database("tls-file");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    /*
+     * A relative path, so this covers the whole line rather than one link of
+     * it: the row stores what the operator typed, the runtime resolves it
+     * against the store's folder, and the transport reports the file it could
+     * not open. Asserting on the resolved path is what proves the middle step
+     * happened -- a bare "keys/nats/ca.crt" would also match an unresolved
+     * pass-through.
+     */
+    const auto resolved =
+        database.path().parent_path() / "keys/nats/ca.crt";
+
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance("inst-tls", "Wrong path", "ores.test.tls");
+    save.instance_row.tls_ca = "keys/nats/ca.crt";
+    save.instance_id = save.instance_row.id;
+    push_command(manager, save);
+
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-tls", "inst-tls");
+    push_command(manager, save_account);
+
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = "inst-tls";
+    connect.account_id = "ident-tls";
+    connect.principal = "alice@example.test";
+    connect.password = "not-a-real-secret";
+    push_command(manager, connect);
+
+    const auto settled = wait_until([&manager] {
+        manager.pump();
+        const auto handle = manager.sessions().find("inst-tls", "ident-tls");
+        return handle
+            && manager.sessions().status(*handle) == session_status::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(settled);
+
+    const auto handle = manager.sessions().find("inst-tls", "ident-tls");
+    REQUIRE(handle.has_value());
+    const auto& reported = manager.sessions().last_error(*handle);
+
+    /*
+     * A sentence naming the file, not "the instance is not reachable": a
+     * mistyped path and a broker that is down look identical otherwise, and
+     * they need very different fixes.
+     */
+    REQUIRE(reported.contains(resolved.string()));
+    REQUIRE_FALSE(reported.contains("not reachable"));
+
+    manager.stop();
+}
+
 /*
  * The probe tests below use exactly one kind of unreachable deployment: a port
  * nothing listens on. A probe of a live broker is not tested here on purpose.
@@ -819,7 +880,6 @@ TEST_CASE("a session_failed event records the sentence a person reads",
  * daemon in it: the translation of a refused connect, the isolation from the
  * session table, and the schedule the answer feeds.
  */
-
 TEST_CASE("a probe against a refused port reports unreachable", "[runtime]") {
     const temporary_database database("probe-unreachable");
 

@@ -38,6 +38,12 @@ namespace hedgr::model::domain {
  * carries no labels of its own: a label is an entity attached by a
  * @c labelling junction, so a free-text field here would be a second way to say
  * the same thing.
+ *
+ * The TLS paths are the exception to "an instance is the deployment": a client
+ * certificate identifies the caller rather than the thing called, and it is
+ * here because a Hedgr process holds instances on several deployments and each
+ * of those deployments may want a different caller. See @c tls_ca for what an
+ * empty path means.
  */
 struct instance final {
     /** @brief Stable key, unique in the local store. */
@@ -65,6 +71,30 @@ struct instance final {
 
     /** @brief Wire format of the deployment's messages. */
     std::string wire_format = "msgpack";
+
+    /**
+     * @brief Path to the CA certificate this deployment is trusted through.
+     *
+     * The material is the instance's own, because two instances on two
+     * deployments are two different client identities and one machine-wide set
+     * cannot be both. A path rather than the certificate itself: the private
+     * key stays a file with file permissions and never enters the store, and a
+     * file the operator can rotate by hand is what an administrator already
+     * expects to manage.
+     *
+     * An empty path means "fall back to what the environment supplied", which
+     * is what keeps a row written before this field existed working and leaves
+     * an operator who never fills the form in seeing no change. The fallback is
+     * per path, and an empty CA is still what turns TLS off for this instance,
+     * because the CA is the switch rather than the whole triple.
+     */
+    std::string tls_ca;
+
+    /** @brief Path to this client's certificate; empty falls back. */
+    std::string tls_cert;
+
+    /** @brief Path to this client's private key; empty falls back. */
+    std::string tls_key;
 
     /** @brief ISO-8601 creation timestamp. Read only when shown. */
     std::string created_at;

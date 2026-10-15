@@ -491,9 +491,11 @@ private:
      * @brief The options the process was seeded with.
      *
      * An instance row carries what differs between deployments: the address,
-     * the prefix and the wire format. The TLS material and the timeouts
-     * describe this machine's client instead, so they live here and every
-     * session is built from them.
+     * the prefix, the wire format, and the TLS material when the operator has
+     * given that instance its own. This is the fallback for every path a row
+     * leaves empty, and the whole answer for the one read that has no row to
+     * look at -- the password policy, which is asked before the store is open.
+     * The timeouts describe this machine's client and come from here alone.
      */
     session::transport::session_options seed_options_;
 

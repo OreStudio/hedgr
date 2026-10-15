@@ -33,8 +33,8 @@
 #include "hedgr.ui/widget/panels.hpp"
 #include "imgui.h"
 #include <algorithm>
-#include <cstdio>
 #include <cstdint>
+#include <cstdio>
 #include <format>
 #include <string>
 #include <string_view>
@@ -268,6 +268,9 @@ void load_draft(window_ui_state& state, const instance* row) {
     state.draft_port.fill('\0');
     state.draft_subject.fill('\0');
     state.draft_wire_format.fill('\0');
+    state.draft_tls_ca.fill('\0');
+    state.draft_tls_cert.fill('\0');
+    state.draft_tls_key.fill('\0');
     set_buffer(state.draft_wire_format, "msgpack");
 
     if (row == nullptr)
@@ -279,6 +282,9 @@ void load_draft(window_ui_state& state, const instance* row) {
     set_buffer(state.draft_port, address.port);
     set_buffer(state.draft_subject, row->subject_prefix);
     set_buffer(state.draft_wire_format, row->wire_format);
+    set_buffer(state.draft_tls_ca, row->tls_ca);
+    set_buffer(state.draft_tls_cert, row->tls_cert);
+    set_buffer(state.draft_tls_key, row->tls_key);
 }
 
 /** @brief Pushes a save for one instance and the labels it should carry. */
@@ -305,6 +311,9 @@ void save_instance(const render_input& input, window_ui_state& state) {
     row.name = name;
     row.subject_prefix = buffer_text(state.draft_subject);
     row.wire_format = buffer_text(state.draft_wire_format);
+    row.tls_ca = buffer_text(state.draft_tls_ca);
+    row.tls_cert = buffer_text(state.draft_tls_cert);
+    row.tls_key = buffer_text(state.draft_tls_key);
     row.folder_id = state.browser.form_folder;
 
     /*
@@ -339,7 +348,7 @@ void draw_form(const render_input& input, window_ui_state& state) {
      * other dialog here. A modal whose layout can move invites a size that
      * hides its own controls, and one that scrolls hides its own validation.
      */
-    const ImVec2 size(460.0f, 340.0f);
+    const ImVec2 size(460.0f, 560.0f);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
@@ -409,17 +418,41 @@ void draw_form(const render_input& input, window_ui_state& state) {
         "created.");
 
     /*
-     * The TLS material is deliberately not a field here. Certificates and keys
-     * describe this client rather than the deployment, so the runtime builds
-     * every session from the material the process was started with; see
-     * @c session_options. A form that collected paths per instance would imply
-     * a per-instance certificate, which is a different design and not this one.
+     * The instance's own TLS material. It is per instance because a client
+     * certificate says who is calling rather than what is called, and one Hedgr
+     * process holds instances on several deployments, each of which may want a
+     * different caller. A path and not the certificate: the private key stays a
+     * file with file permissions and never enters the store.
+     *
+     * An empty field is not an error and is not "no TLS". It means this
+     * instance says nothing and the machine's environment answers instead,
+     * which is what keeps a row that predates these fields working.
      */
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##instance-tls-ca", "CA certificate (optional)",
+        state.draft_tls_ca.data(), state.draft_tls_ca.size());
+    ImGui::SetItemTooltip("%s",
+        "The certificate authority this deployment is trusted through. Empty "
+        "means the environment's CA, and an empty CA is what turns TLS off.");
+
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##instance-tls-cert", "client certificate (optional)",
+        state.draft_tls_cert.data(), state.draft_tls_cert.size());
+    ImGui::SetItemTooltip("%s", "The certificate this client presents. Empty means "
+        "the environment's certificate.");
+
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::InputTextWithHint("##instance-tls-key", "client key (optional)",
+        state.draft_tls_key.data(), state.draft_tls_key.size());
+    ImGui::SetItemTooltip("%s", "The private key for that certificate. Empty means "
+        "the environment's key.");
+
     ImGui::PushStyleColor(ImGuiCol_Text,
         ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     ImGui::TextWrapped(
-        "TLS material comes from this machine's environment, not from the "
-        "instance: the certificate identifies the client.");
+        "A relative path is resolved against the folder holding the store, so a "
+        "store copied to another host with its keys beside it keeps working. An "
+        "empty field falls back to the environment.");
     ImGui::PopStyleColor();
 
     const bool complete = !buffer_text(state.draft_name).empty()
@@ -476,9 +509,16 @@ void open_create_form(window_ui_state& window, std::string_view parent) {
 
 /** @brief Opens the form on an instance, or on a blank copy of one. */
 void open_edit_form(const render_input& input, window_ui_state& window,
-    std::string_view leaf_id, bool duplicating) {
+    std::string leaf_id, bool duplicating) {
+    /*
+     * The id is taken by value rather than as a view, because one caller names
+     * the row with the very buffer this assigns to: a view into
+     * @c window.browser.form_leaf would dangle the moment the assignment below
+     * released that string, and the lookup would then read freed memory and
+     * report that the row does not exist.
+     */
     window.browser.form = widget::form_kind::leaf;
-    window.browser.form_leaf = duplicating ? std::string{} : std::string{leaf_id};
+    window.browser.form_leaf = duplicating ? std::string{} : leaf_id;
     window.browser.form_duplicating = duplicating;
 
     const auto handle = input.instances.find(leaf_id);
@@ -780,6 +820,14 @@ std::string pending_capture_folder;
 /** @brief Whether a capture asked for the dashboard to be open. */
 bool capture_dashboard_open = false;
 
+/**
+ * @brief The instance row a capture asked to see the form for, on the next draw.
+ *
+ * Empty in every ordinary run, and cleared the first time the window draws, so
+ * it can open a form once and never again.
+ */
+std::string pending_capture_edit_instance;
+
 }
 
 void select_folder_for_capture(std::string_view folder_id) {
@@ -788,6 +836,10 @@ void select_folder_for_capture(std::string_view folder_id) {
 
 void open_dashboard_for_capture() {
     capture_dashboard_open = true;
+}
+
+void open_instance_form_for_capture(std::string_view instance_id) {
+    pending_capture_edit_instance = std::string{instance_id};
 }
 
 namespace {
@@ -1010,6 +1062,18 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         state.panel_open = true;
         capture_dashboard_open = false;
         ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+    }
+    if (!pending_capture_edit_instance.empty()) {
+        /*
+         * The same scratch a click on the row's edit icon writes, and no more:
+         * the fill below then loads the row into the fields, which is what
+         * makes the captured form the one an operator would see.
+         */
+        state.browser.form = widget::form_kind::leaf;
+        state.browser.form_leaf = pending_capture_edit_instance;
+        state.browser.form_duplicating = false;
+        state.draft_name.fill('\0');
+        pending_capture_edit_instance.clear();
     }
 
     /*

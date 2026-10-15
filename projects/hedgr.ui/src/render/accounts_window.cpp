@@ -239,9 +239,16 @@ void open_create_form(window_ui_state& window, std::string_view parent) {
 
 /** @brief Opens the form on an account, or on a blank copy of one. */
 void open_edit_form(const render_input& input, window_ui_state& window,
-    std::string_view leaf_id, bool duplicating) {
+    std::string leaf_id, bool duplicating) {
+    /*
+     * The id is taken by value rather than as a view, because one caller names
+     * the row with the very buffer this assigns to: a view into
+     * @c window.browser.form_leaf would dangle the moment the assignment below
+     * released that string, and the lookup would then read freed memory and
+     * report that the row does not exist.
+     */
     window.browser.form = widget::form_kind::leaf;
-    window.browser.form_leaf = duplicating ? std::string{} : std::string{leaf_id};
+    window.browser.form_leaf = duplicating ? std::string{} : leaf_id;
     window.browser.form_duplicating = duplicating;
 
     const auto handle = input.accounts.find(leaf_id);

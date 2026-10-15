@@ -107,6 +107,15 @@ struct window_ui_state final {
     std::array<char, 16> draft_port{};
     std::array<char, 128> draft_subject{};
     std::array<char, 64> draft_wire_format{};
+
+    /*
+     * The three TLS paths, wider than the others because a path is longer than
+     * a name or an address and an operator who cannot see the whole of what
+     * they typed cannot check it.
+     */
+    std::array<char, 256> draft_tls_ca{};
+    std::array<char, 256> draft_tls_cert{};
+    std::array<char, 256> draft_tls_key{};
 };
 
 /**

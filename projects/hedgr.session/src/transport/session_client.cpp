@@ -19,7 +19,11 @@
  */
 #include "hedgr.session/transport/session_client.hpp"
 
+#include <array>
+#include <filesystem>
 #include <format>
+#include <fstream>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -37,6 +41,7 @@ namespace {
 using hedgr::session::transport::fail;
 using hedgr::session::transport::session_errc;
 using hedgr::session::transport::session_error;
+using hedgr::session::transport::session_options;
 using hedgr::session::transport::translate_connect_error;
 
 /**
@@ -109,6 +114,50 @@ anonymous_read(const hedgr::session::transport::session_client& session,
 }
 
 /**
+ * @brief The failure to report when a TLS file the options name cannot be read.
+ *
+ * A mistyped path and an unreachable broker both end as a connection that never
+ * opened, and the wrapped client reports them the same way, so neither the
+ * reader nor this component could tell which of the two had happened -- and the
+ * two need very different fixes. Opening each file here, before the client is
+ * handed it, turns one of them into a sentence that names the file.
+ *
+ * Only the files the options actually name are checked, and only when TLS is
+ * on: a certificate beside no CA is ignored by @c uses_tls, and reporting it as
+ * missing would be complaining about a file that would not have been read.
+ */
+[[nodiscard]] std::optional<session_error>
+unreadable_tls_file(const session_options& options) {
+    if (!options.uses_tls())
+        return std::nullopt;
+
+    const std::array<std::pair<std::string_view, std::string_view>, 3> files{{
+        {"CA certificate", options.tls_ca},
+        {"client certificate", options.tls_cert},
+        {"client key", options.tls_key},
+    }};
+
+    for (const auto& [role, path] : files) {
+        if (path.empty())
+            continue;
+        std::ifstream input{std::filesystem::path{path}};
+        if (input)
+            continue;
+
+        return session_error{
+            .code = session_errc::tls_failed,
+            .message = std::format("the {} {} cannot be opened",
+                role, path),
+            .detail = std::format(
+                "the path named for the {} does not name a file that can be "
+                "opened for reading",
+                role),
+        };
+    }
+    return std::nullopt;
+}
+
+/**
  * @brief The failure to report when opening a connection fails.
  *
  * A connection that never opened is reported as unreachable when the wrapped
@@ -173,6 +222,14 @@ result<void> session_client::connect() {
     opts.subject_prefix = options_.subject_prefix;
     opts.format = *format;
     if (options_.uses_tls()) {
+        /*
+         * Checked before the client is given them, so that a path which names
+         * nothing is reported as the path it is rather than as a broker that
+         * did not answer.
+         */
+        if (auto unreadable = unreadable_tls_file(options_))
+            return std::unexpected(std::move(*unreadable));
+
         opts.tls_ca_cert = options_.tls_ca;
         opts.tls_client_cert = options_.tls_cert;
         opts.tls_client_key = options_.tls_key;

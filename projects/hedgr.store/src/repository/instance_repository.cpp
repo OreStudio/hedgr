@@ -51,6 +51,9 @@ dom::instance to_domain(const instance_entity& row) {
     value.subject_prefix = row.subject_prefix;
     value.wire_format = row.wire_format;
     value.folder_id = row.folder_id;
+    value.tls_ca = row.tls_ca;
+    value.tls_cert = row.tls_cert;
+    value.tls_key = row.tls_key;
     value.created_at = row.created_at;
     return value;
 }
@@ -64,6 +67,9 @@ instance_entity to_entity(const dom::instance& row) {
         .subject_prefix = row.subject_prefix,
         .wire_format = row.wire_format,
         .folder_id = row.folder_id,
+        .tls_ca = row.tls_ca,
+        .tls_cert = row.tls_cert,
+        .tls_key = row.tls_key,
         .created_at = row.created_at,
     };
 }

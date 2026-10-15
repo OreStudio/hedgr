@@ -170,6 +170,47 @@ TEST_CASE("an instance round-trips through save and list", "[store]") {
     REQUIRE(row.wire_format == "msgpack");
 }
 
+TEST_CASE("an instance's TLS paths round-trip, empty ones included", "[store]") {
+    auto db = fresh_store();
+    instance_repository repository(db);
+
+    /*
+     * Two rows in one case, because the empty spelling is a stored value and
+     * not an absent one: a row written before these columns existed reads back
+     * as three empty strings, and that is the state the runtime falls back to
+     * the environment on. A test that only saved paths would leave the
+     * fallback untested, and one that only saved empties would not notice the
+     * columns being dropped.
+     */
+    instance carrying = sample_instance();
+    carrying.tls_ca = "../../keys/nats/ca.crt";
+    carrying.tls_cert = "keys/nats/ores.shell.crt";
+    carrying.tls_key = "/home/operator/private/ores.shell.key";
+    REQUIRE(repository.save(carrying).has_value());
+
+    instance falling_back = sample_instance();
+    falling_back.id = "inst-2";
+    falling_back.name = "No material";
+    REQUIRE(repository.save(falling_back).has_value());
+
+    const auto rows = repository.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 2);
+
+    /* Ordered by name: "Local" before "No material". */
+    const auto& stored = rows.value().front();
+    REQUIRE(stored.id == "inst-1");
+    REQUIRE(stored.tls_ca == "../../keys/nats/ca.crt");
+    REQUIRE(stored.tls_cert == "keys/nats/ores.shell.crt");
+    REQUIRE(stored.tls_key == "/home/operator/private/ores.shell.key");
+
+    const auto& empty = rows.value().back();
+    REQUIRE(empty.id == "inst-2");
+    REQUIRE(empty.tls_ca.empty());
+    REQUIRE(empty.tls_cert.empty());
+    REQUIRE(empty.tls_key.empty());
+}
+
 TEST_CASE("saving the same id twice updates the row", "[store]") {
     auto db = fresh_store();
     instance_repository repository(db);

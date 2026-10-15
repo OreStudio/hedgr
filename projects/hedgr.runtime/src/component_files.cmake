@@ -9,6 +9,7 @@
 #
 set(files
     "async/executor.cpp"
+    "manager/connection_options.cpp"
     "manager/instance_manager.cpp"
     "worker/policy_worker.cpp"
     "worker/probe_worker.cpp"
@@ -21,6 +22,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/async/hedgr.runtime.async.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/export.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/hedgr.runtime.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/connection_options.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/hedgr.runtime.manager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/instance_manager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/hedgr.runtime.worker.hpp"

@@ -56,6 +56,16 @@ HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 HEDGR_UI_EXPORT void open_dashboard_for_capture();
 
 /**
+ * @brief Opens the instance form on one row, for a capture that has to show it.
+ *
+ * The form is otherwise reached by clicking a row's edit icon, and a capture is
+ * not a person. What this writes is that click's own scratch -- the form kind
+ * and the row it names -- so the fields are then filled from the row by the
+ * same code the click reaches.
+ */
+HEDGR_UI_EXPORT void open_instance_form_for_capture(std::string_view instance_id);
+
+/**
  * @brief The accounts of one instance, as a browser over that instance's tree.
  *
  * One window per instance, several open at once. It carries the sign-in action

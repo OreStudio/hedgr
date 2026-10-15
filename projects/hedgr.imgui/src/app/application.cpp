@@ -110,16 +110,19 @@ void application::run() {
         workspace_.unlock_with(cfg_.master_password);
 
     /*
-     * A capture can ask for one piece of interface scratch to be set, because
-     * some of what these windows show is reached by a click and a capture is
-     * not a person. The variables are read here and nowhere else, so nothing
-     * below this line knows whether it is being captured.
+     * A capture can ask for pieces of interface scratch to be set, because some
+     * of what these windows show is reached by a click and a capture is not a
+     * person. The variables are read here and nowhere else, so nothing below
+     * this line knows whether it is being captured.
      */
     if (const char* folder = std::getenv("HEDGR_CAPTURE_SELECT_FOLDER"))
         ui::render::select_folder_for_capture(folder);
     if (const char* dashboard = std::getenv("HEDGR_CAPTURE_SHOW_DASHBOARD");
         dashboard != nullptr && *dashboard != '\0')
         ui::render::open_dashboard_for_capture();
+    if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
+        editing != nullptr && *editing != '\0')
+        ui::render::open_instance_form_for_capture(editing);
     auto* window = initialise_graphics();
     if (window == nullptr) {
         BOOST_LOG_SEV(lg(), error) << "Failed to initialise graphics.";

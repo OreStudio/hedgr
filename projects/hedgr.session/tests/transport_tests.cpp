@@ -24,8 +24,9 @@
  * service, because that is the machine a developer runs them on and a green
  * suite that quietly depends on a daemon is worse than no suite. What is
  * testable without a server is the part that is worth pinning down anyway: the
- * subject arithmetic, the TLS switch, the state a fresh session reports, and
- * the translation of a transport failure into the sentence a person reads.
+ * subject arithmetic, the TLS switch, the state a fresh session reports, the
+ * sentence a person reads when a certificate cannot be opened, and the
+ * translation of a transport failure into the sentence a person reads.
  * The round trips themselves are covered by the running application against a
  * real deployment.
  */
@@ -34,8 +35,13 @@
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <catch2/catch_all.hpp>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <random>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include "ores.nats/service/nats_connect_error.hpp"
 
 using hedgr::session::transport::make_subject;
@@ -54,6 +60,44 @@ namespace {
         .nats_url = "nats://localhost:20405",
         .subject_prefix = prefix};
 }
+
+/**
+ * @brief A file that exists for the length of one case and then removes itself.
+ *
+ * The TLS check only asks whether a path can be opened, so a test that needs a
+ * readable CA needs a real file and nothing in it. The name carries a per-run
+ * token, so a file left behind by a killed run can never be picked up by the
+ * next one.
+ */
+class scratch_file final {
+public:
+    scratch_file(std::string name, std::string_view contents)
+        : path_(std::filesystem::temp_directory_path() /
+              std::format("hedgr.session.{}.{}", unique_token(), name)) {
+        std::ofstream file(path_);
+        file << contents;
+    }
+
+    ~scratch_file() {
+        std::error_code ignored;
+        std::filesystem::remove(path_, ignored);
+    }
+
+    scratch_file(const scratch_file&) = delete;
+    scratch_file& operator=(const scratch_file&) = delete;
+
+    [[nodiscard]] const std::filesystem::path& path() const noexcept {
+        return path_;
+    }
+
+private:
+    static std::string unique_token() {
+        std::random_device source;
+        return std::format("{:08x}", source());
+    }
+
+    std::filesystem::path path_;
+};
 
 }
 
@@ -138,6 +182,50 @@ TEST_CASE("a broken service behind the broker reads as the instance being down",
     REQUIRE(error.message ==
         "the instance is not responding; contact your system administrator");
     REQUIRE(error.detail == refused.what());
+}
+
+TEST_CASE("a certificate that cannot be opened is named in the failure",
+    "[transport]") {
+    /*
+     * A mistyped path and an unreachable broker both end as a connect that
+     * never opened, and the two need different fixes. The failure therefore
+     * names the file, and it is produced without a broker on the machine
+     * because the file is read before the client is handed it.
+     */
+    const std::string missing = "/nonexistent/hedgr-tls/ca.crt";
+
+    auto secured = options_for("ores.dev.brave_hopper");
+    secured.tls_ca = missing;
+
+    session_client session(secured);
+    const auto connected = session.connect();
+
+    REQUIRE_FALSE(connected.has_value());
+    REQUIRE(connected.error().code == session_errc::tls_failed);
+    REQUIRE(connected.error().message.contains(missing));
+    REQUIRE_FALSE(session.is_connected());
+}
+
+TEST_CASE("a client key that cannot be opened is named in the failure",
+    "[transport]") {
+    /*
+     * The three files are checked in turn, so the key is only reached when the
+     * CA it sits beside is readable. A trust anchor that exists and names no
+     * certificate is enough for that: nothing here completes a handshake.
+     */
+    const scratch_file present("ca.crt", "not a real certificate\n");
+    const std::string missing = "/nonexistent/hedgr-tls/client.key";
+
+    auto secured = options_for("ores.dev.brave_hopper");
+    secured.tls_ca = present.path().string();
+    secured.tls_key = missing;
+
+    session_client session(secured);
+    const auto connected = session.connect();
+
+    REQUIRE_FALSE(connected.has_value());
+    REQUIRE(connected.error().message.contains(missing));
+    REQUIRE(connected.error().message.contains("key"));
 }
 
 TEST_CASE("an unreachable broker reads as the instance being unreachable",

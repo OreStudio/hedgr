@@ -45,13 +45,14 @@ namespace {
  * column became `name` so that it no longer shares a word with the label
  * entity, from 4 when the store gained the master table and the account gained
  * its sealed credential, from 5 when an instance and an account gained the
- * folder they sit in, and from 6 when the tables stopped being hand-written
+ * folder they sit in, from 6 when the tables stopped being hand-written
  * SQL and started being derived from the entity structs, which moved the
- * `created_at` default out of the table and into the writer. The store is
+ * `created_at` default out of the table and into the writer, and from 7 when an
+ * instance gained its own TLS material as three paths. The store is
  * pre-release, so there is no migration: a file written against a different
  * version is refused, and the operator deletes it.
  */
-constexpr std::int64_t current_version = 6;
+constexpr std::int64_t current_version = 7;
 
 /**
  * @brief The version the file was written with, when it records one.

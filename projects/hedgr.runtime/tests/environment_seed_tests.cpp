@@ -89,8 +89,8 @@ public:
     checkout_directory& operator=(const checkout_directory&) = delete;
 
     /**
-     * @brief Writes a checkout whose @c .env states the four variables the
-     * seeder reads.
+     * @brief Writes a checkout whose @c .env states the variables the seeder
+     * reads, TLS material included.
      */
     void add(std::string_view directory, std::string_view label,
         std::string_view url, std::string_view prefix) {
@@ -104,7 +104,26 @@ public:
              << "ORES_ENV_TYPE=development\n"
              << "ORES_NATS_URL=" << url << "\n"
              << "ORES_NATS_SUBJECT_PREFIX=" << prefix << "\n"
-             << "ORES_NATS_WIRE_FORMAT=msgpack\n";
+             << "ORES_NATS_WIRE_FORMAT=msgpack\n"
+             << tls_lines(label);
+    }
+
+    /**
+     * @brief Writes a checkout whose @c .env names a broker but no TLS.
+     *
+     * The shape a checkout has before its certificates are provisioned. The
+     * seeded row must still be usable, which means the three paths stay empty
+     * rather than being filled with something invented.
+     */
+    void add_without_tls(std::string_view directory, std::string_view label,
+        std::string_view url, std::string_view prefix) {
+        const auto path = root_ / directory;
+        std::filesystem::create_directories(path);
+        std::ofstream file(path / ".env");
+        file << "ORES_CHECKOUT_LABEL=" << label << "\n"
+             << "ORES_ENV_TYPE=development\n"
+             << "ORES_NATS_URL=" << url << "\n"
+             << "ORES_NATS_SUBJECT_PREFIX=" << prefix << "\n";
     }
 
     /** @brief Writes a checkout with no @c .env at all. */
@@ -130,6 +149,23 @@ public:
     }
 
 private:
+    /**
+     * @brief The TLS lines one fixture checkout carries, keyed by its label.
+     *
+     * Derived from the label rather than fixed, so a case can assert on an
+     * exact path and tell one checkout's material from another's. They are
+     * absolute, which is how a deployment's own @c .env states them, and the
+     * files need not exist: the seeder records what it was told, and opening
+     * them is the transport's business.
+     */
+    [[nodiscard]] static std::string tls_lines(std::string_view label) {
+        return std::format(
+            "ORES_NATS_TLS_CA=/keys/{0}/nats/ca.crt\n"
+            "ORES_NATS_TLS_CERT=/keys/{0}/nats/ores.shell.crt\n"
+            "ORES_NATS_TLS_KEY=/keys/{0}/nats/ores.shell.key\n",
+            label);
+    }
+
     static std::string unique_token() {
         std::random_device source;
         return std::format("{:08x}{:08x}", source(), source());
@@ -229,6 +265,15 @@ TEST_CASE("a seeded store holds one instance per environment", "[seed]") {
     REQUIRE(brave.subject_prefix == "ores.dev.brave_hopper");
     REQUIRE(brave.wire_format == "msgpack");
     REQUIRE_FALSE(brave.created_at.empty());
+
+    /*
+     * The checkout's own certificates, written into the row. That is what makes
+     * a store created on this host work on it without anything being typed in,
+     * and it is the deployment's answer rather than one this process supplied.
+     */
+    REQUIRE(brave.tls_ca == "/keys/brave_hopper/nats/ca.crt");
+    REQUIRE(brave.tls_cert == "/keys/brave_hopper/nats/ores.shell.crt");
+    REQUIRE(brave.tls_key == "/keys/brave_hopper/nats/ores.shell.key");
 
     const auto swift = instance("inst-env-swift_curie");
     REQUIRE(swift.name == "Swift Curie");
@@ -359,6 +404,32 @@ TEST_CASE("a store with no checkouts beside it keeps the single seed", "[seed]")
     REQUIRE(row.name == "local development");
     REQUIRE(row.nats_url == "nats://localhost:20405");
     REQUIRE(row.folder_id == hedgr::model::domain::instances_root_id);
+
+    manager.stop();
+}
+
+TEST_CASE("an environment that names no TLS leaves the fallback to answer",
+    "[seed]") {
+    checkout_directory checkouts;
+    checkouts.add_without_tls("ores_dev_brave_hopper", "brave_hopper",
+        "nats://localhost:20405", "ores.dev.brave_hopper");
+
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.last_error().empty());
+
+    /*
+     * Empty rather than filled with something invented: the row says nothing,
+     * and the runtime reads that as "the environment answers". Writing a path
+     * the checkout never named would be this seeder guessing at a certificate.
+     */
+    const auto handle = manager.instances().find("inst-env-brave_hopper");
+    REQUIRE(handle.has_value());
+    const auto& row = *manager.instances().get(*handle);
+    REQUIRE(row.tls_ca.empty());
+    REQUIRE(row.tls_cert.empty());
+    REQUIRE(row.tls_key.empty());
 
     manager.stop();
 }
