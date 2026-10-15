@@ -202,6 +202,17 @@ private:
     bool environment_announced_ = false;
 
     /**
+     * @brief Whether this run has already offered the password form.
+     *
+     * The form is put in front of the operator once, on the first frame that
+     * finds the store shut with no password handed to it. Once and not every
+     * frame, because Cancel and the title bar have to be able to put the prompt
+     * down and have it stay down: a form that reopened itself would be a form
+     * with no way out.
+     */
+    bool lock_prompt_offered_ = false;
+
+    /**
      * @brief Whether the startup notice's window is still up.
      *
      * Re-armed whenever the notice appears and cleared by the title bar's

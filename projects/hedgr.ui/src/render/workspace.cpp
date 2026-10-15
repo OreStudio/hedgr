@@ -194,11 +194,22 @@ void workspace::render(const render_input& input) {
     }
 
     /*
-     * The password form, when it is open. It is a window beside the others and
-     * not a mode: the rest of the interface keeps drawing behind it, and the
-     * one way to open it is the lock control on the status bar.
+     * The password form is put in front of the operator once, on the first
+     * frame that finds the store shut and was handed no password. The other way
+     * to open it is the lock control on the status bar. Offered once and not
+     * every frame, because Cancel and the title bar have to be able to put it
+     * down and have it stay down.
+     *
+     * The drawing itself happens at the end of the frame, not here. It was here
+     * until it was noticed that it opened underneath the Instances window: a
+     * window is drawn in submission order, the walk below submits the Instances
+     * window over the middle of the screen, and a prompt nobody can see is a
+     * store nobody can open.
      */
-    draw_lock_prompt(input);
+    if (!lock_prompt_offered_ && !armed_password_ && !shows_instances(input)) {
+        lock_prompt_offered_ = true;
+        open_lock_prompt();
+    }
 
     /*
      * An unattended launch left a password in the buffer, so it is submitted
@@ -343,8 +354,16 @@ void workspace::render(const render_input& input) {
         close_lock_prompt();
         environment_unlock_ = false;
     } else if (lock_control_.open_requested) {
+        lock_prompt_offered_ = true;
         open_lock_prompt();
     }
+
+    /*
+     * Last, and after the control that may have just asked for it, so the form
+     * is the final window submitted and therefore the one on top of everything
+     * the walk drew. See the note where it is opened.
+     */
+    draw_lock_prompt(input);
 }
 
 bool workspace::shows_lock_prompt(const render_input& input) const noexcept {
@@ -695,12 +714,6 @@ void workspace::draw_lock_prompt(const render_input& input) {
      *
      * Read after the body so a click that both typed and closed is not read as
      * a dismissal before the typing happened.
-     */
-    /*
-     * The title bar's close button puts the prompt down the same way Cancel
-     * does, and it is the second of the two ways out. A window that could be
-     * closed with the mouse but insisted on an answer would be a window that
-     * cannot be dismissed, which is the thing being removed here.
      */
     if (ImGui::IsWindowAppearing())
         prompt_open_ = true;
