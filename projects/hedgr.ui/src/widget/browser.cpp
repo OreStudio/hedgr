@@ -22,6 +22,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/capture.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "imgui.h"
@@ -41,6 +42,7 @@ namespace {
 
 namespace widget = hedgr::ui::widget;
 namespace icon = hedgr::ui::icon;
+namespace theme = hedgr::ui::theme;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
@@ -409,6 +411,70 @@ void accept_drop(const widget::browser_model& model,
 }
 
 /**
+ * @brief The padlock, which is the whole of the store's state in the strip.
+ *
+ * An icon and a tooltip, with no sentence beside it. The colour is the state --
+ * amber for a store that is shut and for one with no password yet, grey for an
+ * open one, red for a refusal -- and the words live in the tooltip, because a
+ * toolbar is a row of controls: a sentence in it makes the row taller than the
+ * strip it sits in, and the state was already saying itself twice.
+ *
+ * One control with two jobs, chosen by the state it is showing. An open store
+ * is locked, and anything else asks for the password. That is what makes this
+ * the only lock control in the interface.
+ *
+ * It sits at the end of the row rather than among the buttons that change a
+ * row, because it is not an action on the thing being browsed: it is the state
+ * of the store everything on the window is read from.
+ */
+void draw_lock_button(hedgr::ui::render::lock_control& lock) {
+    using hedgr::model::domain::store_lock;
+
+    const char* state_text = "The store is unlocked";
+    const char* action = "click to lock it";
+    switch (lock.lock) {
+    case store_lock::absent:
+        state_text = "There is no master password yet";
+        action = "click to create one";
+        break;
+    case store_lock::locked:
+        state_text = "The store is locked";
+        action = "click to enter the master password";
+        break;
+    case store_lock::unlocked:
+        break;
+    case store_lock::failed:
+        state_text = "The store could not be unlocked";
+        action = "click to try again";
+        break;
+    }
+
+    /*
+     * The reason travels with the state rather than on an icon of its own. When
+     * the last attempt was refused the reason is the whole of what the operator
+     * wants, and the tooltip is the only place with room for it.
+     */
+    const std::string tooltip = lock.lock == store_lock::failed
+            && !lock.reason.empty()
+        ? std::format("{}. {}. {}", state_text, action, lock.reason)
+        : std::format("{}. {}.", state_text, action);
+
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(theme::store_lock_colour(lock.lock)));
+    const bool clicked = widget::icon_button("lock-control",
+        theme::store_lock_icon(lock.lock), tooltip.c_str());
+    ImGui::PopStyleColor();
+
+    if (!clicked)
+        return;
+
+    if (lock.lock == store_lock::unlocked)
+        lock.close_requested = true;
+    else
+        lock.open_requested = true;
+}
+
+/**
  * @brief The toolbar: every action the browser offers, as icons with tooltips.
  *
  * Which of them appear is the host's choice, because the two browsers offer
@@ -515,6 +581,16 @@ void draw_toolbar(const widget::browser_model& model,
             request.instance_id = state.selected_leaf;
             input.commands.push(std::move(request));
         }
+    }
+
+    /*
+     * The padlock closes the strip, after every action. It is the one control
+     * here that is not about the thing being browsed, and putting it at the end
+     * keeps it from reading as one more thing to do to the selected row.
+     */
+    if (model.lock != nullptr) {
+        ImGui::SameLine();
+        draw_lock_button(*model.lock);
     }
 }
 
@@ -841,42 +917,40 @@ void draw_list(const widget::browser_model& model,
     }
 
     /*
-     * A shut store has no cells to draw. The host's row callback answers with
-     * blank text until the catalogue can be read, so a table submitted anyway
-     * is a header over rows that are empty but not absent, which reads as a
-     * rendering fault rather than as a state. The one thing that is true is
-     * said instead, and it outranks an empty result: no filter and no selection
-     * puts a row back until the password is given.
+     * A shut store draws a padlock and no words. The host's cell callback
+     * answers with blank text until the catalogue can be read, so a table
+     * submitted anyway is a header over rows that are empty but not absent,
+     * which reads as a rendering fault rather than as a state.
+     *
+     * The state already has a home on the toolbar's own padlock, so a sentence
+     * here would be the third place the same fact is said. A large grey shape
+     * in the middle of the pane is read at a glance and says the one thing
+     * that matters, which is that the pane is shut rather than broken.
      */
-    const char* shut = nullptr;
-    switch (input.store_lock) {
-    case hedgr::model::domain::store_lock::absent:
-        shut = "There is no master password yet, so there is nothing to list.";
-        break;
-    case hedgr::model::domain::store_lock::locked:
-        shut = "The store is locked, so there is nothing to list. Click the "
-               "padlock on the status bar.";
-        break;
-    case hedgr::model::domain::store_lock::failed:
-        shut = "The store could not be unlocked, so there is nothing to list. "
-               "Click the padlock to try again.";
-        break;
-    case hedgr::model::domain::store_lock::unlocked:
-        break;
-    }
-    if (input.unlocking)
-        shut = "Unlocking the store.";
-
-    const auto kept = visible_leaf_indices(model, rows, state);
-    if (shut != nullptr || kept.empty()) {
+    if (!store_is_open(input) || input.unlocking) {
+        const float size = ImGui::GetStyle().FontSizeBase * 4.0f;
+        ImGui::PushFont(nullptr, size);
+        const ImVec2 glyph = ImGui::CalcTextSize(icon::lock_closed);
+        const ImVec2 room = ImGui::GetContentRegionAvail();
+        ImGui::SetCursorPos(ImVec2(
+            ImGui::GetCursorPosX() + (room.x - glyph.x) * 0.5f,
+            ImGui::GetCursorPosY() + (room.y - glyph.y) * 0.5f));
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(shut != nullptr
-                ? shut
-                : (state.filter[0] != '\0'
-                          ? "Nothing under this folder matches the filter."
-                          : "Nothing here yet. Select a folder, or add an "
-                            "entry."));
+        ImGui::TextUnformatted(icon::lock_closed);
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::EndChild();
+        return;
+    }
+
+    const auto kept = visible_leaf_indices(model, rows, state);
+    if (kept.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(state.filter[0] != '\0'
+                ? "Nothing under this folder matches the filter."
+                : "Nothing here yet. Select a folder, or add an entry.");
         ImGui::PopStyleColor();
         ImGui::EndChild();
         return;

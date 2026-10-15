@@ -998,98 +998,8 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
  * The reservation is always made, so nothing below knows whether there is a
  * message; the line is drawn only when there is one.
  */
-/**
- * @brief The lock icon, its colour, and the tooltip that names the state.
- *
- * Amber while the store is locked and green while it is open, because a closed
- * lock is the normal condition of a store at rest and not a fault: red is kept
- * for @c failed, which is the one state that describes an attempt that went
- * wrong. An operator who reads a locked store as broken will look for a
- * problem that is not there.
- *
- * Clicking it is the only way the password form is opened. Nothing else opens
- * it, and closing the form is what "not now" means, so a launch nobody touches
- * draws the application with its contents obscured and nothing in the way.
- */
-void draw_lock_control(lock_control& lock) {
-    using hedgr::model::domain::store_lock;
 
-    /*
-     * A sentence per state, in sentence case, beside the icon and saying the
-     * same thing the icon's colour says. The icon alone is not a status: a
-     * padlock is a shape that has to be learned, and a colour has to be
-     * learned with it. The words are what a person reads the first time.
-     *
-     * The same words go in the tooltip's first clause, so hovering adds the
-     * action rather than repeating the state a second time in different words.
-     */
-    const char* state_text = "the store is unlocked";
-    const char* action = "Click to lock it.";
-    switch (lock.lock) {
-    case store_lock::absent:
-        state_text = "no master password yet";
-        action = "Click to create one.";
-        break;
-    case store_lock::locked:
-        state_text = "the store is locked";
-        action = "Click to enter the master password.";
-        break;
-    case store_lock::unlocked:
-        state_text = "the store is unlocked";
-        action = "Click to lock it.";
-        break;
-    case store_lock::failed:
-        state_text = "the store could not be unlocked";
-        action = "Click to try again.";
-        break;
-    }
-
-    /*
-     * The state's colour is pushed around both the icon and the words, so the
-     * two are one statement rather than an icon with a caption beside it that
-     * happens to be grey.
-     */
-    const auto tone = ImGui::ColorConvertU32ToFloat4(
-        theme::store_lock_colour(lock.lock));
-
-    /*
-     * The reason travels on the words rather than on the icon. When the last
-     * attempt was refused the reason is the whole of what the operator wants
-     * to know, and it belongs on the thing that names the state; the tooltip
-     * has room for it and the bar does not.
-     */
-    const std::string tooltip = lock.lock == store_lock::failed
-            && !lock.reason.empty()
-        ? std::format("{}. {}\n{}", state_text, action, lock.reason)
-        : std::format("{}. {}", state_text, action);
-
-    ImGui::PushStyleColor(ImGuiCol_Text, tone);
-    const bool clicked = widget::icon_button("lock-control",
-        theme::store_lock_icon(lock.lock), tooltip.c_str());
-    ImGui::PopStyleColor();
-    ImGui::SetItemTooltip("%s", tooltip.c_str());
-
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
-    ImGui::TextColored(tone, "%s", state_text);
-
-    if (!clicked)
-        return;
-
-    /*
-     * One control, two jobs, chosen by the state it is showing. An open store
-     * is locked; anything else asks for the password. That is what makes the
-     * control the only lock control in the interface rather than one half of a
-     * pair, and it is why the toolbar's padlock came out.
-     */
-    if (lock.lock == store_lock::unlocked) {
-        lock.close_requested = true;
-        return;
-    }
-    lock.open_requested = true;
-}
-
-void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
-    lock_control& lock) {
+void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
     const float height = status_foot_height(status);
 
     /*
@@ -1114,17 +1024,14 @@ void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
         ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
     /*
-     * The lock, at the left of the foot and ahead of everything else on it.
-     * This is the whole of the control: there is no lock button in the toolbar
-     * any more, and nothing else opens the password form. Its colour is the
-     * state -- green open, amber locked, red failed -- so the state is read
-     * without the icon being read.
+     * The status line, and nothing ahead of it. The lock control used to sit
+     * here, at the left of the foot, and it moved into the window's one
+     * toolbar: the foot is where the runtime's messages are read, and a
+     * control that changes the state of the whole window does not belong in
+     * the middle of a sentence about a probe.
      */
-    draw_lock_control(lock);
-    if (!status.empty()) {
-        ImGui::SameLine();
+    if (!status.empty())
         draw_status_line(status, now_ns);
-    }
 
     ImGui::EndChild();
 }
@@ -1189,6 +1096,7 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.leaves = instance_tree_leaves(input);
     model.columns = instance_columns();
     model.window_actions = &instance_window_actions;
+    model.lock = &lock;
     model.row_cells = &instance_row_cells;
     model.row_labels = &instance_row_labels;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
@@ -1254,7 +1162,7 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * way the password form is opened, so it is deliberately drawn in every
      * state rather than only while the store is open.
      */
-    draw_status_foot(status, input.now_ns, lock);
+    draw_status_foot(status, input.now_ns);
 
     ImGui::PopID();
 }

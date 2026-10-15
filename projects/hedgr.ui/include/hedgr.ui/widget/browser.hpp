@@ -315,6 +315,19 @@ struct browser_model final {
     void (*window_actions)(const hedgr::ui::render::render_input&,
         hedgr::ui::render::window_ui_state&) = nullptr;
 
+    /**
+     * @brief The store's lock, when the host wants the control in the toolbar.
+     *
+     * Drawn at the end of the strip, after the host's own actions, because it
+     * is not an action on the thing being browsed: it is the state of the store
+     * everything on the window is read from, and it belongs at the edge rather
+     * than among the buttons that change a row.
+     *
+     * Null when the host does not show it, which is what stops every browser
+     * acquiring a lock whether or not it has a store behind it.
+     */
+    hedgr::ui::render::lock_control* lock = nullptr;
+
     /** @brief Starts the host's form for a new leaf inside a folder. */
     void (*create_leaf)(hedgr::ui::render::window_ui_state&,
         std::string_view parent_id) = nullptr;

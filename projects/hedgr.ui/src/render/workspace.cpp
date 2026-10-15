@@ -137,7 +137,6 @@ void workspace::render(const render_input& input) {
      * fills it in; these are the defaults for a frame in which it does not.
      */
     lock_control_.lock = input.store_lock;
-    lock_control_.form_open = shows_lock_prompt(input);
     lock_control_.reason = input.lock_message;
     lock_control_.open_requested = false;
     lock_control_.close_requested = false;

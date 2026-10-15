@@ -269,9 +269,6 @@ struct lock_control final {
     hedgr::model::domain::store_lock lock =
         hedgr::model::domain::store_lock::absent;
 
-    /** @brief Whether the password form is already open. */
-    bool form_open = false;
-
     /**
      * @brief Why the last attempt was refused, or empty.
      *
