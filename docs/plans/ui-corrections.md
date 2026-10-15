@@ -191,3 +191,28 @@ not obviously the cause, and the vertex colour path is shared with the
 rectangles that render correctly. The next step is to check what is actually
 bound while a glyph is drawn, and whether the atlas is being sampled as the
 texture the draw expects.
+
+## Rule: every failure reaches the interface
+
+The operator, after a blank screen caused by a store the build refused: "make sure we
+throw and we show errors clearly in the UI".
+
+`instance_manager::last_error_` is already the accumulator for every failure the
+runtime records: a store that will not open, a save the store refused, removing the
+root being declined, a schema mismatch, a certificate that will not open. It is set
+in many places and read by no surface at all. A log line is not a surface, and on a
+deployed host the log does not even reach the terminal.
+
+So the store-startup case now being fixed is the first instance of a rule rather
+than a special case. The rule is that every recorded failure is visible, with what
+went wrong and what to do next, on the status bar the operator already reads.
+
+Two things to keep in mind when applying it. A failure must be distinguishable at a
+glance from a remark such as "the store was opened from the environment", so the two
+do not share a treatment. And an error is closer to a condition than to an event:
+it should still be there for an operator who looked away, without sitting there
+forever after it has been read.
+
+The word "throw" is read as "propagate and surface". The project returns
+`std::expected` at boundaries and reserves exceptions for the genuinely unexpected,
+which is its documented style, and nothing here changes that.
