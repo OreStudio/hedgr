@@ -195,6 +195,12 @@ ImU32 label_colour(hedgr::model::domain::label_colour value) noexcept {
 }
 
 ImU32 text_colour_on(ImU32 background) noexcept {
+    /*
+     * Shift 0 is red, 8 is green and 16 is blue, because IM_COL32 packs red
+     * into the low byte. The weights below were always right and the channels
+     * they were applied to were not, which happened to agree for every colour
+     * in the palette and would not have agreed for the next one added.
+     */
     const auto channel = [&](unsigned int shift) {
         return static_cast<float>((background >> shift) & 0xFFu);
     };
@@ -205,7 +211,7 @@ ImU32 text_colour_on(ImU32 background) noexcept {
      * 0..1.
      */
     const float luminance =
-        (0.299f * channel(16) + 0.587f * channel(8) + 0.114f * channel(0))
+        (0.299f * channel(0) + 0.587f * channel(8) + 0.114f * channel(16))
         / 255.0f;
 
     /*

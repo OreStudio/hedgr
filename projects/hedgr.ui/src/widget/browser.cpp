@@ -801,16 +801,16 @@ void draw_list(const widget::browser_model& model,
                      * name keep the ordinary one.
                      */
                     ImGui::AlignTextToFramePadding();
-                    if (!cells.colours.empty() && cells.colours.front() != 0) {
-                        const auto colour = cells.colours.front();
-                        ImGui::PushStyleColor(ImGuiCol_Text,
-                            ImGui::ColorConvertU32ToFloat4(
-                                IM_COL32(
-                                    static_cast<int>((colour >> 16) & 0xFFu),
-                                    static_cast<int>((colour >> 8) & 0xFFu),
-                                    static_cast<int>(colour & 0xFFu),
-                                    static_cast<int>((colour >> 24) & 0xFFu))));
-                    }
+                    /*
+                     * Pushed as the ImU32 it already is. An earlier version
+                     * unpacked it by hand into IM_COL32 and put red where blue
+                     * belongs, which exchanged the two channels: the icons were
+                     * drawn in the wrong colour while the rectangles beside them
+                     * were right, so it read as a rendering fault rather than as
+                     * arithmetic.
+                     */
+                    if (!cells.colours.empty() && cells.colours.front() != 0)
+                        ImGui::PushStyleColor(ImGuiCol_Text, cells.colours.front());
                     ImGui::TextUnformatted(leaf.icon);
                     if (!cells.colours.empty() && cells.colours.front() != 0)
                         ImGui::PopStyleColor();
@@ -820,13 +820,7 @@ void draw_list(const widget::browser_model& model,
                     }
                 } else if (position < cells.colours.size()
                     && cells.colours[position] != 0) {
-                    const auto colour = cells.colours[position];
-                    ImGui::PushStyleColor(ImGuiCol_Text,
-                        ImGui::ColorConvertU32ToFloat4(
-                            IM_COL32(static_cast<int>((colour >> 16) & 0xFFu),
-                                static_cast<int>((colour >> 8) & 0xFFu),
-                                static_cast<int>(colour & 0xFFu),
-                                static_cast<int>((colour >> 24) & 0xFFu))));
+                    ImGui::PushStyleColor(ImGuiCol_Text, cells.colours[position]);
                     ImGui::TextUnformatted(text.data(), text.data() + text.size());
                     ImGui::PopStyleColor();
                 } else {
