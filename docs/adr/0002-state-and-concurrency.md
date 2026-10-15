@@ -20,10 +20,13 @@ through a channel. There is no async client to build on.
 **Data-oriented state.** State lives in tables organised by how the frame loop
 reads it, not by domain taxonomy.
 
-- `instance_table` and `identity_table` are cold: tens of rows, read when the
-  Instance Manager is drawn, never touched by the per-window path. They are
-  arrays of whole values keyed by the persisted id. Splitting them into columns
-  would buy nothing.
+- `instance_table` and `account_table` are cold: tens of rows, read when the
+  Instances window is drawn, never touched by the per-window path. Each row is a
+  whole value. Splitting them into columns would buy nothing.
+- Every table nonetheless addresses its rows by a **generation-tagged handle**,
+  issued from the same sparse slab. The cold tables gained this in ADR 5, when
+  probe results and label junctions needed an index that survives a delete. A
+  cold table does not need the handle for speed, it needs it for stability.
 - `session_table` and `window_table` are hot. Each is a structure of arrays,
   split into a hot block the frame loop reads every frame and a cold block read
   only when a row survives the cull. A token, a tenant name and a window's

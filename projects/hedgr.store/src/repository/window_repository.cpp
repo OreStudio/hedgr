@@ -35,7 +35,7 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT window_id, kind, session_instance_id, session_identity_id, "
+    "SELECT window_id, kind, session_instance_id, session_account_id, "
     "cadence_ms, state_json FROM window_spec ORDER BY window_id";
 
 sqlite::store_error corrupt_row(std::string_view window_id,
@@ -121,11 +121,11 @@ sqlite::result<void> window_repository::save(const dom::window_spec& spec) {
     sqlite::statement insert(
         db_->handle(),
         "INSERT INTO window_spec (window_id, kind, session_instance_id, "
-        "session_identity_id, cadence_ms, state_json) "
+        "session_account_id, cadence_ms, state_json) "
         "VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(window_id) DO UPDATE SET kind = excluded.kind, "
         "session_instance_id = excluded.session_instance_id, "
-        "session_identity_id = excluded.session_identity_id, "
+        "session_account_id = excluded.session_account_id, "
         "cadence_ms = excluded.cadence_ms, "
         "state_json = excluded.state_json");
     if (!insert.is_valid())
@@ -138,7 +138,7 @@ sqlite::result<void> window_repository::save(const dom::window_spec& spec) {
     if (spec.session) {
         if (auto bound = insert.bind(3, spec.session->instance_id); !bound)
             return bound;
-        if (auto bound = insert.bind(4, spec.session->identity_id); !bound)
+        if (auto bound = insert.bind(4, spec.session->account_id); !bound)
             return bound;
     } else {
         if (auto bound = insert.bind_null(3); !bound)

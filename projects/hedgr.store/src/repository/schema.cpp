@@ -28,17 +28,24 @@ namespace hedgr::store::repository {
 
 namespace {
 
-/** @brief The schema version written and expected by this component. */
-constexpr std::int64_t current_version = 1;
+/**
+ * @brief The schema version written and expected by this component.
+ *
+ * Bumped from 1 when an instance row stopped carrying a safety classification
+ * and the accounts table took its current name. The store is pre-release, so
+ * there is no migration: a file written against an older version is deleted and
+ * recreated rather than brought forward.
+ */
+constexpr std::int64_t current_version = 2;
 
 /**
  * @brief The whole schema, in one place.
  *
  * The tables mirror the domain types rather than any view's needs: an instance
- * carries its tier and transport, an identity carries no credential, and a
- * window carries its kind beside its payload so no variant is ever written out.
+ * carries its transport, an account carries no credential, and a window carries
+ * its kind beside its payload so no variant is ever written out.
  *
- * @c window_spec.session_instance_id and @c window_spec.session_identity_id are
+ * @c window_spec.session_instance_id and @c window_spec.session_account_id are
  * nullable because a window may be bound to no session at all, which is the
  * normal case for the instance manager.
  */
@@ -47,14 +54,13 @@ constexpr std::array<std::string_view, 5> schema_statements{
     R"(CREATE TABLE IF NOT EXISTS instance (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL UNIQUE,
-        tier TEXT NOT NULL,
         nats_url TEXT NOT NULL,
         subject_prefix TEXT NOT NULL,
         wire_format TEXT NOT NULL DEFAULT 'msgpack',
         labels TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
     ))",
-    R"(CREATE TABLE IF NOT EXISTS identity (
+    R"(CREATE TABLE IF NOT EXISTS account (
         id TEXT PRIMARY KEY,
         instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
         label TEXT NOT NULL,
@@ -65,7 +71,7 @@ constexpr std::array<std::string_view, 5> schema_statements{
         window_id TEXT PRIMARY KEY,
         kind TEXT NOT NULL,
         session_instance_id TEXT,
-        session_identity_id TEXT,
+        session_account_id TEXT,
         cadence_ms INTEGER NOT NULL DEFAULT 1000,
         state_json TEXT NOT NULL DEFAULT '{}'
     ))",
@@ -109,8 +115,9 @@ result<void> apply(sqlite::database& db) {
         return {};
 
     // The version row is written on the way in, so a store created before
-    // schema_version existed is indistinguishable from an empty one; the file
-    // format is new enough that there is nothing to migrate.
+    // schema_version existed is indistinguishable from an empty one. Nothing
+    // reads the stored version back either: the store is pre-release, so a file
+    // that does not match the DDL above is deleted rather than migrated.
     return db.execute(
         std::format("INSERT INTO schema_version (version) VALUES ({})",
                     current_version));

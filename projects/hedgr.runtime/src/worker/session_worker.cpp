@@ -56,7 +56,7 @@ using hedgr::model::command::event_queue;
 [[nodiscard]] event::event for_key(const domain::session_key& key) {
     event::event result;
     result.instance_id = key.instance_id;
-    result.identity_id = key.identity_id;
+    result.account_id = key.account_id;
     return result;
 }
 
@@ -143,20 +143,20 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
             push_failure(events, key, answer.error());
             status = domain::session_status::failed;
         } else {
-            const auto& identity = answer.value();
+            const auto& account = answer.value();
             auto authenticated = for_key(key);
             authenticated.kind = event::event_kind::session_authenticated;
-            authenticated.token = identity.token;
-            authenticated.tenant_name = identity.tenant_name;
-            authenticated.party_name = identity.party_name;
+            authenticated.token = account.token;
+            authenticated.tenant_name = account.tenant_name;
+            authenticated.party_name = account.party_name;
 
             /*
              * The event has no principal field because the session key already
-             * names the identity. What the instance answered with is still
+             * names the account. What the instance answered with is still
              * worth carrying, and payload is the one free-form field, so it
              * travels there for the log rather than being dropped.
              */
-            authenticated.payload = identity.principal;
+            authenticated.payload = account.principal;
             events.push(std::move(authenticated));
 
             status = domain::session_status::authenticated;

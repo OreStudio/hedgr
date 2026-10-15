@@ -20,7 +20,7 @@
 #ifndef HEDGR_MODEL_STATE_TABLES_HPP
 #define HEDGR_MODEL_STATE_TABLES_HPP
 
-#include "hedgr.model/domain/identity.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
@@ -37,66 +37,113 @@
 namespace hedgr::model::state {
 
 /**
- * @brief The instances known to this process.
+ * @brief The instances known to this process, addressed by handle.
  *
  * Instances are cold: tens of rows, read when the Instance Manager is drawn and
  * never touched by the frame loop's per-window path. Splitting them into
  * parallel columns would buy nothing, so the table keeps the value whole and
  * keys it by the persisted id.
+ *
+ * The rows sit in a sparse slab rather than a compacting vector, because a
+ * probe result and, later, a label junction address an instance by handle and
+ * must keep addressing the same instance after a removal. Both @c rows() and
+ * @c layout() include the holes a removal leaves behind, so a whole-table walk
+ * checks @c layout().is_alive(index) before reading a slot.
  */
 class HEDGR_MODEL_EXPORT instance_table final {
 public:
-    [[nodiscard]] std::size_t size() const noexcept { return rows_.size(); }
+    /**
+     * @brief Adds @p row, or replaces the row carrying the same id.
+     *
+     * A replacement keeps the handle the previous row held, so a caller that
+     * already resolved this instance keeps addressing it.
+     */
+    [[nodiscard]] instance_handle upsert(domain::instance row);
+
+    void remove(instance_handle h);
+
+    [[nodiscard]] bool contains(instance_handle h) const noexcept;
+
+    [[nodiscard]] std::size_t size() const noexcept;
+
+    /** @brief The handle carrying this persisted id, when there is one. */
+    [[nodiscard]] std::optional<instance_handle>
+    find(std::string_view id) const;
+
+    /**
+     * @brief The row a handle addresses, or nullptr when the handle is stale.
+     *
+     * A caller at a boundary turns a string id into a handle with find() and
+     * asks either contains() or this. A caller holding a handle it just
+     * received needs neither check.
+     */
+    [[nodiscard]] const domain::instance* get(instance_handle h) const noexcept;
+    [[nodiscard]] domain::instance* get(instance_handle h) noexcept;
+
+    /** @brief Aliveness and generations, holes included. */
+    [[nodiscard]] const slab& layout() const noexcept { return layout_; }
 
     /** @brief Every row, holes included, for a whole-table walk. */
     [[nodiscard]] std::span<const domain::instance> rows() const noexcept {
         return rows_;
     }
 
-    /** @brief The row with this id, or nullptr. */
-    [[nodiscard]] const domain::instance* find(std::string_view id) const noexcept;
-
-    /** @brief Inserts or replaces by id. Returns true when a row was replaced. */
-    bool upsert(domain::instance row);
-
-    /** @brief Removes by id. Returns true when a row was removed. */
-    bool remove(std::string_view id);
-
-    void clear() noexcept { rows_.clear(); }
+    void clear() noexcept;
 
 private:
+    slab layout_;
     std::vector<domain::instance> rows_;
+    std::unordered_map<std::string, instance_handle> by_id_;
 };
 
 /**
- * @brief The identities known to this process.
+ * @brief The accounts known to this process, addressed by handle.
  *
- * Cold, like the instance table, and keyed by the persisted id.
+ * Cold, like the instance table, and shaped the same way: a sparse slab, a map
+ * from the persisted id, and @c rows() and @c layout() both including the holes
+ * a removal leaves behind, so a whole-table walk checks
+ * @c layout().is_alive(index).
  */
-class HEDGR_MODEL_EXPORT identity_table final {
+class HEDGR_MODEL_EXPORT account_table final {
 public:
-    [[nodiscard]] std::size_t size() const noexcept { return rows_.size(); }
+    /**
+     * @brief Adds @p row, or replaces the row carrying the same id.
+     *
+     * A replacement keeps the handle the previous row held.
+     */
+    [[nodiscard]] account_handle upsert(domain::account row);
 
-    [[nodiscard]] std::span<const domain::identity> rows() const noexcept {
+    void remove(account_handle h);
+
+    [[nodiscard]] bool contains(account_handle h) const noexcept;
+
+    [[nodiscard]] std::size_t size() const noexcept;
+
+    /** @brief The handle carrying this persisted id, when there is one. */
+    [[nodiscard]] std::optional<account_handle> find(std::string_view id) const;
+
+    /** @brief The row a handle addresses, or nullptr when it is stale. */
+    [[nodiscard]] const domain::account* get(account_handle h) const noexcept;
+    [[nodiscard]] domain::account* get(account_handle h) noexcept;
+
+    /** @brief The accounts belonging to one instance, holes skipped. */
+    [[nodiscard]] std::vector<const domain::account*>
+    children_of(std::string_view instance_id) const;
+
+    /** @brief Aliveness and generations, holes included. */
+    [[nodiscard]] const slab& layout() const noexcept { return layout_; }
+
+    /** @brief Every row, holes included, for a whole-table walk. */
+    [[nodiscard]] std::span<const domain::account> rows() const noexcept {
         return rows_;
     }
 
-    [[nodiscard]] const domain::identity* find(std::string_view id) const noexcept;
-
-    /** @brief The identities belonging to one instance. */
-    [[nodiscard]] std::vector<const domain::identity*>
-    children_of(std::string_view instance_id) const;
-
-    bool upsert(domain::identity row);
-
-    /** @brief Removes an identity and every identity of an instance. */
-    bool remove(std::string_view id);
-    void remove_for_instance(std::string_view instance_id);
-
-    void clear() noexcept { rows_.clear(); }
+    void clear() noexcept;
 
 private:
-    std::vector<domain::identity> rows_;
+    slab layout_;
+    std::vector<domain::account> rows_;
+    std::unordered_map<std::string, account_handle> by_id_;
 };
 
 /**
@@ -113,7 +160,7 @@ struct session_columns final {
 
     // Warm: read when a session row is drawn.
     std::vector<std::string> instance_id;
-    std::vector<std::string> identity_id;
+    std::vector<std::string> account_id;
 
     // Cold: read only when a detail surface opens.
     std::vector<std::string> last_error;
@@ -123,7 +170,7 @@ struct session_columns final {
 };
 
 /**
- * @brief Live sessions, keyed by handle and looked up by (instance, identity).
+ * @brief Live sessions, keyed by handle and looked up by (instance, account).
  *
  * Every accessor takes a handle and has the precondition that the handle is
  * live. Callers at a boundary check contains() first; callers holding a handle
@@ -133,7 +180,7 @@ class HEDGR_MODEL_EXPORT session_table final {
 public:
     /** @brief Creates a disconnected session for the pair. */
     [[nodiscard]] session_handle
-    insert(std::string instance_id, std::string identity_id);
+    insert(std::string instance_id, std::string account_id);
 
     void remove(session_handle h);
 
@@ -147,7 +194,7 @@ public:
 
     /** @brief The handle for a pair, or nothing when no session exists. */
     [[nodiscard]] std::optional<session_handle>
-    find(std::string_view instance_id, std::string_view identity_id) const;
+    find(std::string_view instance_id, std::string_view account_id) const;
 
     [[nodiscard]] domain::session_status status(session_handle h) const;
     void set_status(session_handle h, domain::session_status value);
@@ -158,12 +205,12 @@ public:
     [[nodiscard]] std::string_view last_error(session_handle h) const;
     void set_last_error(session_handle h, std::string value);
 
-    /** @brief Records what IAM returned once the identity was accepted. */
-    void set_identity_result(session_handle h, std::string tenant_name,
+    /** @brief Records what IAM returned once the account was accepted. */
+    void set_account_result(session_handle h, std::string tenant_name,
                              std::string party_name, std::string token);
 
     [[nodiscard]] std::string_view instance_id(session_handle h) const;
-    [[nodiscard]] std::string_view identity_id(session_handle h) const;
+    [[nodiscard]] std::string_view account_id(session_handle h) const;
     [[nodiscard]] std::string_view tenant_name(session_handle h) const;
     [[nodiscard]] std::string_view party_name(session_handle h) const;
 

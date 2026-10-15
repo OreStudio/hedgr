@@ -38,9 +38,8 @@ using sqlite::result;
  * @brief Reads and writes the instances an operator has configured.
  *
  * The repository borrows the connection, so it must not outlive it. It is a
- * thin translation between the @c instance table and the domain value; parsing
- * of the stored tier happens here, because this is the boundary where stored
- * text becomes a typed value again.
+ * thin translation between the @c instance table and the domain value: every
+ * column here is stored text or a plain number, so nothing needs parsing.
  */
 class HEDGR_STORE_EXPORT instance_repository final {
 public:
@@ -58,7 +57,7 @@ public:
      */
     [[nodiscard]] result<void> save(const dom::instance& row);
 
-    /** @brief Deletes the instance with @c id, cascading to its identities. */
+    /** @brief Deletes the instance with @c id, cascading to its accounts. */
     [[nodiscard]] result<void> remove(std::string_view id);
 
 private:

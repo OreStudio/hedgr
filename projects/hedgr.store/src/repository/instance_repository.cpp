@@ -19,10 +19,8 @@
  */
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/sqlite/statement.hpp"
-#include <format>
 #include <string>
 #include <string_view>
-#include <utility>
 
 namespace hedgr::store::repository {
 
@@ -33,35 +31,19 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, name, tier, nats_url, subject_prefix, wire_format, labels, "
+    "SELECT id, name, nats_url, subject_prefix, wire_format, labels, "
     "created_at FROM instance ORDER BY name";
 
-/**
- * @brief Reads the row the statement is currently parked on.
- *
- * A tier that no longer parses is reported as a corrupt row naming the
- * instance, rather than defaulting to development: defaulting would silently
- * downgrade the confirmation a destructive action asks for.
- */
-sqlite::result<dom::instance> read_row(const sqlite::statement& query) {
+/** @brief Reads the row the statement is currently parked on. */
+dom::instance read_row(const sqlite::statement& query) {
     dom::instance row;
     row.id = std::string(query.column_text(0));
     row.name = std::string(query.column_text(1));
-    row.nats_url = std::string(query.column_text(3));
-    row.subject_prefix = std::string(query.column_text(4));
-    row.wire_format = std::string(query.column_text(5));
-    row.labels = std::string(query.column_text(6));
-    row.created_at = std::string(query.column_text(7));
-
-    const auto tier = dom::tier_from_string(query.column_text(2));
-    if (!tier)
-        return std::unexpected(sqlite::store_error{
-            .code = sqlite::store_errc::corrupt_row,
-            .message = std::format("instance {} has an unknown tier [{}]: {}",
-                                   row.id, query.column_text(2), tier.error()),
-            .sqlite_code = 0,
-        });
-    row.tier = tier.value();
+    row.nats_url = std::string(query.column_text(2));
+    row.subject_prefix = std::string(query.column_text(3));
+    row.wire_format = std::string(query.column_text(4));
+    row.labels = std::string(query.column_text(5));
+    row.created_at = std::string(query.column_text(6));
     return row;
 }
 
@@ -83,10 +65,7 @@ sqlite::result<std::vector<dom::instance>> instance_repository::list() const {
         if (!available.value())
             break;
 
-        auto row = read_row(query);
-        if (!row)
-            return std::unexpected(row.error());
-        rows.push_back(std::move(row).value());
+        rows.push_back(read_row(query));
     }
     return rows;
 }
@@ -94,10 +73,10 @@ sqlite::result<std::vector<dom::instance>> instance_repository::list() const {
 sqlite::result<void> instance_repository::save(const dom::instance& row) {
     sqlite::statement insert(
         db_->handle(),
-        "INSERT INTO instance (id, name, tier, nats_url, subject_prefix, "
-        "wire_format, labels) VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO instance (id, name, nats_url, subject_prefix, "
+        "wire_format, labels) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET name = excluded.name, "
-        "tier = excluded.tier, nats_url = excluded.nats_url, "
+        "nats_url = excluded.nats_url, "
         "subject_prefix = excluded.subject_prefix, "
         "wire_format = excluded.wire_format, labels = excluded.labels");
     if (!insert.is_valid())
@@ -109,15 +88,13 @@ sqlite::result<void> instance_repository::save(const dom::instance& row) {
         return bound;
     if (auto bound = insert.bind(2, row.name); !bound)
         return bound;
-    if (auto bound = insert.bind(3, dom::to_string(row.tier)); !bound)
+    if (auto bound = insert.bind(3, row.nats_url); !bound)
         return bound;
-    if (auto bound = insert.bind(4, row.nats_url); !bound)
+    if (auto bound = insert.bind(4, row.subject_prefix); !bound)
         return bound;
-    if (auto bound = insert.bind(5, row.subject_prefix); !bound)
+    if (auto bound = insert.bind(5, row.wire_format); !bound)
         return bound;
-    if (auto bound = insert.bind(6, row.wire_format); !bound)
-        return bound;
-    if (auto bound = insert.bind(7, row.labels); !bound)
+    if (auto bound = insert.bind(6, row.labels); !bound)
         return bound;
 
     auto stepped = insert.step();

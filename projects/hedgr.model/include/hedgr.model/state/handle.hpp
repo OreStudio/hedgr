@@ -53,12 +53,12 @@ struct handle final {
 };
 
 struct instance_tag {};
-struct identity_tag {};
+struct account_tag {};
 struct session_tag {};
 struct window_tag {};
 
 using instance_handle = handle<instance_tag>;
-using identity_handle = handle<identity_tag>;
+using account_handle = handle<account_tag>;
 using session_handle = handle<session_tag>;
 using window_handle = handle<window_tag>;
 

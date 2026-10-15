@@ -162,20 +162,6 @@ void apply_theme() {
     plot.Colormap = ImPlotColormap_Dark;
 }
 
-ImU32 tier_colour(hedgr::model::domain::tier value) noexcept {
-    switch (value) {
-    case hedgr::model::domain::tier::development:
-        return IM_COL32(0, 200, 83, 255);
-    case hedgr::model::domain::tier::staging:
-        return IM_COL32(255, 193, 7, 255);
-    case hedgr::model::domain::tier::production:
-        return IM_COL32(255, 23, 68, 255);
-    }
-    // Unreachable while the switch is exhaustive. The trailing return is
-    // what lets a new enumerator compile only once it is handled above.
-    return IM_COL32(212, 212, 212, 255);
-}
-
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {
     switch (value) {
     case hedgr::model::domain::session_status::disconnected:
@@ -188,18 +174,6 @@ ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {
         return IM_COL32(255, 23, 68, 255);
     }
     return IM_COL32(212, 212, 212, 255);
-}
-
-const char* tier_icon(hedgr::model::domain::tier value) noexcept {
-    switch (value) {
-    case hedgr::model::domain::tier::development:
-        return icon::tier_development;
-    case hedgr::model::domain::tier::staging:
-        return icon::tier_staging;
-    case hedgr::model::domain::tier::production:
-        return icon::tier_production;
-    }
-    return icon::information;
 }
 
 const char* status_icon(hedgr::model::domain::session_status value) noexcept {

@@ -27,18 +27,18 @@
 namespace hedgr::model::domain {
 
 /**
- * @brief The key of a session: one identity presented to one instance.
+ * @brief The key of a session: one account presented to one instance.
  *
  * A session is keyed by the pair rather than by a surrogate id, so reconnecting
- * an identity to an instance resumes the same session instead of creating a
+ * an account to an instance resumes the same session instead of creating a
  * second one.
  */
 struct session_key final {
     /** @brief Key of the instance. */
     std::string instance_id;
 
-    /** @brief Key of the identity. */
-    std::string identity_id;
+    /** @brief Key of the account. */
+    std::string account_id;
 
     friend bool operator==(const session_key&, const session_key&) = default;
 };
@@ -49,7 +49,7 @@ enum class session_status : std::uint8_t {
     disconnected = 0,
     /** @brief A transport is being opened or authentication is in flight. */
     connecting = 1,
-    /** @brief The transport is open and IAM accepted the identity. */
+    /** @brief The transport is open and IAM accepted the account. */
     authenticated = 2,
     /** @brief The last attempt failed; last_error says why. */
     failed = 3,

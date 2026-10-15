@@ -137,7 +137,7 @@ parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
 
     /*
      * Make the unprefixed ORES_NATS_* variables available to the shared
-     * fallback tier, so a deployment's broker settings need only be stated
+     * fallback, so a deployment's broker settings need only be stated
      * once across every ORE Studio client.
      */
     nats_configuration::register_shared_domain();

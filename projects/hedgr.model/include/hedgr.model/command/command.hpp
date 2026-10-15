@@ -20,9 +20,8 @@
 #ifndef HEDGR_MODEL_COMMAND_COMMAND_HPP
 #define HEDGR_MODEL_COMMAND_COMMAND_HPP
 
-#include "hedgr.model/domain/identity.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
-#include "hedgr.model/domain/tier.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
@@ -41,12 +40,12 @@ namespace hedgr::model::command {
 enum class command_kind : std::uint8_t {
     /** @brief Add or replace an instance, then persist it. */
     save_instance = 0,
-    /** @brief Remove an instance, its identities and their sessions. */
+    /** @brief Remove an instance, its accounts and their sessions. */
     remove_instance = 1,
-    /** @brief Add or replace an identity, then persist it. */
-    save_identity = 2,
-    /** @brief Remove an identity and its session. */
-    remove_identity = 3,
+    /** @brief Add or replace an account, then persist it. */
+    save_account = 2,
+    /** @brief Remove an account and its session. */
+    remove_account = 3,
     /** @brief Open a session for a pair, authenticating with a credential. */
     connect_session = 4,
     /** @brief Close a session. */
@@ -79,8 +78,8 @@ struct command final {
     /** @brief Instance the command concerns, when it concerns one. */
     std::string instance_id;
 
-    /** @brief Identity the command concerns, when it concerns one. */
-    std::string identity_id;
+    /** @brief Account the command concerns, when it concerns one. */
+    std::string account_id;
 
     /** @brief Window the command concerns, when it concerns one. */
     std::string window_id;
@@ -91,8 +90,8 @@ struct command final {
     /** @brief Instance row, for save_instance. */
     domain::instance instance_row;
 
-    /** @brief Identity row, for save_identity. */
-    domain::identity identity_row;
+    /** @brief Account row, for save_account. */
+    domain::account account_row;
 
     /** @brief Principal for connect_session. Never persisted. */
     std::string principal;

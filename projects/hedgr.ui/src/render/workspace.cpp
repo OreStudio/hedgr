@@ -229,7 +229,7 @@ void workspace::render(const render_input& input) {
         const std::string title = window_title(kind, input.windows.state(handle));
 
         /*
-         * The visible title can change with the data, so the ImGui identity
+         * The visible title can change with the data, so the ImGui id
          * is pinned to the stable id after the ### marker. Without it a
          * retitled window would be a different window to ImGui, and would
          * lose its position, size and collapsed state.

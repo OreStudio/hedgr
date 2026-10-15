@@ -17,10 +17,10 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.model/domain/identity.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/window.hpp"
-#include "hedgr.store/repository/identity_repository.hpp"
+#include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/schema.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
@@ -33,14 +33,13 @@
 
 namespace {
 
+using hedgr::model::domain::account;
 using hedgr::model::domain::chart_state;
-using hedgr::model::domain::identity;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::session_key;
-using hedgr::model::domain::tier;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
-using hedgr::store::repository::identity_repository;
+using hedgr::store::repository::account_repository;
 using hedgr::store::repository::instance_repository;
 using hedgr::store::repository::window_repository;
 using hedgr::store::sqlite::database;
@@ -59,7 +58,6 @@ instance sample_instance() {
     instance row;
     row.id = "inst-1";
     row.name = "Local";
-    row.tier = tier::production;
     row.nats_url = "nats://localhost:20405";
     row.subject_prefix = "ores.local";
     row.wire_format = "msgpack";
@@ -91,7 +89,6 @@ TEST_CASE("an instance round-trips through save and list", "[store]") {
     const auto& row = rows.value().front();
     REQUIRE(row.id == "inst-1");
     REQUIRE(row.name == "Local");
-    REQUIRE(row.tier == tier::production);
     REQUIRE(row.nats_url == "nats://localhost:20405");
     REQUIRE(row.subject_prefix == "ores.local");
     REQUIRE(row.wire_format == "msgpack");
@@ -106,34 +103,32 @@ TEST_CASE("saving the same id twice updates the row", "[store]") {
 
     instance updated = sample_instance();
     updated.name = "Local Renamed";
-    updated.tier = tier::staging;
     REQUIRE(repository.save(updated).has_value());
 
     const auto rows = repository.list();
     REQUIRE(rows.has_value());
     REQUIRE(rows.value().size() == 1);
     REQUIRE(rows.value().front().name == "Local Renamed");
-    REQUIRE(rows.value().front().tier == tier::staging);
 }
 
-TEST_CASE("removing an instance cascades to its identities", "[store]") {
+TEST_CASE("removing an instance cascades to its accounts", "[store]") {
     auto db = fresh_store();
     instance_repository instances(db);
-    identity_repository identities(db);
+    account_repository accounts(db);
 
     REQUIRE(instances.save(sample_instance()).has_value());
 
-    identity row;
+    account row;
     row.id = "id-1";
     row.instance_id = "inst-1";
     row.label = "ops read-only";
     row.principal = "ops@host";
-    REQUIRE(identities.save(row).has_value());
-    REQUIRE(identities.list_for_instance("inst-1").value().size() == 1);
+    REQUIRE(accounts.save(row).has_value());
+    REQUIRE(accounts.list_for_instance("inst-1").value().size() == 1);
 
     REQUIRE(instances.remove("inst-1").has_value());
 
-    const auto remaining = identities.list_for_instance("inst-1");
+    const auto remaining = accounts.list_for_instance("inst-1");
     REQUIRE(remaining.has_value());
     REQUIRE(remaining.value().empty());
 }
@@ -158,7 +153,7 @@ TEST_CASE("a window bound to a session round-trips", "[store]") {
     const auto& stored = rows.value().front();
     REQUIRE(stored.session.has_value());
     REQUIRE(stored.session->instance_id == "inst-1");
-    REQUIRE(stored.session->identity_id == "id-1");
+    REQUIRE(stored.session->account_id == "id-1");
     REQUIRE(stored.cadence == std::chrono::milliseconds(250));
 }
 
@@ -203,18 +198,18 @@ TEST_CASE("a chart window's state payload round-trips", "[store]") {
     REQUIRE(chart->max_points == 450);
 }
 
-TEST_CASE("an unknown tier in a row is reported as a corrupt row", "[store]") {
+TEST_CASE("an unknown window kind in a row is reported as a corrupt row",
+    "[store]") {
     auto db = fresh_store();
-    instance_repository repository(db);
+    window_repository repository(db);
 
     const auto planted = db.execute(
-        "INSERT INTO instance (id, name, tier, nats_url, subject_prefix) "
-        "VALUES ('inst-bad', 'Bad', 'quantum', 'nats://localhost:1', "
-        "'ores.bad')");
+        "INSERT INTO window_spec (window_id, kind) "
+        "VALUES ('win-bad', 'hologram')");
     REQUIRE(planted.has_value());
 
     const auto rows = repository.list();
     REQUIRE_FALSE(rows.has_value());
     REQUIRE(rows.error().code == store_errc::corrupt_row);
-    REQUIRE(rows.error().message.contains("inst-bad"));
+    REQUIRE(rows.error().message.contains("win-bad"));
 }

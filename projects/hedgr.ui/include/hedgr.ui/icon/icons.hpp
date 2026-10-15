@@ -42,10 +42,10 @@ namespace hedgr::ui::icon {
 /** @brief An instance: a deployment Hedgr can talk to. */
 inline constexpr const char* instance = ICON_FA_SERVER;
 
-/** @brief An identity: a principal that may be presented to an instance. */
-inline constexpr const char* identity = ICON_FA_ID_CARD;
+/** @brief An account: a principal that may be presented to an instance. */
+inline constexpr const char* account = ICON_FA_ID_CARD;
 
-/** @brief A session, in the abstract: one identity presented to one instance. */
+/** @brief A session, in the abstract: one account presented to one instance. */
 inline constexpr const char* session = ICON_FA_CIRCLE_NODES;
 
 /** @brief A session whose connection attempt is still in flight. */
@@ -113,15 +113,6 @@ inline constexpr const char* eye_off = ICON_FA_EYE_SLASH;
 
 /** @brief Filter a list down to what matches some text. */
 inline constexpr const char* search = ICON_FA_MAGNIFYING_GLASS;
-
-/** @brief The development tier. Nothing it does can hurt anyone. */
-inline constexpr const char* tier_development = ICON_FA_CODE;
-
-/** @brief The staging tier. It is a rehearsal for production. */
-inline constexpr const char* tier_staging = ICON_FA_FLASK;
-
-/** @brief The production tier. Mistakes here cost money. */
-inline constexpr const char* tier_production = ICON_FA_GAUGE_HIGH;
 
 /** @brief The Instance Manager: the root surface of the interface. */
 inline constexpr const char* dashboard = ICON_FA_CIRCLE_PLAY;

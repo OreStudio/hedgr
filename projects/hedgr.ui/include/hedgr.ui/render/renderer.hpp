@@ -77,8 +77,8 @@ struct render_input final {
     /** @brief The instances known to this process. */
     const hedgr::model::state::instance_table& instances;
 
-    /** @brief The identities known to this process. */
-    const hedgr::model::state::identity_table& identities;
+    /** @brief The accounts known to this process. */
+    const hedgr::model::state::account_table& accounts;
 
     /** @brief The live sessions. */
     const hedgr::model::state::session_table& sessions;

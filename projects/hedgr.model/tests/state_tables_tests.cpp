@@ -17,19 +17,102 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstdint>
 #include <string>
+#include <utility>
 
+using hedgr::model::domain::account;
+using hedgr::model::domain::instance;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
+using hedgr::model::state::account_table;
+using hedgr::model::state::instance_table;
 using hedgr::model::state::session_table;
 using hedgr::model::state::window_table;
 
-TEST_CASE("a session is found by the instance and identity pair", "[session]") {
+/** @brief An instance row carrying only what a table test reads back. */
+[[nodiscard]] instance make_instance(std::string id, std::string name) {
+    instance row;
+    row.id = std::move(id);
+    row.name = std::move(name);
+    return row;
+}
+
+/** @brief An account row belonging to @p instance_id. */
+[[nodiscard]] account make_account(std::string id, std::string instance_id) {
+    account row;
+    row.id = std::move(id);
+    row.instance_id = std::move(instance_id);
+    return row;
+}
+
+TEST_CASE("an instance is found by id and read back by handle", "[instance]") {
+    instance_table instances;
+
+    const auto handle = instances.upsert(make_instance("inst-1", "Local"));
+
+    REQUIRE(instances.size() == 1);
+    REQUIRE(instances.contains(handle));
+    REQUIRE(instances.find("inst-1") == handle);
+    REQUIRE(instances.get(handle) != nullptr);
+    REQUIRE(instances.get(handle)->name == "Local");
+}
+
+TEST_CASE("a replaced instance keeps the handle it held", "[instance]") {
+    instance_table instances;
+    const auto first = instances.upsert(make_instance("inst-1", "Local"));
+
+    const auto second = instances.upsert(make_instance("inst-1", "Renamed"));
+
+    REQUIRE(second == first);
+    REQUIRE(instances.size() == 1);
+    REQUIRE(instances.get(first)->name == "Renamed");
+}
+
+TEST_CASE("a removed instance leaves a hole no handle reaches", "[instance]") {
+    instance_table instances;
+    const auto first = instances.upsert(make_instance("inst-1", "Local"));
+
+    instances.remove(first);
+
+    REQUIRE(instances.size() == 0);
+    REQUIRE_FALSE(instances.contains(first));
+    REQUIRE(instances.get(first) == nullptr);
+    REQUIRE_FALSE(instances.find("inst-1").has_value());
+
+    /* The slot stays where it was, which keeps every other handle valid. */
+    REQUIRE(instances.rows().size() == 1);
+    REQUIRE_FALSE(instances.layout().is_alive(0));
+
+    const auto second = instances.upsert(make_instance("inst-2", "Next"));
+    REQUIRE(second.index == first.index);
+    REQUIRE(second.generation != first.generation);
+    REQUIRE_FALSE(second == first);
+}
+
+TEST_CASE("an account table reports the children of an instance", "[account]") {
+    account_table accounts;
+    const auto first = accounts.upsert(make_account("acc-1", "inst-1"));
+    static_cast<void>(accounts.upsert(make_account("acc-2", "inst-2")));
+    static_cast<void>(accounts.upsert(make_account("acc-3", "inst-1")));
+
+    REQUIRE(accounts.children_of("inst-1").size() == 2);
+    REQUIRE(accounts.children_of("inst-2").size() == 1);
+
+    accounts.remove(first);
+
+    const auto children = accounts.children_of("inst-1");
+    REQUIRE(children.size() == 1);
+    REQUIRE(children.front()->id == "acc-3");
+}
+
+TEST_CASE("a session is found by the instance and account pair", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
 
@@ -57,7 +140,7 @@ TEST_CASE("a released handle does not address the next occupant", "[session]") {
 TEST_CASE("removing a session drops the token it held", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
-    sessions.set_identity_result(handle, "acme", "books", "secret-token");
+    sessions.set_account_result(handle, "acme", "books", "secret-token");
 
     REQUIRE(sessions.tenant_name(handle) == "acme");
     sessions.remove(handle);
@@ -118,7 +201,7 @@ TEST_CASE("a window description round-trips through the table", "[window]") {
     REQUIRE(recovered.kind == window_kind::chart);
     REQUIRE(recovered.session.has_value());
     REQUIRE(recovered.session->instance_id == "inst-1");
-    REQUIRE(recovered.session->identity_id == "id-1");
+    REQUIRE(recovered.session->account_id == "id-1");
 
     REQUIRE(windows.specs(sessions).size() == 1);
 }

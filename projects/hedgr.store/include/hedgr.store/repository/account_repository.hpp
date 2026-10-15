@@ -17,10 +17,10 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HEDGR_STORE_REPOSITORY_IDENTITY_REPOSITORY_HPP
-#define HEDGR_STORE_REPOSITORY_IDENTITY_REPOSITORY_HPP
+#ifndef HEDGR_STORE_REPOSITORY_ACCOUNT_REPOSITORY_HPP
+#define HEDGR_STORE_REPOSITORY_ACCOUNT_REPOSITORY_HPP
 
-#include "hedgr.model/domain/identity.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.store/export.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include "hedgr.store/sqlite/error.hpp"
@@ -35,31 +35,31 @@ namespace dom = model::domain;
 using sqlite::result;
 
 /**
- * @brief Reads and writes the identities that may be presented to instances.
+ * @brief Reads and writes the accounts that may be presented to instances.
  *
  * The repository borrows the connection, so it must not outlive it. Nothing
- * here relates to a credential: an identity is a principal, and the secret that
+ * here relates to a credential: an account is a principal, and the secret that
  * authenticates it lives in memory for one connect attempt only.
  */
-class HEDGR_STORE_EXPORT identity_repository final {
+class HEDGR_STORE_EXPORT account_repository final {
 public:
     /** @brief Binds the repository to an open @c db. */
-    explicit identity_repository(sqlite::database& db) noexcept;
+    explicit account_repository(sqlite::database& db) noexcept;
 
-    /** @brief Every identity, ordered by instance then label. */
-    [[nodiscard]] result<std::vector<dom::identity>> list() const;
+    /** @brief Every account, ordered by instance then label. */
+    [[nodiscard]] result<std::vector<dom::account>> list() const;
 
-    /** @brief The identities of one instance, ordered by label. */
-    [[nodiscard]] result<std::vector<dom::identity>>
+    /** @brief The accounts of one instance, ordered by label. */
+    [[nodiscard]] result<std::vector<dom::account>>
     list_for_instance(std::string_view instance_id) const;
 
     /** @brief Inserts @c row, or replaces the row with the same id. */
-    [[nodiscard]] result<void> save(const dom::identity& row);
+    [[nodiscard]] result<void> save(const dom::account& row);
 
-    /** @brief Deletes the identity with @c id. */
+    /** @brief Deletes the account with @c id. */
     [[nodiscard]] result<void> remove(std::string_view id);
 
-    /** @brief Deletes every identity of one instance. */
+    /** @brief Deletes every account of one instance. */
     [[nodiscard]] result<void>
     remove_for_instance(std::string_view instance_id);
 

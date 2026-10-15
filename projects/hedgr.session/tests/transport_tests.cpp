@@ -100,7 +100,7 @@ TEST_CASE("a session that was never connected reports itself so", "[transport]")
 
     REQUIRE_FALSE(session.is_connected());
     REQUIRE_FALSE(session.is_authenticated());
-    REQUIRE(session.identity().token.empty());
+    REQUIRE(session.account().token.empty());
     REQUIRE(session.options().subject_prefix == "ores.dev.brave_hopper");
 }
 

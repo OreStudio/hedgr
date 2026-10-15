@@ -20,7 +20,6 @@
 #ifndef HEDGR_MODEL_DOMAIN_INSTANCE_HPP
 #define HEDGR_MODEL_DOMAIN_INSTANCE_HPP
 
-#include "hedgr.model/domain/tier.hpp"
 #include "hedgr.model/export.hpp"
 #include <string>
 
@@ -43,9 +42,6 @@ struct instance final {
 
     /** @brief Short human label, unique in the local store. */
     std::string name;
-
-    /** @brief Safety classification, read by destructive-action prompts. */
-    tier tier = tier::development;
 
     /** @brief NATS server address, for example nats://localhost:20405. */
     std::string nats_url;

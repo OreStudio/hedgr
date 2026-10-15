@@ -17,7 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.store/repository/identity_repository.hpp"
+#include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/sqlite/statement.hpp"
 #include <string>
 #include <string_view>
@@ -32,10 +32,10 @@ namespace dom = model::domain;
 namespace {
 
 constexpr std::string_view select_columns =
-    "SELECT id, instance_id, label, principal FROM identity";
+    "SELECT id, instance_id, label, principal FROM account";
 
-dom::identity read_row(const sqlite::statement& query) {
-    dom::identity row;
+dom::account read_row(const sqlite::statement& query) {
+    dom::account row;
     row.id = std::string(query.column_text(0));
     row.instance_id = std::string(query.column_text(1));
     row.label = std::string(query.column_text(2));
@@ -43,7 +43,7 @@ dom::identity read_row(const sqlite::statement& query) {
     return row;
 }
 
-sqlite::result<std::vector<dom::identity>>
+sqlite::result<std::vector<dom::account>>
 collect(sqlite::database& db, std::string_view sql, std::string_view argument) {
     sqlite::statement query(db.handle(), sql);
     if (!query.is_valid())
@@ -53,7 +53,7 @@ collect(sqlite::database& db, std::string_view sql, std::string_view argument) {
             return std::unexpected(bound.error());
     }
 
-    std::vector<dom::identity> rows;
+    std::vector<dom::account> rows;
     while (true) {
         auto available = query.step();
         if (!available)
@@ -67,26 +67,26 @@ collect(sqlite::database& db, std::string_view sql, std::string_view argument) {
 
 }
 
-identity_repository::identity_repository(sqlite::database& db) noexcept
+account_repository::account_repository(sqlite::database& db) noexcept
     : db_(&db) {}
 
-sqlite::result<std::vector<dom::identity>> identity_repository::list() const {
+sqlite::result<std::vector<dom::account>> account_repository::list() const {
     const std::string sql =
         std::string(select_columns) + " ORDER BY instance_id, label";
     return collect(*db_, sql, {});
 }
 
-sqlite::result<std::vector<dom::identity>>
-identity_repository::list_for_instance(std::string_view instance_id) const {
+sqlite::result<std::vector<dom::account>>
+account_repository::list_for_instance(std::string_view instance_id) const {
     const std::string sql = std::string(select_columns) +
                             " WHERE instance_id = ? ORDER BY label";
     return collect(*db_, sql, instance_id);
 }
 
-sqlite::result<void> identity_repository::save(const dom::identity& row) {
+sqlite::result<void> account_repository::save(const dom::account& row) {
     sqlite::statement insert(
         db_->handle(),
-        "INSERT INTO identity (id, instance_id, label, principal) "
+        "INSERT INTO account (id, instance_id, label, principal) "
         "VALUES (?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET instance_id = excluded.instance_id, "
         "label = excluded.label, principal = excluded.principal");
@@ -108,8 +108,8 @@ sqlite::result<void> identity_repository::save(const dom::identity& row) {
     return {};
 }
 
-sqlite::result<void> identity_repository::remove(std::string_view id) {
-    sqlite::statement query(db_->handle(), "DELETE FROM identity WHERE id = ?");
+sqlite::result<void> account_repository::remove(std::string_view id) {
+    sqlite::statement query(db_->handle(), "DELETE FROM account WHERE id = ?");
     if (!query.is_valid())
         return std::unexpected(query.step().error());
 
@@ -122,10 +122,10 @@ sqlite::result<void> identity_repository::remove(std::string_view id) {
     return {};
 }
 
-sqlite::result<void> identity_repository::remove_for_instance(
+sqlite::result<void> account_repository::remove_for_instance(
     std::string_view instance_id) {
     sqlite::statement query(db_->handle(),
-                            "DELETE FROM identity WHERE instance_id = ?");
+                            "DELETE FROM account WHERE instance_id = ?");
     if (!query.is_valid())
         return std::unexpected(query.step().error());
 

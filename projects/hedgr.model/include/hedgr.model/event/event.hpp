@@ -37,7 +37,7 @@ namespace hedgr::model::event {
 enum class event_kind : std::uint8_t {
     /** @brief The session moved to a new lifecycle state. */
     session_status_changed = 0,
-    /** @brief IAM accepted the identity and returned a token. */
+    /** @brief IAM accepted the account and returned a token. */
     session_authenticated = 1,
     /** @brief The attempt failed; code and message say why. */
     session_failed = 2,
@@ -66,8 +66,8 @@ struct event final {
     /** @brief Instance the fact belongs to. */
     std::string instance_id;
 
-    /** @brief Identity the fact belongs to. */
-    std::string identity_id;
+    /** @brief Account the fact belongs to. */
+    std::string account_id;
 
     /** @brief New status, for session_status_changed. */
     domain::session_status status = domain::session_status::disconnected;

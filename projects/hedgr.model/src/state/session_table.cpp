@@ -24,12 +24,12 @@ namespace hedgr::model::state {
 
 namespace {
 
-std::string join_key(std::string_view instance_id, std::string_view identity_id) {
+std::string join_key(std::string_view instance_id, std::string_view account_id) {
     std::string key;
-    key.reserve(instance_id.size() + identity_id.size() + 1);
+    key.reserve(instance_id.size() + account_id.size() + 1);
     key.append(instance_id);
     key.push_back('\x1f');
-    key.append(identity_id);
+    key.append(account_id);
     return key;
 }
 
@@ -39,7 +39,7 @@ void grow(session_columns& columns, std::size_t count) {
     columns.status.resize(count);
     columns.latency_us.resize(count);
     columns.instance_id.resize(count);
-    columns.identity_id.resize(count);
+    columns.account_id.resize(count);
     columns.last_error.resize(count);
     columns.tenant_name.resize(count);
     columns.party_name.resize(count);
@@ -49,7 +49,7 @@ void grow(session_columns& columns, std::size_t count) {
 }
 
 session_handle
-session_table::insert(std::string instance_id, std::string identity_id) {
+session_table::insert(std::string instance_id, std::string account_id) {
     const auto index = layout_.allocate();
     grow(columns_, layout_.capacity());
 
@@ -57,21 +57,21 @@ session_table::insert(std::string instance_id, std::string identity_id) {
         static_cast<std::uint8_t>(domain::session_status::disconnected);
     columns_.latency_us[index] = 0;
     columns_.instance_id[index] = std::move(instance_id);
-    columns_.identity_id[index] = std::move(identity_id);
+    columns_.account_id[index] = std::move(account_id);
     columns_.last_error[index].clear();
     columns_.tenant_name[index].clear();
     columns_.party_name[index].clear();
     columns_.token[index].clear();
 
     const session_handle h{index, layout_.generation[index]};
-    by_key_.emplace(join_key(columns_.instance_id[index], columns_.identity_id[index]), h);
+    by_key_.emplace(join_key(columns_.instance_id[index], columns_.account_id[index]), h);
     return h;
 }
 
 void session_table::remove(session_handle h) {
     if (!contains(h))
         return;
-    by_key_.erase(join_key(columns_.instance_id[h.index], columns_.identity_id[h.index]));
+    by_key_.erase(join_key(columns_.instance_id[h.index], columns_.account_id[h.index]));
 
     // The token is a secret: drop it now rather than leave it in a free slot.
     columns_.token[h.index].clear();
@@ -79,14 +79,14 @@ void session_table::remove(session_handle h) {
     columns_.tenant_name[h.index].clear();
     columns_.party_name[h.index].clear();
     columns_.instance_id[h.index].clear();
-    columns_.identity_id[h.index].clear();
+    columns_.account_id[h.index].clear();
 
     layout_.release(h.index);
 }
 
 std::optional<session_handle>
-session_table::find(std::string_view instance_id, std::string_view identity_id) const {
-    const auto it = by_key_.find(join_key(instance_id, identity_id));
+session_table::find(std::string_view instance_id, std::string_view account_id) const {
+    const auto it = by_key_.find(join_key(instance_id, account_id));
     if (it == by_key_.end())
         return std::nullopt;
     return it->second;
@@ -116,7 +116,7 @@ void session_table::set_last_error(session_handle h, std::string value) {
     columns_.last_error[h.index] = std::move(value);
 }
 
-void session_table::set_identity_result(session_handle h, std::string tenant_name,
+void session_table::set_account_result(session_handle h, std::string tenant_name,
                                         std::string party_name, std::string token) {
     columns_.tenant_name[h.index] = std::move(tenant_name);
     columns_.party_name[h.index] = std::move(party_name);
@@ -127,8 +127,8 @@ std::string_view session_table::instance_id(session_handle h) const {
     return columns_.instance_id[h.index];
 }
 
-std::string_view session_table::identity_id(session_handle h) const {
-    return columns_.identity_id[h.index];
+std::string_view session_table::account_id(session_handle h) const {
+    return columns_.account_id[h.index];
 }
 
 std::string_view session_table::tenant_name(session_handle h) const {

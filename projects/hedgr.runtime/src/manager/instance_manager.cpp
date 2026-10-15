@@ -56,12 +56,12 @@ namespace transport = hedgr::session::transport;
  * "a" + "bc" and "ab" + "c" have to be two workers, not one.
  */
 [[nodiscard]] std::string running_key(std::string_view instance_id,
-    std::string_view identity_id) {
+    std::string_view account_id) {
     std::string result;
-    result.reserve(instance_id.size() + identity_id.size() + 1);
+    result.reserve(instance_id.size() + account_id.size() + 1);
     result.append(instance_id);
     result.push_back('\x1f');
-    result.append(identity_id);
+    result.append(account_id);
     return result;
 }
 
@@ -87,6 +87,25 @@ live_windows(const model_state::window_table& windows) {
         if (layout.alive[index] == 0)
             continue;
         result.push_back(model_state::window_handle{index, layout.generation[index]});
+    }
+    return result;
+}
+
+/**
+ * @brief Every live account row, holes skipped, for a whole-table walk.
+ *
+ * Removing an instance cascades to its accounts, and the rows to drop are found
+ * by walking the slab rather than by a lookup, because the question asked is
+ * "whose instance is this" rather than "which row is this id".
+ */
+[[nodiscard]] std::vector<model_state::account_handle>
+live_accounts(const model_state::account_table& accounts) {
+    std::vector<model_state::account_handle> result;
+    const auto& layout = accounts.layout();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        result.push_back(model_state::account_handle{index, layout.generation[index]});
     }
     return result;
 }
@@ -202,7 +221,7 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     instance_repo_ = std::make_unique<store::repository::instance_repository>(
         *database_);
-    identity_repo_ = std::make_unique<store::repository::identity_repository>(
+    account_repo_ = std::make_unique<store::repository::account_repository>(
         *database_);
     window_repo_ = std::make_unique<store::repository::window_repository>(
         *database_);
@@ -223,17 +242,17 @@ instance_manager::start(const std::filesystem::path& database_path,
     }
     instances_.clear();
     for (const auto& row : instances.value())
-        instances_.upsert(row);
+        static_cast<void>(instances_.upsert(row));
 
-    auto identities = identity_repo_->list();
-    if (!identities) {
-        last_error_ = store_failure("cannot read the stored identities",
-            identities.error());
+    auto accounts = account_repo_->list();
+    if (!accounts) {
+        last_error_ = store_failure("cannot read the stored accounts",
+            accounts.error());
         return std::unexpected(last_error_);
     }
-    identities_.clear();
-    for (const auto& row : identities.value())
-        identities_.upsert(row);
+    accounts_.clear();
+    for (const auto& row : accounts.value())
+        static_cast<void>(accounts_.upsert(row));
 
     auto windows = window_repo_->list();
     if (!windows) {
@@ -254,7 +273,7 @@ instance_manager::start(const std::filesystem::path& database_path,
         if (!spec.session)
             continue;
         if (const auto session = sessions_.find(spec.session->instance_id,
-                spec.session->identity_id)) {
+                spec.session->account_id)) {
             windows_.bind_session(handle, *session);
         }
     }
@@ -291,13 +310,12 @@ void instance_manager::seed_first_run() {
     domain::instance row;
     row.id = std::format("inst-{}", stamp);
     row.name = "local development";
-    row.tier = domain::tier::development;
     row.nats_url = seed_options_.nats_url;
     row.subject_prefix = seed_options_.subject_prefix;
     row.wire_format = seed_options_.wire_format;
     row.created_at = iso8601_now();
 
-    instances_.upsert(row);
+    static_cast<void>(instances_.upsert(row));
 
     if (auto saved = instance_repo_->save(row); !saved) {
         last_error_ = store_failure(
@@ -347,11 +365,11 @@ void instance_manager::handle(const command::command& cmd) {
     case command::command_kind::remove_instance:
         do_remove_instance(cmd);
         break;
-    case command::command_kind::save_identity:
-        do_save_identity(cmd);
+    case command::command_kind::save_account:
+        do_save_account(cmd);
         break;
-    case command::command_kind::remove_identity:
-        do_remove_identity(cmd);
+    case command::command_kind::remove_account:
+        do_remove_account(cmd);
         break;
     case command::command_kind::connect_session:
         do_connect_session(cmd);
@@ -395,17 +413,18 @@ void instance_manager::do_save_instance(const command::command& cmd) {
      * put the table back the way it was. A table that shows an instance the
      * store never accepted would be a lie the next start would contradict.
      */
-    const auto* existing = instances_.find(cmd.instance_row.id);
-    const auto previous = existing ? std::optional<domain::instance>(*existing)
-                                   : std::nullopt;
+    const auto existing = instances_.find(cmd.instance_row.id);
+    const auto previous = existing
+        ? std::optional<domain::instance>(*instances_.get(*existing))
+        : std::nullopt;
 
-    instances_.upsert(cmd.instance_row);
+    const auto handle = instances_.upsert(cmd.instance_row);
 
     if (auto saved = instance_repo_->save(cmd.instance_row); !saved) {
         if (previous)
-            instances_.upsert(*previous);
+            static_cast<void>(instances_.upsert(*previous));
         else
-            instances_.remove(cmd.instance_row.id);
+            instances_.remove(handle);
         last_error_ = store_failure(
             std::format("cannot save instance {}", cmd.instance_row.id),
             saved.error());
@@ -425,8 +444,18 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
         return;
     }
 
-    instances_.remove(id);
-    identities_.remove_for_instance(id);
+    if (const auto handle = instances_.find(id))
+        instances_.remove(*handle);
+
+    /*
+     * The cascade is a walk rather than a lookup: what the accounts table is
+     * asked is which rows name this instance, and its handles are what a
+     * removal takes.
+     */
+    for (const auto account : live_accounts(accounts_)) {
+        if (accounts_.get(account)->instance_id == id)
+            accounts_.remove(account);
+    }
 
     /*
      * A session belongs to the pair, so removing the instance removes its
@@ -439,7 +468,7 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
             continue;
 
         stop_session(running_key(sessions_.instance_id(session),
-            sessions_.identity_id(session)));
+            sessions_.account_id(session)));
 
         /*
          * The window stays open and loses its session. Closing it would take
@@ -463,10 +492,10 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
                 std::format("cannot remove instance {}", id), removed.error());
         }
     }
-    if (identity_repo_) {
-        if (auto removed = identity_repo_->remove_for_instance(id); !removed) {
+    if (account_repo_) {
+        if (auto removed = account_repo_->remove_for_instance(id); !removed) {
             last_error_ = store_failure(
-                std::format("cannot remove the identities of instance {}", id),
+                std::format("cannot remove the accounts of instance {}", id),
                 removed.error());
         }
     }
@@ -474,45 +503,51 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
         last_error_ = saved.error();
 }
 
-void instance_manager::do_save_identity(const command::command& cmd) {
-    if (!identity_repo_) {
-        last_error_ = "cannot save an identity: the store is not open";
+void instance_manager::do_save_account(const command::command& cmd) {
+    if (!account_repo_) {
+        last_error_ = "cannot save an account: the store is not open";
         return;
     }
 
-    const auto* existing = identities_.find(cmd.identity_row.id);
-    const auto previous = existing ? std::optional<domain::identity>(*existing)
-                                   : std::nullopt;
+    const auto existing = accounts_.find(cmd.account_row.id);
+    const auto previous = existing
+        ? std::optional<domain::account>(*accounts_.get(*existing))
+        : std::nullopt;
 
-    identities_.upsert(cmd.identity_row);
+    const auto handle = accounts_.upsert(cmd.account_row);
 
-    if (auto saved = identity_repo_->save(cmd.identity_row); !saved) {
+    if (auto saved = account_repo_->save(cmd.account_row); !saved) {
         if (previous)
-            identities_.upsert(*previous);
+            static_cast<void>(accounts_.upsert(*previous));
         else
-            identities_.remove(cmd.identity_row.id);
+            accounts_.remove(handle);
         last_error_ = store_failure(
-            std::format("cannot save identity {}", cmd.identity_row.id),
+            std::format("cannot save account {}", cmd.account_row.id),
             saved.error());
     }
 }
 
-void instance_manager::do_remove_identity(const command::command& cmd) {
-    const std::string id = cmd.identity_id.empty() ? cmd.identity_row.id
-                                                   : cmd.identity_id;
+void instance_manager::do_remove_account(const command::command& cmd) {
+    const std::string id = cmd.account_id.empty() ? cmd.account_row.id
+                                                  : cmd.account_id;
     if (id.empty()) {
-        last_error_ = "cannot remove an identity: no identity was named";
+        last_error_ = "cannot remove an account: no account was named";
         return;
     }
 
     /*
-     * One identity is at most one session, because a session is keyed by the
+     * One account is at most one session, because a session is keyed by the
      * pair, so the row to stop is looked up by the pair rather than walked for.
+     * The instance is read out before the row goes, because removing it clears
+     * the value the slot held.
      */
-    const auto* row = identities_.find(id);
-    const std::string instance_id = row ? row->instance_id : cmd.instance_id;
+    const auto handle = accounts_.find(id);
+    const std::string instance_id = handle
+        ? accounts_.get(*handle)->instance_id
+        : cmd.instance_id;
 
-    identities_.remove(id);
+    if (handle)
+        accounts_.remove(*handle);
 
     if (const auto session = sessions_.find(instance_id, id)) {
         stop_session(running_key(instance_id, id));
@@ -523,10 +558,10 @@ void instance_manager::do_remove_identity(const command::command& cmd) {
         sessions_.remove(*session);
     }
 
-    if (identity_repo_) {
-        if (auto removed = identity_repo_->remove(id); !removed) {
+    if (account_repo_) {
+        if (auto removed = account_repo_->remove(id); !removed) {
             last_error_ = store_failure(
-                std::format("cannot remove identity {}", id), removed.error());
+                std::format("cannot remove account {}", id), removed.error());
         }
     }
     if (auto saved = save_windows(); !saved)
@@ -534,17 +569,22 @@ void instance_manager::do_remove_identity(const command::command& cmd) {
 }
 
 void instance_manager::do_connect_session(const command::command& cmd) {
-    const auto* instance_row = instances_.find(cmd.instance_id);
-    if (instance_row == nullptr) {
+    /*
+     * Both ids arrive as text from the interface, so both are resolved here:
+     * the instance's row is read for the connection settings, and the account
+     * has only to exist, since the credential travels in the command.
+     */
+    const auto instance = instances_.find(cmd.instance_id);
+    if (!instance) {
         last_error_ = std::format("cannot connect: no instance {}",
             cmd.instance_id);
         return;
     }
+    const auto* instance_row = instances_.get(*instance);
 
-    const auto* identity_row = identities_.find(cmd.identity_id);
-    if (identity_row == nullptr) {
-        last_error_ = std::format("cannot connect: no identity {}",
-            cmd.identity_id);
+    if (!accounts_.find(cmd.account_id)) {
+        last_error_ = std::format("cannot connect: no account {}",
+            cmd.account_id);
         return;
     }
 
@@ -552,9 +592,9 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * Reconnecting a pair resumes the same session rather than making a second
      * one, which is the whole reason the table is keyed by the pair.
      */
-    auto handle = sessions_.find(cmd.instance_id, cmd.identity_id);
+    auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
     if (!handle)
-        handle = sessions_.insert(cmd.instance_id, cmd.identity_id);
+        handle = sessions_.insert(cmd.instance_id, cmd.account_id);
     sessions_.set_status(*handle, domain::session_status::connecting);
 
     transport::session_options options;
@@ -575,10 +615,10 @@ void instance_manager::do_connect_session(const command::command& cmd) {
 
     worker::session_job job;
     job.options = std::move(options);
-    job.key = domain::session_key{cmd.instance_id, cmd.identity_id};
+    job.key = domain::session_key{cmd.instance_id, cmd.account_id};
     job.credential = domain::credential{cmd.principal, cmd.password};
 
-    const auto key = running_key(cmd.instance_id, cmd.identity_id);
+    const auto key = running_key(cmd.instance_id, cmd.account_id);
     if (const auto previous = running_.find(key); previous != running_.end()) {
         /*
          * A second connect for a pair that is already running asks for a fresh
@@ -601,9 +641,9 @@ void instance_manager::do_connect_session(const command::command& cmd) {
 }
 
 void instance_manager::do_disconnect_session(const command::command& cmd) {
-    stop_session(running_key(cmd.instance_id, cmd.identity_id));
+    stop_session(running_key(cmd.instance_id, cmd.account_id));
 
-    const auto handle = sessions_.find(cmd.instance_id, cmd.identity_id);
+    const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
     if (!handle)
         return;
 
@@ -633,7 +673,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
     spec.kind = cmd.new_window_kind;
 
     std::string_view last_error;
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.identity_id))
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
     spec.state = default_state_for(cmd.new_window_kind, last_error);
 
@@ -644,7 +684,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * reach its state without a key lookup per window. A window opened with no
      * session named stays unbound and renders the session-loss state.
      */
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.identity_id))
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         windows_.bind_session(handle, *session);
 
     if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
@@ -700,7 +740,7 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
 }
 
 void instance_manager::apply(const event::event& ev) {
-    const auto handle = sessions_.find(ev.instance_id, ev.identity_id);
+    const auto handle = sessions_.find(ev.instance_id, ev.account_id);
 
     /*
      * A session that is gone is not an error: a worker that was asked to stop
@@ -715,7 +755,7 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_status(*handle, ev.status);
         break;
     case event::event_kind::session_authenticated:
-        sessions_.set_identity_result(*handle, ev.tenant_name, ev.party_name,
+        sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.token);
         sessions_.set_status(*handle, domain::session_status::authenticated);
         break;

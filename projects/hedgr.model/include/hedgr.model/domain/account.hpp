@@ -17,31 +17,36 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.model/domain/tier.hpp"
-#include <format>
+#ifndef HEDGR_MODEL_DOMAIN_ACCOUNT_HPP
+#define HEDGR_MODEL_DOMAIN_ACCOUNT_HPP
+
+#include "hedgr.model/export.hpp"
+#include <string>
 
 namespace hedgr::model::domain {
 
-std::string_view to_string(tier value) noexcept {
-    switch (value) {
-    case tier::development:
-        return "development";
-    case tier::staging:
-        return "staging";
-    case tier::production:
-        return "production";
-    }
-    return "unknown";
+/**
+ * @brief A login on exactly one instance.
+ *
+ * The same username on two instances is two accounts, which is why every row
+ * names its instance rather than being found by principal alone. An account
+ * carries no credential and no token: credentials live for the lifetime of a
+ * session only, and the bearer token belongs to the session that obtained it.
+ */
+struct account final {
+    /** @brief Stable key, unique in the local store. */
+    std::string id;
+
+    /** @brief Key of the instance this login belongs to. */
+    std::string instance_id;
+
+    /** @brief Short human label, for example "ops read-only". */
+    std::string label;
+
+    /** @brief The principal as IAM sees it, for example user@host. */
+    std::string principal;
+};
+
 }
 
-std::expected<tier, std::string> tier_from_string(std::string_view text) {
-    if (text == "development")
-        return tier::development;
-    if (text == "staging")
-        return tier::staging;
-    if (text == "production")
-        return tier::production;
-    return std::unexpected(std::format("unknown tier '{}'", text));
-}
-
-}
+#endif

@@ -25,7 +25,7 @@
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.session/transport/session_options.hpp"
-#include "hedgr.store/repository/identity_repository.hpp"
+#include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
@@ -85,8 +85,8 @@ public:
         return instances_;
     }
 
-    [[nodiscard]] const model::state::identity_table& identities() const noexcept {
-        return identities_;
+    [[nodiscard]] const model::state::account_table& accounts() const noexcept {
+        return accounts_;
     }
 
     [[nodiscard]] const model::state::session_table& sessions() const noexcept {
@@ -123,8 +123,8 @@ private:
 
     void do_save_instance(const model::command::command& cmd);
     void do_remove_instance(const model::command::command& cmd);
-    void do_save_identity(const model::command::command& cmd);
-    void do_remove_identity(const model::command::command& cmd);
+    void do_save_account(const model::command::command& cmd);
+    void do_remove_account(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
     void do_disconnect_session(const model::command::command& cmd);
     void do_open_window(const model::command::command& cmd);
@@ -137,7 +137,7 @@ private:
 
     async::executor pool_;
     model::state::instance_table instances_;
-    model::state::identity_table identities_;
+    model::state::account_table accounts_;
     model::state::session_table sessions_;
     model::state::window_table windows_;
     model::command::command_queue commands_;
@@ -145,7 +145,7 @@ private:
 
     std::unique_ptr<store::sqlite::database> database_;
     std::unique_ptr<store::repository::instance_repository> instance_repo_;
-    std::unique_ptr<store::repository::identity_repository> identity_repo_;
+    std::unique_ptr<store::repository::account_repository> account_repo_;
     std::unique_ptr<store::repository::window_repository> window_repo_;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;

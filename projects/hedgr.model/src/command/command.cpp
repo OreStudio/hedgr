@@ -27,10 +27,10 @@ std::string_view to_string(command_kind value) noexcept {
         return "save_instance";
     case command_kind::remove_instance:
         return "remove_instance";
-    case command_kind::save_identity:
-        return "save_identity";
-    case command_kind::remove_identity:
-        return "remove_identity";
+    case command_kind::save_account:
+        return "save_account";
+    case command_kind::remove_account:
+        return "remove_account";
     case command_kind::connect_session:
         return "connect_session";
     case command_kind::disconnect_session:

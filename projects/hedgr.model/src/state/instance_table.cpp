@@ -18,32 +18,70 @@
  *
  */
 #include "hedgr.model/state/tables.hpp"
-#include <algorithm>
+#include <memory>
+#include <utility>
 
 namespace hedgr::model::state {
 
-const domain::instance*
-instance_table::find(std::string_view id) const noexcept {
-    const auto it = std::ranges::find(rows_, id, &domain::instance::id);
-    return it == rows_.end() ? nullptr : std::addressof(*it);
-}
-
-bool instance_table::upsert(domain::instance row) {
-    const auto it = std::ranges::find(rows_, row.id, &domain::instance::id);
-    if (it == rows_.end()) {
-        rows_.push_back(std::move(row));
-        return false;
+instance_handle instance_table::upsert(domain::instance row) {
+    if (const auto found = by_id_.find(row.id); found != by_id_.end()) {
+        rows_[found->second.index] = std::move(row);
+        return found->second;
     }
-    *it = std::move(row);
-    return true;
+
+    const auto index = layout_.allocate();
+    if (rows_.size() < layout_.capacity())
+        rows_.resize(layout_.capacity());
+
+    const instance_handle h{index, layout_.generation[index]};
+    by_id_.emplace(row.id, h);
+    rows_[index] = std::move(row);
+    return h;
 }
 
-bool instance_table::remove(std::string_view id) {
-    const auto it = std::ranges::find(rows_, id, &domain::instance::id);
-    if (it == rows_.end())
-        return false;
-    rows_.erase(it);
-    return true;
+void instance_table::remove(instance_handle h) {
+    if (!contains(h))
+        return;
+    by_id_.erase(rows_[h.index].id);
+
+    // The value goes with the slot: a hole holds nothing a caller could reach.
+    rows_[h.index] = domain::instance{};
+    layout_.release(h.index);
+}
+
+bool instance_table::contains(instance_handle h) const noexcept {
+    return owns(layout_, h);
+}
+
+std::size_t instance_table::size() const noexcept {
+    return layout_.live_count;
+}
+
+std::optional<instance_handle>
+instance_table::find(std::string_view id) const {
+    const auto it = by_id_.find(std::string{id});
+    if (it == by_id_.end())
+        return std::nullopt;
+    return it->second;
+}
+
+const domain::instance*
+instance_table::get(instance_handle h) const noexcept {
+    if (!contains(h))
+        return nullptr;
+    return std::addressof(rows_[h.index]);
+}
+
+domain::instance* instance_table::get(instance_handle h) noexcept {
+    if (!contains(h))
+        return nullptr;
+    return std::addressof(rows_[h.index]);
+}
+
+void instance_table::clear() noexcept {
+    layout_ = {};
+    rows_.clear();
+    by_id_.clear();
 }
 
 }

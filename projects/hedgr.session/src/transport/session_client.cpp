@@ -157,7 +157,7 @@ void session_client::disconnect() {
     }
 
     connected_ = false;
-    identity_ = session_identity{};
+    account_ = session_account{};
 }
 
 bool session_client::is_connected() const noexcept {
@@ -165,10 +165,10 @@ bool session_client::is_connected() const noexcept {
 }
 
 bool session_client::is_authenticated() const noexcept {
-    return !identity_.token.empty();
+    return !account_.token.empty();
 }
 
-result<session_identity> session_client::authenticate(std::string_view principal,
+result<session_account> session_client::authenticate(std::string_view principal,
     std::string_view password) {
 
     if (!is_connected()) {
@@ -221,7 +221,7 @@ result<session_identity> session_client::authenticate(std::string_view principal
             ? answer.selected_party_id : answer.default_party_id;
         nats_.set_auth(std::move(info));
 
-        identity_ = session_identity{
+        account_ = session_account{
             .token = answer.token,
             .tenant_id = answer.tenant_id,
             .tenant_name = answer.tenant_name,
@@ -229,7 +229,7 @@ result<session_identity> session_client::authenticate(std::string_view principal
             .principal = answer.username.empty()
                 ? std::string(principal) : answer.username};
 
-        return identity_;
+        return account_;
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {
@@ -278,12 +278,12 @@ result<void> session_client::select_party(std::string_view party_id) {
         info.default_party_id = std::string(party_id);
         nats_.set_auth(std::move(info));
 
-        identity_.token = answer.token;
-        identity_.party_name = answer.party_name;
+        account_.token = answer.token;
+        account_.party_name = answer.party_name;
         if (!answer.tenant_name.empty())
-            identity_.tenant_name = answer.tenant_name;
+            account_.tenant_name = answer.tenant_name;
         if (!answer.username.empty())
-            identity_.principal = answer.username;
+            account_.principal = answer.username;
 
         return {};
     } catch (const std::exception& e) {
@@ -301,7 +301,7 @@ result<void> session_client::logout() {
          * state, and repeating it must not fail.
          */
         nats_.clear_auth();
-        identity_ = session_identity{};
+        account_ = session_account{};
         return {};
     }
 
@@ -342,7 +342,7 @@ result<void> session_client::logout() {
      * looking signed in.
      */
     nats_.clear_auth();
-    identity_ = session_identity{};
+    account_ = session_account{};
 
     return outcome;
 }
@@ -396,8 +396,8 @@ std::string session_client::subject(std::string_view suffix) const {
     return make_subject(options_, suffix);
 }
 
-const session_identity& session_client::identity() const noexcept {
-    return identity_;
+const session_account& session_client::account() const noexcept {
+    return account_;
 }
 
 const session_options& session_client::options() const noexcept {

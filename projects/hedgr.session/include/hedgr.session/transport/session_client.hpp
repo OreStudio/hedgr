@@ -22,7 +22,7 @@
 
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_error.hpp"
-#include "hedgr.session/transport/session_identity.hpp"
+#include "hedgr.session/transport/session_account.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <string>
 #include <string_view>
@@ -31,7 +31,7 @@
 namespace hedgr::session::transport {
 
 /**
- * @brief One blocking connection from one identity to one instance.
+ * @brief One blocking connection from one account to one instance.
  *
  * Every call here blocks until the instance answers or the request times
  * out, because the transport underneath is blocking and pretending otherwise
@@ -104,7 +104,7 @@ public:
      * @param password the secret presented to the instance.
      * @return who the instance says this session is, or why it refused.
      */
-    [[nodiscard]] result<session_identity>
+    [[nodiscard]] result<session_account>
     authenticate(std::string_view principal, std::string_view password);
 
     /**
@@ -176,7 +176,7 @@ public:
     [[nodiscard]] std::string subject(std::string_view suffix) const;
 
     /** @brief Who this session is, empty until the instance says. */
-    [[nodiscard]] const session_identity& identity() const noexcept;
+    [[nodiscard]] const session_account& account() const noexcept;
 
     /** @brief Where this session connects and how. */
     [[nodiscard]] const session_options& options() const noexcept;
@@ -194,7 +194,7 @@ private:
 
     ores::nats::service::nats_client nats_;
     session_options options_;
-    session_identity identity_;
+    session_account account_;
     bool connected_ = false;
 };
 

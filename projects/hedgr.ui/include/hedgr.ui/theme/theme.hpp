@@ -21,7 +21,6 @@
 #define HEDGR_UI_THEME_THEME_HPP
 
 #include "hedgr.model/domain/session.hpp"
-#include "hedgr.model/domain/tier.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
@@ -38,31 +37,12 @@ namespace hedgr::ui::theme {
 HEDGR_UI_EXPORT void apply_theme();
 
 /**
- * @brief The colour of a tier: green, amber or red.
- *
- * Tier is the axis every destructive-action prompt reads, so the same colour
- * has to mean the same thing in a table row, a tooltip and a confirmation.
- * Keeping the mapping in one function is what guarantees that.
- */
-[[nodiscard]] HEDGR_UI_EXPORT ImU32
-tier_colour(hedgr::model::domain::tier value) noexcept;
-
-/**
  * @brief The colour of a session status.
  *
  * Disconnected grey, connecting amber, authenticated green, failed red.
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImU32
 status_colour(hedgr::model::domain::session_status value) noexcept;
-
-/**
- * @brief The icon naming a tier.
- *
- * An exhaustive switch with no default branch beyond the trailing return, so
- * a new enumerator fails to compile until it is given an icon here.
- */
-[[nodiscard]] HEDGR_UI_EXPORT const char*
-tier_icon(hedgr::model::domain::tier value) noexcept;
 
 /** @brief The icon naming a session status. */
 [[nodiscard]] HEDGR_UI_EXPORT const char*

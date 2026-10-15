@@ -17,8 +17,8 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HEDGR_SESSION_TRANSPORT_SESSION_IDENTITY_HPP
-#define HEDGR_SESSION_TRANSPORT_SESSION_IDENTITY_HPP
+#ifndef HEDGR_SESSION_TRANSPORT_SESSION_ACCOUNT_HPP
+#define HEDGR_SESSION_TRANSPORT_SESSION_ACCOUNT_HPP
 
 #include <string>
 
@@ -34,7 +34,7 @@ namespace hedgr::session::transport {
  * it is never persisted, never logged, and never copied into the state tables
  * the interface renders. It leaves this struct only as an Authorization header.
  */
-struct session_identity final {
+struct session_account final {
     /** @brief The bearer token presented on every authenticated request. */
     std::string token;
 

@@ -136,7 +136,7 @@ window_table::spec(window_handle h, const session_table& sessions) const {
     if (const auto session = session_of(h); session && sessions.contains(*session)) {
         result.session = domain::session_key{
             std::string(sessions.instance_id(*session)),
-            std::string(sessions.identity_id(*session)),
+            std::string(sessions.account_id(*session)),
         };
     }
     return result;

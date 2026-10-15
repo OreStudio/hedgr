@@ -113,7 +113,7 @@ using window_state = std::variant<chart_state, grid_state, notice_state>;
  * optional rather than a session_key with empty strings.
  */
 struct window_spec final {
-    /** @brief Stable identity, used as the ImGui id and never shown. */
+    /** @brief Stable id, used as the ImGui id and never shown. */
     std::string id;
 
     /** @brief What the window renders. */

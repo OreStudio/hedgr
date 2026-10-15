@@ -305,7 +305,7 @@ void application::render_loop(GLFWwindow* window) {
 
         const ui::render::render_input input{
             manager_.instances(),
-            manager_.identities(),
+            manager_.accounts(),
             manager_.sessions(),
             manager_.windows(),
             manager_.commands(),

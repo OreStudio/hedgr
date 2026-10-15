@@ -38,10 +38,9 @@ namespace {
 
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
-using hedgr::model::domain::identity;
+using hedgr::model::domain::account;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::session_status;
-using hedgr::model::domain::tier;
 using hedgr::model::domain::window_kind;
 using hedgr::model::state::session_handle;
 using hedgr::model::state::window_handle;
@@ -56,11 +55,11 @@ using hedgr::ui::render::window_ui_state;
 instance add_draft{};
 bool add_form_open = false;
 
-/** @brief The instance whose identities are listed, empty when none is. */
+/** @brief The instance whose accounts are listed, empty when none is. */
 std::string selected_instance_id;
 
-/** @brief The identity whose connect form is showing, empty when none is. */
-std::string connect_identity_id;
+/** @brief The account whose connect form is showing, empty when none is. */
+std::string connect_account_id;
 
 /**
  * @brief Whether a needle occurs anywhere in a haystack, case-insensitively.
@@ -83,29 +82,13 @@ bool filter_contains(std::string_view haystack, std::string_view needle) {
 /**
  * @brief An icon-only action button, sized to the frame height.
  */
-bool action_button(const char* id, const char* glyph, const char* tooltip,
-    const ImVec4* tint = nullptr) {
+bool action_button(const char* id, const char* glyph, const char* tooltip) {
     const float height = ImGui::GetFrameHeight();
-    if (tint != nullptr)
-        ImGui::PushStyleColor(ImGuiCol_Text, *tint);
     ImGui::PushID(id);
     const bool pressed = ImGui::Button(glyph, ImVec2(height, height));
     ImGui::PopID();
-    if (tint != nullptr)
-        ImGui::PopStyleColor();
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed;
-}
-
-/**
- * @brief The colour of the destructive action, read from the tier.
- *
- * Removing a production instance and removing a development one are not the
- * same act, and the icon says so before the click rather than after it.
- */
-ImVec4 destructive_tint(tier value) {
-    return ImGui::ColorConvertU32ToFloat4(
-        hedgr::ui::theme::tier_colour(value));
 }
 
 /**
@@ -124,8 +107,8 @@ struct session_row final {
     /** @brief Stable id of the instance the session belongs to. */
     std::string instance_id;
 
-    /** @brief Stable id of the identity the session presents. */
-    std::string identity_id;
+    /** @brief Stable id of the account the session presents. */
+    std::string account_id;
 };
 
 /**
@@ -153,14 +136,14 @@ std::vector<session_row> collect_sessions(const render_input& input) {
         row.status = static_cast<session_status>(status_column[handle.index]);
         row.latency_us = latency_column[handle.index];
         row.instance_id = std::string{sessions.instance_id(handle)};
-        row.identity_id = std::string{sessions.identity_id(handle)};
+        row.account_id = std::string{sessions.account_id(handle)};
         rows.push_back(std::move(row));
     }
     return rows;
 }
 
-/** @brief The label to show for an identity, falling back to its principal. */
-std::string identity_label(const identity& row) {
+/** @brief The label to show for an account, falling back to its principal. */
+std::string account_label(const account& row) {
     if (!row.label.empty())
         return row.label;
     return row.principal;
@@ -173,24 +156,13 @@ std::string identity_label(const identity& row) {
  * empty cell tells the reader nothing about why.
  */
 std::string instance_name(const render_input& input, std::string_view id) {
-    if (const auto* row = input.instances.find(id))
-        return row->name;
+    if (const auto handle = input.instances.find(id))
+        return input.instances.get(*handle)->name;
     return std::string{id};
 }
 
-/**
- * @brief The form that creates an instance, shown on request.
- *
- * Tier is chosen explicitly here and never inferred from the name, matching
- * how the rest of the interface reads it.
- */
+/** @brief The form that creates an instance, shown on request. */
 void draw_add_form(const render_input& input) {
-    constexpr std::array<std::pair<tier, std::string_view>, 3> tiers{{
-        {tier::development, "Development"},
-        {tier::staging, "Staging"},
-        {tier::production, "Production"},
-    }};
-
     ImGui::SeparatorText("New instance");
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##add-name", "name", &add_draft.name);
@@ -200,23 +172,6 @@ void draw_add_form(const render_input& input) {
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##add-prefix", "subject prefix",
         &add_draft.subject_prefix);
-
-    ImGui::TextUnformatted("Tier");
-    for (const auto& [value, label] : tiers) {
-        ImGui::SameLine();
-        const bool current = add_draft.tier == value;
-        if (current)
-            ImGui::PushStyleColor(ImGuiCol_Button,
-                ImGui::ColorConvertU32ToFloat4(
-                    hedgr::ui::theme::tier_colour(value)));
-        ImGui::PushID(label.data());
-        if (ImGui::Button(hedgr::ui::theme::tier_icon(value)))
-            add_draft.tier = value;
-        ImGui::PopID();
-        if (current)
-            ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%s", label.data());
-    }
 
     const bool complete = !add_draft.name.empty()
         && !add_draft.nats_url.empty() && !add_draft.subject_prefix.empty();
@@ -252,17 +207,25 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
         | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingFixedFit
         | ImGuiTableFlags_ScrollY;
 
-    if (!ImGui::BeginTable("##instances", 4, flags, ImVec2(0.0f, 160.0f)))
+    if (!ImGui::BeginTable("##instances", 3, flags, ImVec2(0.0f, 160.0f)))
         return;
 
     ImGui::TableSetupScrollFreeze(0, 1);
-    ImGui::TableSetupColumn("##tier", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Subject", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
 
-    for (const auto& row : input.instances.rows()) {
+    /*
+     * The rows span includes the holes a removal leaves behind, so the walk
+     * checks the slab before reading a slot.
+     */
+    const auto& layout = input.instances.layout();
+    const auto rows = input.instances.rows();
+    for (std::size_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(static_cast<std::uint32_t>(index)))
+            continue;
+        const auto& row = rows[index];
         if (!filter_contains(row.name, state.filter.data())
             && !filter_contains(row.subject_prefix, state.filter.data())
             && !filter_contains(row.nats_url, state.filter.data()))
@@ -270,15 +233,6 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
 
         ImGui::TableNextRow();
         ImGui::PushID(row.id.c_str());
-
-        ImGui::TableNextColumn();
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(
-                hedgr::ui::theme::tier_colour(row.tier)));
-        ImGui::TextUnformatted(hedgr::ui::theme::tier_icon(row.tier));
-        ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%s",
-            hedgr::model::domain::to_string(row.tier).data());
 
         ImGui::TableNextColumn();
         const bool selected = selected_instance_id == row.id;
@@ -293,9 +247,8 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
         if (action_button("edit", hedgr::ui::icon::edit, "Edit instance"))
             selected_instance_id = row.id;
         ImGui::SameLine();
-        const ImVec4 danger = destructive_tint(row.tier);
         if (action_button("remove", hedgr::ui::icon::remove,
-                "Remove instance", &danger)) {
+                "Remove instance")) {
             command request;
             request.kind = command_kind::remove_instance;
             request.instance_id = row.id;
@@ -303,7 +256,7 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
         }
         ImGui::SameLine();
         if (action_button("connect", hedgr::ui::icon::connect,
-                "Connect an identity")) {
+                "Connect an account")) {
             selected_instance_id = row.id;
             state.selected_row = -1;
         }
@@ -314,14 +267,14 @@ void draw_instances_table(const render_input& input, window_ui_state& state) {
     ImGui::EndTable();
 }
 
-void draw_identities(const render_input& input, window_ui_state& state) {
-    ImGui::SeparatorText("Identities");
+void draw_accounts(const render_input& input, window_ui_state& state) {
+    ImGui::SeparatorText("Accounts");
 
-    const auto children = input.identities.children_of(selected_instance_id);
+    const auto children = input.accounts.children_of(selected_instance_id);
     if (children.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted("No identities on this instance yet.");
+        ImGui::TextUnformatted("No accounts on this instance yet.");
         ImGui::PopStyleColor();
         return;
     }
@@ -329,14 +282,14 @@ void draw_identities(const render_input& input, window_ui_state& state) {
     const float reserved = ImGui::GetFrameHeight() * 2.0f
         + ImGui::GetStyle().ItemSpacing.x * 2.0f;
     for (std::size_t index = 0; index < children.size(); ++index) {
-        const identity& row = *children[index];
-        if (!filter_contains(identity_label(row), state.filter.data())
+        const account& row = *children[index];
+        if (!filter_contains(account_label(row), state.filter.data())
             && !filter_contains(row.principal, state.filter.data()))
             continue;
 
         ImGui::PushID(row.id.c_str());
         const bool selected = state.selected_row == static_cast<int>(index);
-        if (ImGui::Selectable(identity_label(row).c_str(), selected,
+        if (ImGui::Selectable(account_label(row).c_str(), selected,
                 ImGuiSelectableFlags_None,
                 ImVec2(ImGui::GetContentRegionAvail().x - reserved, 0.0f)))
             state.selected_row = selected ? -1 : static_cast<int>(index);
@@ -344,17 +297,17 @@ void draw_identities(const render_input& input, window_ui_state& state) {
 
         ImGui::SameLine();
         if (action_button("connect", hedgr::ui::icon::connect,
-                "Connect this identity")) {
-            connect_identity_id = row.id;
+                "Connect this account")) {
+            connect_account_id = row.id;
             state.draft_principal = row.principal;
         }
         ImGui::SameLine();
         if (action_button("remove", hedgr::ui::icon::remove,
-                "Remove identity")) {
+                "Remove account")) {
             command request;
-            request.kind = command_kind::remove_identity;
+            request.kind = command_kind::remove_account;
             request.instance_id = selected_instance_id;
-            request.identity_id = row.id;
+            request.account_id = row.id;
             input.commands.push(std::move(request));
         }
         ImGui::PopID();
@@ -406,7 +359,7 @@ void draw_connect_form(const render_input& input, window_ui_state& state) {
         command request;
         request.kind = command_kind::connect_session;
         request.instance_id = selected_instance_id;
-        request.identity_id = connect_identity_id;
+        request.account_id = connect_account_id;
         request.principal = state.draft_principal;
         request.password = state.draft_password.data();
         input.commands.push(std::move(request));
@@ -418,7 +371,7 @@ void draw_connect_form(const render_input& input, window_ui_state& state) {
     if (cancelled) {
         state.draft_principal.clear();
         state.draft_password.fill('\0');
-        connect_identity_id.clear();
+        connect_account_id.clear();
     }
 }
 
@@ -429,7 +382,7 @@ void draw_sessions_table(const render_input& input) {
     if (rows.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted("No sessions. Connect an identity to start.");
+        ImGui::TextUnformatted("No sessions. Connect an account to start.");
         ImGui::PopStyleColor();
         return;
     }
@@ -444,7 +397,7 @@ void draw_sessions_table(const render_input& input) {
     ImGui::TableSetupScrollFreeze(0, 1);
     ImGui::TableSetupColumn("##status", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("Instance", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("Identity", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Account", ImGuiTableColumnFlags_WidthStretch);
     ImGui::TableSetupColumn("Latency", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("##actions", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
@@ -468,10 +421,12 @@ void draw_sessions_table(const render_input& input) {
         ImGui::TextUnformatted(instance_name(input, row.instance_id).c_str());
 
         ImGui::TableNextColumn();
-        if (const auto* found = input.identities.find(row.identity_id))
-            ImGui::TextUnformatted(identity_label(*found).c_str());
-        else
-            ImGui::TextUnformatted(row.identity_id.c_str());
+        if (const auto found = input.accounts.find(row.account_id)) {
+            const auto* account_row = input.accounts.get(*found);
+            ImGui::TextUnformatted(account_label(*account_row).c_str());
+        } else {
+            ImGui::TextUnformatted(row.account_id.c_str());
+        }
 
         ImGui::TableNextColumn();
         if (row.status == session_status::authenticated) {
@@ -487,7 +442,7 @@ void draw_sessions_table(const render_input& input) {
             command request;
             request.kind = command_kind::disconnect_session;
             request.instance_id = row.instance_id;
-            request.identity_id = row.identity_id;
+            request.account_id = row.account_id;
             input.commands.push(std::move(request));
         }
 
@@ -515,7 +470,7 @@ void draw_sessions_table(const render_input& input) {
  * shows rather than by walking a menu to find it.
  */
 void draw_open_window_row(const render_input& input, std::string_view instance_id,
-    std::string_view identity_id) {
+    std::string_view account_id) {
     constexpr std::array<std::pair<window_kind, const char*>, 3> kinds{{
         {window_kind::chart, "Open chart"},
         {window_kind::grid, "Open grid"},
@@ -530,7 +485,7 @@ void draw_open_window_row(const render_input& input, std::string_view instance_i
             command request;
             request.kind = command_kind::open_window;
             request.instance_id = std::string{instance_id};
-            request.identity_id = std::string{identity_id};
+            request.account_id = std::string{account_id};
             request.new_window_kind = kind;
             input.commands.push(std::move(request));
         }
@@ -546,7 +501,7 @@ namespace hedgr::ui::render {
  * @brief The Instance Manager: the root surface, and the only window that is
  * always usable.
  *
- * It has to make sense with no instance stored, no identity stored and no
+ * It has to make sense with no instance stored, no account stored and no
  * session open, because that is the state a person meets it in on a first run.
  * Everything it can do is an icon with a tooltip, like the rest of the
  * interface, because there is no menu here to fall back on either.
@@ -568,7 +523,7 @@ void render_instance_manager(window_handle handle, const render_input& input,
     ImGui::PushID("instance-manager");
 
     ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##filter", "filter instances and identities",
+    ImGui::InputTextWithHint("##filter", "filter instances and accounts",
         state.filter.data(), state.filter.size());
 
     if (add_form_open)
@@ -576,11 +531,12 @@ void render_instance_manager(window_handle handle, const render_input& input,
 
     draw_instances_table(input, state);
 
-    if (input.instances.find(selected_instance_id) != nullptr)
-        draw_identities(input, state);
+    const bool instance_selected =
+        input.instances.find(selected_instance_id).has_value();
+    if (instance_selected)
+        draw_accounts(input, state);
 
-    if (!connect_identity_id.empty()
-        && input.instances.find(selected_instance_id) != nullptr)
+    if (!connect_account_id.empty() && instance_selected)
         draw_connect_form(input, state);
 
     draw_sessions_table(input);
@@ -595,7 +551,7 @@ void render_instance_manager(window_handle handle, const render_input& input,
             continue;
         ImGui::PushID(static_cast<int>(row.handle.index));
         ImGui::TextUnformatted(instance_name(input, row.instance_id).c_str());
-        draw_open_window_row(input, row.instance_id, row.identity_id);
+        draw_open_window_row(input, row.instance_id, row.account_id);
         ImGui::PopID();
     }
 

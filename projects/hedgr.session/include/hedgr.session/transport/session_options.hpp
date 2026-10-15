@@ -29,7 +29,7 @@ namespace hedgr::session::transport {
 /**
  * @brief Everything needed to open one connection to one instance.
  *
- * A plain value: it is what an instance and an identity resolve to before any
+ * A plain value: it is what an instance and an account resolve to before any
  * connection exists, so it can be copied, stored and compared without holding
  * a socket. The caller builds it once per session; the transport reads it and
  * never writes it back.

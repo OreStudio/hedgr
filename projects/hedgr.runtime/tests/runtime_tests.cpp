@@ -30,7 +30,7 @@
  */
 
 #include "hedgr.model/command/command.hpp"
-#include "hedgr.model/domain/identity.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
@@ -56,10 +56,9 @@ namespace {
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::chart_state;
-using hedgr::model::domain::identity;
+using hedgr::model::domain::account;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::session_status;
-using hedgr::model::domain::tier;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
@@ -141,15 +140,26 @@ private:
     instance row;
     row.id = std::move(id);
     row.name = std::move(name);
-    row.tier = tier::staging;
     row.nats_url = "nats://localhost:20405";
     row.subject_prefix = std::move(subject_prefix);
     return row;
 }
 
-/** @brief An identity row belonging to @p instance_id. */
-[[nodiscard]] identity make_identity(std::string id, std::string instance_id) {
-    identity row;
+/**
+ * @brief The instance row with this id, or nullptr.
+ *
+ * The table answers a string id with a handle and a handle with a row, so the
+ * two steps are spelled once here rather than at every assertion.
+ */
+[[nodiscard]] const instance* find_instance(const instance_manager& manager,
+    std::string_view id) {
+    const auto handle = manager.instances().find(id);
+    return handle ? manager.instances().get(*handle) : nullptr;
+}
+
+/** @brief An account row belonging to @p instance_id. */
+[[nodiscard]] account make_account(std::string id, std::string instance_id) {
+    account row;
     row.id = std::move(id);
     row.instance_id = std::move(instance_id);
     row.label = "ops read-only";
@@ -219,9 +229,15 @@ TEST_CASE("start opens the store and seeds one development instance", "[runtime]
     REQUIRE(manager.is_started());
     REQUIRE(manager.instances().size() == 1);
 
-    const auto& row = manager.instances().rows().front();
+    /*
+     * The rows span includes the holes a removal leaves behind, so the walk
+     * checks the slab before reading the one row a fresh store holds.
+     */
+    const auto& instances = manager.instances();
+    const auto& layout = instances.layout();
+    REQUIRE(layout.is_alive(0));
+    const auto& row = instances.rows()[0];
     REQUIRE(row.name == "local development");
-    REQUIRE(row.tier == tier::development);
     REQUIRE(row.nats_url == "nats://localhost:20405");
     REQUIRE(row.subject_prefix == "ores.dev.brave_hopper");
     REQUIRE_FALSE(row.created_at.empty());
@@ -249,7 +265,6 @@ TEST_CASE("starting twice leaves one instance", "[runtime]") {
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
-    REQUIRE(reopened.instances().rows().front().tier == tier::development);
     REQUIRE(reopened.windows().find("instance-manager").has_value());
     reopened.stop();
 }
@@ -268,19 +283,19 @@ TEST_CASE("a save_instance command adds a row and replaces it in place",
     push_command(manager, request);
 
     REQUIRE(manager.instances().size() == 2);
-    REQUIRE(manager.instances().find("inst-alpha") != nullptr);
-    REQUIRE(manager.instances().find("inst-alpha")->name == "Alpha");
+    REQUIRE(find_instance(manager, "inst-alpha") != nullptr);
+    REQUIRE(find_instance(manager, "inst-alpha")->name == "Alpha");
 
     request.instance_row.name = "Alpha renamed";
     push_command(manager, request);
 
     REQUIRE(manager.instances().size() == 2);
-    REQUIRE(manager.instances().find("inst-alpha")->name == "Alpha renamed");
+    REQUIRE(find_instance(manager, "inst-alpha")->name == "Alpha renamed");
 
     manager.stop();
 }
 
-TEST_CASE("a remove_instance command takes the instance's identities with it",
+TEST_CASE("a remove_instance command takes the instance's accounts with it",
     "[runtime]") {
     const temporary_database database("remove-instance");
 
@@ -294,22 +309,22 @@ TEST_CASE("a remove_instance command takes the instance's identities with it",
         save.instance_id = save.instance_row.id;
         push_command(manager, save);
 
-        command save_identity;
-        save_identity.kind = command_kind::save_identity;
-        save_identity.identity_row = make_identity("ident-1", "inst-beta");
-        push_command(manager, save_identity);
+        command save_account;
+        save_account.kind = command_kind::save_account;
+        save_account.account_row = make_account("ident-1", "inst-beta");
+        push_command(manager, save_account);
 
         REQUIRE(manager.instances().size() == 2);
-        REQUIRE(manager.identities().size() == 1);
+        REQUIRE(manager.accounts().size() == 1);
 
         command remove;
         remove.kind = command_kind::remove_instance;
         remove.instance_id = "inst-beta";
         push_command(manager, remove);
 
-        REQUIRE(manager.instances().find("inst-beta") == nullptr);
+        REQUIRE(find_instance(manager, "inst-beta") == nullptr);
         REQUIRE(manager.instances().size() == 1);
-        REQUIRE(manager.identities().size() == 0);
+        REQUIRE(manager.accounts().size() == 0);
 
         manager.stop();
     }
@@ -318,7 +333,7 @@ TEST_CASE("a remove_instance command takes the instance's identities with it",
     instance_manager reopened;
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
-    REQUIRE(reopened.identities().size() == 0);
+    REQUIRE(reopened.accounts().size() == 0);
     reopened.stop();
 }
 
@@ -378,15 +393,15 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     save.instance_id = save.instance_row.id;
     push_command(manager, save);
 
-    command save_identity;
-    save_identity.kind = command_kind::save_identity;
-    save_identity.identity_row = make_identity("ident-1", "inst-refused");
-    push_command(manager, save_identity);
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
 
     command connect;
     connect.kind = command_kind::connect_session;
     connect.instance_id = "inst-refused";
-    connect.identity_id = "ident-1";
+    connect.account_id = "ident-1";
     connect.principal = "alice@example.test";
     connect.password = "not-a-real-secret";
     push_command(manager, connect);
@@ -409,7 +424,7 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     event fact;
     fact.kind = event_kind::session_failed;
     fact.instance_id = "inst-refused";
-    fact.identity_id = "ident-1";
+    fact.account_id = "ident-1";
     fact.code = "unreachable";
     fact.message = "the instance could not be reached";
     manager.events().push(fact);
