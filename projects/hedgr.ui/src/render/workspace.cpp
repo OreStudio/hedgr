@@ -114,7 +114,12 @@ void workspace::render(const render_input& input) {
     lock_control_.open_requested = false;
     lock_control_.close_requested = false;
 
-    draw_toolbar(input);
+    /*
+     * The background is submitted first and nothing precedes it, because it is
+     * the surface the windows are read against. There is no application-level
+     * toolbar to draw above it: the one toolbar each window has is the
+     * browser's, beside the tree.
+     */
     draw_background(input);
 
     /*
@@ -277,106 +282,6 @@ void workspace::render(const render_input& input) {
     } else if (lock_control_.open_requested) {
         open_lock_prompt();
     }
-}
-
-
-void workspace::draw_toolbar(const render_input& input) {
-    namespace icon = hedgr::ui::icon;
-    using hedgr::model::command::command_kind;
-
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->Pos);
-    ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, 0.0f));
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
-        | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
-        | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
-
-    if (!ImGui::Begin("##hedgr-toolbar", nullptr, flags)) {
-        ImGui::End();
-        return;
-    }
-
-    /*
-     * Every action here reaches the store, so none of them is drawn while the
-     * lock is closed: a button that cannot do its job is worse than no button.
-     * The lock control itself is below, outside this gate, because it is the
-     * one action that is available while locked.
-     */
-    const bool open = input.store_lock == hedgr::model::domain::store_lock::unlocked;
-
-    if (!open)
-        ImGui::BeginDisabled();
-
-    if (hedgr::ui::widget::icon_button("refresh", icon::refresh,
-            "Refresh every window")) {
-        /*
-         * One command per open window. The interface does not know how to
-         * fetch anything: it names the windows that want fresh data and lets
-         * the runtime decide when and whether that happens.
-         */
-        const auto& layout = input.windows.layout();
-        const auto open_column = input.windows.open_column();
-        for (std::size_t index = 0; index < layout.alive.size(); ++index) {
-            if (layout.alive[index] == 0 || open_column[index] == 0)
-                continue;
-            hedgr::model::command::command request;
-            request.kind = command_kind::refresh_window;
-            request.window_id = std::string{input.windows.id(
-                hedgr::model::state::window_handle{
-                    static_cast<std::uint32_t>(index), layout.generation[index]})};
-            input.commands.push(std::move(request));
-        }
-    }
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("probe", icon::probe, "Probe every instance now")) {
-        /*
-         * One command for the whole set rather than one per instance: the
-         * runtime owns the schedule, so asking it to bring every deadline
-         * forward leaves it to decide what is already being probed and in what
-         * order the rest follow.
-         */
-        hedgr::model::command::command request;
-        request.kind = command_kind::probe_all;
-        input.commands.push(std::move(request));
-    }
-
-    if (!open)
-        ImGui::EndDisabled();
-
-    /*
-     * The lock indicator. Coloured, because the colour is what is read at a
-     * glance, and tooltipped with prose, because the glyph alone does not say
-     * which of the three closed-looking states this is.
-     */
-    /*
-     * The lock indicator and its control used to live here and do not any
-     * more. The lock's state and the action on it are one control on the
-     * Instances window's status bar, where the store's own status is read:
-     * a padlock in the chrome that is not the one that opens the store is a
-     * second thing to look at, and the two could disagree.
-     */
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
-        /*
-         * Full screen is a property of the GLFW window, which this library
-         * does not own and must not reach for. It synthesises the shortcut the
-         * application already listens for during its frame loop, so the
-         * decision about how to change it stays in the layer that has the
-         * window handle.
-         */
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_F11, true);
-    }
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("exit", icon::exit_app, "Exit Hedgr")) {
-        hedgr::model::command::command request;
-        request.kind = command_kind::shutdown;
-        input.commands.push(std::move(request));
-    }
-
-    ImGui::End();
 }
 
 bool workspace::shows_lock_prompt(const render_input& input) const noexcept {

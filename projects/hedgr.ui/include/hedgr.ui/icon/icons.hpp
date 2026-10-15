@@ -90,11 +90,12 @@ inline constexpr const char* refresh = ICON_FA_ROTATE;
 /** @brief Settings. */
 inline constexpr const char* settings = ICON_FA_GEAR;
 
-/** @brief Go full screen, or leave it. */
-inline constexpr const char* fullscreen = ICON_FA_EXPAND;
-
-/** @brief Leave the application. */
-inline constexpr const char* exit_app = ICON_FA_POWER_OFF;
+/*
+ * There is no full-screen glyph and no exit glyph here any more. Both were
+ * carried only by the application-level toolbar, which is gone: full screen is
+ * the frame loop's own F11 handling, and leaving is the window's close control.
+ * A glyph with no control behind it is a shape a reader learns for nothing.
+ */
 
 /** @brief Something is not fatal but wants attention. */
 inline constexpr const char* warning = ICON_FA_TRIANGLE_EXCLAMATION;

@@ -61,32 +61,28 @@ public:
      *
      * The store is then opened without anybody pressing anything, so the
      * interface says so for as long as that is true: see
-     * the toolbar note. An unlock that looks exactly like a person's
+     * @c environment_unlock_ below, whose notice lands on the Instances
+     * window's status bar. An unlock that looks exactly like a person's
      * is the failure this records against, because it makes the gate look as
      * though it is not there.
      */
     void unlock_with(std::string_view master_password);
 
     /**
-     * @brief Draws the toolbar, then every open window, gated on the lock.
+     * @brief Draws every open window, gated on the lock.
      *
      * Must be called between ImGui::NewFrame and ImGui::Render. Pushes at most
      * one command per user action into input.commands; it never touches the
      * tables it reads.
+     *
+     * There is no application-level toolbar to draw first. The one toolbar
+     * each window has is the browser's, beside the tree, and the actions the
+     * application's strip used to carry are on the surfaces that own them:
+     * probe-all on the Instances window, the lock control on the status bar.
      */
     void render(const render_input& input);
 
-
 private:
-    /**
-     * @brief Draws the toolbar, including the lock indicator and its action.
-     *
-     * A member and not a free function because the lock action has to change
-     * this object's prompt state, and threading a reference to that through a
-     * free function would hide the one thing the function is for.
-     */
-    void draw_toolbar(const render_input& input);
-
     /**
      * @brief Draws the password form, when the operator has opened it.
      *
@@ -182,7 +178,7 @@ private:
      * again. It changes nothing about how the store works: it exists so that
      * an unattended unlock cannot be mistaken for a person's, because a store
      * that opens itself and says nothing makes the gate look absent. The
-     * toolbar carries a note while this is true.
+     * Instances window's status bar carries a note while this is true.
      */
     bool environment_unlock_ = false;
 

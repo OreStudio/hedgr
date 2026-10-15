@@ -215,16 +215,20 @@ ImU32 text_colour_on(ImU32 background) noexcept {
         / 255.0f;
 
     /*
-     * Half of the scale, because that is where the label palette changes over:
-     * amber at 0.75, grey at 0.62, blue at 0.56, purple at 0.55 and green at
-     * 0.50 are all pale enough to want dark text, and red at 0.38 wants the
-     * pale one. The threshold has to sit above green -- 0.4 would give a
-     * saturated green dark text, which is the combination a reader finds worst
-     * -- and a declared "dark is under half, light is over half" is the reading
-     * of the scale that needs no second table to justify it.
+     * Below the middle of the scale, because the palette does not split at the
+     * middle. Every colour a label is painted with is pale enough for dark text
+     * except red: amber at 0.75, grey at 0.62, blue at 0.56, purple at 0.55 and
+     * green at 0.50 all sit above the line, and red at 0.38 below it. A
+     * threshold of one half would put green, at 0.50, on the pale side, which
+     * is not where the palette wants it.
+     *
+     * So the line is set below green with room to spare rather than exactly at
+     * it. An entry that moved across it should show up as a failing test and
+     * not as a label nobody can read, and green is the entry with the least
+     * room.
      */
-    return luminance > 0.5f ? IM_COL32(24, 24, 24, 255)
-                            : IM_COL32(250, 250, 250, 255);
+    return luminance > 0.45f ? IM_COL32(24, 24, 24, 255)
+                             : IM_COL32(250, 250, 250, 255);
 }
 
 const char* status_icon(hedgr::model::domain::session_status value) noexcept {
