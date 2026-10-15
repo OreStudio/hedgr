@@ -51,4 +51,16 @@ if [ -n "${ORES_NATS_TLS_CA:-}" ]; then
     export ORES_HEDGR_NATS_TLS_KEY="${ORES_NATS_TLS_KEY}"
 fi
 
+# The development master password.
+#
+# A known value so an unattended run, a capture or a scripted check can unlock
+# the store without a prompt, and so the same store opens every time. It guards
+# a local development database and nothing else, and it is deliberately not a
+# secret: it is written here in the clear, which is exactly why it must never
+# be used for a store that matters.
+#
+# Setting it means the unlock prompt does not appear on a development run. Unset
+# it, or override it, to see the prompt and the gate as an operator would.
+export HEDGR_MASTER_PASSWORD="${HEDGR_MASTER_PASSWORD:-Secure-Password-123}"
+
 exec "${binary}" "$@"
