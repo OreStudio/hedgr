@@ -777,24 +777,47 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
  * A leaf selection lists that one leaf. A folder selection lists every leaf the
  * walk reached under it, filtered, which is what "selecting a folder lists
  * everything beneath it" comes to once the tree is already flattened.
+ *
+ * A subtree is a run in the flattened rows: the selected folder's own row, then
+ * every row deeper than it, until a row at its depth or shallower ends it. A
+ * shut folder still lists its entries, because whether a folder is open is how
+ * the tree is drawn. A list that emptied when a folder was shut would be a
+ * second place the same state lives, and closing a folder would then hide rows
+ * in two places that can disagree.
  */
 [[nodiscard]] std::vector<std::size_t> visible_leaf_indices(
     const widget::browser_model& model, const std::vector<tree_row>& rows,
     const widget::browser_state& state) {
     std::vector<std::size_t> kept;
-    for (const auto& row : rows) {
-        if (row.kind != widget::node_kind::leaf || !row.visible)
-            continue;
-        if (!state.selected_leaf.empty())
-            continue;
-        kept.push_back(row.index);
-    }
 
     if (!state.selected_leaf.empty()) {
         for (std::size_t index = 0; index < model.leaves.size(); ++index) {
             if (model.leaves[index].id == state.selected_leaf)
                 kept.push_back(index);
         }
+        return kept;
+    }
+
+    /*
+     * With no folder named, everything the filter let through is listed. With a
+     * folder named, the rows before its own are passed over and the walk stops
+     * at the first row that is not beneath it.
+     */
+    std::size_t folder_depth = 0;
+    bool in_subtree = state.selected_folder.empty();
+    for (const auto& row : rows) {
+        if (!in_subtree) {
+            if (row.kind == widget::node_kind::folder
+                && id_of(model, row) == state.selected_folder) {
+                in_subtree = true;
+                folder_depth = row.depth;
+            }
+            continue;
+        }
+        if (!state.selected_folder.empty() && row.depth <= folder_depth)
+            break;
+        if (row.kind == widget::node_kind::leaf && row.visible)
+            kept.push_back(row.index);
     }
     return kept;
 }
@@ -817,14 +840,43 @@ void draw_list(const widget::browser_model& model,
         return;
     }
 
+    /*
+     * A shut store has no cells to draw. The host's row callback answers with
+     * blank text until the catalogue can be read, so a table submitted anyway
+     * is a header over rows that are empty but not absent, which reads as a
+     * rendering fault rather than as a state. The one thing that is true is
+     * said instead, and it outranks an empty result: no filter and no selection
+     * puts a row back until the password is given.
+     */
+    const char* shut = nullptr;
+    switch (input.store_lock) {
+    case hedgr::model::domain::store_lock::absent:
+        shut = "There is no master password yet, so there is nothing to list.";
+        break;
+    case hedgr::model::domain::store_lock::locked:
+        shut = "The store is locked, so there is nothing to list. Click the "
+               "padlock on the status bar.";
+        break;
+    case hedgr::model::domain::store_lock::failed:
+        shut = "The store could not be unlocked, so there is nothing to list. "
+               "Click the padlock to try again.";
+        break;
+    case hedgr::model::domain::store_lock::unlocked:
+        break;
+    }
+    if (input.unlocking)
+        shut = "Unlocking the store.";
+
     const auto kept = visible_leaf_indices(model, rows, state);
-    if (kept.empty()) {
+    if (shut != nullptr || kept.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        const bool filtering = state.filter[0] != '\0';
-        ImGui::TextUnformatted(filtering
-                ? "Nothing under this folder matches the filter."
-                : "Nothing here yet. Select a folder, or add an entry.");
+        ImGui::TextUnformatted(shut != nullptr
+                ? shut
+                : (state.filter[0] != '\0'
+                          ? "Nothing under this folder matches the filter."
+                          : "Nothing here yet. Select a folder, or add an "
+                            "entry."));
         ImGui::PopStyleColor();
         ImGui::EndChild();
         return;
