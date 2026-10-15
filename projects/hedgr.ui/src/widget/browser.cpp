@@ -38,6 +38,7 @@
 namespace {
 
 namespace widget = hedgr::ui::widget;
+namespace icon = hedgr::ui::icon;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
@@ -87,11 +88,33 @@ struct tree_row final {
         : std::string_view{model.leaves[row.index].name};
 }
 
-/** @brief Whether the row is the tree's root. */
+/**
+ * @brief Whether the row is the tree's root.
+ *
+ * Defined ahead of @c icon_of, which is what a folder's glyph depends on.
+ */
 [[nodiscard]] bool is_root_of(const widget::browser_model& model,
     const tree_row& row) {
     return row.kind == widget::node_kind::folder
         && model.folders[row.index].is_root;
+}
+
+/**
+ * @brief The row's glyph, whichever list it came from.
+ *
+ * A leaf takes its glyph from the model rather than from a constant here, so
+ * that the tree and the list are two drawings of one entry rather than two
+ * guesses at what an entry looks like: the list has always read the leaf's own
+ * icon, and a leaf the tree drew with a different one would be the same entry
+ * wearing two faces in one window.
+ */
+[[nodiscard]] const char* icon_of(const widget::browser_model& model,
+    const tree_row& row) {
+    if (row.kind == widget::node_kind::folder) {
+        return is_root_of(model, row) ? icon::folder_root : icon::folder;
+    }
+    const auto* leaf_icon = model.leaves[row.index].icon;
+    return leaf_icon != nullptr ? leaf_icon : icon::instance;
 }
 
 /** @brief The tree's root id, or empty when the model names no root. */
@@ -601,8 +624,7 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
         }
 
         *row_open = ImGui::TreeNodeEx("##node", flags, "%s  %s",
-            root ? icon::folder_root : icon::folder,
-            std::string{name_of(model, row)}.c_str());
+            icon_of(model, row), std::string{name_of(model, row)}.c_str());
 
         if (root) {
             /*
@@ -649,7 +671,8 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
             ImGui::GetStyle().IndentSpacing * static_cast<float>(row.depth);
         ImGui::Indent(indent);
         const std::string label =
-            std::format("{}  {}", icon::instance, std::string{name_of(model, row)});
+            std::format("{}  {}", icon_of(model, row),
+                std::string{name_of(model, row)});
         if (ImGui::Selectable(label.c_str(), selected)) {
             state.selected_leaf = std::string{id};
             state.selected_folder.clear();
@@ -767,8 +790,36 @@ void draw_list(const widget::browser_model& model,
                      */
                     static_cast<void>(widget::label_pill_row(*pills,
                         ImGui::GetContentRegionAvail().x));
-                } else if (model.columns[position].indicator
-                    && position < cells.colours.size()) {
+                } else if (column == 0 && leaf.icon != nullptr) {
+                    /*
+                     * The icon is submitted as its own item rather than as one
+                     * format string with the name, because the tint below is a
+                     * pushed text colour and would otherwise paint the name as
+                     * well: a whole row in the state's colour is a row that
+                     * shouts, and the name is what the reader is looking for.
+                     * It is also what lets the icon take the colour and the
+                     * name keep the ordinary one.
+                     */
+                    ImGui::AlignTextToFramePadding();
+                    if (!cells.colours.empty() && cells.colours.front() != 0) {
+                        const auto colour = cells.colours.front();
+                        ImGui::PushStyleColor(ImGuiCol_Text,
+                            ImGui::ColorConvertU32ToFloat4(
+                                IM_COL32(
+                                    static_cast<int>((colour >> 16) & 0xFFu),
+                                    static_cast<int>((colour >> 8) & 0xFFu),
+                                    static_cast<int>(colour & 0xFFu),
+                                    static_cast<int>((colour >> 24) & 0xFFu))));
+                    }
+                    ImGui::TextUnformatted(leaf.icon);
+                    if (!cells.colours.empty() && cells.colours.front() != 0)
+                        ImGui::PopStyleColor();
+                    if (!text.empty()) {
+                        ImGui::SameLine();
+                        ImGui::TextUnformatted(text.data(), text.data() + text.size());
+                    }
+                } else if (position < cells.colours.size()
+                    && cells.colours[position] != 0) {
                     const auto colour = cells.colours[position];
                     ImGui::PushStyleColor(ImGuiCol_Text,
                         ImGui::ColorConvertU32ToFloat4(
@@ -778,9 +829,6 @@ void draw_list(const widget::browser_model& model,
                                 static_cast<int>((colour >> 24) & 0xFFu))));
                     ImGui::TextUnformatted(text.data(), text.data() + text.size());
                     ImGui::PopStyleColor();
-                } else if (column == 0 && leaf.icon != nullptr) {
-                    ImGui::Text("%s  %.*s", leaf.icon,
-                        static_cast<int>(text.size()), text.data());
                 } else {
                     ImGui::TextUnformatted(text.data(), text.data() + text.size());
                 }

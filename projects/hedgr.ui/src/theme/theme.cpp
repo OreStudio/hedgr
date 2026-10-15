@@ -259,6 +259,52 @@ ImU32 readiness_colour(hedgr::model::domain::readiness value) noexcept {
     return IM_COL32(212, 212, 212, 255);
 }
 
+/** @brief The colour of an instance's icon, from what the last probe found. */
+ImU32 probe_state_colour(
+    const hedgr::model::domain::probe_result& result, bool observed) noexcept {
+    using hedgr::model::domain::reachability;
+    using hedgr::model::domain::readiness;
+
+    /*
+     * No probe has reported, so the row's colour is the question rather than an
+     * answer: grey. A deployment that has never answered is not a deployment
+     * that refused, and reporting the second is a claim nobody made.
+     */
+    if (!observed)
+        return IM_COL32(128, 128, 128, 255);
+
+    /*
+     * Reachability first, because a broker that did not answer is the whole
+     * story: nothing is known about the service behind it.
+     */
+    if (result.reach == reachability::unreachable)
+        return IM_COL32(255, 23, 68, 255);
+
+    /*
+     * Reachable and not finished. Both readiness answers that are not ready
+     * land here, and the reachability the probe did not fill in lands here with
+     * them, because an instance in the catalogue whose probe has reported
+     * something has been answered for.
+     */
+    if (result.ready != readiness::ready)
+        return IM_COL32(255, 193, 7, 255);
+
+    return IM_COL32(0, 200, 83, 255);
+}
+
+/** @brief The short word for that colour, for a row's tooltip. */
+const char* probe_state_word(
+    const hedgr::model::domain::probe_result& result, bool observed) noexcept {
+    using hedgr::model::domain::reachability;
+    using hedgr::model::domain::readiness;
+
+    if (!observed)
+        return "unknown";
+    if (result.reach == reachability::unreachable)
+        return "unreachable";
+    return result.ready == readiness::ready ? "ready" : "not ready";
+}
+
 const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     switch (value) {
     case hedgr::model::domain::window_kind::chart:

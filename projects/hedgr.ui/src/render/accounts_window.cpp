@@ -409,11 +409,11 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 [[nodiscard]] std::vector<hedgr::ui::widget::list_column> account_columns() {
     using hedgr::ui::widget::column_width;
     return {
-        { "Name", column_width::stretch, false },
-        { "Principal", column_width::stretch, false },
-        { "Tenant", column_width::fit, false },
-        { "Labels", column_width::stretch, false },
-        { "Last sign-in", column_width::fit, true },
+        { "Name", column_width::stretch },
+        { "Principal", column_width::stretch },
+        { "Tenant", column_width::fit },
+        { "Labels", column_width::stretch },
+        { "Last sign-in", column_width::fit },
     };
 }
 

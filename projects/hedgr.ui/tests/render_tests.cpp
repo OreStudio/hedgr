@@ -92,6 +92,60 @@ TEST_CASE("every window kind has an icon", "[theme]") {
     }
 }
 
+/*
+ * The row's one state indicator, tested as the pure function it is.
+ *
+ * The colour and the word are the two halves of one decision, so they are
+ * asserted together: a row that came out amber while its tooltip said "ready"
+ * would be two statements that disagree, and that is exactly the defect this
+ * test exists to catch. The expected values are literal rather than read from
+ * the palette functions the mapping shares, so that moving the mapping away
+ * from red-for-unreachable has to be a deliberate edit here as well.
+ */
+TEST_CASE("a probe result maps to the colour and word a row shows",
+    "[theme]") {
+    using hedgr::model::domain::probe_result;
+    using hedgr::model::domain::reachability;
+    using hedgr::model::domain::readiness;
+    using hedgr::ui::theme::probe_state_colour;
+    using hedgr::ui::theme::probe_state_word;
+
+    const auto never_observed = probe_result{};
+    REQUIRE(probe_state_colour(never_observed, false)
+        == IM_COL32(128, 128, 128, 255));
+    REQUIRE(std::string{probe_state_word(never_observed, false)} == "unknown");
+
+    probe_result unreachable;
+    unreachable.reach = reachability::unreachable;
+    REQUIRE(probe_state_colour(unreachable, true)
+        == IM_COL32(255, 23, 68, 255));
+    REQUIRE(std::string{probe_state_word(unreachable, true)} == "unreachable");
+
+    probe_result bootstrapping;
+    bootstrapping.reach = reachability::reachable;
+    bootstrapping.ready = readiness::bootstrapping;
+    REQUIRE(probe_state_colour(bootstrapping, true)
+        == IM_COL32(255, 193, 7, 255));
+    REQUIRE(std::string{probe_state_word(bootstrapping, true)} == "not ready");
+
+    /*
+     * IAM said nothing, which is an amber row and not a red one: the broker
+     * answered, so the instance is up, and what is unfinished about it is a
+     * different question from whether it is there.
+     */
+    probe_result iam_silent;
+    iam_silent.reach = reachability::reachable;
+    iam_silent.ready = readiness::unknown;
+    REQUIRE(probe_state_colour(iam_silent, true) == IM_COL32(255, 193, 7, 255));
+    REQUIRE(std::string{probe_state_word(iam_silent, true)} == "not ready");
+
+    probe_result ready;
+    ready.reach = reachability::reachable;
+    ready.ready = readiness::ready;
+    REQUIRE(probe_state_colour(ready, true) == IM_COL32(0, 200, 83, 255));
+    REQUIRE(std::string{probe_state_word(ready, true)} == "ready");
+}
+
 TEST_CASE("a window's scratch state starts empty and masked", "[state]") {
     const window_ui_state state;
 

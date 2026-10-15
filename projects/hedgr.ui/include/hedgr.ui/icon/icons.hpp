@@ -158,21 +158,22 @@ inline constexpr const char* unlock = ICON_FA_KEY;
 inline constexpr const char* link = ICON_FA_LINK;
 
 /**
- * @brief A probe: whether the deployment answers at all.
+ * @brief Asking every instance whether it answers.
  *
- * A filled circle, because a reachability is a dot beside an instance's name
- * rather than an action: the colour carries the answer and the glyph only has
- * to be the same shape on every row so the column reads as a column.
+ * A filled circle, because the action is the same shape as the state it
+ * produces: the toolbar button and the coloured icon a row carries for that
+ * state should read as one idea rather than two.
  */
 inline constexpr const char* probe = ICON_FA_CIRCLE;
 
 /**
  * @brief Readiness: whether the deployment has been bootstrapped.
  *
- * A ticked circle rather than a plain one, so the two indicators beside an
- * instance's name are told apart by shape as well as by colour: one reports on
- * the broker, the other on the service behind it, and a reader who cannot
- * distinguish red-green still has to be able to tell which is which.
+ * A ticked circle rather than a plain one, because it is the one readiness
+ * answer that is good news, and a mark is read as "done" without a legend.
+ * Since the row's icon carries the state, this glyph no longer appears in the
+ * instance list; it remains for any surface that wants to name the ready state
+ * on its own.
  */
 inline constexpr const char* ready = ICON_FA_CIRCLE_CHECK;
 

@@ -148,9 +148,8 @@ struct render_input final {
     /**
      * @brief The probes' last results and next deadlines.
      *
-     * Read-only like every other table here, and read for the two indicators
-     * beside each instance's name: what a probe found, and -- through the
-     * tooltip it carries -- why.
+     * Read-only like every other table here, and read for the colour of each
+     * row's icon and -- through the tooltip it carries -- why that colour.
      */
     const hedgr::model::state::probe_table& probes;
 

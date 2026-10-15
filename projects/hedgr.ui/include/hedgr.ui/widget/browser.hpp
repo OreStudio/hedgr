@@ -169,16 +169,6 @@ struct list_column final {
 
     /** @brief How ImGui should size it. */
     column_width width = column_width::fit;
-
-    /**
-     * @brief Whether the name column draws its text as a coloured indicator.
-     *
-     * True for the reachability and readiness columns, whose cell text is a
-     * glyph in a status colour and whose value is the colour rather than the
-     * word. The browser does not know what the colour means; the host does,
-     * and the host also supplies the cell's text.
-     */
-    bool indicator = false;
 };
 
 /**
@@ -192,11 +182,17 @@ struct row_cells final {
     std::vector<std::string> texts;
 
     /**
-     * @brief One colour per column, for the indicator columns.
+     * @brief A colour per column with one, in column order.
      *
      * A plain 32-bit ARGB value rather than an ImGui colour type, so this
      * header names no ImGui type and the widget's interface stays the two
      * strings a host understands. The host converts from the theme.
+     *
+     * The first entry tints the row's leading icon, which is how a host says
+     * what state the row is in without a column of its own: one icon carrying
+     * the state beats a status glyph beside a status glyph. A later entry
+     * colours that column's text. The browser does not know what either colour
+     * means; the host does.
      */
     std::vector<std::uint32_t> colours;
 

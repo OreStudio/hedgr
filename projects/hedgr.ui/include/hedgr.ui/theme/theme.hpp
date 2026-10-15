@@ -73,6 +73,41 @@ reachability_colour(hedgr::model::domain::reachability value) noexcept;
 [[nodiscard]] HEDGR_UI_EXPORT ImU32
 readiness_colour(hedgr::model::domain::readiness value) noexcept;
 
+/*
+ * The two below answer a coarser question than either column above: what one
+ * row is, in one colour, rather than what one column of it is. A list read at a
+ * glance needs one answer per instance, and a mapping spread across the drawing
+ * code is a mapping that drifts from this one.
+ */
+
+/**
+ * @brief The colour of an instance's icon, from what the last probe found.
+ *
+ * Red for unreachable, amber for reachable and not finished, green for ready,
+ * and grey for an instance no probe has reported on.
+ *
+ * Amber covers bootstrapping as well as a readiness nobody answered for,
+ * because the reader's question is whether the instance is healthy and
+ * "reachable, and something is not finished" is one answer rather than two. The
+ * distinction survives in @c probe_state_word, which is what the tooltip shows,
+ * so an operator asking the harder question still gets the exact one.
+ *
+ * Grey is not a shade of failing: it is what is known before an answer arrives,
+ * and painting it red would report an outage nobody measured.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32 probe_state_colour(
+    const hedgr::model::domain::probe_result& result, bool observed) noexcept;
+
+/**
+ * @brief The short word for that same colour, for a tooltip.
+ *
+ * "unreachable", "not ready" or "ready", so the words a reader hovers over
+ * agree with the colour they are looking at rather than repeating the state's
+ * canonical name.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT const char* probe_state_word(
+    const hedgr::model::domain::probe_result& result, bool observed) noexcept;
+
 /** @brief The colour a label's name is drawn in. */
 [[nodiscard]] HEDGR_UI_EXPORT ImU32
 label_colour(hedgr::model::domain::label_colour value) noexcept;

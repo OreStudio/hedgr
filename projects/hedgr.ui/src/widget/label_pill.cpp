@@ -40,6 +40,18 @@ constexpr float padding_x_ratio = 0.45f;
 constexpr float padding_y_ratio = 0.16f;
 constexpr float gap_ratio = 0.5f;
 
+/**
+ * @brief The pill's text size, as a fraction of the body's.
+ *
+ * Small enough to read as a badge rather than as a sentence of the row's own
+ * text, and large enough to read without leaning in at 1920 wide. Seven tenths
+ * of the body size leaves the pill at about two thirds of a row's height, which
+ * is what a badge is; the DPI and main font scale factors are applied on top,
+ * so a 4K display scales the badge with everything else rather than leaving it
+ * behind at a fixed pixel size.
+ */
+constexpr float pill_font_scale = 0.7f;
+
 /** @brief A colour that stands for a whole set: the mean of their fills. */
 [[nodiscard]] std::uint32_t mean_colour(const std::vector<label_pill>& pills,
     std::size_t first) {
@@ -65,8 +77,14 @@ pill_style pill_style_for_current_font() {
 
     pill_style style;
     style.text_height = height;
-    style.padding_x = std::max(4.0f, height * padding_x_ratio);
-    style.padding_y = std::max(1.0f, height * padding_y_ratio);
+    /*
+     * Ratios rather than pixel floors. The floor that used to sit here kept the
+     * padding visible at a large size and did the opposite at a small one: a
+     * four-pixel minimum around a shrink-to-fit badge is a wide margin, and the
+     * result is a box with small text in it rather than a smaller pill.
+     */
+    style.padding_x = height * padding_x_ratio;
+    style.padding_y = height * padding_y_ratio;
     /*
      * The total distance between two pills, which is what ImGui will actually
      * leave: a SameLine advances by the style's ItemSpacing and then by the
@@ -82,6 +100,24 @@ pill_style pill_style_for_current_font() {
      */
     style.rounding = (height + 2.0f * style.padding_y) * 0.5f;
     return style;
+}
+
+/**
+ * @brief Binds the font the pills are drawn and measured in, at their size.
+ *
+ * One font at a smaller size rather than a second face in the atlas: ImGui
+ * rasterises the size asked for, so the badge costs nothing at start-up. What
+ * matters is that the measurement and the paint happen under the same size,
+ * which is why this is pushed once around a whole row rather than per pill.
+ */
+void push_pill_font() {
+    /*
+     * FontSizeBase rather than GetFontSize(): the latter has the DPI and main
+     * scale factors already applied, and passing it back would apply them a
+     * second time.
+     */
+    ImGui::PushFont(nullptr,
+        ImGui::GetStyle().FontSizeBase * pill_font_scale);
 }
 
 float pill_width(std::string_view text, const pill_style& style) noexcept {
@@ -144,15 +180,24 @@ void label_pill_draw(std::string_view text, std::uint32_t background,
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImDrawList* const draw = ImGui::GetWindowDrawList();
 
-    const ImVec2 top_left(origin.x, origin.y);
-    const ImVec2 bottom_right(origin.x + width, origin.y + height);
+    /*
+     * The badge is centred in a row's worth of space rather than being given
+     * the row's height: a pill as tall as the text it sits beside has stopped
+     * being a badge. The row is claimed at the body's height below, so the
+     * shorter pill does not shorten the rows around it.
+     */
+    const float row_height = ImGui::GetTextLineHeight();
+    const float top = origin.y + std::max(0.0f, (row_height - height) * 0.5f);
+
+    const ImVec2 top_left(origin.x, top);
+    const ImVec2 bottom_right(origin.x + width, top + height);
     draw->AddRectFilled(top_left, bottom_right,
         static_cast<ImU32>(background), style.rounding,
         ImDrawFlags_RoundCornersAll);
 
     const ImVec2 text_position(
         origin.x + style.padding_x,
-        origin.y + (height - text_size.y) * 0.5f);
+        top + (height - text_size.y) * 0.5f);
     draw->AddText(font, font_size, text_position,
         static_cast<ImU32>(hedgr::ui::theme::text_colour_on(background)),
         text.data(), text.data() + text.size());
@@ -161,10 +206,12 @@ void label_pill_draw(std::string_view text, std::uint32_t background,
      * The cursor is advanced by the pill's own width rather than by a text
      * item, because the pill is painted on the draw list rather than submitted
      * as a widget: what the layout has to know is that this many pixels of the
-     * line are gone. The dummy is what records the item, and therefore what
-     * makes the tooltip -- the label's name and its severity -- answer on hover.
+     * line are gone. The item claims the row's height while the pill inside it
+     * stays short, so a badge smaller than the body text does not make the row
+     * smaller with it. It is also what makes the tooltip -- the label's name
+     * and its severity -- answer on hover.
      */
-    ImGui::Dummy(ImVec2(width, height));
+    ImGui::Dummy(ImVec2(width, row_height));
     if (!tooltip.empty())
         ImGui::SetItemTooltip("%.*s", static_cast<int>(tooltip.size()),
             tooltip.data());
@@ -174,6 +221,12 @@ float label_pill_row(const std::vector<label_pill>& pills, float available) {
     if (pills.empty())
         return 0.0f;
 
+    /*
+     * One push around the whole row, because the widths measured below and the
+     * text drawn from them have to be the same size or the last pill runs past
+     * the width the row was told it had.
+     */
+    push_pill_font();
     const pill_style style = pill_style_for_current_font();
 
     std::vector<float> widths;
@@ -241,6 +294,7 @@ float label_pill_row(const std::vector<label_pill>& pills, float available) {
             draw_at(count, mean_colour(pills, shown), hidden);
     }
 
+    ImGui::PopFont();
     return x;
 }
 

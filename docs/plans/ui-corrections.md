@@ -155,3 +155,39 @@ surface. The window is not replaced; its content is blanked.
    bar carries, not just the lock.
 8. The blanked content still reads as the application. The tree and the list are
    visibly there and waiting; an empty box or a spinner is not the same thing.
+
+## Defect: glyph colours are channel-swapped
+
+Found while verifying items 15 and 16, and not caused by them.
+
+**Untextured drawing is correct and textured drawing is not.** In the same
+frame, in the same window, the label pill fills land exactly on their theme
+colours, and the row icons land exactly on the red-blue exchange of theirs.
+
+Measured on `.cache/verify/unit11-final.ppm`, by counting exact pixel values and
+taking their bounding boxes:
+
+| what | colour written | colour rendered | where it is |
+|---|---|---|---|
+| label pill fill | `(64,160,255)` blue | `(64,160,255)` exact | x 1082 to 1153, the Labels column |
+| row icon, ready | `(0,200,83)` green | `(83,200,0)` swapped | x 611 to 624, the icon column |
+| row icon, not ready | `(255,193,7)` amber | `(7,193,255)` swapped | x 611 to 624, the icon column |
+| row icon, unreachable | `(255,23,68)` red | `(68,23,255)` swapped | x 611 to 624, the icon column |
+
+Rectangles are drawn without a texture and come out right. Glyphs are drawn
+from the font atlas and come out swapped. That is the whole difference between
+the two, and it is the thread to pull.
+
+**It is not new.** Older frames show green glyphs swapped too, two hundred and
+forty pixels of them in both `one.ppm` and `clean_unlocked.ppm`, where the green
+was a status marker. Nobody noticed because green exchanged with itself looks
+green. It became visible only now, when a state that should be amber began to be
+drawn as a glyph: amber exchanges with cyan, and cyan reads as information
+rather than as a warning, which inverts what the colour is for.
+
+**Not yet found.** The OpenGL3 backend for this ImGui version uploads the font
+atlas as `GL_RGBA` and asserts `ImTextureFormat_RGBA32`, so the texture format is
+not obviously the cause, and the vertex colour path is shared with the
+rectangles that render correctly. The next step is to check what is actually
+bound while a glyph is drawn, and whether the atlas is being sampled as the
+texture the draw expects.

@@ -52,6 +52,7 @@ using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::label;
 using hedgr::model::domain::labelling_owner;
+using hedgr::model::domain::probe_result;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
 using hedgr::ui::render::render_input;
@@ -146,37 +147,38 @@ void set_buffer(auto& buffer, std::string_view text) {
 }
 
 /**
- * @brief The two status indicators of one instance, and why.
+ * @brief What the last probe found about one instance, and whether one did.
  *
- * The colour is the answer and the tooltip is the reason: a red dot says the
- * deployment does not answer, and the next question is always why, which is
- * what the probe's detail holds.
+ * The flag is carried rather than inferred from the two enums, because a probe
+ * whose answer never arrived and a probe nobody ran look identical in them and
+ * are not the same thing to a reader: one is an outage, the other is a row the
+ * operator has not waited for yet.
  */
-struct status_cells final {
-    reachability reach = reachability::unknown;
-    readiness ready = readiness::unknown;
+struct instance_status final {
+    probe_result result;
+    bool observed = false;
     std::string detail;
 };
 
 /** @brief The status of one instance, read from the probe table by handle. */
-[[nodiscard]] status_cells status_of(const render_input& input,
+[[nodiscard]] instance_status status_of(const render_input& input,
     std::string_view instance_id) {
-    status_cells cells;
+    instance_status status;
     const auto handle = input.instances.find(instance_id);
     if (!handle)
-        return cells;
+        return status;
 
     const auto* probe = input.probes.get(*handle);
     if (probe == nullptr) {
-        cells.detail = "no probe has answered for this instance yet";
-        return cells;
+        status.detail = "no probe has answered for this instance yet";
+        return status;
     }
-    cells.reach = probe->reach;
-    cells.ready = probe->ready;
-    cells.detail = probe->detail.empty()
+    status.result = *probe;
+    status.observed = true;
+    status.detail = probe->detail.empty()
         ? std::string{"the probe reported no detail"}
         : probe->detail;
-    return cells;
+    return status;
 }
 
 /** @brief The labels attached to an owner, resolved to rows. */
@@ -650,22 +652,26 @@ void draw_dashboard(const render_input& input, window_ui_state& state) {
     ImGui::EndTable();
 }
 
-/** @brief The six columns of the instance list. */
+/** @brief The four columns of the instance list. */
 [[nodiscard]] std::vector<hedgr::ui::widget::list_column> instance_columns() {
     using hedgr::ui::widget::column_width;
     return {
-        { "##reach", column_width::fit, true },
-        { "##ready", column_width::fit, true },
+        /*
+         * The first column is the row's icon, and it is the row's whole state:
+         * the icon is drawn in the colour the last probe earned, so there is no
+         * second column for a reachability and no third for a readiness. Read
+         * the tooltip for the reason behind the colour.
+         */
+        { "Name", column_width::stretch },
         /*
          * Host and Subject are stretched rather than fit, because a fitted
          * column sizes itself to its widest cell and a long address would then
-         * squeeze the name beside it. Two stretched columns share the room that
-         * is left, which is the honest answer to "how wide is a host".
+         * squeeze the name beside it. Stretched columns share the room that is
+         * left, which is the honest answer to "how wide is a host".
          */
-        { "Name", column_width::stretch, false },
-        { "Host", column_width::stretch, false },
-        { "Subject", column_width::stretch, false },
-        { "Labels", column_width::stretch, false },
+        { "Host", column_width::stretch },
+        { "Subject", column_width::stretch },
+        { "Labels", column_width::stretch },
     };
 }
 
@@ -730,16 +736,17 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
 }
 
 /** @brief The index of the one column whose cells are label pills. */
-constexpr std::size_t instance_label_column = 5;
+constexpr std::size_t instance_label_column = 3;
 
 /**
  * @brief Fills one instance row's cells.
  *
  * While the store is closed every cell that came out of the store is left
- * empty and only the probe columns are filled, because those are a fact about
- * the broker rather than a row: a measurement taken minutes ago does not
- * become a secret when the lock closes. The cells are blanked here, at the
- * source, rather than covered by something drawn over the table afterwards:
+ * empty, because those are the fields the lock withholds. The icon and its
+ * colour are not blanked: a probe measures the broker rather than the row, so
+ * the state of a deployment is not a secret, and a measurement taken minutes
+ * ago does not become one when the lock closes. The cells are blanked here, at
+ * the source, rather than covered by something drawn over the table afterwards:
  * an overlay is a rectangle that has to agree with a layout it does not own,
  * and text nobody can read is still text that was drawn.
  */
@@ -748,21 +755,22 @@ void instance_row_cells(const tree_leaf& leaf, const render_input& input,
     const bool readable = shows_instances(input);
     const auto status = status_of(input, leaf.id);
 
-    cells.texts.emplace_back(icon::probe);
-    cells.colours.push_back(theme::reachability_colour(status.reach));
-    cells.tooltips.push_back(std::format("Reachability: {}\n{}",
-        hedgr::model::domain::to_string(status.reach), status.detail));
-
-    cells.texts.emplace_back(icon::ready);
-    cells.colours.push_back(theme::readiness_colour(status.ready));
-    cells.tooltips.push_back(std::format("Readiness: {}\n{}",
-        hedgr::model::domain::to_string(status.ready), status.detail));
+    /*
+     * The row's icon carries its state, and the tooltip is why. The colour goes
+     * in the first column's slot, which is the column the icon is drawn in. The
+     * state's own word goes first in the tooltip, because that is the fact the
+     * reader is looking at, and the probe's detail follows it, because that is
+     * the only place the cause of an amber or red row is written down.
+     */
+    cells.colours.push_back(
+        theme::probe_state_colour(status.result, status.observed));
+    cells.tooltips.push_back(std::format("{}\n{}",
+        theme::probe_state_word(status.result, status.observed), status.detail));
 
     const auto handle = input.instances.find(leaf.id);
     const auto* row = handle ? input.instances.get(*handle) : nullptr;
 
     cells.texts.push_back(readable ? leaf.name : std::string{});
-    cells.colours.push_back(0);
     cells.tooltips.emplace_back(readable && row != nullptr ? row->nats_url
                                                            : std::string{});
 
@@ -770,12 +778,10 @@ void instance_row_cells(const tree_leaf& leaf, const render_input& input,
         ? widget::split_host_port(row->nats_url)
         : widget::host_port{};
     cells.texts.push_back(address.host);
-    cells.colours.push_back(0);
     cells.tooltips.push_back(address.host);
 
     cells.texts.emplace_back(readable && row != nullptr ? row->subject_prefix
                                                         : std::string{});
-    cells.colours.push_back(0);
     cells.tooltips.push_back(cells.texts.back());
 }
 
