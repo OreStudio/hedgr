@@ -213,6 +213,14 @@ do not share a treatment. And an error is closer to a condition than to an event
 it should still be there for an operator who looked away, without sitting there
 forever after it has been read.
 
-The word "throw" is read as "propagate and surface". The project returns
-`std::expected` at boundaries and reserves exceptions for the genuinely unexpected,
-which is its documented style, and nothing here changes that.
+Errors are `std::expected`. The operator's word "throw" means propagate and
+surface, and the operator has confirmed that reading. Every fallible operation at a
+component boundary returns `std::expected<T, E>` carrying a typed code and a sentence
+written for an operator, and the caller either handles it or records it where the
+interface can see it. Exceptions stay reserved for the genuinely unexpected, which is
+the project's documented style and OreStudio's, and no error in this list is one.
+
+This is the same discipline the store, the transport and the runtime already follow.
+What was missing was only the last step: an error that is propagated to the manager
+and then read by nothing is, from where the operator sits, the same as an error that
+was never detected.
