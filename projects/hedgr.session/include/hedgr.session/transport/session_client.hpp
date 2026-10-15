@@ -24,6 +24,7 @@
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include <expected>
 #include <string>
 #include <string_view>
 #include "ores.nats/service/nats_client.hpp"
@@ -60,6 +61,48 @@ struct bootstrap_status final {
 
     /** @brief The build the answering service runs, in full. */
     std::string version;
+};
+
+/**
+ * @brief The rules a deployment says a new password must satisfy.
+ *
+ * The answer to the IAM read, in the deployment's own fields. It is not a
+ * policy Hedgr holds: the rules live in the deployment's validator and reach a
+ * screen only through that read, so a rule the deployment changes changes what
+ * the screen assesses and a rule it does not state is not shown and not
+ * required.
+ */
+struct password_policy final {
+    /**
+     * @brief The deployment's own verdict on whether it answered.
+     *
+     * A reply carrying @c false is the deployment refusing the read, and its
+     * @c message says why. It is told apart from a transport failure because
+     * the two are different instructions: one names work on the deployment and
+     * the other a connection.
+     */
+    bool success = false;
+
+    /** @brief Why the deployment refused, or empty when it did not. */
+    std::string message;
+
+    /** @brief The shortest password the deployment accepts. */
+    int min_length = 0;
+
+    /** @brief Whether an upper-case letter is required. */
+    bool require_uppercase = false;
+
+    /** @brief Whether a lower-case letter is required. */
+    bool require_lowercase = false;
+
+    /** @brief Whether a digit is required. */
+    bool require_digit = false;
+
+    /** @brief Whether a character from @c special_chars is required. */
+    bool require_special = false;
+
+    /** @brief The characters that satisfy the special-character rule. */
+    std::string special_chars;
 };
 
 /**
@@ -213,6 +256,22 @@ public:
      * not, and the caller is owed that distinction.
      */
     [[nodiscard]] result<bootstrap_status> bootstrap_status() const;
+
+    /**
+     * @brief Asks the deployment what rules a new password must satisfy.
+     *
+     * The other call that needs no credential, and for the same reason as the
+     * one above: the screen that shows the rules is the one a person signs in
+     * on, so the deployment cannot ask who is calling before it has anywhere
+     * to look the caller up. It goes through the unauthenticated request path
+     * and nowhere else.
+     *
+     * @pre the session is connected.
+     * @return what the deployment stated, or why it did not state it. A reply
+     * it refused arrives as a value with @c success false, because that is the
+     * deployment answering rather than failing to.
+     */
+    [[nodiscard]] result<password_policy> password_policy() const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

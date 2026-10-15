@@ -21,6 +21,7 @@
 
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/widget/controls.hpp"
+#include "hedgr.ui/widget/password_meter.hpp"
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
@@ -86,124 +87,29 @@ std::string lock_tooltip(hedgr::model::domain::store_lock value) {
 }
 
 /**
- * @brief The icon strip along the top: the whole of the application's chrome.
+ * @brief The note the toolbar carries while the environment holds the store.
  *
- * Refresh, probe, the lock indicator, full screen and exit. Everything that
- * acts on one row lives in the window that holds the row, so this strip is only
- * what acts on the whole application: a button here that meant "add an
- * instance" would be a button whose subject is somewhere the operator is not
- * looking.
+ * Written here rather than at the drawing so the sentence is one thing a reader
+ * can find. It is deliberately short: the toolbar has one line and the note
+ * sits at the end of it, so the first words have to be the ones that matter.
  *
- * The lock indicator is text rather than a button so that it cannot be mistaken
- * for the control; the control is the padlock action beside it.
+ * The variable's name is not in it. The note says who opened the store, which
+ * is what a person needs to know; the variable is in the longer sentence the
+ * prompt carries and in the tooltip, where there is room for it and where the
+ * reader is the one who can go and unset it.
  */
-void draw_toolbar(const hedgr::ui::render::render_input& input, bool& lock_clicked,
-    bool& unlock_clicked) {
-    namespace icon = hedgr::ui::icon;
-    using hedgr::model::command::command_kind;
+constexpr std::string_view environment_note = "opened from the environment";
 
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(viewport->Pos);
-    ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, 0.0f));
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
-        | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
-        | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
-
-    if (!ImGui::Begin("##hedgr-toolbar", nullptr, flags)) {
-        ImGui::End();
-        return;
-    }
-
-    /*
-     * Every action here reaches the store, so none of them is drawn while the
-     * lock is closed: a button that cannot do its job is worse than no button.
-     * The lock control itself is below, outside this gate, because it is the
-     * one action that is available while locked.
-     */
-    const bool open = input.store_lock == hedgr::model::domain::store_lock::unlocked;
-
-    if (!open)
-        ImGui::BeginDisabled();
-
-    if (hedgr::ui::widget::icon_button("refresh", icon::refresh,
-            "Refresh every window")) {
-        /*
-         * One command per open window. The interface does not know how to
-         * fetch anything: it names the windows that want fresh data and lets
-         * the runtime decide when and whether that happens.
-         */
-        const auto& layout = input.windows.layout();
-        const auto open_column = input.windows.open_column();
-        for (std::size_t index = 0; index < layout.alive.size(); ++index) {
-            if (layout.alive[index] == 0 || open_column[index] == 0)
-                continue;
-            hedgr::model::command::command request;
-            request.kind = command_kind::refresh_window;
-            request.window_id = std::string{input.windows.id(
-                hedgr::model::state::window_handle{
-                    static_cast<std::uint32_t>(index), layout.generation[index]})};
-            input.commands.push(std::move(request));
-        }
-    }
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("probe", icon::probe, "Probe every instance now")) {
-        /*
-         * One command for the whole set rather than one per instance: the
-         * runtime owns the schedule, so asking it to bring every deadline
-         * forward leaves it to decide what is already being probed and in what
-         * order the rest follow.
-         */
-        hedgr::model::command::command request;
-        request.kind = command_kind::probe_all;
-        input.commands.push(std::move(request));
-    }
-
-    if (!open)
-        ImGui::EndDisabled();
-
-    /*
-     * The lock indicator. Coloured, because the colour is what is read at a
-     * glance, and tooltipped with prose, because the glyph alone does not say
-     * which of the three closed-looking states this is.
-     */
-    ImGui::SameLine();
-    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(
-                           hedgr::ui::theme::store_lock_colour(input.store_lock)),
-        "%s", hedgr::ui::theme::store_lock_icon(input.store_lock));
-    ImGui::SetItemTooltip("%s", lock_tooltip(input.store_lock).c_str());
-
-    ImGui::SameLine();
-    if (open) {
-        if (hedgr::ui::widget::icon_button("lock", icon::lock,
-                "Lock the store, forgetting the master password for this run"))
-            lock_clicked = true;
-    } else {
-        if (hedgr::ui::widget::icon_button("unlock", icon::unlock, "Enter the master password"))
-            unlock_clicked = true;
-    }
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
-        /*
-         * Full screen is a property of the GLFW window, which this library
-         * does not own and must not reach for. It synthesises the shortcut the
-         * application already listens for during its frame loop, so the
-         * decision about how to change it stays in the layer that has the
-         * window handle.
-         */
-        ImGui::GetIO().AddKeyEvent(ImGuiKey_F11, true);
-    }
-
-    ImGui::SameLine();
-    if (hedgr::ui::widget::icon_button("exit", icon::exit_app, "Exit Hedgr")) {
-        hedgr::model::command::command request;
-        request.kind = command_kind::shutdown;
-        input.commands.push(std::move(request));
-    }
-
-    ImGui::End();
-}
+/**
+ * @brief The tooltip that explains the note, for whoever wants the detail.
+ *
+ * The variable is named here because the reader of a tooltip is looking for
+ * what to change, and a sentence that said only "the environment" would send
+ * them through the environment looking for which variable.
+ */
+constexpr std::string_view environment_note_tooltip =
+    "HEDGR_MASTER_PASSWORD held the password that opened this store. Nobody "
+    "pressed Unlock. Lock the store to return to a run you opened yourself.";
 
 }
 
@@ -225,6 +131,15 @@ void workspace::unlock_with(std::string_view master_password) {
     std::copy_n(master_password.begin(), length, master_password_.begin());
     master_password_[length] = '\0';
     lock_prompt_dismissed_ = false;
+    prompt_open_ = true;
+
+    /*
+     * The interface is told, now and for as long as the run keeps the password
+     * it was handed. An unlock nobody performed that leaves no trace is the
+     * whole defect this records against: the store would look exactly as it
+     * does when a person opens it, and the gate would look absent.
+     */
+    environment_unlock_ = true;
 }
 
 void workspace::render(const render_input& input) {
@@ -363,23 +278,141 @@ void workspace::render(const render_input& input) {
     }
 }
 
-void workspace::draw_toolbar(const render_input& input) {
-    bool lock_clicked = false;
-    bool unlock_clicked = false;
-    ::draw_toolbar(input, lock_clicked, unlock_clicked);
 
-    if (lock_clicked) {
+void workspace::draw_toolbar(const render_input& input) {
+    namespace icon = hedgr::ui::icon;
+    using hedgr::model::command::command_kind;
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(ImVec2(viewport->Size.x, 0.0f));
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
+        | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove
+        | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings;
+
+    if (!ImGui::Begin("##hedgr-toolbar", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    /*
+     * Every action here reaches the store, so none of them is drawn while the
+     * lock is closed: a button that cannot do its job is worse than no button.
+     * The lock control itself is below, outside this gate, because it is the
+     * one action that is available while locked.
+     */
+    const bool open = input.store_lock == hedgr::model::domain::store_lock::unlocked;
+
+    if (!open)
+        ImGui::BeginDisabled();
+
+    if (hedgr::ui::widget::icon_button("refresh", icon::refresh,
+            "Refresh every window")) {
+        /*
+         * One command per open window. The interface does not know how to
+         * fetch anything: it names the windows that want fresh data and lets
+         * the runtime decide when and whether that happens.
+         */
+        const auto& layout = input.windows.layout();
+        const auto open_column = input.windows.open_column();
+        for (std::size_t index = 0; index < layout.alive.size(); ++index) {
+            if (layout.alive[index] == 0 || open_column[index] == 0)
+                continue;
+            hedgr::model::command::command request;
+            request.kind = command_kind::refresh_window;
+            request.window_id = std::string{input.windows.id(
+                hedgr::model::state::window_handle{
+                    static_cast<std::uint32_t>(index), layout.generation[index]})};
+            input.commands.push(std::move(request));
+        }
+    }
+
+    ImGui::SameLine();
+    if (hedgr::ui::widget::icon_button("probe", icon::probe, "Probe every instance now")) {
+        /*
+         * One command for the whole set rather than one per instance: the
+         * runtime owns the schedule, so asking it to bring every deadline
+         * forward leaves it to decide what is already being probed and in what
+         * order the rest follow.
+         */
         hedgr::model::command::command request;
-        request.kind = hedgr::model::command::command_kind::lock_store;
+        request.kind = command_kind::probe_all;
+        input.commands.push(std::move(request));
+    }
+
+    if (!open)
+        ImGui::EndDisabled();
+
+    /*
+     * The lock indicator. Coloured, because the colour is what is read at a
+     * glance, and tooltipped with prose, because the glyph alone does not say
+     * which of the three closed-looking states this is.
+     */
+    ImGui::SameLine();
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(
+                           hedgr::ui::theme::store_lock_colour(input.store_lock)),
+        "%s", hedgr::ui::theme::store_lock_icon(input.store_lock));
+    ImGui::SetItemTooltip("%s", lock_tooltip(input.store_lock).c_str());
+
+    ImGui::SameLine();
+    if (open) {
+        if (hedgr::ui::widget::icon_button("lock", icon::lock,
+                "Lock the store, forgetting the master password for this run")) {
+            hedgr::model::command::command request;
+            request.kind = command_kind::lock_store;
+            input.commands.push(std::move(request));
+
+            /*
+             * The operator has taken the store back, so the run is theirs
+             * again and the environment's password is no longer what holds it
+             * open. The toolbar's note goes with it: a line that outlived the
+             * thing it described would be read as noise on every later run.
+             */
+            environment_unlock_ = false;
+        }
+    } else {
+        if (hedgr::ui::widget::icon_button("unlock", icon::unlock,
+                "Enter the master password")) {
+            lock_prompt_dismissed_ = false;
+            prompt_open_ = true;
+        }
+    }
+
+    ImGui::SameLine();
+    if (hedgr::ui::widget::icon_button("fullscreen", icon::fullscreen, "Toggle full screen")) {
+        /*
+         * Full screen is a property of the GLFW window, which this library
+         * does not own and must not reach for. It synthesises the shortcut the
+         * application already listens for during its frame loop, so the
+         * decision about how to change it stays in the layer that has the
+         * window handle.
+         */
+        ImGui::GetIO().AddKeyEvent(ImGuiKey_F11, true);
+    }
+
+    ImGui::SameLine();
+    if (hedgr::ui::widget::icon_button("exit", icon::exit_app, "Exit Hedgr")) {
+        hedgr::model::command::command request;
+        request.kind = command_kind::shutdown;
         input.commands.push(std::move(request));
     }
 
     /*
-     * Pressing unlock re-arms the prompt. It is the one way back in after a
-     * dismissal, which is what keeps "not now" from being permanent.
+     * The environment note, at the end of the chrome rather than on a strip of
+     * its own. A store opened from the environment must not look like one a
+     * person opened, and that is the whole job of these four words. Anything
+     * louder would be an alarm about a supported way to start the client.
+     *
+     * It is the same disabled text colour the rest of the interface uses for a
+     * second-order fact, so it reads as chrome and not as a problem.
      */
-    if (unlock_clicked)
-        lock_prompt_dismissed_ = false;
+    if (environment_unlock_) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", environment_note.data());
+        ImGui::SetItemTooltip("%s", environment_note_tooltip.data());
+    }
+
+    ImGui::End();
 }
 
 bool workspace::prompt_visible(const render_input& input) const noexcept {
@@ -391,7 +424,7 @@ bool workspace::prompt_visible(const render_input& input) const noexcept {
      *
      * The prompt does stay up while a derivation is running, and that is the
      * point rather than an oversight: the key derivation is slow on purpose, and
-     * a modal that disappears for half a second leaves an operator looking at a
+     * a form that disappears for half a second leaves an operator looking at a
      * background wondering whether the application has hung. It shows that it is
      * working instead.
      */
@@ -441,29 +474,54 @@ void workspace::draw_lock_prompt(const render_input& input) {
     const bool creating = input.store_lock == store_lock::absent;
 
     /*
-     * A fixed size, no resize, no collapse and no scrolling, matching every
-     * other dialog in this interface. Fixed because a password box that can be
-     * resized invites a size that hides the eye toggle, and because a modal
-     * whose layout moves is a modal that can be made to look like something
-     * else.
-     */
-    /*
      * Fixed, and sized to what is in it. The create form is taller because it
-     * asks twice and explains what the password is for; the unlock form asks
-     * once and says one line. The sentence below is wrapped rather than run off
-     * the edge, because a window this width cannot carry it on one line and a
-     * clipped explanation is worse than none.
+     * asks twice, explains what the password is for and carries the rule list
+     * the deployment stated; the unlock form asks once and says one line,
+     * because there is nothing to assess about a password that already exists.
+     * The sentence below is wrapped rather than run off the edge, because a
+     * window this width cannot carry it on one line and a clipped explanation
+     * is worse than none.
+     *
+     * Fixed width, no resize and no collapse, for the same reason every other
+     * form here has them: a password box that can be resized invites a size
+     * that hides the eye toggle. Not fixed in position, because the title bar
+     * is how the prompt is put down.
      */
-    const ImVec2 size(460.0f, creating ? 220.0f : 150.0f);
+    const ImVec2 size(460.0f, creating ? 400.0f : 150.0f);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+
+    /*
+     * Centred the first time, and left wherever the operator puts it after
+     * that. The prompt is the only surface on a first run, so it opens where
+     * the eye already is; once it has been moved, moving it back would be the
+     * interface arguing with the person who moved it.
+     */
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(
+        ImVec2(viewport->Pos.x + (viewport->Size.x - size.x) / 2.0f,
+            viewport->Pos.y + (viewport->Size.y - size.y) / 2.0f),
+        ImGuiCond_FirstUseEver);
+
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
         | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
+    /*
+     * A window and not a modal. A trading system has several things happening
+     * at once, and a modal stops all of them for a question that concerns one
+     * of them. The prompt sits beside the windows the operator is already
+     * looking at, and putting it down -- with the title bar's close button or
+     * with Cancel -- leaves everything else exactly as it was.
+     */
+    /*
+     * The title bar's close button is the second way out, beside Cancel. The
+     * flag is handed to ImGui so that button exists, and it is re-armed every
+     * time the window appears, because ImGui clears it when it is clicked and
+     * that clear is the click.
+     */
     const char* title = creating ? "Create the master password###hedgr-lock"
                                  : "Unlock the store###hedgr-lock";
-    ImGui::OpenPopup(title);
-    if (!ImGui::BeginPopupModal(title, nullptr, flags))
+    if (!ImGui::Begin(title, &prompt_open_, flags))
         return;
 
     if (creating) {
@@ -475,6 +533,17 @@ void workspace::draw_lock_prompt(const render_input& input) {
         ImGui::TextWrapped("Enter the master password to read the store.");
     }
 
+    /*
+     * The environment's password is named here as well as in the toolbar,
+     * because this is the one frame in which the prompt is filling itself in
+     * and the operator is watching it happen. Disabled text and no colour of
+     * its own: the fact is worth stating and not worth alarm, since an
+     * unattended launch is a supported way to start the client.
+     */
+    if (environment_unlock_)
+        ImGui::TextDisabled(
+            "Submitted from HEDGR_MASTER_PASSWORD; nothing here needs typing.");
+
     ImGui::Spacing();
 
     /*
@@ -485,9 +554,10 @@ void workspace::draw_lock_prompt(const render_input& input) {
      */
     const float eye = ImGui::GetFrameHeight();
     ImGui::SetNextItemWidth(-(eye + ImGui::GetStyle().ItemInnerSpacing.x));
-    ImGui::InputTextWithHint("##master-password", "master password",
-        master_password_.data(), master_password_.size(),
-        master_password_visible_ ? 0 : ImGuiInputTextFlags_Password);
+    bool submitted_by_enter = ImGui::InputTextWithHint("##master-password",
+        "master password", master_password_.data(), master_password_.size(),
+        (master_password_visible_ ? 0 : ImGuiInputTextFlags_Password)
+            | ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
 
     const float height = ImGui::GetFrameHeight();
@@ -502,9 +572,12 @@ void workspace::draw_lock_prompt(const render_input& input) {
 
     if (creating) {
         ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##master-password-again", "master password again",
-            master_password_again_.data(), master_password_again_.size(),
-            master_password_visible_ ? 0 : ImGuiInputTextFlags_Password);
+        submitted_by_enter |=
+            ImGui::InputTextWithHint("##master-password-again",
+                "master password again", master_password_again_.data(),
+                master_password_again_.size(),
+                (master_password_visible_ ? 0 : ImGuiInputTextFlags_Password)
+                    | ImGuiInputTextFlags_EnterReturnsTrue);
 
         /*
          * Checked as it is typed rather than on submit, because the failure is
@@ -523,12 +596,25 @@ void workspace::draw_lock_prompt(const render_input& input) {
 
     /*
      * The failure message the runtime sent, inline beside the prompt rather
-     * than in a banner: it is about this field, and it belongs next to it.
+     * than after the buttons: it is about this field, and it belongs next to
+     * it.
      */
     if (!input.lock_message.empty()) {
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(
                                hedgr::ui::theme::store_lock_colour(store_lock::failed)),
             "%s", input.lock_message.c_str());
+    }
+
+    /*
+     * The rules and the strength, on the create prompt and nowhere else. The
+     * unlock prompt has a password that already exists, so there is nothing
+     * there to assess: the only question is whether the deployment accepts it,
+     * and only the deployment can answer that.
+     */
+    if (creating) {
+        ImGui::Spacing();
+        hedgr::ui::widget::draw_password_meter(input.password_policy,
+            std::string_view{master_password_.data()});
     }
 
     ImGui::Spacing();
@@ -564,14 +650,46 @@ void workspace::draw_lock_prompt(const render_input& input) {
             master_password_visible_ = false;
             create_mismatch_ = false;
             lock_prompt_dismissed_ = true;
-            ImGui::CloseCurrentPopup();
         }
 
-        if (confirmed && complete)
+        /*
+         * Enter submits, which is what every other password field in every
+         * other program does, and the button is the only other way in. Both
+         * paths run the same submit, so neither can drift from the other; and
+         * Enter is gated on @c complete exactly as the button is, because a
+         * keypress must not be a way past the confirmation the form asks for.
+         */
+        if (submitted_by_enter && complete)
+            submit_master_password(input);
+        else if (confirmed && complete)
             submit_master_password(input);
     }
 
-    ImGui::EndPopup();
+    /*
+     * The title bar's close button puts the prompt down the same way Cancel
+     * does, and it is the second of the two ways out. A window that could be
+     * closed with the mouse but insisted on an answer would be a window that
+     * cannot be dismissed, which is the thing being removed here.
+     *
+     * Read after the body so a click that both typed and closed is not read as
+     * a dismissal before the typing happened.
+     */
+    /*
+     * The title bar's close button puts the prompt down the same way Cancel
+     * does, and it is the second of the two ways out. A window that could be
+     * closed with the mouse but insisted on an answer would be a window that
+     * cannot be dismissed, which is the thing being removed here.
+     */
+    if (ImGui::IsWindowAppearing())
+        prompt_open_ = true;
+    if (!prompt_open_) {
+        clear_password_buffers();
+        master_password_visible_ = false;
+        create_mismatch_ = false;
+        lock_prompt_dismissed_ = true;
+    }
+
+    ImGui::End();
 }
 
 }

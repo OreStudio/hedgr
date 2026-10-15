@@ -26,6 +26,7 @@
 #include "ores.iam.api/messaging/account_operations_protocol.hpp"
 #include "ores.iam.api/messaging/bootstrap_protocol.hpp"
 #include "ores.iam.api/messaging/login_protocol.hpp"
+#include "ores.iam.api/messaging/password_policy_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
@@ -55,6 +56,56 @@ using hedgr::session::transport::translate_connect_error;
 [[nodiscard]] std::unexpected<session_error> transport_failure() {
     return fail(session_errc::protocol_error,
         "the transport failed for a reason it did not name");
+}
+
+/**
+ * @brief Asks one deployment-relative subject and decodes its answer.
+ *
+ * The two reads that come before a sign-in differ only in which pair of
+ * messages they name, so the encoding, the unauthenticated request and the
+ * decoding are written once. The body is encoded here rather than by the
+ * transport's own helper, because that helper encodes with the process-wide
+ * codec while this session's format is the one the deployment is listening in:
+ * a session holds one connection to one instance, so the format on its options
+ * is the only answer that is right for it.
+ *
+ * @tparam Request the generated request type, which names its own subject.
+ * @tparam Response the generated response type the deployment answers with.
+ * @pre the session is connected.
+ */
+template <typename Request, typename Response>
+[[nodiscard]] hedgr::session::transport::result<Response>
+anonymous_read(const hedgr::session::transport::session_client& session,
+    const hedgr::session::transport::session_options& options) {
+    const auto format = ores::nats::parse_wire_format(options.wire_format);
+    if (!format) {
+        return fail(session_errc::protocol_error,
+            std::format("the wire format '{}' is not one this client understands",
+                options.wire_format));
+    }
+
+    const ores::nats::wire_codec codec(*format);
+    const auto encoded = codec.encode(Request{});
+    const std::string body(reinterpret_cast<const char*>(encoded.data()),
+        encoded.size());
+
+    /*
+     * The unauthenticated request path and nothing else: a caller reaches
+     * either of these before it has a credential, so neither can require one.
+     */
+    const auto reply = session.request(Request::nats_subject, body);
+    if (!reply)
+        return std::unexpected(reply.error());
+
+    const auto bytes = std::as_bytes(
+        std::span<const char>(reply->data(), reply->size()));
+    const auto decoded = codec.decode<Response>(bytes);
+    if (!decoded) {
+        return fail(session_errc::protocol_error,
+            std::format("the answer to {} could not be decoded: {}",
+                Request::nats_subject, decoded.error().what()));
+    }
+    return *decoded;
 }
 
 /**
@@ -402,54 +453,56 @@ result<bootstrap_status> session_client::bootstrap_status() const {
     }
 
     /*
-     * The body is encoded here rather than by the transport's own helper,
-     * because that helper encodes with the process-wide codec while this
-     * session's format is the one the deployment is listening in. A probe
-     * holds one connection to one instance, so the format on its options is
-     * the only answer that is right for it.
+     * Asking whether a deployment has been set up cannot require having been
+     * set up, so this is one of the two reads that go out without a token.
      */
-    const auto format = ores::nats::parse_wire_format(options_.wire_format);
-    if (!format) {
-        return fail(session_errc::protocol_error,
-            std::format("the wire format '{}' is not one this client understands",
-                options_.wire_format));
-    }
-
     using ores::iam::messaging::bootstrap_status_request;
     using ores::iam::messaging::bootstrap_status_response;
 
-    const ores::nats::wire_codec codec(*format);
-    const auto encoded = codec.encode(bootstrap_status_request{});
-    const std::string body(reinterpret_cast<const char*>(encoded.data()),
-        encoded.size());
+    const auto answer = anonymous_read<bootstrap_status_request,
+        bootstrap_status_response>(*this, options_);
+    if (!answer)
+        return std::unexpected(answer.error());
 
-    /*
-     * The unauthenticated request path and nothing else: asking whether a
-     * deployment has been set up cannot require having been set up.
-     */
-    const auto reply = request(bootstrap_status_request::nats_subject, body);
-    if (!reply)
-        return std::unexpected(reply.error());
-
-    const auto bytes = std::as_bytes(
-        std::span<const char>(reply->data(), reply->size()));
-    const auto decoded = codec.decode<bootstrap_status_response>(bytes);
-    if (!decoded) {
-        return fail(session_errc::protocol_error,
-            std::format("the bootstrap answer could not be decoded: {}",
-                decoded.error().what()));
-    }
-
-    const auto& answer = *decoded;
     /*
      * Qualified because the method shares its name with the type it returns,
      * and an unqualified use inside the method finds the method.
      */
     return transport::bootstrap_status{
-        .is_in_bootstrap_mode = answer.is_in_bootstrap_mode,
-        .has_tenant = answer.has_tenant,
-        .message = answer.message,
-        .version = answer.version};
+        .is_in_bootstrap_mode = answer->is_in_bootstrap_mode,
+        .has_tenant = answer->has_tenant,
+        .message = answer->message,
+        .version = answer->version};
+}
+
+result<password_policy> session_client::password_policy() const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "a request needs an open connection to the instance");
+    }
+
+    /*
+     * The second read that needs no credential, and for the same reason as the
+     * bootstrap one: the screen that shows the rules is the one a person signs
+     * in on, so there is no session to present when it is drawn.
+     */
+    using ores::iam::messaging::get_password_policy_request;
+    using ores::iam::messaging::get_password_policy_response;
+
+    const auto answer = anonymous_read<get_password_policy_request,
+        get_password_policy_response>(*this, options_);
+    if (!answer)
+        return std::unexpected(answer.error());
+
+    return transport::password_policy{
+        .success = answer->success,
+        .message = answer->message,
+        .min_length = answer->min_length,
+        .require_uppercase = answer->require_uppercase,
+        .require_lowercase = answer->require_lowercase,
+        .require_digit = answer->require_digit,
+        .require_special = answer->require_special,
+        .special_chars = answer->special_chars};
 }
 
 std::string session_client::subject(std::string_view suffix) const {

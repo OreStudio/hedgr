@@ -21,6 +21,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
@@ -555,6 +556,15 @@ void instance_manager::stop() noexcept {
     probing_.clear();
 
     /*
+     * The policy read is cancelled with them: it blocks on the transport too,
+     * so a process going away must not leave a pool thread waiting on an
+     * answer nobody is left to read.
+     */
+    if (policy_read_)
+        policy_read_->request_stop();
+    policy_read_.reset();
+
+    /*
      * The pool is stopped here and not in do_shutdown: pump() may still be
      * called after a shutdown command, because the frame loop decides when the
      * last frame is, and a pump over a stopped context is harmless while a
@@ -993,6 +1003,16 @@ void instance_manager::pump() {
      * the deadline the schedule reads.
      */
     pump_probes();
+
+    /*
+     * Then the policy read, once per process. The create prompt is drawn from
+     * the first frame, so the sooner the question is asked the sooner that
+     * screen can say something other than that it is waiting; and asking on
+     * the first pump rather than in start() keeps the answer on the same event
+     * channel as every other worker's.
+     */
+    if (!policy_requested_)
+        fetch_password_policy();
 }
 
 std::string instance_manager::open_accounts_window(const std::string& instance_id) {
@@ -2387,6 +2407,65 @@ void instance_manager::apply_probe_result(const event::event& ev) {
             std::chrono::duration_cast<std::chrono::nanoseconds>(interval).count());
 }
 
+void instance_manager::fetch_password_policy() {
+    /*
+     * Built the way a probe builds its own options, and from the same seed: an
+     * instance row carries what differs between deployments, but there is no
+     * row to read at the moment the create prompt is drawn, because the store
+     * is still shut. The deployment the process was pointed at is therefore
+     * the only one that can be asked, and it is the right one to ask: a first
+     * run seeds its single instance from exactly this description.
+     */
+    transport::session_options options;
+    options.nats_url = seed_options_.nats_url;
+    options.subject_prefix = seed_options_.subject_prefix;
+    options.wire_format = seed_options_.wire_format;
+    options.tls_ca = seed_options_.tls_ca;
+    options.tls_cert = seed_options_.tls_cert;
+    options.tls_key = seed_options_.tls_key;
+    options.request_timeout = seed_options_.request_timeout;
+    options.connect_timeout = seed_options_.connect_timeout;
+
+    worker::policy_job job;
+    job.options = std::move(options);
+    job.subject_prefix = seed_options_.subject_prefix;
+
+    /*
+     * A deployment nobody pointed this process at cannot be asked. The state
+     * is left stating that there is no policy rather than that one is coming,
+     * because waiting for an answer that was never requested is a lie the
+     * create prompt would tell for the rest of the run.
+     */
+    if (job.options.nats_url.empty()) {
+        password_policy_.fail("no deployment is configured to ask");
+        policy_requested_ = true;
+        return;
+    }
+
+    password_policy_.begin();
+    policy_read_ = std::make_shared<std::stop_source>();
+    worker::spawn_policy_read(probe_pool_.context(), std::move(job), events_,
+        policy_read_);
+    policy_requested_ = true;
+}
+
+void instance_manager::apply_password_policy(const event::event& ev) {
+    policy_read_.reset();
+
+    if (!ev.policy_available) {
+        /*
+         * The deployment did not state a policy, so nothing is assessed and
+         * the create prompt says so. The alternative -- treating the absence
+         * as a policy that requires nothing -- would turn an outage into a
+         * screen that promises a password the deployment was about to refuse.
+         */
+        password_policy_.fail(ev.message);
+        return;
+    }
+
+    password_policy_.set(ev.policy);
+}
+
 void instance_manager::forget_probe(model_state::instance_handle handle,
     const std::string& instance_id) {
     if (const auto found = probing_.find(instance_id); found != probing_.end()) {
@@ -2413,6 +2492,17 @@ void instance_manager::apply(const event::event& ev) {
      */
     if (ev.kind == event::event_kind::probe_result) {
         apply_probe_result(ev);
+        return;
+    }
+
+    /*
+     * A policy answer is about the deployment and not about a session, so it
+     * is applied here for the same reason a probe result is: there is no
+     * session to find it by, and the screen waiting on it is the create prompt,
+     * which is drawn before anybody has signed in to anything.
+     */
+    if (ev.kind == event::event_kind::password_policy_fetched) {
+        apply_password_policy(ev);
         return;
     }
 
@@ -2532,9 +2622,11 @@ void instance_manager::apply(const event::event& ev) {
         break;
     case event::event_kind::store_unlocked:
     case event::event_kind::store_lock_failed:
+    case event::event_kind::password_policy_fetched:
         /*
-         * Never reached either, and for the same reason: both are applied above
-         * where the store is, because neither belongs to a session.
+         * Never reached either, and for the same reason: all three are applied
+         * above where the store and the deployment are, because none of them
+         * belongs to a session.
          */
         break;
     }

@@ -120,7 +120,6 @@ void application::run() {
     if (const char* dashboard = std::getenv("HEDGR_CAPTURE_SHOW_DASHBOARD");
         dashboard != nullptr && *dashboard != '\0')
         ui::render::open_dashboard_for_capture();
-
     auto* window = initialise_graphics();
     if (window == nullptr) {
         BOOST_LOG_SEV(lg(), error) << "Failed to initialise graphics.";
@@ -333,6 +332,7 @@ void application::render_loop(GLFWwindow* window) {
             .labellings = manager_.labellings(),
             .sessions = manager_.sessions(),
             .probes = manager_.probes(),
+            .password_policy = manager_.password_policy(),
             .windows = manager_.windows(),
             .commands = manager_.commands(),
             .store_lock = manager_.store_lock(),

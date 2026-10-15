@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/probe_table.hpp"
+#include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
@@ -141,6 +142,17 @@ struct render_input final {
      * tooltip it carries -- why.
      */
     const hedgr::model::state::probe_table& probes;
+
+    /**
+     * @brief What the deployment said a new password must satisfy.
+     *
+     * Read by the create prompt, which is the one surface drawn while the store
+     * is shut and therefore the one with no catalogue row to look a policy up
+     * on. An unloaded state is not an empty policy: the first means strength
+     * cannot be assessed, and the second would be a claim about a deployment
+     * that never made it.
+     */
+    const hedgr::model::state::password_policy_state& password_policy;
 
     /** @brief The live windows, including the one being drawn. */
     const hedgr::model::state::window_table& windows;

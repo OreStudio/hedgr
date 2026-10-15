@@ -57,6 +57,12 @@ public:
      * is held in the same buffer the prompt edits and is wiped the moment it is
      * submitted, so it exists in this object for exactly as long as a typed one
      * would. Calling this on a store that is already unlocked does nothing.
+     *
+     * The store is then opened without anybody pressing anything, so the
+     * interface says so for as long as that is true: see
+     * the toolbar note. An unlock that looks exactly like a person's
+     * is the failure this records against, because it makes the gate look as
+     * though it is not there.
      */
     void unlock_with(std::string_view master_password);
 
@@ -68,6 +74,7 @@ public:
      * tables it reads.
      */
     void render(const render_input& input);
+
 
 private:
     /**
@@ -125,10 +132,36 @@ private:
      * @brief Whether the prompt was dismissed without an answer.
      *
      * The gate stays closed, but the operator has said "not now" and is not
-     * asked again this run. Without this the modal would reappear the instant
-     * it was closed, which is the interface refusing to take no for an answer.
+     * asked again this run. Without this the form would reappear the instant
+     * it was put down, which is the interface refusing to take no for an
+     * answer. It clears when the toolbar's unlock action re-arms the prompt,
+     * so no is not permanent either.
      */
     bool lock_prompt_dismissed_ = false;
+
+    /**
+     * @brief Whether the prompt's window is open, handed to ImGui.
+     *
+     * ImGui draws a close button on the title bar only when it is given
+     * somewhere to report the click, and this is that somewhere: it clears the
+     * flag when the button is pressed. The flag is re-armed every time the
+     * window appears, and a cleared flag is read once as a dismissal -- which
+     * is what makes the title bar a way out beside Cancel.
+     */
+    bool prompt_open_ = true;
+
+    /**
+     * @brief Whether this run's store was opened with the environment's
+     * password rather than by somebody opening it.
+     *
+     * Set when @c unlock_with arms the prompt and cleared when the operator
+     * locks the store, which is the first moment the run's state is theirs
+     * again. It changes nothing about how the store works: it exists so that
+     * an unattended unlock cannot be mistaken for a person's, because a store
+     * that opens itself and says nothing makes the gate look absent. The
+     * toolbar carries a note while this is true.
+     */
+    bool environment_unlock_ = false;
 
     /*
      * There is deliberately no "I have submitted a password" flag here. The

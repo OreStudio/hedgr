@@ -10,6 +10,7 @@
 set(files
     "async/executor.cpp"
     "manager/instance_manager.cpp"
+    "worker/policy_worker.cpp"
     "worker/probe_worker.cpp"
     "worker/session_worker.cpp"
 )
@@ -23,6 +24,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/hedgr.runtime.manager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/instance_manager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/hedgr.runtime.worker.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/policy_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/probe_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
 )

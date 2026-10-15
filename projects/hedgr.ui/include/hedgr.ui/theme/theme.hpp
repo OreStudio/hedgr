@@ -117,6 +117,20 @@ store_lock_icon(hedgr::model::domain::store_lock value) noexcept;
 [[nodiscard]] HEDGR_UI_EXPORT ImU32
 store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
 
+/**
+ * @brief The colour of one level of the password strength meter.
+ *
+ * Red at the bottom two, because neither is a password the deployment will
+ * take; amber in the middle, which is a password that has started well and is
+ * not there yet; and green at the top two, because both satisfy the policy and
+ * what separates them is room to spare rather than acceptability.
+ *
+ * An out-of-range level is grey, which is the colour of not knowing. It is not
+ * red: a level nobody defined is a defect in the caller, and drawing it as a
+ * refusal would report it as a fact about the password.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32 strength_colour(int strength) noexcept;
+
 }
 
 #endif

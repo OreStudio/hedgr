@@ -39,6 +39,8 @@ std::string_view to_string(event_kind value) noexcept {
         return "store_unlocked";
     case event_kind::store_lock_failed:
         return "store_lock_failed";
+    case event_kind::password_policy_fetched:
+        return "password_policy_fetched";
     }
     return "unknown";
 }

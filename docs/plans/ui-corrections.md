@@ -63,8 +63,23 @@ written down before it is started so that none of it is lost.
 
 ## The master password warning
 
-20. **The massive yellow warning is not idiomatic.** This is unit 8's territory
-    and has been relayed to it.
+20. **The massive yellow warning is not idiomatic.** Being removed. It is
+    replaced by a transient status bar entry, see item 21.
+
+## Status bar
+
+21. **The Instances window gets a status bar** for short messages describing
+    something that just happened. "The store was opened with the password from
+    the environment" is the first such message, and it disappears after a little
+    while rather than staying for the session.
+22. **The unreachable warning belongs in the same bar** but is a different kind
+    of thing: it describes a current condition, not an event, so it persists
+    while the condition holds and does not fade. Item 13 and this are the same
+    surface, and the bar has to carry both kinds.
+
+Neither the prompt nor a banner carries the environment notice any more. The
+prompt is about the password and nothing else, and no screen in this application
+is modal.
 
 ## What this implies beyond the interface
 

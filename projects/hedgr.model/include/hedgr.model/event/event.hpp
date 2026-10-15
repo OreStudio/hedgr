@@ -20,6 +20,7 @@
 #ifndef HEDGR_MODEL_EVENT_EVENT_HPP
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
+#include "hedgr.model/domain/password_policy.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
@@ -65,6 +66,16 @@ enum class event_kind : std::uint8_t {
      * and nothing about what was tried.
      */
     store_lock_failed = 7,
+    /**
+     * @brief A deployment answered the password-policy read, or did not.
+     *
+     * Reported even when the read failed, because "asked and did not answer"
+     * is a state the create prompt has to draw differently from "not asked
+     * yet": one is a wait and the other is the absence of a policy, and a
+     * screen that drew them the same would be claiming rules the deployment
+     * never stated.
+     */
+    password_policy_fetched = 8,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -139,6 +150,19 @@ struct event final {
      * instance: the subject with no responder, the address that refused.
      */
     std::string detail;
+
+    /**
+     * @brief Whether the deployment stated a policy, for
+     * password_policy_fetched.
+     *
+     * False for a read that was refused or never answered, which the create
+     * prompt draws as "strength cannot be assessed" rather than as a policy
+     * that requires nothing. @c message says which of the two it was.
+     */
+    bool policy_available = false;
+
+    /** @brief The policy's rules, for password_policy_fetched. */
+    domain::password_policy policy;
 };
 
 }

@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
+#include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -149,6 +150,21 @@ public:
         return windows_;
     }
 
+    /**
+     * @brief What the deployment said a new password must satisfy.
+     *
+     * Read by the create prompt, which is drawn while the store is still shut
+     * and therefore has no instance row to look a policy up on: the rules
+     * belong to the deployment the process was pointed at. While the state is
+     * not @c loaded the screen must say strength cannot be assessed rather
+     * than assess against nothing, because a policy of zeroes is a claim and
+     * the absence of a policy is not.
+     */
+    [[nodiscard]] const model::state::password_policy_state&
+    password_policy() const noexcept {
+        return password_policy_;
+    }
+
     /** @brief Where the interface pushes its commands. */
     [[nodiscard]] model::command::command_queue& commands() noexcept {
         return commands_;
@@ -250,6 +266,20 @@ private:
      * one moment and would spend two of the pool's two threads doing it.
      */
     void pump_probes();
+
+    /**
+     * @brief Asks the deployment the process was pointed at for its policy.
+     *
+     * Run once at start. Not from the create prompt's own frame and not per
+     * frame: the read blocks on the transport, so the interface asks for it by
+     * starting the process and then reads whatever came back. Asking once is
+     * also what keeps a refused read from becoming a poll loop against a
+     * deployment that is already not answering.
+     */
+    void fetch_password_policy();
+
+    /** @brief Applies one policy read's answer. */
+    void apply_password_policy(const model::event::event& ev);
 
     /** @brief Starts one probe, and remembers that it is in flight. */
     void spawn_probe_for(const model::domain::instance& row);
@@ -383,6 +413,7 @@ private:
     model::state::session_table sessions_;
     model::state::window_table windows_;
     model::state::probe_table probes_;
+    model::state::password_policy_state password_policy_;
     model::command::command_queue commands_;
     model::command::event_queue events_;
 
@@ -436,6 +467,17 @@ private:
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> probing_;
 
     /**
+     * @brief The policy read, once it has been asked for.
+     *
+     * Held apart from the sessions' cancellations because it is not one: it
+     * belongs to the deployment rather than to a session or an instance, and a
+     * key is not something it has. It exists so that a stop cancels a read
+     * still waiting on a connect, rather than leaving a pool thread holding a
+     * socket for a process that is going away.
+     */
+    std::shared_ptr<std::stop_source> policy_read_;
+
+    /**
      * @brief The cadence each instance currently polls on, by instance id.
      *
      * The deadline itself lives in the probe table, beside the result; this is
@@ -461,6 +503,15 @@ private:
     std::string lock_error_;
     std::uint64_t next_window_serial_ = 1;
     bool started_ = false;
+
+    /**
+     * @brief Whether the policy read has been asked for.
+     *
+     * The read starts on the first pump rather than in @c start, because the
+     * answer arrives as an event and the frame loop is the only thing that
+     * applies one.
+     */
+    bool policy_requested_ = false;
 };
 
 }

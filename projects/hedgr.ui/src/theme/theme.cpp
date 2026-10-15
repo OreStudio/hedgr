@@ -305,4 +305,23 @@ ImU32 store_lock_colour(hedgr::model::domain::store_lock value) noexcept {
     return IM_COL32(212, 212, 212, 255);
 }
 
+ImU32 strength_colour(int strength) noexcept {
+    /*
+     * The label palette's own red, amber and green, so a strength meter and a
+     * severity pill read as one visual language rather than two.
+     */
+    switch (strength) {
+    case 0:
+    case 1:
+        return IM_COL32(255, 23, 68, 255);
+    case 2:
+        return IM_COL32(255, 193, 7, 255);
+    case 3:
+    case 4:
+        return IM_COL32(0, 200, 83, 255);
+    default:
+        return IM_COL32(128, 128, 128, 255);
+    }
+}
+
 }

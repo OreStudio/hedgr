@@ -51,13 +51,19 @@ using hedgr::model::domain::store_lock;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::session::transport::session_options;
 
-/** @brief The password a captured store is seeded with. */
 /**
  * @brief The password the seeded store is sealed with.
  *
- * Read from the same variable the run script uses, so a capture unlocks the
- * store the seeder just made without an override. The fallback matches
- * run.sh's default; keeping the two in step is the point of reading it at all.
+ * Read from the variable the capture script uses, so a seeder and the client
+ * that later opens the store agree on the secret without an override, and so
+ * the password never appears on a command line where the process table would
+ * show it. The fallback matches capture.sh's, because a capture that set
+ * nothing must still produce a store the client can open.
+ *
+ * It is a fixture and not a secret: it exists only in the store this test has
+ * just written under the directory the capture gave it. The client that opens
+ * that store is told, on screen, that the password came from the environment
+ * rather than from the person at the keyboard.
  */
 [[nodiscard]] std::string seed_password() {
     if (const char* from_env = std::getenv("HEDGR_MASTER_PASSWORD");
