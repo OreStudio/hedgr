@@ -741,18 +741,23 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
         std::format("{}  {}", glyph.glyph, std::string{name});
 
     /*
-     * Root opens the first time it is drawn and its own expander owns the state
-     * from then on, so a reader opening Hedgr sees the tree's contents rather
-     * than a single closed name, and a reader who shuts it keeps it shut.
+     * Every folder opens the first time it is drawn and its own expander owns
+     * the state from then on, so a reader opening Hedgr sees the whole tree
+     * rather than a column of closed names to work open, and a reader who shuts
+     * one folder keeps that one shut.
      *
-     * The id is taken once, before the node is submitted, and reused after it.
-     * TreeNodeEx pushes the node's own id while it is open, so an id computed
+     * The key is derived from the row's own id, so each folder remembers its own
+     * state. One shared key would make every folder open and shut together,
+     * which is the same as having no expander at all.
+     *
+     * The key is taken once, before the node is submitted, and reused after it.
+     * TreeNodeEx pushes the node's own id while it is open, so a key computed
      * after it is hashed against a different stack and lands in a different
-     * slot: the read would then never see what the write stored, and a root
+     * slot: the read would then never see what the write stored, and a folder
      * that had been shut could never be opened again.
      */
-    const ImGuiID open_state = root ? ImGui::GetID("##hedgr-root-open") : 0;
-    if (root) {
+    const ImGuiID open_state = ImGui::GetID("##hedgr-open");
+    if (!leaf) {
         ImGui::SetNextItemOpen(
             ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
             ImGuiCond_Always);
@@ -791,15 +796,16 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
         element->label.clear();
     }
 
-    if (root) {
-        /*
-         * Written only when the operator worked the expander, and only after
-         * the node: the first frame reads the default above, and every later
-         * frame reads what the last click left.
-         */
-        if (ImGui::IsItemToggledOpen())
-            ImGui::GetStateStorage()->SetInt(open_state, open ? 1 : 0);
+    /*
+     * Written only when the operator worked the expander, and only after the
+     * node: the first frame reads the default above, and every later frame
+     * reads what the last click left. A leaf has no expander to work, so the
+     * write is a folder's alone and a leaf never reaches it.
+     */
+    if (ImGui::IsItemToggledOpen())
+        ImGui::GetStateStorage()->SetInt(open_state, open ? 1 : 0);
 
+    if (root) {
         ImGui::SetItemTooltip("%s",
             "The root of this tree. New folders and entries are created here, "
             "and it cannot be renamed, moved or removed.");
@@ -1279,16 +1285,19 @@ void render_browser(const browser_model& model, window_ui_state& window,
 
     /*
      * The tree and the right hand pane share what the strip does not take, and
-     * they divide it the way they always have: the tree takes a third and the
-     * pane takes the rest. The pane is a list or a details view depending on
-     * whether the host supplied one, and the split is the same either way. The
-     * strip's width and the gaps between the three children are subtracted from
-     * the available width rather than guessed at, so the three fit the window
-     * exactly and the split does not depend on a magic number.
+     * they divide it with the tree taking three tenths and the pane the rest.
+     * Three tenths rather than the third this used to be, because a folder name
+     * is short and the list's columns are what the operator reads across. The
+     * floor under the tree is what keeps the expander arrow and a nested name
+     * whole on a window squeezed narrow, and the pane is a list or a details
+     * view depending on whether the host supplied one, the split being the same
+     * either way. The strip's width and the gaps between the three children are
+     * subtracted from the available width rather than guessed at, so the three
+     * fit the window exactly and the split does not depend on a magic number.
      */
     const float beside =
         std::max(region.x - strip_width - style.ItemSpacing.x, 0.0f);
-    const float tree_width = std::max(beside * 0.34f, 180.0f);
+    const float tree_width = std::max(beside * 0.30f, 180.0f);
     const float list_width =
         std::max(beside - tree_width - style.ItemSpacing.x, 200.0f);
     /*

@@ -86,8 +86,12 @@ std::filesystem::path icon_sheet_path() {
  * proportional face sets a paragraph better and a table worse, and the tables
  * outnumber the paragraphs here.
  *
- * The list is ordered by preference, from the faces an operator is likeliest to
- * have installed deliberately down to the ones a bare distribution ships. An
+ * DejaVu Sans Mono leads the list because that is the face this operator asked
+ * for, and it is already present on a bare distribution, so the tree does not
+ * depend on a font that was installed beside it. A wider face than the narrower
+ * JetBrains Mono this used to open with reads better here, and the glyphs that
+ * are easy to confuse are told apart. The faces after it are reached only on a
+ * host with no DejaVu at all, so each is a fallback rather than a preference. An
  * empty result means fall back to the font embedded in ImGui, which always
  * exists.
  */
@@ -95,23 +99,22 @@ std::filesystem::path base_font_path() {
     std::vector<std::filesystem::path> candidates;
 
     /*
-     * A face the user installed wins, since a person who has put a monospace in
-     * their own font directory is the one asking for one by name. HOME is read
-     * rather than written as a literal path so the lookup works for whoever
-     * runs it.
+     * A face the user installed is looked at first, since a person who has put
+     * a monospace in their own font directory has a font they chose. HOME is
+     * read rather than written as a literal path so the lookup works for
+     * whoever runs it.
      */
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         const auto user_fonts = std::filesystem::path(home) / ".local/share/fonts";
-        candidates.push_back(user_fonts / "JetBrainsMono-Regular.ttf");
-        candidates.push_back(user_fonts / "RobotoMono-Regular.ttf");
+        candidates.push_back(user_fonts / "DejaVuSansMono.ttf");
     }
 
+    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
     candidates.push_back(
         "/usr/share/fonts/truetype/roboto/hinted/RobotoMono-Regular.ttf");
     candidates.push_back("/usr/share/fonts/truetype/roboto/RobotoMono-Regular.ttf");
     candidates.push_back(
         "/usr/share/fonts/gfonts/roboto-mono/roboto-mono-v13-latin-regular.ttf");
-    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
     candidates.push_back(
         "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf");
     return first_existing(candidates);
