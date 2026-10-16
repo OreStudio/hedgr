@@ -355,6 +355,23 @@ private:
     void seed_first_run();
 
     /**
+     * @brief Gives a seeded instance back the illustration key a migration
+     * dropped.
+     *
+     * The version 7 to 8 migration added @c icon_key empty on every existing
+     * row, because empty is the stored meaning of no illustration chosen and
+     * the migration would not guess which rows had one. It runs here, where the
+     * store has just been read, rather than in the migration, so it reaches
+     * every store rather than only the one that happens to migrate next, and it
+     * is idempotent because a row whose key is already set is left alone.
+     *
+     * It only writes a row whose id carries the seeder's prefix and whose
+     * derived key has an asset behind it, so a hand-typed row is never given a
+     * picture. A refused write is reported through @c last_error_.
+     */
+    void backfill_seeded_icon_keys();
+
+    /**
      * @brief Makes sure the folder the seeded environments sit in exists.
      *
      * @return The folder's id, which is a constant rather than a generated key:

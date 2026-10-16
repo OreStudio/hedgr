@@ -207,6 +207,76 @@ live_indices(const model_state::slab& layout) {
 }
 
 /**
+ * @brief The directories an install keeps its instance illustrations in.
+ *
+ * The runtime and the interface are separate components, so the runtime cannot
+ * ask the interface where the pictures are and has to know the install's own
+ * layout instead. The running executable is the anchor both use, because where
+ * the binary sits is the one thing a deployed bundle and a run out of the build
+ * tree agree on; the source tree's own assets directory is the last candidate,
+ * for a run with no publish directory beside it. The override exists so a test
+ * can point the backfill at a fixture rather than at whatever is installed.
+ */
+[[nodiscard]] std::vector<std::filesystem::path> instance_icon_directories() {
+    std::vector<std::filesystem::path> result;
+    if (const char* override_directory = std::getenv("HEDGR_INSTANCE_ICONS_DIR");
+        override_directory != nullptr && *override_directory != '\0')
+        result.emplace_back(override_directory);
+
+    std::error_code failure;
+    const auto self = std::filesystem::read_symlink("/proc/self/exe", failure);
+    if (!failure && !self.empty()) {
+        result.push_back(self.parent_path().parent_path() / "share" /
+            "hedgr.ui" / "instances");
+        result.push_back(self.parent_path() / "instances");
+    }
+    result.emplace_back("assets/instances");
+    return result;
+}
+
+/**
+ * @brief Whether the install ships an illustration under @p key.
+ *
+ * The guard is the file rather than the shape of the key, because a key that
+ * names nothing would only trade one blank entry for another, and the backfill
+ * is worth a write only when there is a picture the interface will actually
+ * draw. The key and its asset are related by the extension alone, which is the
+ * relation the loader already relies on when it takes a file's stem as the key.
+ * An install with no illustration directory answers false for every key, which
+ * leaves the row as the migration left it rather than naming an asset nobody
+ * has.
+ */
+[[nodiscard]] bool instance_icon_asset_exists(std::string_view key) {
+    if (key.empty())
+        return false;
+
+    const std::string file = std::format("{}.png", key);
+    for (const auto& directory : instance_icon_directories()) {
+        std::error_code failure;
+        if (std::filesystem::exists(directory / file, failure) && !failure)
+            return true;
+    }
+    return false;
+}
+
+/**
+ * @brief The label an environment-seeded instance carries in its id, or empty.
+ *
+ * Only the seeder names a row this way. @c seed_first_run derives the id of a
+ * row it read from a checkout as @c inst-env-<label>, where the label is the
+ * checkout's own label; an instance an operator typed is named from the clock
+ * as @c inst-<nanoseconds>, which never carries the prefix. The prefix is
+ * therefore the whole of the proof that a row came from the seeder, and a
+ * hand-typed row, whatever its name, cannot match it.
+ */
+[[nodiscard]] std::string seeded_label_of(std::string_view id) {
+    constexpr std::string_view seeded_prefix = "inst-env-";
+    if (!id.starts_with(seeded_prefix))
+        return {};
+    return std::string{id.substr(seeded_prefix.size())};
+}
+
+/**
  * @brief The stable id of the folder one instance's seeded logins sit in.
  *
  * Derived from the instance the way the seeded accounts' keys are, so a second
@@ -689,6 +759,15 @@ instance_manager::start(const std::filesystem::path& database_path,
     for (const auto& row : instances.value())
         static_cast<void>(instances_.upsert(row));
 
+    /*
+     * Immediately after the read and before anything that could depend on it,
+     * so a store written by a build that lost the keys has them back for this
+     * process, not the next one. It is a start step rather than a migration
+     * because it has to reach every store, including ones already stamped 8,
+     * and because a migration runs once where this runs every time.
+     */
+    backfill_seeded_icon_keys();
+
     auto accounts = account_repo_->list();
     if (!accounts) {
         last_error_ = store_failure("cannot read the stored accounts",
@@ -811,6 +890,47 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     started_ = true;
     return {};
+}
+
+void instance_manager::backfill_seeded_icon_keys() {
+    const auto& layout = instances_.layout();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+
+        const model_state::instance_handle handle{index, layout.generation[index]};
+        auto* row = instances_.get(handle);
+        if (row == nullptr || !row->icon_key.empty())
+            continue;
+
+        const std::string label = seeded_label_of(row->id);
+        if (label.empty() || !instance_icon_asset_exists(label))
+            continue;
+
+        /*
+         * The row is changed in memory and then written, so the frame that
+         * follows this start draws the picture rather than waiting for a
+         * restart to read it back. The write is the repository's own, exactly
+         * as a form's save is, so a refusal is reported the one way every other
+         * refusal is.
+         */
+        row->icon_key = label;
+        if (auto saved = instance_repo_->save(*row); !saved) {
+            last_error_ = store_failure(std::format(
+                "cannot restore the illustration of the seeded instance {}",
+                row->id), saved.error());
+        } else {
+            /*
+             * A row is only worth a line when it changed, which is what makes
+             * the log say which store was repaired rather than repeating the
+             * same one on every start. The key is not a secret; it is the
+             * environment's own label.
+             */
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Restored the illustration key " << row->icon_key
+                << " of the seeded instance " << row->id << ".";
+        }
+    }
 }
 
 void instance_manager::seed_first_run() {
