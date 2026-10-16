@@ -123,6 +123,11 @@ void set_buffer(auto& buffer, std::string_view text) {
  * whose answer never arrived and a probe nobody ran look identical in them and
  * are not the same thing to a reader: one is an outage, the other is a row the
  * operator has not waited for yet.
+ *
+ * The detail is the probe's own sentence and is left exactly as it was
+ * measured, empty included. A reader of the details pane is owed the cause and
+ * not a rewording of it, and a sentence this code composed would be a claim
+ * the probe never made.
  */
 struct instance_status final {
     probe_result result;
@@ -139,15 +144,12 @@ struct instance_status final {
         return status;
 
     const auto* probe = input.probes.get(*handle);
-    if (probe == nullptr) {
-        status.detail = "no probe has answered for this instance yet";
+    if (probe == nullptr)
         return status;
-    }
+
     status.result = *probe;
     status.observed = true;
-    status.detail = probe->detail.empty()
-        ? std::string{"the probe reported no detail"}
-        : probe->detail;
+    status.detail = probe->detail;
     return status;
 }
 
@@ -156,8 +158,12 @@ struct instance_status final {
  *
  * The glyph carries the state, so the probe is read here rather than in the
  * list's cells. An entry has one icon and it is in the tree: the state is the
- * icon's colour, and the sentence behind that colour is the icon's tooltip,
- * which is where a reader looks for the cause of an amber or a red one.
+ * icon's colour, and the tooltip is the state's own word, which is what a
+ * reader who has not selected the row has to go on.
+ *
+ * The probe's sentence is not in the tooltip. It is in the details pane, which
+ * has the width to hold it whole, and a tooltip that repeated it would be a
+ * second copy of one fact to keep in step.
  */
 [[nodiscard]] std::vector<tree_leaf> instance_tree_leaves(const render_input& input) {
     std::vector<tree_leaf> leaves;
@@ -181,13 +187,11 @@ struct instance_status final {
             theme::probe_state_colour(status.result, status.observed);
 
         /*
-         * The state's own word goes first, because that is the fact the reader
-         * is looking at, and the probe's detail follows it, because that is the
-         * only place the cause of an amber or red row is written down.
+         * One word and no more. It is the answer to "what does this colour
+         * mean", which is the whole question a hover can ask before a row is
+         * selected; the cause behind the colour waits in the pane.
          */
-        leaf.icon_tooltip = std::format("{}\n{}",
-            theme::probe_state_word(status.result, status.observed),
-            status.detail);
+        leaf.icon_tooltip = theme::probe_state_word(status.result, status.observed);
         leaves.push_back(std::move(leaf));
     }
     return leaves;
@@ -933,8 +937,9 @@ void draw_dashboard(const render_input& input) {
         /*
          * The first column is the row's icon, and it is the row's whole state:
          * the icon is drawn in the colour the last probe earned, so there is no
-         * second column for a reachability and no third for a readiness. Read
-         * the tooltip for the reason behind the colour.
+         * second column for a reachability and no third for a readiness. Select
+         * the row for the cause behind the colour; the tree's tooltip carries
+         * the state's word and nothing more.
          */
         { "Name", column_width::stretch },
         /*
@@ -1130,6 +1135,108 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
 }
 
 /**
+ * @brief The widths of the details pane's own columns.
+ *
+ * The value column is the third one and takes whatever the first two leave, so
+ * where the values start is decided by the glyph and the field columns. The
+ * diagnostics sit in a table of their own below a separator, and a table that
+ * measured its own columns would fit them to the shorter diagnostic names and
+ * start its values somewhere else from the fields above. One width given to
+ * both tables is what keeps the pane one column of values rather than two, and
+ * it is measured from the longest name either table writes so no field is cut.
+ *
+ * The glyph and field columns refuse resizing because their width is the
+ * alignment and not a preference. A drag that moved one table's column would
+ * break the value column in two.
+ */
+void setup_detail_columns() {
+    constexpr std::string_view widest_field = "TLS client certificate";
+    const float padding = ImGui::GetStyle().CellPadding.x * 2.0f;
+    const ImGuiTableColumnFlags fixed =
+        ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize;
+
+    ImGui::TableSetupColumn("##glyph", fixed,
+        ImGui::CalcTextSize(icon::instance).x + padding);
+    ImGui::TableSetupColumn("##field", fixed,
+        ImGui::CalcTextSize(widest_field.data(),
+            widest_field.data() + widest_field.size()).x + padding);
+    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+}
+
+/**
+ * @brief Whether IAM said the deployment is still setting itself up.
+ *
+ * The readiness says the same thing in its own word, and the plain yes or no is
+ * written beside it because "is this deployment still bootstrapping" is a
+ * question an operator asks on its own. A deployment whose IAM never answered
+ * has not answered no. It has said nothing, and the third word keeps an outage
+ * from being read as a setup that is under way.
+ */
+[[nodiscard]] const char* bootstrap_word(readiness value) {
+    switch (value) {
+    case readiness::bootstrapping:
+        return "yes";
+    case readiness::ready:
+        return "no";
+    case readiness::unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
+/**
+ * @brief The probe's own sentence, wrapped and set apart from the fields.
+ *
+ * Every other row here is a word or a number, so this is the only one that can
+ * be a sentence and the only one that has to wrap. A cause cut off at the
+ * pane's edge is a cause nobody can act on, and the value column is where it
+ * has to fit because that is where the fields above keep their values.
+ *
+ * A failing instance's sentence is drawn over a faint wash of the state's own
+ * colour rather than in a coloured face, so the row reads as the reason for a
+ * red or an amber tree row at a glance, without a wall of red to read the
+ * sentence through. A healthy instance's sentence gets no wash, because there
+ * is nothing wrong for the pane to point at.
+ */
+void probe_detail_row(std::string_view detail, bool failing,
+    std::uint32_t colour) {
+    if (detail.empty())
+        return;
+
+    ImGui::TableNextRow();
+
+    ImGui::TableNextColumn();
+    ImGui::TextDisabled("%s", failing ? icon::error : icon::information);
+    ImGui::SetItemTooltip("%s",
+        failing ? "What the probe could not do" : "What the probe reported");
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted("Detail");
+
+    ImGui::TableNextColumn();
+    if (failing) {
+        /*
+         * The state's colour with most of its alpha taken out. The constant is
+         * low enough that full brightness text stays readable on the wash and
+         * high enough that the row is still told apart from the neutral one
+         * above it on a projector.
+         */
+        constexpr std::uint32_t wash_alpha = 40;
+        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
+            (colour & 0x00ffffffu) | (wash_alpha << 24));
+    }
+
+    /*
+     * Wrapped at the cell's own edge rather than the window's, so the sentence
+     * uses the value column's whole width and does not run under the table.
+     */
+    ImGui::PushTextWrapPos(
+        ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
+    ImGui::TextWrapped("%.*s", static_cast<int>(detail.size()), detail.data());
+    ImGui::PopTextWrapPos();
+}
+
+/**
  * @brief Draws one instance's details, in the browser's right hand pane.
  *
  * Read only, and deliberately so. The toolbar's edit control already opens the
@@ -1157,9 +1264,7 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     if (!ImGui::BeginTable("##instance-details", 3, flags))
         return;
 
-    ImGui::TableSetupColumn("##glyph", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+    setup_detail_columns();
 
     /*
      * The environment's own picture, when the instance names one. It is drawn
@@ -1239,8 +1344,31 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
         }
     }
 
+    ImGui::EndTable();
+
+    /*
+     * The probe's answers, set apart from the row's configuration by a rule and
+     * a name. They used to be rows of the same table, which read as more
+     * configuration; they are a measurement of the deployment rather than a
+     * property of the record, and a reader looking for why a row is red starts
+     * at the bottom of the pane.
+     *
+     * The pane has a fixed height and never scrolls, so a pane too short for
+     * both tables clips what falls past its foot rather than growing a bar.
+     * The order is the priority. The fields are drawn first, and the detail
+     * sentence, which is last and the only row whose height is not one line,
+     * is what a short pane loses.
+     */
+    ImGui::Spacing();
+    ImGui::SeparatorText("Probe");
+
+    if (!ImGui::BeginTable("##instance-probe", 3, flags))
+        return;
+    setup_detail_columns();
+
     if (!status.observed) {
-        detail_row(icon::probe, "Last probe", status.detail);
+        detail_row(icon::probe, "Last probe",
+            "no probe has answered for this instance yet");
         ImGui::EndTable();
         return;
     }
@@ -1251,7 +1379,7 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
      * than the pair, so an operator asking the harder question gets the exact
      * answer without having to open the form.
      */
-    probe_state_row(icon::probe, "Last probe",
+    probe_state_row(icon::probe, "Probe state",
         theme::probe_state_word(status.result, true),
         theme::probe_state_colour(status.result, true));
 
@@ -1259,6 +1387,12 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
         hedgr::model::domain::to_string(status.result.reach));
     detail_row(icon::ready, "Readiness",
         hedgr::model::domain::to_string(status.result.ready));
+
+    /*
+     * No glyph, because the set has no bootstrap concept and a checkmark would
+     * say the field had passed rather than what it answers.
+     */
+    detail_row(nullptr, "Bootstrap mode", bootstrap_word(status.result.ready));
 
     if (status.result.latency_us > 0)
         detail_row(icon::clock, "Latency",
@@ -1276,6 +1410,16 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
             std::format("{:.0f} s ago",
                 static_cast<double>(
                     input.now_ns - status.result.observed_at_ns) / 1.0e9));
+
+    /*
+     * The cause last, and set apart from the words above it. Only a deployment
+     * that is not ready has something wrong for the wash to point at, so a
+     * ready row's sentence is drawn plainly.
+     */
+    const bool failing = status.result.reach == reachability::unreachable
+        || status.result.ready != readiness::ready;
+    probe_detail_row(status.detail, failing,
+        theme::probe_state_colour(status.result, true));
 
     ImGui::EndTable();
 }
