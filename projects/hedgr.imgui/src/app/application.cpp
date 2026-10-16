@@ -257,20 +257,27 @@ GLFWwindow* application::initialise_graphics() {
     windowed_width_ = 1600;
     windowed_height_ = 900;
     /*
-     * A capture used to reach the size of its frame by going fullscreen, and a
-     * hidden window cannot, because GLFW puts the fullscreen request on a
-     * shell role that only a shown window creates. The same size is therefore
-     * asked for at creation, from the mode fullscreen would have used, so the
-     * frame keeps the dimensions every check in this project reads.
+     * A capture writes one frame and every check in this project compares its
+     * size against the output it was taken from, so the window is created at
+     * that size rather than left at the client default to be resized later. A
+     * hidden window cannot go fullscreen, because GLFW puts that request on a
+     * shell role only a shown window creates, so the resize would never land.
+     * The size is read from the output mode before the window exists, and a
+     * run that cannot read it stops rather than writing a frame of some other
+     * size, since a frame whose size varies no longer says which run made it.
      */
-    if (capturing && cfg_.fullscreen) {
+    if (capturing) {
         GLFWmonitor* monitor = glfwGetPrimaryMonitor();
         const GLFWvidmode* mode =
             monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
-        if (mode != nullptr) {
-            windowed_width_ = mode->width;
-            windowed_height_ = mode->height;
+        if (mode == nullptr) {
+            BOOST_LOG_SEV(lg(), error)
+                << "Cannot size a capture: the compositor names no output mode.";
+            glfwTerminate();
+            return nullptr;
         }
+        windowed_width_ = mode->width;
+        windowed_height_ = mode->height;
     }
 
     GLFWwindow* window =
@@ -453,20 +460,35 @@ void application::release_instance_icon_textures() {
 }
 
 void application::toggle_fullscreen(GLFWwindow* window) {
-    fullscreen_ = !fullscreen_;
-    if (fullscreen_) {
+    if (!fullscreen_) {
+        /*
+         * The output is read before anything changes, because a compositor that
+         * names no mode has nothing to make the window fullscreen on. The old
+         * form flipped the flag first and then skipped the request, so the
+         * client went on believing it was fullscreen while the window kept the
+         * windowed size and a capture read that size as the answer. A request
+         * that cannot land now says so and leaves the flag where it was.
+         */
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode =
+            monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
+        if (monitor == nullptr || mode == nullptr) {
+            BOOST_LOG_SEV(lg(), warn)
+                << "Cannot go fullscreen: the compositor names no output mode.";
+            return;
+        }
+
         glfwGetWindowPos(window, &windowed_x_, &windowed_y_);
         glfwGetWindowSize(window, &windowed_width_, &windowed_height_);
-        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
-        const GLFWvidmode* mode = monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
-        if (monitor != nullptr && mode != nullptr) {
-            glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height,
-                                 mode->refreshRate);
-        }
+        glfwSetWindowMonitor(window, monitor, 0, 0, mode->width, mode->height,
+                             mode->refreshRate);
+        fullscreen_ = true;
         return;
     }
+
     glfwSetWindowMonitor(window, nullptr, windowed_x_, windowed_y_, windowed_width_,
                          windowed_height_, 0);
+    fullscreen_ = false;
 }
 
 void application::capture_frame(GLFWwindow* window) {
