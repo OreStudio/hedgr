@@ -37,6 +37,8 @@ std::string_view to_string(readiness value) noexcept {
     switch (value) {
     case readiness::unknown:
         return "unknown";
+    case readiness::service_missing:
+        return "service missing";
     case readiness::bootstrapping:
         return "bootstrapping";
     case readiness::ready:

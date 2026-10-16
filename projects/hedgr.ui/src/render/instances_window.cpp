@@ -649,7 +649,7 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 }
 
 /**
- * @brief The four states a row of the instance tree can stand in.
+ * @brief The five states a row of the instance tree can stand in.
  *
  * The order is the order the lines are drawn in, which no longer matters for
  * what is visible because the lines do not cover one another. It is kept so
@@ -659,6 +659,7 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 enum class estate_state : std::uint8_t {
     unknown,
     unreachable,
+    service_missing,
     not_ready,
     ready,
 };
@@ -678,6 +679,9 @@ enum class estate_state : std::uint8_t {
     case estate_state::not_ready:
         return ImGui::ColorConvertU32ToFloat4(
             theme::readiness_colour(readiness::bootstrapping));
+    case estate_state::service_missing:
+        return ImGui::ColorConvertU32ToFloat4(
+            theme::readiness_colour(readiness::service_missing));
     case estate_state::unreachable:
         return ImGui::ColorConvertU32ToFloat4(
             theme::reachability_colour(reachability::unreachable));
@@ -695,7 +699,9 @@ enum class estate_state : std::uint8_t {
     case estate_state::ready:
         return "Ready";
     case estate_state::not_ready:
-        return "Not ready";
+        return "Bootstrapping";
+    case estate_state::service_missing:
+        return "Service missing";
     case estate_state::unreachable:
         return "Unreachable";
     case estate_state::unknown:
@@ -918,6 +924,7 @@ void draw_dashboard(const render_input& input) {
                 if (series.count > 0) {
                     line(estate_state::ready, series.ready);
                     line(estate_state::not_ready, series.not_ready);
+                    line(estate_state::service_missing, series.service_missing);
                     line(estate_state::unreachable, series.unreachable);
                     line(estate_state::unknown, series.unknown);
                 }

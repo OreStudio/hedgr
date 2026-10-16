@@ -29,6 +29,7 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <optional>
 #include <stop_token>
@@ -36,6 +37,34 @@
 #include <utility>
 
 namespace hedgr::runtime::worker {
+
+std::string failure_detail(const session::transport::session_error& error) {
+    using enum session::transport::session_errc;
+
+    /*
+     * One code says the broker answered and nothing behind it did, and that is
+     * the one a reader mistakes for a bootstrap state. The others already name
+     * what happened, so their own sentence is the headline and this adds
+     * nothing to it.
+     */
+    const auto headline = error.code == services_unavailable
+        ? std::string("nothing answered the setup read. The instance is "
+                      "reachable but its IAM service is not answering, so this "
+                      "is a service that is down or still starting rather than "
+                      "a deployment that needs bootstrapping, which an "
+                      "answering service reports")
+        : error.message;
+
+    if (error.detail.empty())
+        return headline;
+
+    /*
+     * The wire's own sentence is kept rather than dropped. It names the
+     * subject, which is the line an administrator pastes into a ticket, and it
+     * sits under a headline that has already said what it means.
+     */
+    return std::format("{} ({})", headline, error.detail);
+}
 
 namespace {
 
@@ -51,17 +80,6 @@ using hedgr::model::command::event_queue;
     return std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - started)
         .count();
-}
-
-/**
- * @brief The sentence that explains a failure, for the tooltip.
- *
- * The low-level cause is the whole reason the field exists, so it is preferred
- * over the friendly message; a failure that named no cause falls back to the
- * message rather than leaving an empty box where the reason should be.
- */
-[[nodiscard]] std::string cause(const transport::session_error& error) {
-    return error.detail.empty() ? error.message : error.detail;
 }
 
 /**
@@ -156,7 +174,7 @@ boost::asio::awaitable<void> run_probe(probe_job job, event_queue& events,
          */
         push_result(events, job.instance, domain::reachability::unreachable,
             domain::readiness::unknown, elapsed_us(started),
-            cause(connected.error()));
+            failure_detail(connected.error()));
         co_return;
     }
 
@@ -169,13 +187,13 @@ boost::asio::awaitable<void> run_probe(probe_job job, event_queue& events,
         /*
          * The broker answered, so the deployment is reachable whatever IAM
          * said: what failed is the service behind the broker, not the broker.
-         * Readiness stays unknown, and unknown is deliberately not
-         * bootstrapping -- a deployment whose IAM is down has not announced
-         * that it is halfway through setting itself up, it has said nothing.
+         * That is a fault rather than a gap, because a deployment that still
+         * needs bootstrapping answers this read. It is service_missing and not
+         * unknown, which is what a probe that has not reported yet leaves.
          */
         push_result(events, job.instance, domain::reachability::reachable,
-            domain::readiness::unknown, elapsed_us(started),
-            cause(answer.error()));
+            domain::readiness::service_missing, elapsed_us(started),
+            failure_detail(answer.error()));
         co_return;
     }
 

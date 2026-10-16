@@ -30,11 +30,11 @@ namespace hedgr::model::state {
 /**
  * @brief How many instances stood in each state at one poll.
  *
- * The counts are the four colours the instance tree draws rather than a fold
- * into one total, because the chart and the rows must not become two opinions
- * about the same estate. An instance nothing is known about is counted as
- * unknown rather than left out, so the four counts sum to every live instance
- * and a chart of them can reach one hundred percent.
+ * The counts are the colours the instance tree and its chart draw rather than a
+ * fold into one total, because the chart and the rows must not become two
+ * opinions about the same estate. An instance nothing is known about is counted
+ * as unknown rather than left out, so the counts sum to every live instance and
+ * a chart of them can reach one hundred percent.
  */
 struct estate_sample final {
     /** @brief When the poll these counts describe was taken, monotonic. */
@@ -43,15 +43,19 @@ struct estate_sample final {
     /** @brief Instances whose probe answered that the deployment is set up. */
     std::int32_t ready = 0;
 
+    /** @brief Instances whose probe answered that setup is still incomplete. */
+    std::int32_t not_ready = 0;
+
     /**
-     * @brief Instances whose broker answered but IAM did not say ready.
+     * @brief Instances whose broker answered but IAM did not.
      *
-     * Bootstrapping and a broker that is up with IAM silent both land here,
-     * because that is one colour on the tree and this count is not allowed to
-     * split a colour the rows do not split. See
+     * A fault rather than a question. An instance that still needs bootstrapping
+     * answers the setup read, so a read nothing answered is a configured
+     * deployment whose service is not there, and it is counted apart from the
+     * broker that never answered because the two have different fixes. See
      * @c theme::probe_state_colour for the same rule.
      */
-    std::int32_t not_ready = 0;
+    std::int32_t service_missing = 0;
 
     /** @brief Instances no connection could be opened to. */
     std::int32_t unreachable = 0;
@@ -62,12 +66,12 @@ struct estate_sample final {
     /**
      * @brief Every live instance these counts describe.
      *
-     * Inline rather than out of line because it is the sum of four numbers and
+     * Inline rather than out of line because it is the sum of five numbers and
      * the struct is not itself an exported type, so a caller in another library
      * would otherwise have nothing to link against.
      */
     [[nodiscard]] std::int32_t total() const noexcept {
-        return ready + not_ready + unreachable + unknown;
+        return ready + not_ready + service_missing + unreachable + unknown;
     }
 };
 

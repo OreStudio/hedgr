@@ -100,9 +100,12 @@ opened, green when one could.
 ## Readiness
 
 What the last probe found about IAM. Ready when IAM reports the deployment
-bootstrapped, bootstrapping when IAM reports setup incomplete, and unknown when
-the broker answered but IAM did not. Unknown is not bootstrapping. A deployment
-whose IAM is down has not said it is bootstrapping, it has said nothing.
+bootstrapped, bootstrapping when IAM reports setup incomplete, and service
+missing when the broker answered but IAM did not. Unknown is a probe that has
+not reported yet, which is a question and not a fault; service missing is a
+fault, because a deployment that still needs bootstrapping answers the setup
+read. Two faults, two words: a broker that never answered is unreachable, and a
+broker whose service is absent is service missing.
 
 ## Browser
 

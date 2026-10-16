@@ -49,19 +49,22 @@ enum class reachability : std::uint8_t {
  * @brief What the last probe found about IAM.
  *
  * Ready when IAM reports the deployment bootstrapped, bootstrapping when IAM
- * reports setup incomplete, and unknown when the broker answered but IAM did
- * not. The last of those is the one worth stating plainly: a deployment whose
- * IAM is down has not said it is bootstrapping, it has said nothing. Reporting
- * it as bootstrapping would turn an outage into a work item for whoever reads
- * the list, which is a different and wrong instruction.
+ * reports setup incomplete, and service_missing when the broker answered but
+ * IAM did not. The last of those is a fault rather than a gap. A deployment
+ * that still needs bootstrapping answers this read, so an unanswered read is a
+ * configured instance whose service is not there, and showing it as unknown
+ * would read as a measurement nobody has taken. Unknown is the state before a
+ * probe has reported at all, which is a different thing and stays grey.
  */
 enum class readiness : std::uint8_t {
-    /** @brief IAM did not answer, so it has said nothing either way. */
+    /** @brief No probe has reported, so IAM has said nothing either way. */
     unknown = 0,
+    /** @brief The broker answered but IAM did not, which is a fault. */
+    service_missing = 1,
     /** @brief IAM answered that the deployment still needs setting up. */
-    bootstrapping = 1,
+    bootstrapping = 2,
     /** @brief IAM answered that the deployment has been set up. */
-    ready = 2,
+    ready = 3,
 };
 
 /**
@@ -132,11 +135,12 @@ struct probe_result final {
     /**
      * @brief The free text that explains an unhealthy instance.
      *
-     * This is where a reader finds out why an instance is unhealthy: the
-     * subject that had no responder, the address that refused, the sentence IAM
-     * sent. It is the whole answer for a failure that never reached the
-     * structured read, and IAM's own remark beside the fields when one arrived,
-     * so an empty value is what says there is nothing to explain.
+     * This is where a reader finds out why an instance is unhealthy. A failure
+     * that never reached the structured read gets a sentence saying what was
+     * measured and which failures the measurement rules out, with the wire's
+     * own words after it in parentheses for the ticket. A read that arrived
+     * carries IAM's own remark here instead. An empty value is what says there
+     * is nothing to explain.
      */
     std::string detail;
 };

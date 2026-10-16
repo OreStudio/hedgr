@@ -120,11 +120,12 @@ using hedgr::model::state::window_table;
 /** @brief An estate sample carrying only what a ring test reads back. */
 [[nodiscard]] estate_sample make_sample(std::int64_t observed_at_ns,
     std::int32_t ready, std::int32_t not_ready, std::int32_t unreachable,
-    std::int32_t unknown) {
+    std::int32_t unknown, std::int32_t service_missing = 0) {
     estate_sample sample;
     sample.observed_at_ns = observed_at_ns;
     sample.ready = ready;
     sample.not_ready = not_ready;
+    sample.service_missing = service_missing;
     sample.unreachable = unreachable;
     sample.unknown = unknown;
     return sample;
@@ -606,6 +607,7 @@ TEST_CASE("every reachability and readiness has a distinct stable name",
 
     const std::pair<readiness, std::string_view> readies[] = {
         {readiness::unknown, "unknown"},
+        {readiness::service_missing, "service missing"},
         {readiness::bootstrapping, "bootstrapping"},
         {readiness::ready, "ready"},
     };
@@ -614,18 +616,22 @@ TEST_CASE("every reachability and readiness has a distinct stable name",
         REQUIRE(hedgr::model::domain::to_string(value) == expected);
         ready_names.insert(hedgr::model::domain::to_string(value));
     }
-    REQUIRE(ready_names.size() == 3);
+    REQUIRE(ready_names.size() == 4);
 
     /*
-     * Every enumerator, walked by value rather than by name, so a fourth
-     * state added without a spelling fails here instead of rendering as an
-     * empty cell.
+     * Every enumerator, walked by value rather than by name, so a state added
+     * without a spelling fails here instead of rendering as an empty cell. The
+     * two axes are walked to their own counts, because readiness gained a state
+     * that reachability never had.
      */
     for (std::uint8_t raw = 0; raw < 3; ++raw) {
         INFO("reachability " << static_cast<int>(raw));
         REQUIRE_FALSE(
             hedgr::model::domain::to_string(static_cast<reachability>(raw))
                 .empty());
+    }
+    for (std::uint8_t raw = 0; raw < 4; ++raw) {
+        INFO("readiness " << static_cast<int>(raw));
         REQUIRE_FALSE(
             hedgr::model::domain::to_string(static_cast<readiness>(raw))
                 .empty());
@@ -712,7 +718,7 @@ TEST_CASE("a probe table records one estate poll per sweep", "[probe]") {
 
     probes.set(ready, make_probe(reachability::reachable, readiness::ready));
     probes.set(silent,
-        make_probe(reachability::reachable, readiness::unknown));
+        make_probe(reachability::reachable, readiness::service_missing));
     probes.set(down,
         make_probe(reachability::unreachable, readiness::unknown));
 
@@ -721,7 +727,8 @@ TEST_CASE("a probe table records one estate poll per sweep", "[probe]") {
     REQUIRE(probes.estate().size() == 1);
     const auto& first = probes.estate().at(0);
     REQUIRE(first.ready == 1);
-    REQUIRE(first.not_ready == 1);
+    REQUIRE(first.not_ready == 0);
+    REQUIRE(first.service_missing == 1);
     REQUIRE(first.unreachable == 1);
     REQUIRE(first.unknown == 1);
     REQUIRE(first.total() == 4);

@@ -52,6 +52,15 @@ struct dashboard_counts final {
     /** @brief How many have answered that they still need setting up. */
     std::size_t bootstrapping = 0;
 
+    /**
+     * @brief How many have a broker but no IAM service answering.
+     *
+     * A fault, counted apart from a broker that never answered and from a
+     * deployment that is still setting itself up, because the three need three
+     * different responses.
+     */
+    std::size_t service_missing = 0;
+
     /** @brief How many no connection could be opened to. */
     std::size_t unreachable = 0;
 
@@ -63,15 +72,14 @@ struct dashboard_counts final {
  * @brief Counts the instances by what the last probe found.
  *
  * @c total counts every row, including instances no probe has answered for.
- * The three status counts partition the probed ones and deliberately overlap
- * in no direction: an instance is ready, bootstrapping or unreachable according
- * to its own two answers, and the counts that do not add up to @c total are the
- * instances nobody has asked about yet.
+ * The status counts partition the probed ones and deliberately overlap in no
+ * direction. An instance is ready, bootstrapping, missing its service or
+ * unreachable according to its own two answers, and the counts that do not add
+ * up to @c total are the instances nobody has asked about yet.
  *
- * "Unknown is not bootstrapping" is the rule from the glossary and it is why
- * this reads the readiness column rather than inferring from reachability: a
- * deployment whose IAM is down has said nothing, and counting it as
- * bootstrapping would turn an outage into a work item.
+ * The two faults are counted apart because they have different fixes, and
+ * "unknown is not bootstrapping" is the rule from the glossary that keeps a
+ * deployment whose IAM is down out of the setting-up count.
  */
 [[nodiscard]] HEDGR_UI_EXPORT dashboard_counts count_instances(
     const hedgr::model::state::instance_table& instances,
@@ -80,16 +88,15 @@ struct dashboard_counts final {
 /**
  * @brief The estate's counts against wall-clock minutes, ready to plot.
  *
- * The x values are the centres of the window's minutes and the four count
- * arrays line up with them, one point a minute. A minute nobody polled holds a
- * NaN in every count array rather than a zero, so a line reader breaks there
- * instead of inventing a reading, and a sampled minute with a count of zero
- * keeps its real zero.
+ * The x values are the centres of the window's minutes and the count arrays
+ * line up with them, one point a minute. A minute nobody polled holds a NaN in
+ * every count array rather than a zero, so a line reader breaks there instead
+ * of inventing a reading, and a sampled minute with a count of zero keeps its
+ * real zero.
  *
  * This is a pure function of the history and the two clocks, which is what
- * makes the chart's arithmetic testable without a frame: the same four polls
- * fed in have to come out as four different minutes with four different
- * counts.
+ * makes the chart's arithmetic testable without a frame. The same polls fed in
+ * have to come out as different minutes with the counts they carried.
  */
 struct estate_series final {
     /** @brief How many minutes the window can hold. */
@@ -101,8 +108,11 @@ struct estate_series final {
     /** @brief Instances ready in that minute, NaN where nothing was polled. */
     std::array<double, capacity> ready{};
 
-    /** @brief Instances reachable but not ready, NaN where nothing polled. */
+    /** @brief Instances bootstrapping, NaN where nothing polled. */
     std::array<double, capacity> not_ready{};
+
+    /** @brief Instances with a broker but no IAM service, NaN where none. */
+    std::array<double, capacity> service_missing{};
 
     /** @brief Instances no connection was opened to, NaN where none polled. */
     std::array<double, capacity> unreachable{};

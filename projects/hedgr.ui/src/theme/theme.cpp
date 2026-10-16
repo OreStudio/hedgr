@@ -49,6 +49,14 @@ const ImVec4 accent = colour(0x2d8cffff);
 const ImVec4 accent_hover = colour(0x3d9cffff);
 const ImVec4 accent_active = colour(0x1f6fd0ff);
 
+/*
+ * The second red. A reachable broker with no IAM service behind it is a fault,
+ * but it is not the same fault as a broker that never answered, and the estate
+ * chart carries no legend, so two lines in one red would be two lines a reader
+ * cannot tell apart. The service that is missing gets the darker red.
+ */
+constexpr ImU32 service_missing_colour = IM_COL32(211, 47, 47, 255);
+
 }
 
 namespace hedgr::ui::theme {
@@ -261,6 +269,8 @@ ImU32 readiness_colour(hedgr::model::domain::readiness value) noexcept {
     switch (value) {
     case hedgr::model::domain::readiness::unknown:
         return IM_COL32(128, 128, 128, 255);
+    case hedgr::model::domain::readiness::service_missing:
+        return service_missing_colour;
     case hedgr::model::domain::readiness::bootstrapping:
         return IM_COL32(255, 193, 7, 255);
     case hedgr::model::domain::readiness::ready:
@@ -291,10 +301,18 @@ ImU32 probe_state_colour(
         return failure_colour;
 
     /*
-     * Reachable and not finished. Both readiness answers that are not ready
-     * land here, and the reachability the probe did not fill in lands here with
-     * them, because an instance in the catalogue whose probe has reported
-     * something has been answered for.
+     * The broker answered and IAM did not, which is the second fault and gets
+     * its own red rather than the first fault's. A deployment that still needs
+     * bootstrapping answers this read, so an unanswered read is a service that
+     * is not there.
+     */
+    if (result.ready == readiness::service_missing)
+        return service_missing_colour;
+
+    /*
+     * Reachable and unfinished. Bootstrapping lands here, and so does the
+     * readiness a probe did not fill in, because an instance in the catalogue
+     * whose probe has reported something has been answered for.
      */
     if (result.ready != readiness::ready)
         return IM_COL32(255, 193, 7, 255);
@@ -312,7 +330,23 @@ const char* probe_state_word(
         return "unknown";
     if (result.reach == reachability::unreachable)
         return "unreachable";
-    return result.ready == readiness::ready ? "ready" : "not ready";
+
+    /*
+     * One word per state, because the two faults and the two healthy states
+     * are four answers rather than two, and a reader who hovers over a row is
+     * asking which one it is.
+     */
+    switch (result.ready) {
+    case readiness::service_missing:
+        return "service missing";
+    case readiness::bootstrapping:
+        return "bootstrapping";
+    case readiness::ready:
+        return "ready";
+    case readiness::unknown:
+        return "unknown";
+    }
+    return "unknown";
 }
 
 const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {

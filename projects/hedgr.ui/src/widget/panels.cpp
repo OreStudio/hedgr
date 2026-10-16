@@ -62,6 +62,8 @@ dashboard_counts count_instances(
             ++counts.ready;
         else if (probe->ready == readiness::bootstrapping)
             ++counts.bootstrapping;
+        else if (probe->ready == readiness::service_missing)
+            ++counts.service_missing;
     }
 
     return counts;
@@ -133,6 +135,7 @@ estate_series read_estate_series(
         if (!sampled) {
             series.ready[index] = std::nan("");
             series.not_ready[index] = std::nan("");
+            series.service_missing[index] = std::nan("");
             series.unreachable[index] = std::nan("");
             series.unknown[index] = std::nan("");
             continue;
@@ -141,6 +144,7 @@ estate_series read_estate_series(
         const auto& counts = buckets[bucket_index];
         series.ready[index] = static_cast<double>(counts.ready);
         series.not_ready[index] = static_cast<double>(counts.not_ready);
+        series.service_missing[index] = static_cast<double>(counts.service_missing);
         series.unreachable[index] = static_cast<double>(counts.unreachable);
         series.unknown[index] = static_cast<double>(counts.unknown);
         ++bucket_index;

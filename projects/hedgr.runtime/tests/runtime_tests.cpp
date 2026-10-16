@@ -41,6 +41,8 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
+#include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
@@ -78,6 +80,9 @@ using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::runtime::async::executor;
 using hedgr::runtime::manager::instance_manager;
+using hedgr::runtime::worker::failure_detail;
+using hedgr::session::transport::session_errc;
+using hedgr::session::transport::session_error;
 using hedgr::session::transport::session_options;
 
 /**
@@ -931,6 +936,48 @@ TEST_CASE("a probe against a refused port reports unreachable", "[runtime]") {
     REQUIRE(result->observed_at_ns > 0);
 
     manager.stop();
+}
+
+/*
+ * The probe asks one question, and a deployment that still needs bootstrapping
+ * answers it. A read that nothing answered is therefore a service that is not
+ * there, and the sentence the pane shows has to say so rather than repeat the
+ * subject that had no responder. The subject is still kept, because it is the
+ * line an administrator pastes into a ticket; what changes is that it is no
+ * longer the headline.
+ */
+TEST_CASE("an unanswered setup read is explained rather than quoted",
+    "[runtime]") {
+    const session_error unanswered{
+        .code = session_errc::services_unavailable,
+        .message = "the instance is not responding; contact your system "
+                   "administrator",
+        .detail = "NATS request failed: no service is handling subject "
+                  "'ores.dev.brave_hopper.iam.v1.ops.bootstrap_status'"};
+
+    const auto detail = failure_detail(unanswered);
+
+    REQUIRE(detail ==
+        "nothing answered the setup read. The instance is reachable but its "
+        "IAM service is not answering, so this is a service that is down or "
+        "still starting rather than a deployment that needs bootstrapping, "
+        "which an answering service reports (NATS request failed: no service "
+        "is handling subject "
+        "'ores.dev.brave_hopper.iam.v1.ops.bootstrap_status')");
+    REQUIRE_FALSE(detail.starts_with("NATS"));
+    REQUIRE(detail.contains("iam.v1.ops.bootstrap_status"));
+}
+
+TEST_CASE("a broker that refused the connect keeps its own sentence",
+    "[runtime]") {
+    const session_error refused{
+        .code = session_errc::unreachable,
+        .message = "the instance is not reachable",
+        .detail = "NATS connect failed: No servers available"};
+
+    REQUIRE(failure_detail(refused) ==
+        "the instance is not reachable (NATS connect failed: No servers "
+        "available)");
 }
 
 TEST_CASE("a probe leaves the session table untouched", "[runtime]") {

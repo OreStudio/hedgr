@@ -23,10 +23,12 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
 #include <memory>
 #include <stop_token>
+#include <string>
 
 namespace hedgr::runtime::worker {
 
@@ -45,6 +47,24 @@ struct probe_job final {
     /** @brief Where to connect and how, built the way a session builds them. */
     session::transport::session_options options;
 };
+
+/**
+ * @brief The sentence the pane shows for a probe that did not get an answer.
+ *
+ * The transport's own words name the subject that had no responder, which is
+ * the right line for a log and the wrong headline for an operator, who reads
+ * it as a statement about the deployment rather than about the wire. The
+ * sentence here says what was measured, and it says which of the two failures
+ * the measurement rules out. A deployment that still needs bootstrapping
+ * answers this read, so an unanswered read is a service that is not there,
+ * not a state the deployment announced. The wire's own sentence is kept in
+ * parentheses, because it is the line an administrator pastes into a ticket
+ * once the headline has told them what it is for.
+ *
+ * @param error the failure the bootstrap read ended in.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT std::string
+failure_detail(const session::transport::session_error& error);
 
 /**
  * @brief Probes one instance once, then reports and stops.

@@ -76,27 +76,29 @@ void probe_table::record_snapshot(std::int64_t observed_at_ns,
             continue;
 
         /*
-         * The three states are read in the order the tree's own colour helper
-         * reads them, because an unreachable broker has said nothing about IAM
-         * and counting it as merely not ready would turn an outage into a
-         * deployment that is halfway through setting itself up.
+         * The states are read in the order the tree's own colour helper reads
+         * them. An unreachable broker has said nothing about IAM, so it is
+         * counted as unreachable rather than as a service that is missing, and
+         * a broker that answered with no IAM behind it is the second fault
+         * rather than a deployment that is halfway through setting itself up.
          */
         if (slot.result->reach == domain::reachability::unreachable)
             ++sample.unreachable;
         else if (slot.result->ready == domain::readiness::ready)
             ++sample.ready;
+        else if (slot.result->ready == domain::readiness::service_missing)
+            ++sample.service_missing;
         else
             ++sample.not_ready;
     }
 
     /*
      * The remainder is every live instance with no answer yet, which includes
-     * one whose first probe is still in flight. It is the fourth colour the
-     * tree draws rather than a gap, so the four counts always sum to the
-     * estate.
+     * one whose first probe is still in flight. It is the grey the tree draws
+     * rather than a gap, so the counts always sum to the estate.
      */
-    const auto answered = static_cast<std::size_t>(
-        sample.ready + sample.not_ready + sample.unreachable);
+    const auto answered = static_cast<std::size_t>(sample.ready + sample.not_ready
+        + sample.service_missing + sample.unreachable);
     sample.unknown = static_cast<std::int32_t>(
         total > answered ? total - answered : 0);
 

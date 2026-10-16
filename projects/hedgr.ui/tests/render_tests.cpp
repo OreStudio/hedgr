@@ -126,18 +126,20 @@ TEST_CASE("a probe result maps to the colour and word a row shows",
     bootstrapping.ready = readiness::bootstrapping;
     REQUIRE(probe_state_colour(bootstrapping, true)
         == IM_COL32(255, 193, 7, 255));
-    REQUIRE(std::string{probe_state_word(bootstrapping, true)} == "not ready");
+    REQUIRE(std::string{probe_state_word(bootstrapping, true)}
+        == "bootstrapping");
 
     /*
-     * IAM said nothing, which is an amber row and not a red one: the broker
-     * answered, so the instance is up, and what is unfinished about it is a
-     * different question from whether it is there.
+     * The broker answered and IAM did not, which is a fault rather than a
+     * question. A deployment that still needs bootstrapping answers the read,
+     * so a read nothing answered is a service that is not there, and it is red
+     * rather than amber and carries its own word.
      */
     probe_result iam_silent;
     iam_silent.reach = reachability::reachable;
-    iam_silent.ready = readiness::unknown;
-    REQUIRE(probe_state_colour(iam_silent, true) == IM_COL32(255, 193, 7, 255));
-    REQUIRE(std::string{probe_state_word(iam_silent, true)} == "not ready");
+    iam_silent.ready = readiness::service_missing;
+    REQUIRE(probe_state_colour(iam_silent, true) == IM_COL32(211, 47, 47, 255));
+    REQUIRE(std::string{probe_state_word(iam_silent, true)} == "service missing");
 
     probe_result ready;
     ready.reach = reachability::reachable;
@@ -534,6 +536,7 @@ TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {
     REQUIRE(unprobed.total == 1);
     REQUIRE(unprobed.ready == 0);
     REQUIRE(unprobed.bootstrapping == 0);
+    REQUIRE(unprobed.service_missing == 0);
     REQUIRE(unprobed.unreachable == 0);
 
     hedgr::model::domain::probe_result ready;
@@ -547,9 +550,18 @@ TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {
     state.probes.set(add("booting"), booting);
 
     /*
-     * A deployment whose IAM did not answer is unreachable and neither ready
-     * nor bootstrapping: unknown is not bootstrapping, because a deployment
-     * that said nothing has not said it is setting itself up.
+     * The broker answered and IAM did not, which is neither ready nor
+     * bootstrapping. A deployment that still needs bootstrapping answers the
+     * setup read, so a read nothing answered is a service that is not there.
+     */
+    hedgr::model::domain::probe_result missing;
+    missing.reach = hedgr::model::domain::reachability::reachable;
+    missing.ready = hedgr::model::domain::readiness::service_missing;
+    state.probes.set(add("missing"), missing);
+
+    /*
+     * A deployment whose broker did not answer is unreachable and says nothing
+     * about its IAM, so it is counted apart from the service that is missing.
      */
     hedgr::model::domain::probe_result down;
     down.reach = hedgr::model::domain::reachability::unreachable;
@@ -558,9 +570,10 @@ TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {
 
     const auto counts =
         hedgr::ui::widget::count_instances(state.instances, state.probes);
-    REQUIRE(counts.total == 3);
+    REQUIRE(counts.total == 4);
     REQUIRE(counts.ready == 1);
     REQUIRE(counts.bootstrapping == 1);
+    REQUIRE(counts.service_missing == 1);
     REQUIRE(counts.unreachable == 1);
 
     /*
@@ -573,7 +586,7 @@ TEST_CASE("the dashboard counts what the probes found", "[dashboard]") {
     state.probes.forget(*doomed);
 
     const auto after = hedgr::ui::widget::count_instances(state.instances, state.probes);
-    REQUIRE(after.total == 2);
+    REQUIRE(after.total == 3);
     REQUIRE(after.unreachable == 0);
 }
 
@@ -790,12 +803,14 @@ TEST_CASE("four estate polls read back as four different chart points",
     estate_history history;
     const auto add = [&history](std::int64_t observed_at_ns,
                                  std::int32_t ready, std::int32_t not_ready,
+                                 std::int32_t service_missing,
                                  std::int32_t unreachable,
                                  std::int32_t unknown) {
         estate_sample sample;
         sample.observed_at_ns = observed_at_ns;
         sample.ready = ready;
         sample.not_ready = not_ready;
+        sample.service_missing = service_missing;
         sample.unreachable = unreachable;
         sample.unknown = unknown;
         history.append(sample);
@@ -807,10 +822,10 @@ TEST_CASE("four estate polls read back as four different chart points",
      * is the defect this test exists to catch.
      */
     constexpr std::int64_t minute_ns = 60'000'000'000;
-    add(0 * minute_ns, 0, 0, 0, 3);
-    add(1 * minute_ns, 1, 0, 0, 2);
-    add(2 * minute_ns, 1, 0, 1, 1);
-    add(3 * minute_ns, 1, 1, 1, 0);
+    add(0 * minute_ns, 0, 0, 0, 0, 3);
+    add(1 * minute_ns, 1, 0, 0, 0, 2);
+    add(2 * minute_ns, 0, 0, 1, 1, 1);
+    add(3 * minute_ns, 1, 1, 0, 1, 0);
 
     /*
      * The wall clock is pinned half a minute into minute 1000, and the frame's
@@ -829,6 +844,7 @@ TEST_CASE("four estate polls read back as four different chart points",
     REQUIRE(series.unknown[base + 0] == 3);
     REQUIRE(series.ready[base + 1] == 1);
     REQUIRE(series.unknown[base + 1] == 2);
+    REQUIRE(series.service_missing[base + 2] == 1);
     REQUIRE(series.unreachable[base + 2] == 1);
     REQUIRE(series.not_ready[base + 3] == 1);
 
@@ -836,6 +852,7 @@ TEST_CASE("four estate polls read back as four different chart points",
     REQUIRE(series.ready[base + 0] != series.ready[base + 1]);
     REQUIRE(series.unreachable[base + 1] != series.unreachable[base + 2]);
     REQUIRE(series.not_ready[base + 2] != series.not_ready[base + 3]);
+    REQUIRE(series.service_missing[base + 1] != series.service_missing[base + 2]);
     REQUIRE(series.unknown[base + 0] != series.unknown[base + 3]);
 
     /*

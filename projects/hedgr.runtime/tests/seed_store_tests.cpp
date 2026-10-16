@@ -73,6 +73,22 @@ using hedgr::session::transport::session_options;
 }
 
 /**
+ * @brief One connection setting a capture seeds, with the development default.
+ *
+ * The defaults are the development deployment a capture normally shows. The
+ * override exists so a frame can be taken against a broker with no IAM service
+ * on it, which is the only way to photograph the failure a probe reports when
+ * nothing answers the setup read. A capture that sets nothing is unchanged.
+ */
+[[nodiscard]] std::string seed_connection(const char* name,
+    std::string fallback) {
+    if (const char* from_env = std::getenv(name);
+        from_env != nullptr && *from_env != '\0')
+        return from_env;
+    return fallback;
+}
+
+/**
  * @brief Pumps the manager until @p ready, or the limit passes.
  *
  * A bounded wait rather than a sleep, so a failure fails the test instead of
@@ -138,8 +154,10 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
 
     instance_manager manager;
     REQUIRE(manager.start(path, session_options{
-        .nats_url = "nats://localhost:20405",
-        .subject_prefix = "ores.dev.brave_hopper",
+        .nats_url = seed_connection(
+            "HEDGR_SEED_NATS_URL", "nats://localhost:20405"),
+        .subject_prefix = seed_connection(
+            "HEDGR_SEED_SUBJECT_PREFIX", "ores.dev.brave_hopper"),
     }).has_value());
 
     command create;
