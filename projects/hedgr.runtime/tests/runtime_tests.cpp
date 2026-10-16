@@ -941,10 +941,9 @@ TEST_CASE("a probe against a refused port reports unreachable", "[runtime]") {
 /*
  * The probe asks one question, and a deployment that still needs bootstrapping
  * answers it. A read that nothing answered is therefore a service that is not
- * there, and the sentence the pane shows has to say so rather than repeat the
- * subject that had no responder. The subject is still kept, because it is the
- * line an administrator pastes into a ticket; what changes is that it is no
- * longer the headline.
+ * there, and the pane says which thing is down before it quotes the wire. The
+ * two parts are separate lines, because the short answer is the one a reader
+ * stops at and the raw text is the one that goes into a ticket.
  */
 TEST_CASE("an unanswered setup read is explained rather than quoted",
     "[runtime]") {
@@ -958,17 +957,14 @@ TEST_CASE("an unanswered setup read is explained rather than quoted",
     const auto detail = failure_detail(unanswered);
 
     REQUIRE(detail ==
-        "nothing answered the setup read. The instance is reachable but its "
-        "IAM service is not answering, so this is a service that is down or "
-        "still starting rather than a deployment that needs bootstrapping, "
-        "which an answering service reports (NATS request failed: no service "
-        "is handling subject "
-        "'ores.dev.brave_hopper.iam.v1.ops.bootstrap_status')");
+        "IAM is down\n"
+        "NATS request failed: no service is handling subject "
+        "'ores.dev.brave_hopper.iam.v1.ops.bootstrap_status'");
     REQUIRE_FALSE(detail.starts_with("NATS"));
     REQUIRE(detail.contains("iam.v1.ops.bootstrap_status"));
 }
 
-TEST_CASE("a broker that refused the connect keeps its own sentence",
+TEST_CASE("a broker that refused the connect reads as NATS being down",
     "[runtime]") {
     const session_error refused{
         .code = session_errc::unreachable,
@@ -976,8 +972,18 @@ TEST_CASE("a broker that refused the connect keeps its own sentence",
         .detail = "NATS connect failed: No servers available"};
 
     REQUIRE(failure_detail(refused) ==
-        "the instance is not reachable (NATS connect failed: No servers "
-        "available)");
+        "NATS is down\nNATS connect failed: No servers available");
+}
+
+TEST_CASE("a failure that is neither fault keeps its own short headline",
+    "[runtime]") {
+    const session_error timed_out{
+        .code = session_errc::timeout,
+        .message = "the instance did not answer in time",
+        .detail = "NATS request timed out"};
+
+    REQUIRE(failure_detail(timed_out) ==
+        "the instance did not answer in time\nNATS request timed out");
 }
 
 TEST_CASE("a probe leaves the session table untouched", "[runtime]") {

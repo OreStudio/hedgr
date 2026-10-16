@@ -42,28 +42,24 @@ std::string failure_detail(const session::transport::session_error& error) {
     using enum session::transport::session_errc;
 
     /*
-     * One code says the broker answered and nothing behind it did, and that is
-     * the one a reader mistakes for a bootstrap state. The others already name
-     * what happened, so their own sentence is the headline and this adds
-     * nothing to it.
+     * The headline names the thing that is not working and nothing more. The
+     * broker and the service behind it are the two failures a reader acts on
+     * differently, so each gets its own two words; every other code already
+     * carries a short sentence of its own. The wire's text follows on its own
+     * line, unparaphrased, because that is the part that goes into a ticket.
      */
-    const auto headline = error.code == services_unavailable
-        ? std::string("nothing answered the setup read. The instance is "
-                      "reachable but its IAM service is not answering, so this "
-                      "is a service that is down or still starting rather than "
-                      "a deployment that needs bootstrapping, which an "
-                      "answering service reports")
-        : error.message;
+    if (error.code == unreachable)
+        return error.detail.empty()
+            ? std::string("NATS is down")
+            : std::format("NATS is down\n{}", error.detail);
+    if (error.code == services_unavailable)
+        return error.detail.empty()
+            ? std::string("IAM is down")
+            : std::format("IAM is down\n{}", error.detail);
 
-    if (error.detail.empty())
-        return headline;
-
-    /*
-     * The wire's own sentence is kept rather than dropped. It names the
-     * subject, which is the line an administrator pastes into a ticket, and it
-     * sits under a headline that has already said what it means.
-     */
-    return std::format("{} ({})", headline, error.detail);
+    return error.detail.empty()
+        ? error.message
+        : std::format("{}\n{}", error.message, error.detail);
 }
 
 namespace {
