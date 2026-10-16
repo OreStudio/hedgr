@@ -1,6 +1,6 @@
 # 8. Named signals, with sound as one subscriber
 
-**Status.** Accepted. Not yet implemented.
+**Status.** Accepted. Implemented.
 
 ## Context
 

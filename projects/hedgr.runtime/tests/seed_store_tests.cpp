@@ -204,7 +204,11 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
     const auto save_instance = [&](std::string id, std::string name,
                                    std::string url, std::string prefix,
                                    std::string folder_id,
-                                   std::string icon_key) {
+                                   std::string icon_key,
+                                   std::string wire_format = {},
+                                   std::string tls_ca = {},
+                                   std::string tls_cert = {},
+                                   std::string tls_key = {}) {
         command request;
         request.kind = command_kind::save_instance;
         /*
@@ -218,6 +222,18 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
         request.instance_row.nats_url = std::move(url);
         request.instance_row.subject_prefix = std::move(prefix);
         request.instance_row.folder_id = std::move(folder_id);
+        /*
+         * The wire format and the TLS paths are set for two of the three rows,
+         * because a capture of the details wall has to show the connection and
+         * the certificates topics with something in them and a store of rows
+         * that name neither would show a wall with neither. The third row is
+         * left blank on purpose, so the same capture shows what the wall does
+         * with a field the model does not hold.
+         */
+        request.instance_row.wire_format = std::move(wire_format);
+        request.instance_row.tls_ca = std::move(tls_ca);
+        request.instance_row.tls_cert = std::move(tls_cert);
+        request.instance_row.tls_key = std::move(tls_key);
         /*
          * The illustration is keyed by the same environment label the seeder
          * reads from a checkout. It is written here so the capture shows a
@@ -245,9 +261,13 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
         manager.pump();
     }
     save_instance("inst-prod", "production cluster", "nats://manta:20405",
-        "ores.prod.manta", "f-prod", "brave_hopper");
+        "ores.prod.manta", "f-prod", "brave_hopper", "json",
+        "/etc/hedgr/tls/manta-ca.pem", "/etc/hedgr/tls/manta-client.pem",
+        "/etc/hedgr/tls/manta-client-key.pem");
     save_instance("inst-lab", "laboratory", "nats://lab-01:4222",
-        "ores.lab.one", "f-dev-eu", std::string{});
+        "ores.lab.one", "f-dev-eu", std::string{}, "msgpack",
+        "/etc/hedgr/tls/lab-ca.pem", "/etc/hedgr/tls/lab-client.pem",
+        "/etc/hedgr/tls/lab-client-key.pem");
 
     const auto save_label = [&](std::string name, label_colour colour,
                                 label_severity severity) {

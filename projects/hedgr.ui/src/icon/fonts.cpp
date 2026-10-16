@@ -101,18 +101,24 @@ std::filesystem::path instance_icon_directory_path() {
 /**
  * @brief Where the base UI font lives.
  *
- * A monospace, because this interface is mostly columns of numbers and a
- * monospace face is what makes those columns line up down the window. A
- * proportional face sets a paragraph better and a table worse, and the tables
- * outnumber the paragraphs here.
+ * A proportional sans. This was a monospace for as long as the interface was
+ * read as columns of numbers, and the operator has since asked for the
+ * reference screenshot's look, which is set in a proportional face and sets
+ * its own numeric readouts in the same one. Matching it with a monospace would
+ * leave the two interfaces looking unlike each other for a reason no reader
+ * could name.
  *
- * DejaVu Sans Mono leads the list because that is the face this operator asked
- * for, and it is already present on a bare distribution, so the tree does not
- * depend on a font that was installed beside it. A wider face than the narrower
- * JetBrains Mono this used to open with reads better here, and the glyphs that
- * are easy to confuse are told apart. The faces after it are reached only on a
- * host with no DejaVu at all, so each is a fallback rather than a preference. An
- * empty result means fall back to the font embedded in ImGui, which always
+ * Inter leads the list because it is the neutral grotesque that the reference
+ * most resembles, close enough in proportion and in the shape of the letters
+ * that a reader comparing the two would not be looking at the typeface, and
+ * because it is installed here by the distribution. DejaVu Sans follows as the
+ * face that is present on a bare system, then Roboto, Noto Sans and Liberation
+ * Sans, which are metric relatives of one another and of the faces on the
+ * desktop this runs on. Each is a fallback rather than a preference, because a
+ * font named and not installed falls back silently and the interface would
+ * look unlike the reference for a reason nobody could see.
+ *
+ * An empty result means fall back to the font embedded in ImGui, which always
  * exists.
  */
 std::filesystem::path base_font_path() {
@@ -120,23 +126,25 @@ std::filesystem::path base_font_path() {
 
     /*
      * A face the user installed is looked at first, since a person who has put
-     * a monospace in their own font directory has a font they chose. HOME is
+     * a UI face in their own font directory has a font they chose. HOME is
      * read rather than written as a literal path so the lookup works for
      * whoever runs it.
      */
     if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
         const auto user_fonts = std::filesystem::path(home) / ".local/share/fonts";
-        candidates.push_back(user_fonts / "DejaVuSansMono.ttf");
+        candidates.push_back(user_fonts / "Inter-Regular.otf");
+        candidates.push_back(user_fonts / "Inter-Regular.ttf");
     }
 
-    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    candidates.push_back("/usr/share/fonts/opentype/inter/Inter-Regular.otf");
+    candidates.push_back("/usr/share/fonts/truetype/inter/Inter-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
     candidates.push_back(
-        "/usr/share/fonts/truetype/roboto/hinted/RobotoMono-Regular.ttf");
-    candidates.push_back("/usr/share/fonts/truetype/roboto/RobotoMono-Regular.ttf");
+        "/usr/share/fonts/truetype/roboto/hinted/Roboto-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/roboto/Roboto-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
     candidates.push_back(
-        "/usr/share/fonts/gfonts/roboto-mono/roboto-mono-v13-latin-regular.ttf");
-    candidates.push_back(
-        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf");
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
     return first_existing(candidates);
 }
 

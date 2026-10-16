@@ -35,27 +35,137 @@ constexpr ImVec4 colour(std::uint32_t rgba) {
         static_cast<float>(rgba & 0xffu) / 255.0f);
 }
 
-// Backgrounds carry alpha: the photographic background is meant to read
-// through the panels, which is what makes the desk feel like one surface.
-const ImVec4 bg_base = colour(0x0d0d0df0);
-const ImVec4 bg_window = colour(0x121212f2);
-const ImVec4 bg_title = colour(0x1a1a1aff);
-const ImVec4 bg_frame = colour(0x1e1e1eff);
-const ImVec4 bg_frame_hover = colour(0x282828ff);
-const ImVec4 border = colour(0x2a2a2aff);
-const ImVec4 text = colour(0xd4d4d4ff);
-const ImVec4 text_dim = colour(0x808080ff);
-const ImVec4 accent = colour(0x2d8cffff);
-const ImVec4 accent_hover = colour(0x3d9cffff);
-const ImVec4 accent_active = colour(0x1f6fd0ff);
+/*
+ * The palette is read off the reference screenshot rather than invented, and
+ * each entry names the region it was sampled from so the next person can check
+ * the reading instead of trusting it. Regions are given as an x and y in the
+ * reference's own pixels.
+ *
+ * The second reference, the glass one at
+ * docs/samples/267987113-b1f2b31e-a315-4ec4-90ea-f6f0ff00134b.png, shows
+ * surfaces that let the render behind them through. Its Outliner panel was
+ * measured against the render behind it by fitting the panel's own colour to
+ * the render just outside its left edge, which gave an alpha of about 0.75, so
+ * about a quarter of what is behind comes through. The window, the panels and
+ * the cards take that reading in steps rather than all at once, because a card
+ * sits on a panel and two layers at the same alpha would lose the step between
+ * them. The alpha is not one number: the photograph behind is already dimmed by
+ * the workspace, and a card holds the smallest text in the window and needs the
+ * most of its own colour to stay readable.
+ */
+constexpr ImVec4 with_alpha(ImVec4 base, float alpha) {
+    base.w = alpha;
+    return base;
+}
+
+constexpr float window_alpha = 0.72f; // the window's own body
+constexpr float panel_alpha = 0.82f; // a child pane and a card upon it
+constexpr float chrome_alpha = 0.85f; // title bar, status foot, buttons
+constexpr float field_alpha = 0.90f; // a text box or a combo, inside a card
+
+const ImVec4 bg_base = with_alpha(colour(0x101113ff), chrome_alpha); // gap between the two panels, x 406 y 700
+const ImVec4 bg_window = with_alpha(colour(0x1b1f20ff), window_alpha); // main panel body, x 1600 y 300
+const ImVec4 bg_panel = with_alpha(colour(0x1f2324ff), panel_alpha); // card interior, 60x40 at x 840 y 410
+const ImVec4 bg_status = with_alpha(colour(0x1a1b1dff), chrome_alpha); // status bar, x 1600 y 1615
+const ImVec4 bg_title = with_alpha(colour(0x292d2eff), chrome_alpha); // title bar, x 395 y 35
+const ImVec4 bg_frame = with_alpha(colour(0x2b2f30ff), field_alpha); // toolbar field, 300x40 at x 700 y 115
+const ImVec4 bg_frame_hover = with_alpha(colour(0x313637ff), field_alpha);
+const ImVec4 bg_frame_active = with_alpha(colour(0x363b3cff), field_alpha);
+const ImVec4 bg_button = with_alpha(colour(0x292d2eff), chrome_alpha); // Maps button, 100x40 at x 1170 y 115
+const ImVec4 bg_button_hover = with_alpha(colour(0x313637ff), chrome_alpha);
+
+/*
+ * Two weights of line. The outline of a card is one pixel and sits barely
+ * above the surface under it, and the rule beneath a title is one step
+ * brighter, which is the whole of the separation the reference uses.
+ */
+const ImVec4 border = colour(0x3e4243ff); // card left edge, x 434 y 450
+const ImVec4 separator = colour(0x494d4eff); // rule under Runtime Overview, x 1600 y 395
+
+/*
+ * The scrollbar. It matters now that a details pane can hold more than fits,
+ * and it is built from the restyle's own surfaces rather than from ImGui's
+ * defaults so it reads as part of the pane it crosses. The groove is the panel
+ * taken down a step, which makes the track a recess in the surface rather than
+ * a strip laid on top of it. The grab is the card border held solid, because a
+ * bar a reader catches should weigh the same as the outlines around it, and the
+ * hover lifts that grey by a step. The press takes the accent, which is what
+ * every other dragged control in this interface does when it is held.
+ */
+const ImVec4 scrollbar_track = with_alpha(colour(0x131516ff), panel_alpha);
+const ImVec4 scrollbar_grab = border;
+const ImVec4 scrollbar_grab_hover = colour(0x565b5cff);
+
+/*
+ * What a reader is meant to read, and the caption beneath it. The third weight
+ * below is not a sample. The reference draws no disabled text anywhere, so it
+ * is the caption grey taken down by a little under half, which keeps it in the
+ * same family and puts it below the caption rather than beside it.
+ */
+const ImVec4 text = colour(0xcdd2d2ff); // Command Center, 300x30 at x 80 y 420
+const ImVec4 text_dim = colour(0x8f9595ff); // since payload start, 250x24 at x 455 y 520
+const ImVec4 text_disabled = colour(0x585d5eff);
+
+/*
+ * The reference's connected green. It is read off the status dot, which is a
+ * solid disc and so reaches its own colour rather than an antialiased
+ * approximation of it, and the selection bar down the chosen navigation row
+ * reads the same value.
+ *
+ * The reference sets its group headings and its section subtitles in a second
+ * green, about a third darker again. That one is recorded in the restyle's
+ * report rather than here, because ImGui has one text colour and no heading
+ * colour, so there is no style slot that could carry it and an unused constant
+ * would be a palette entry that nothing can reach.
+ */
+const ImVec4 green = colour(0x6ae995ff); // status dot, 22x22 at x 38 y 1616
+
+/*
+ * The chosen navigation row is a dark green wash. The reference draws it over
+ * a panel rather than over black, so the two clean readings of it differ and
+ * the value here is their middle.
+ */
+const ImVec4 selection_fill = colour(0x1e402eff); // Telemetry row, x 300 y 1250
+
+/*
+ * The accent is the reference's bright green, because a chosen control, a
+ * ticked box and a dragged slider are all the same statement as a chosen
+ * navigation row. Nothing is hovered in a still image, so the two neighbouring
+ * steps are the accent moved lighter and darker rather than sampled.
+ */
+const ImVec4 accent = green;
+const ImVec4 accent_hover = colour(0x86f0acff);
+const ImVec4 accent_active = colour(0x4fcb7dff);
 
 /*
  * The second red. A reachable broker with no IAM service behind it is a fault,
  * but it is not the same fault as a broker that never answered, and the estate
  * chart carries no legend, so two lines in one red would be two lines a reader
  * cannot tell apart. The service that is missing gets the darker red.
+ *
+ * The reference shows no red at all, so unlike the green and the amber this
+ * one was not resampled and keeps the value it already had.
  */
 constexpr ImU32 service_missing_colour = IM_COL32(211, 47, 47, 255);
+
+/*
+ * The state colours, named for the meaning rather than for the hue. A probe
+ * that is ready and a session that is authenticated are the same green as the
+ * reference's connected dot, and bootstrapping is the same amber as its
+ * warning fill, so a reader carries one vocabulary between the reference and
+ * this window rather than two.
+ *
+ * Grey is not a shade of either answer. It is the colour of a question nobody
+ * has asked yet, and the reference never has to draw one, so it keeps the
+ * neutral value it already had rather than borrowing the reference's dimmed
+ * text grey, which means something else.
+ */
+constexpr ImU32 good_colour = IM_COL32(106, 233, 149, 255);
+
+/* The warning fill under the Miss Rate label, 600x24 at x 600 y 1022. */
+constexpr ImU32 warning_colour = IM_COL32(240, 193, 87, 255);
+
+constexpr ImU32 unknown_colour = IM_COL32(128, 128, 128, 255);
 
 }
 
@@ -69,59 +179,79 @@ void apply_theme() {
     ImVec4* colors = style.Colors;
 
     /*
-     * Geometry: compact padding, square corners, boxed frames. A trading
-     * terminal packs rows rather than breathing, and rounded corners on a
-     * dense grid read as sloppy rather than friendly.
+     * Geometry. The reference is roomier than this interface has been. A
+     * navigation row is about twice the text height rather than a hair over
+     * it, a card holds its contents well clear of its own edge, and every
+     * corner is rounded by a few pixels. The corner radius is small on purpose,
+     * because a large one on a one pixel border reads as a bubble rather than
+     * as a panel.
+     *
+     * FrameBorderSize is set because the reference frames its fields. A field
+     * is a filled well inside the card it sits on, and without the outline the
+     * well and the card merge into one surface.
      */
-    style.WindowPadding = ImVec2(8.0f, 8.0f);
-    style.FramePadding = ImVec2(5.0f, 3.0f);
-    style.CellPadding = ImVec2(5.0f, 3.0f);
-    style.ItemSpacing = ImVec2(6.0f, 4.0f);
-    style.ItemInnerSpacing = ImVec2(4.0f, 3.0f);
-    style.WindowRounding = 0.0f;
-    style.ChildRounding = 0.0f;
-    style.FrameRounding = 0.0f;
-    style.PopupRounding = 0.0f;
-    style.GrabRounding = 0.0f;
-    style.TabRounding = 0.0f;
-    style.ScrollbarRounding = 0.0f;
+    style.WindowPadding = ImVec2(12.0f, 12.0f);
+    style.FramePadding = ImVec2(8.0f, 5.0f);
+    style.CellPadding = ImVec2(8.0f, 5.0f);
+    style.ItemSpacing = ImVec2(8.0f, 6.0f);
+    style.ItemInnerSpacing = ImVec2(6.0f, 5.0f);
+    style.WindowRounding = 6.0f;
+    style.ChildRounding = 6.0f;
+    style.FrameRounding = 4.0f;
+    style.PopupRounding = 6.0f;
+    style.GrabRounding = 3.0f;
+    style.TabRounding = 4.0f;
+    style.ScrollbarRounding = 6.0f;
     style.WindowBorderSize = 1.0f;
-    style.FrameBorderSize = 0.0f;
-    style.ScrollbarSize = 12.0f;
-    style.GrabMinSize = 8.0f;
+    style.FrameBorderSize = 1.0f;
+    style.ScrollbarSize = 10.0f;
+    style.GrabMinSize = 10.0f;
     style.SeparatorTextBorderSize = 1.0f;
 
     colors[ImGuiCol_Text] = text;
-    colors[ImGuiCol_TextDisabled] = text_dim;
+    colors[ImGuiCol_TextDisabled] = text_disabled;
     colors[ImGuiCol_WindowBg] = bg_window;
-    colors[ImGuiCol_ChildBg] = colour(0x00000000);
-    colors[ImGuiCol_PopupBg] = colour(0x141414fa);
+    colors[ImGuiCol_ChildBg] = bg_panel;
+    colors[ImGuiCol_PopupBg] = bg_panel;
     colors[ImGuiCol_Border] = border;
     colors[ImGuiCol_BorderShadow] = colour(0x00000000);
     colors[ImGuiCol_FrameBg] = bg_frame;
     colors[ImGuiCol_FrameBgHovered] = bg_frame_hover;
-    colors[ImGuiCol_FrameBgActive] = colour(0x323232ff);
+    colors[ImGuiCol_FrameBgActive] = bg_frame_active;
     colors[ImGuiCol_TitleBg] = bg_title;
     colors[ImGuiCol_TitleBgActive] = bg_title;
     colors[ImGuiCol_TitleBgCollapsed] = bg_base;
     colors[ImGuiCol_MenuBarBg] = bg_title;
-    colors[ImGuiCol_ScrollbarBg] = colour(0x0d0d0d80);
-    colors[ImGuiCol_ScrollbarGrab] = colour(0x333333ff);
-    colors[ImGuiCol_ScrollbarGrabHovered] = colour(0x454545ff);
+    colors[ImGuiCol_ScrollbarBg] = scrollbar_track;
+    colors[ImGuiCol_ScrollbarGrab] = scrollbar_grab;
+    colors[ImGuiCol_ScrollbarGrabHovered] = scrollbar_grab_hover;
     colors[ImGuiCol_ScrollbarGrabActive] = accent_active;
     colors[ImGuiCol_CheckMark] = accent;
     colors[ImGuiCol_SliderGrab] = accent;
     colors[ImGuiCol_SliderGrabActive] = accent_active;
-    colors[ImGuiCol_Button] = colour(0x242424ff);
-    colors[ImGuiCol_ButtonHovered] = colour(0x333333ff);
-    colors[ImGuiCol_ButtonActive] = accent_active;
-    colors[ImGuiCol_Header] = colour(0x242424ff);
-    colors[ImGuiCol_HeaderHovered] = colour(0x333333ff);
-    colors[ImGuiCol_HeaderActive] = colour(0x3d3d3dff);
-    colors[ImGuiCol_Separator] = border;
+    colors[ImGuiCol_Button] = bg_button;
+    colors[ImGuiCol_ButtonHovered] = bg_button_hover;
+    colors[ImGuiCol_ButtonActive] = bg_frame_active;
+    /*
+     * A selected row takes the reference's green wash. Header is the one
+     * colour ImGui draws for "this is the chosen one" in a list or a tree, so
+     * it is where the reference's selection background lands.
+     *
+     * The hover and the press are neutral greys, not steps of the same green.
+     * ImGui reaches for HeaderHovered whether or not the row is selected, so a
+     * green hover would have painted the same wash under a row the pointer
+     * merely crossed as under the chosen row, and the reference keeps the two
+     * states apart. A surface that wants the green to survive a hover of the
+     * chosen row pushes it back for that row alone, which is what the browser
+     * does.
+     */
+    colors[ImGuiCol_Header] = selection_fill;
+    colors[ImGuiCol_HeaderHovered] = colour(0x282c2dff);
+    colors[ImGuiCol_HeaderActive] = colour(0x323637ff);
+    colors[ImGuiCol_Separator] = separator;
     colors[ImGuiCol_SeparatorHovered] = accent_hover;
     colors[ImGuiCol_SeparatorActive] = accent_active;
-    colors[ImGuiCol_ResizeGrip] = colour(0x24242480);
+    colors[ImGuiCol_ResizeGrip] = colour(0x3e424380);
     colors[ImGuiCol_ResizeGripHovered] = accent_hover;
     colors[ImGuiCol_ResizeGripActive] = accent_active;
     colors[ImGuiCol_Tab] = bg_title;
@@ -135,10 +265,10 @@ void apply_theme() {
     colors[ImGuiCol_PlotHistogramHovered] = accent_hover;
     colors[ImGuiCol_TableHeaderBg] = bg_title;
     colors[ImGuiCol_TableBorderStrong] = border;
-    colors[ImGuiCol_TableBorderLight] = colour(0x1e1e1eff);
+    colors[ImGuiCol_TableBorderLight] = colour(0x2a2e2fff);
     colors[ImGuiCol_TableRowBg] = colour(0x00000000);
-    colors[ImGuiCol_TableRowBgAlt] = colour(0xffffff08);
-    colors[ImGuiCol_TextSelectedBg] = colour(0x2d8cff59);
+    colors[ImGuiCol_TableRowBgAlt] = colour(0xffffff05);
+    colors[ImGuiCol_TextSelectedBg] = colour(0x6ae99559);
     colors[ImGuiCol_DragDropTarget] = accent;
     colors[ImGuiCol_NavCursor] = accent;
     colors[ImGuiCol_NavWindowingHighlight] = colour(0xffffff20);
@@ -148,18 +278,23 @@ void apply_theme() {
     /*
      * ImPlot keeps its own palette, so it is themed here too: a plot drawn in
      * ImPlot's defaults would be the one bright, rounded thing on the desk.
+     *
+     * A plot is an inset well rather than a card, so it takes the window's
+     * colour and not the panel's, and its frame is the same one pixel border.
+     * The axis text is the dim weight, because an axis is a caption on the
+     * data rather than data a reader is following.
      */
     ImPlotStyle& plot = ImPlot::GetStyle();
-    plot.PlotPadding = ImVec2(6.0f, 6.0f);
-    plot.LabelPadding = ImVec2(4.0f, 4.0f);
-    plot.LegendPadding = ImVec2(4.0f, 4.0f);
+    plot.PlotPadding = ImVec2(10.0f, 10.0f);
+    plot.LabelPadding = ImVec2(6.0f, 6.0f);
+    plot.LegendPadding = ImVec2(6.0f, 6.0f);
     plot.PlotBorderSize = 1;
     plot.MinorAlpha = 0.15f;
-    plot.Colors[ImPlotCol_PlotBg] = ImVec4(0.05f, 0.05f, 0.05f, 0.60f);
-    plot.Colors[ImPlotCol_PlotBorder] = ImVec4(0.16f, 0.16f, 0.16f, 1.00f);
-    plot.Colors[ImPlotCol_AxisText] = text;
-    plot.Colors[ImPlotCol_AxisGrid] = ImVec4(0.20f, 0.20f, 0.20f, 0.60f);
-    plot.Colors[ImPlotCol_AxisTick] = text_dim;
+    plot.Colors[ImPlotCol_PlotBg] = bg_window;
+    plot.Colors[ImPlotCol_PlotBorder] = border;
+    plot.Colors[ImPlotCol_AxisText] = text_dim;
+    plot.Colors[ImPlotCol_AxisGrid] = colour(0x3e424366);
+    plot.Colors[ImPlotCol_AxisTick] = text_disabled;
 
     /*
      * Series colours come from a colormap rather than from the colour array:
@@ -170,14 +305,41 @@ void apply_theme() {
     plot.Colormap = ImPlotColormap_Dark;
 }
 
+ImVec4 status_surface() noexcept {
+    return bg_status;
+}
+
+ImVec4 card_surface() noexcept {
+    return bg_panel;
+}
+
+ImVec4 card_border() noexcept {
+    return border;
+}
+
+ImVec4 dim_text() noexcept {
+    return text_dim;
+}
+
+ImU32 card_title_icon_colour() noexcept {
+    /*
+     * The connected green, the same value the status dot carries. The reference
+     * writes every card title's icon in it while the title's own words stay a
+     * step below the value, so the icon marks the field and the words only name
+     * it. Every card takes it from here rather than reaching for the accent, so
+     * a change of mind moves the whole wall together.
+     */
+    return good_colour;
+}
+
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {
     switch (value) {
     case hedgr::model::domain::session_status::disconnected:
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
     case hedgr::model::domain::session_status::connecting:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case hedgr::model::domain::session_status::authenticated:
-        return IM_COL32(0, 200, 83, 255);
+        return good_colour;
     case hedgr::model::domain::session_status::failed:
         return failure_colour;
     }
@@ -191,9 +353,9 @@ ImU32 label_colour(hedgr::model::domain::label_colour value) noexcept {
     case hedgr::model::domain::label_colour::blue:
         return IM_COL32(64, 160, 255, 255);
     case hedgr::model::domain::label_colour::green:
-        return IM_COL32(0, 200, 83, 255);
+        return good_colour;
     case hedgr::model::domain::label_colour::amber:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case hedgr::model::domain::label_colour::red:
         return failure_colour;
     case hedgr::model::domain::label_colour::purple:
@@ -256,11 +418,11 @@ const char* status_icon(hedgr::model::domain::session_status value) noexcept {
 ImU32 reachability_colour(hedgr::model::domain::reachability value) noexcept {
     switch (value) {
     case hedgr::model::domain::reachability::unknown:
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
     case hedgr::model::domain::reachability::unreachable:
         return failure_colour;
     case hedgr::model::domain::reachability::reachable:
-        return IM_COL32(0, 200, 83, 255);
+        return good_colour;
     }
     return IM_COL32(212, 212, 212, 255);
 }
@@ -268,13 +430,13 @@ ImU32 reachability_colour(hedgr::model::domain::reachability value) noexcept {
 ImU32 readiness_colour(hedgr::model::domain::readiness value) noexcept {
     switch (value) {
     case hedgr::model::domain::readiness::unknown:
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
     case hedgr::model::domain::readiness::service_missing:
         return service_missing_colour;
     case hedgr::model::domain::readiness::bootstrapping:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case hedgr::model::domain::readiness::ready:
-        return IM_COL32(0, 200, 83, 255);
+        return good_colour;
     }
     return IM_COL32(212, 212, 212, 255);
 }
@@ -291,7 +453,7 @@ ImU32 probe_state_colour(
      * that refused, and reporting the second is a claim nobody made.
      */
     if (!observed)
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
 
     /*
      * Reachability first, because a broker that did not answer is the whole
@@ -315,9 +477,9 @@ ImU32 probe_state_colour(
      * whose probe has reported something has been answered for.
      */
     if (result.ready != readiness::ready)
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
 
-    return IM_COL32(0, 200, 83, 255);
+    return good_colour;
 }
 
 /** @brief The short word for that colour, for a row's tooltip. */
@@ -384,11 +546,11 @@ const char* store_lock_icon(hedgr::model::domain::store_lock value) noexcept {
 ImU32 store_lock_colour(hedgr::model::domain::store_lock value) noexcept {
     switch (value) {
     case hedgr::model::domain::store_lock::absent:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case hedgr::model::domain::store_lock::locked:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case hedgr::model::domain::store_lock::unlocked:
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
     case hedgr::model::domain::store_lock::failed:
         return failure_colour;
     }
@@ -405,12 +567,12 @@ ImU32 strength_colour(int strength) noexcept {
     case 1:
         return failure_colour;
     case 2:
-        return IM_COL32(255, 193, 7, 255);
+        return warning_colour;
     case 3:
     case 4:
-        return IM_COL32(0, 200, 83, 255);
+        return good_colour;
     default:
-        return IM_COL32(128, 128, 128, 255);
+        return unknown_colour;
     }
 }
 

@@ -24,6 +24,7 @@
 #include "hedgr.ui/widget/capture.hpp"
 #include "imgui.h"
 #include <algorithm>
+#include <format>
 #include <string>
 #include <string_view>
 
@@ -57,6 +58,132 @@ namespace hedgr::ui::widget {
     ImGui::PopID();
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed && enabled;
+}
+
+/**
+ * @brief A navigation rail's entry: a glyph and the word it stands for.
+ *
+ * The one control the reference's left hand rail is built from. It is a
+ * selectable rather than a button because a rail entry is a row a reader
+ * chooses among, and ImGui's selectable is the widget that carries the chosen
+ * row's fill and the hover. It spans the strip's own width so the rows line up
+ * as a column instead of each being as wide as its word.
+ *
+ * The glyph and the word are one item to the pointer as well as to the eye: two
+ * items on one line would give the row two hit boxes and a gap between them
+ * that selects nothing. They are painted together in the middle of the row,
+ * because the row is taller than one line and a label left where ImGui puts it
+ * sits at the top of the highlight rather than in the middle of it.
+ *
+ * The height is roomier than an icon button's, which is what the reference
+ * uses: a rail row is about two text heights rather than a hair over one.
+ *
+ * @param id ImGui id, unique among the controls of one strip.
+ * @param glyph The icon, which must come from @c hedgr.ui.icon.
+ * @param label The word the entry is read by.
+ * @param tooltip The action's name, shown on hover.
+ * @return Whether the entry was pressed this frame.
+ */
+[[nodiscard]] inline bool rail_button(const char* id, const char* glyph,
+    const char* label, const char* tooltip, bool enabled = true) {
+    constexpr float rail_row_extra = 6.0f;
+    const float height = ImGui::GetFrameHeight() + rail_row_extra;
+
+    ImGui::PushID(id);
+    if (!enabled)
+        ImGui::BeginDisabled();
+    /*
+     * Rounded here rather than in the theme, because a selectable's rounding is
+     * the one style value ImGui itself warns about: contiguous selectables in a
+     * popup would each round their own corners and read as beads. A rail's rows
+     * are not contiguous fills, so it is the surface that can use it.
+     */
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableRounding, 6.0f);
+    /*
+     * A zero width is the selectable's own "span what is available": its size
+     * argument is read as a requested width and a zero means the row's full
+     * line, so the rows of a column line up rather than each being as wide as
+     * its own word.
+     */
+    const bool pressed = ImGui::Selectable(
+        "##row", false, ImGuiSelectableFlags_None, ImVec2(0.0f, height));
+    ImGui::PopStyleVar();
+
+    /*
+     * The text is drawn here rather than submitted as the selectable's own
+     * label. ImGui writes a label at the item's top left, which is right for a
+     * one line row and wrong for this one, because the row is taller than its
+     * text and the highlight would sit around a word pinned to the top of it.
+     * An empty label leaves the drawing here, which centres the glyph and the
+     * word in the rectangle the row actually occupies.
+     *
+     * It is drawn before the disabled scope ends, because the dimming of a
+     * disabled item is carried on the style alpha and the colour is read while
+     * that alpha still applies.
+     */
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const ImU32 colour = ImGui::GetColorU32(ImGuiCol_Text);
+    const float text_y = min.y
+        + ((max.y - min.y) - ImGui::GetTextLineHeight()) * 0.5f;
+    /*
+     * The left inset is half an item spacing rather than the frame padding,
+     * because that is where ImGui's own label sat: a selectable widens its hit
+     * box by half a spacing on each side to close the gap to its neighbour, and
+     * the label was written at the cursor inside that box.
+     */
+    const float glyph_x = min.x + style.ItemSpacing.x * 0.5f;
+    const float word_x =
+        glyph_x + ImGui::CalcTextSize(glyph).x + style.ItemInnerSpacing.x;
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+    draw->AddText(ImVec2(glyph_x, text_y), colour, glyph);
+    draw->AddText(ImVec2(word_x, text_y), colour, label);
+
+    if (!enabled)
+        ImGui::EndDisabled();
+    ImGui::PopID();
+    ImGui::SetItemTooltip("%s", tooltip);
+    return pressed && enabled;
+}
+
+/**
+ * @brief A read-only value on one line, as text that can be selected and
+ * copied.
+ *
+ * The card form of @c text_value. A card holds one value and gives it one line,
+ * so the value is a single line input rather than a wrapping multiline one: a
+ * path long enough to wrap would grow the box past the card and be clipped, and
+ * a value that is clipped is a value the operator cannot check. A single line
+ * input scrolls its own text instead, which costs the card nothing.
+ *
+ * The whole value is on the tooltip as well, because a value wider than its
+ * card is otherwise unreadable except by scrolling it a character at a time.
+ */
+inline void text_line(const char* id, std::string_view value, float width) {
+    if (value.empty())
+        return;
+
+    static thread_local std::string buffer;
+    buffer.assign(value);
+
+    ImGui::PushID(id);
+    ImGui::SetNextItemWidth(width);
+    static_cast<void>(ImGui::InputText("##value", buffer.data(),
+        buffer.size() + 1, ImGuiInputTextFlags_ReadOnly));
+    ImGui::PopID();
+    ImGui::SetItemTooltip("%.*s", static_cast<int>(value.size()), value.data());
+
+    capture_element element;
+    const ImVec2 item_min = ImGui::GetItemRectMin();
+    const ImVec2 item_max = ImGui::GetItemRectMax();
+    element.min_x = item_min.x;
+    element.min_y = item_min.y;
+    element.max_x = item_max.x;
+    element.max_y = item_max.y;
+    element.label_min_x = item_min.x;
+    element.label = "value";
+    observe_capture_element(id, element);
 }
 
 /**

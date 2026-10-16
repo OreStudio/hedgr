@@ -21,6 +21,8 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
@@ -65,6 +67,7 @@ namespace command = hedgr::model::command;
 namespace domain = hedgr::model::domain;
 namespace event = hedgr::model::event;
 namespace model_state = hedgr::model::state;
+namespace signal = hedgr::model::signal;
 namespace sqlite = hedgr::store::sqlite;
 namespace store_crypto = hedgr::store::crypto;
 namespace transport = hedgr::session::transport;
@@ -2811,6 +2814,22 @@ void instance_manager::apply_probe_result(const event::event& ev) {
     if (!handle)
         return;
 
+    /*
+     * The previous answer is read before the new one overwrites it, because the
+     * row is the only place it lives and the signal is about the change rather
+     * than about the state. A first result has nothing to differ from and
+     * raises nothing, so a process that starts with six unreachable
+     * deployments does not announce six faults it has only just learned about.
+     */
+    const domain::probe_result* previous = probes_.get(*handle);
+    const bool had_previous = previous != nullptr;
+    const auto previous_reach = had_previous
+        ? previous->reach
+        : domain::reachability::unknown;
+    const auto previous_ready = had_previous
+        ? previous->ready
+        : domain::readiness::unknown;
+
     domain::probe_result result;
     result.reach = ev.reach;
     result.ready = ev.ready;
@@ -2826,6 +2845,50 @@ void instance_manager::apply_probe_result(const event::event& ev) {
     if (ev.bootstrap_answered)
         result.bootstrap = ev.bootstrap;
     probes_.set(*handle, std::move(result));
+
+    /*
+     * The change, if there was one, is raised as a named signal rather than
+     * acted on here. The sound and any later subscriber read the same name, and
+     * the runtime stays ignorant of both, which is the point of the name being
+     * the whole interface. Reachability is raised in preference to readiness
+     * when both moved, because a broker that stopped answering also stops
+     * reporting readiness and the operator would otherwise hear two faults for
+     * one fact.
+     */
+    if (had_previous) {
+        const domain::instance* row = instances_.get(*handle);
+        const std::string subject = row != nullptr ? row->name : ev.instance_id;
+        const std::int64_t at_ns = steady_now_ns();
+
+        auto announce = [&](std::string_view name, std::string detail) {
+            signal::signal value;
+            value.name = std::string(name);
+            value.detail = std::move(detail);
+            value.at_ns = at_ns;
+            signal::bus().raise(std::move(value));
+        };
+
+        if (ev.reach != previous_reach) {
+            if (ev.reach == domain::reachability::reachable)
+                announce(signal::names::instance_reachability_restored,
+                    std::format("{} answers its broker again", subject));
+            else
+                announce(signal::names::instance_reachability_lost,
+                    std::format("{} no longer answers its broker", subject));
+        } else if (ev.reach == domain::reachability::reachable
+            && ev.ready != previous_ready) {
+            if (ev.ready == domain::readiness::ready)
+                announce(signal::names::instance_readiness_recovered,
+                    std::format("{} is ready", subject));
+            else if (ev.ready == domain::readiness::bootstrapping)
+                announce(signal::names::instance_readiness_bootstrapping,
+                    std::format("{} is bootstrapping", subject));
+            else
+                announce(signal::names::instance_readiness_degraded,
+                    std::format("{} stopped being ready and is now {}",
+                        subject, domain::to_string(ev.ready)));
+        }
+    }
 
     /*
      * A probe that got no answer backs the next attempt off; a probe that got

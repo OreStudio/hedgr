@@ -22,13 +22,16 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/browser.hpp"
+#include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include <algorithm>
 #include <cfloat>
@@ -51,12 +54,20 @@ using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
 using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::labelling_owner;
+using hedgr::model::domain::probe_result;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::store_lock;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_leaf;
+
+/*
+ * The row a capture asked to see selected, held until the frame that can show
+ * it. File-scope rather than a parameter because the environment is read once,
+ * before any window is drawn, and empty in an ordinary run.
+ */
+std::string pending_capture_selected_account;
 
 /** @brief Every live account of one instance, as the browser wants it. */
 [[nodiscard]] std::vector<tree_leaf> account_tree_leaves(const render_input& input,
@@ -80,6 +91,26 @@ using hedgr::ui::widget::tree_leaf;
         });
     }
     return leaves;
+}
+
+/**
+ * @brief The one word a session's status is read by.
+ *
+ * The list and the pane both write it, so the two cannot come to use two words
+ * for one state.
+ */
+[[nodiscard]] const char* session_word(session_status value) noexcept {
+    switch (value) {
+    case session_status::authenticated:
+        return "authenticated";
+    case session_status::connecting:
+        return "connecting";
+    case session_status::failed:
+        return "failed";
+    case session_status::disconnected:
+        return "disconnected";
+    }
+    return "unknown";
 }
 
 /** @brief Loads the account form's buffers from a row, or leaves them blank. */
@@ -455,21 +486,8 @@ void account_row_cells(const tree_leaf& leaf, const render_input& input,
             ? std::string{"IAM has not named a tenant for this account yet"}
             : std::format("Tenant {} as of the last sign-in", sign_in.tenant));
 
-    const auto summary = [&]() -> std::string {
-        if (!sign_in.ever_attempted)
-            return "never";
-        switch (sign_in.status) {
-        case session_status::authenticated:
-            return "authenticated";
-        case session_status::connecting:
-            return "connecting";
-        case session_status::failed:
-            return "failed";
-        case session_status::disconnected:
-            return "disconnected";
-        }
-        return "unknown";
-    }();
+    const auto summary = sign_in.ever_attempted ? session_word(sign_in.status)
+                                                : "never";
 
     cells.texts.push_back(summary);
     cells.colours.push_back(sign_in.ever_attempted
@@ -495,18 +513,179 @@ void account_row_labels(const tree_leaf& leaf, const render_input& input,
         forms::labels_of(input, labelling_owner::account, leaf.id));
 }
 
+/**
+ * @brief The instance an account signs in to, and what the last probe found.
+ *
+ * The flag is carried rather than inferred, for the reason the Instances
+ * window carries it: a probe whose answer never arrived and a probe nobody ran
+ * look identical in the two enums and are not the same thing to a reader. One
+ * is an outage, the other is a deployment nobody has waited on yet.
+ */
+struct account_instance_state final {
+    std::string name;
+    probe_result result;
+    bool observed = false;
+};
+
+/** @brief The state of the instance an account belongs to. */
+[[nodiscard]] account_instance_state instance_state_of(const render_input& input,
+    std::string_view instance_id) {
+    account_instance_state state;
+    const auto handle = input.instances.find(instance_id);
+    if (!handle)
+        return state;
+
+    state.name = input.instances.get(*handle)->name;
+    const auto* probe = input.probes.get(*handle);
+    if (probe == nullptr)
+        return state;
+
+    state.result = *probe;
+    state.observed = true;
+    return state;
+}
+
+/**
+ * @brief Draws one account's details, in the browser's right hand pane.
+ *
+ * The account is the leaf and the pane reports on the selected one, which is
+ * what the operator asked for: cards for the current account rather than a
+ * table of every account. The pane is the browser's own right hand slot, the
+ * same slot the Instances window shows an instance in, so the two windows are
+ * one program rather than two. The kind of card, the grouping and the full
+ * width rule for a long value all come from the shared card widget.
+ *
+ * The instance's readiness and reachability lead the report after the account's
+ * own fields, because they are what decide whether signing in can work at all,
+ * and they are read from the same probe result and the same theme helpers the
+ * Instances window uses so the two cannot disagree about one deployment.
+ */
+void account_details(const tree_leaf& leaf, const render_input& input,
+    window_ui_state& window) {
+    static_cast<void>(window);
+    const auto handle = input.accounts.find(leaf.id);
+    if (!handle) {
+        ImGui::TextDisabled("This account is no longer in the store.");
+        return;
+    }
+
+    const auto& row = *input.accounts.get(*handle);
+    const auto instance = instance_state_of(input, row.instance_id);
+    const std::string& display = row.name.empty() ? row.principal : row.name;
+
+    /*
+     * The head names the account and the state of the instance it belongs to,
+     * in the state's own colour and its own word. The labels sit beside them as
+     * the same pills the list draws, so a label is one colour on every surface.
+     */
+    ImGui::TextUnformatted(display.c_str());
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(
+            theme::probe_state_colour(instance.result, instance.observed)));
+    ImGui::TextUnformatted(
+        theme::probe_state_word(instance.result, instance.observed));
+    ImGui::PopStyleColor();
+
+    const auto attached =
+        forms::labels_of(input, labelling_owner::account, row.id);
+    if (!attached.empty()) {
+        ImGui::SameLine();
+        static_cast<void>(
+            widget::label_pill_row(widget::pills_for(attached), 0.0f));
+    }
+
+    const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+    const int columns = widget::card_columns(pane_width);
+    const float width = widget::card_width(pane_width, columns);
+    const float height = widget::card_height();
+
+    std::vector<widget::topic_spec> topics;
+
+    widget::topic_spec identity;
+    identity.title = "Account";
+    identity.cards.push_back(widget::card_spec{.id = "account-name",
+        .glyph = icon::account, .title = "Name", .value = display,
+        .caption = "the name this account is read by"});
+    if (!row.principal.empty()) {
+        identity.cards.push_back(widget::card_spec{.id = "account-principal",
+            .title = "Principal", .value = row.principal,
+            .caption = "what IAM sees when it signs in"});
+    }
+    topics.push_back(std::move(identity));
+
+    widget::topic_spec deployment;
+    deployment.title = "Instance";
+    if (!instance.name.empty()) {
+        deployment.cards.push_back(widget::card_spec{.id = "instance-name",
+            .title = "Instance", .value = instance.name,
+            .caption = "the deployment this login belongs to"});
+    }
+    deployment.cards.push_back(widget::card_spec{.id = "probe-state",
+        .glyph = icon::probe, .title = "Probe state",
+        .value = theme::probe_state_word(instance.result, instance.observed),
+        .caption = "the last probe's answer",
+        .colour = theme::probe_state_colour(instance.result, instance.observed)});
+    deployment.cards.push_back(widget::card_spec{.id = "reachability",
+        .glyph = icon::connect, .title = "Reachability",
+        .value = std::string{
+            hedgr::model::domain::to_string(instance.result.reach)},
+        .caption = "whether the broker answered"});
+    deployment.cards.push_back(widget::card_spec{.id = "readiness",
+        .glyph = icon::ready, .title = "Readiness",
+        .value = std::string{
+            hedgr::model::domain::to_string(instance.result.ready)},
+        .caption = "whether IAM is behind it"});
+    topics.push_back(std::move(deployment));
+
+    const auto sign_in =
+        widget::last_sign_in(input.sessions, row.instance_id, row.id);
+    widget::topic_spec session;
+    session.title = "Session";
+    session.cards.push_back(widget::card_spec{.id = "last-sign-in",
+        .title = "Last sign-in",
+        .value = sign_in.ever_attempted ? session_word(sign_in.status) : "never",
+        .caption = sign_in.ever_attempted ? "the last sign-in's answer"
+                                          : "no sign-in has been attempted",
+        .colour = sign_in.ever_attempted
+            ? theme::status_colour(sign_in.status)
+            : theme::reachability_colour(
+                  hedgr::model::domain::reachability::unknown)});
+    if (!sign_in.tenant.empty()) {
+        session.cards.push_back(widget::card_spec{.id = "tenant",
+            .title = "Tenant", .value = sign_in.tenant,
+            .caption = "what IAM named at the last sign-in"});
+    }
+    if (!sign_in.last_error.empty()) {
+        session.cards.push_back(widget::card_spec{.id = "sign-in-detail",
+            .title = "Detail", .value = sign_in.last_error,
+            .caption = "what the last sign-in reported",
+            .colour = sign_in.status == session_status::failed
+                ? theme::failure_colour
+                : 0,
+            .full_width = true});
+    }
+    topics.push_back(std::move(session));
+
+    widget::draw_topics(topics, pane_width, width, height, columns);
+}
+
 }
 
 namespace hedgr::ui::render {
+
+void select_account_for_capture(std::string_view account_id) {
+    pending_capture_selected_account = std::string{account_id};
+}
 
 /**
  * @brief Draws the Accounts window's own action, in the browser's toolbar.
  *
  * The sign-in is the one control the browser cannot draw for it, and it is the
- * window's reason for existing. It is a bare glyph like every other control in
- * the strip, because the tooltip is the action's name on screen and a second
- * copy of that name in the button made this the one control whose width did
- * not match its neighbours.
+ * window's reason for existing. It is a rail entry with the others now, an
+ * icon and a word, because the operator asked for the worded strip here as
+ * well as on the Instances window. The word is "Sign in", which is the
+ * action's own name and the same one its tooltip carries.
  */
 void accounts_window_actions(const render_input& input,
     window_ui_state& state) {
@@ -525,8 +704,8 @@ void accounts_window_actions(const render_input& input,
         ? input.accounts.find(state.browser.selected_leaf)
         : std::optional<hedgr::model::state::account_handle>{};
 
-    const bool sign_in = widget::icon_button("sign-in", icon::sign_in,
-        "Sign in with the selected account and open a workspace",
+    const bool sign_in = widget::rail_button("sign-in", icon::sign_in,
+        "Sign in", "Sign in with the selected account and open a workspace",
         have_selection);
 
     if (!sign_in || !selected)
@@ -585,6 +764,16 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     state.browser.instance = instance_id;
     state.browser.form_owner = instance_id;
 
+    /*
+     * A capture's selection is the scratch a click writes and nothing more, so
+     * the pane that follows is the one an operator would have reached by hand.
+     */
+    if (!pending_capture_selected_account.empty()) {
+        state.browser.selected_leaf = pending_capture_selected_account;
+        state.browser.selected_folder.clear();
+        pending_capture_selected_account.clear();
+    }
+
     ImGui::PushID("accounts");
 
     const auto root = input.folders.root(folder_tree::accounts, instance_id);
@@ -614,6 +803,13 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     model.columns = account_columns();
     model.row_cells = &account_row_cells;
     model.row_labels = &account_row_labels;
+    /*
+     * The right hand pane shows one account in full rather than every account
+     * as a row, which is the operator's "cards just for the current account".
+     * The columns and cells above are still declared, because they are the
+     * pane's fallback and the browser draws the details whenever this is set.
+     */
+    model.draw_details = &account_details;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
         open_create_form(window, parent);
     };
@@ -656,6 +852,25 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
         else if (!state.browser.duplicate_source.empty())
             open_edit_form(input, state, state.browser.duplicate_source, true);
     }
+
+    /*
+     * The foot reports the state of the instance this window belongs to, in the
+     * instance's own colour and its own word, with the same disc ahead of the
+     * line the Instances window draws. Signing in is only possible when the
+     * broker answered and IAM is behind it, so the state belongs on this window
+     * and not only on the one that owns the probes. It is drawn last, so the
+     * browser above has already taken the height it needs.
+     */
+    const auto instance_state = instance_state_of(input, instance_id);
+    widget::foot_state foot;
+    if (!instance_id.empty()) {
+        foot.name = instance_state.name;
+        foot.word =
+            theme::probe_state_word(instance_state.result, instance_state.observed);
+        foot.colour = theme::probe_state_colour(
+            instance_state.result, instance_state.observed);
+    }
+    widget::draw_status_foot(status, input.now_ns, foot);
 
     ImGui::PopID();
 }

@@ -59,6 +59,16 @@ HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 HEDGR_UI_EXPORT void select_instance_for_capture(std::string_view instance_id);
 
 /**
+ * @brief Selects an account in the Accounts window, on the next frame it draws.
+ *
+ * The account pane is reached by selecting a row, and a capture that wants to
+ * show it without a click has no other way in. The selection is the same
+ * scratch a click writes, so the pane that follows is the one an operator would
+ * have seen.
+ */
+HEDGR_UI_EXPORT void select_account_for_capture(std::string_view account_id);
+
+/**
  * @brief Puts the Instances pane into edit mode on one row, for a capture.
  *
  * Edit mode is otherwise reached by clicking the row's edit icon, and a capture

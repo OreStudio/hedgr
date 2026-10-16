@@ -29,8 +29,10 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/browser.hpp"
+#include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -1303,29 +1305,47 @@ void draw_picture_gallery(const render_input& input, window_ui_state& state) {
  */
 void instance_window_actions(const render_input& input, window_ui_state& state) {
     /*
-     * A rule between the browser's own actions and this window's, so the strip
-     * reads as two groups rather than as a column of unrelated buttons.
-     * Separator() asks the current layout which way it runs, and the strip is a
-     * vertical stack, so it draws a horizontal rule across the strip.
-     */
-    ImGui::Separator();
-
-    /*
+     * These sit under the browser's own "Actions" heading, which is why nothing
+     * here opens a group of its own: the strip is a rail of words, and a second
+     * heading would put this window's controls in a set of one.
+     *
      * Probe-all belongs here rather than in the application's toolbar: it acts
      * on the instances this window lists, and a control that acts on one
      * window's rows belongs with them.
      */
-    if (widget::icon_button("probe-all", icon::probe, "Probe every instance now")) {
+    if (widget::rail_button(
+            "probe-all", icon::probe, "Probe all", "Probe every instance now")) {
         command request;
         request.kind = command_kind::probe_all;
         input.commands.push(std::move(request));
     }
 
-    if (widget::icon_button("open-accounts", icon::account,
+    if (widget::rail_button("open-accounts", icon::account, "Accounts",
             "Open the accounts of the selected instance",
             !state.browser.selected_leaf.empty()))
         hedgr::ui::render::request_accounts_window(input,
             state.browser.selected_leaf);
+
+    /*
+     * The shortcut toggle used to sit at the pane's top right, where the pane
+     * had no other control and the dismiss glyph on it read as an action on the
+     * instance rather than on the bar. It lives here now, with the window's
+     * other actions, where it carries a word and the pane goes back to being a
+     * place that reports. "Pin" and "Unpin" are the words because the thing it
+     * changes is the shortcuts bar, and the glyphs stay the add and dismiss the
+     * icon set carries since it has no pin of its own.
+     */
+    const bool have_instance = !state.browser.selected_leaf.empty();
+    const bool on_bar = shortcuts_bar_holds(
+        input.shortcuts, window_kind::accounts, state.browser.selected_leaf);
+    if (widget::rail_button("shortcut-toggle",
+            on_bar ? icon::cancel : icon::add, on_bar ? "Unpin" : "Pin",
+            on_bar ? "Take this instance off the shortcuts bar"
+                   : "Put this instance on the shortcuts bar",
+            have_instance)) {
+        input.commands.push(shortcut_toggle_command(
+            input, window_kind::accounts, state.browser.selected_leaf));
+    }
 
     /*
      * The picture control acts on the selected instance and opens a gallery
@@ -1338,8 +1358,8 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
      * the same way a value offers itself, so the gallery can be driven open and
      * read rather than only pressed by a person.
      */
-    const bool picture_pressed = widget::icon_button("choose-picture",
-        icon::dashboard, "Choose this instance's environment picture",
+    const bool picture_pressed = widget::rail_button("choose-picture",
+        icon::dashboard, "Picture", "Choose this instance's environment picture",
         !state.browser.selected_leaf.empty());
     {
         widget::capture_element element;
@@ -1427,103 +1447,29 @@ void instance_row_labels(const tree_leaf& leaf, const render_input& input,
 }
 
 /**
- * @brief Whether the glyph column is wide enough to be worth painting in.
+ * @brief Opens one editable card and marks it when its draft has changed.
  *
- * The two details tables each set their columns immediately before their rows,
- * so the decision is made where the pane's own width is known and read by the
- * row writers that follow. A pane too narrow for the glyph and a field name
- * together keeps the name, because the name is what the value beside it means.
+ * The mark is the theme's cyan on the card's outline and bar, on its title and
+ * around the value the caller draws, so a changed field is legible as changed
+ * without a wash behind the text being read.
  */
-bool show_detail_glyph = true;
-
-/**
- * @brief One read-only field of the details pane, named and shown.
- *
- * The icon is drawn only where the set carries one that means the field, and
- * the name is written beside it either way, because a value with no name is a
- * number a reader has to guess at. The icon names the field for a reader who
- * hovers it as well, which is where an icon with no obvious sense of its own
- * gets its meaning.
- *
- * A field whose value is empty is not drawn at all, so every row is a fact the
- * model holds rather than a blank one pretending to be one.
- *
- * The value is an input rather than drawn text, so it can be dragged across and
- * copied the way text is in every other program, and the stock multiline input
- * wraps it as well. The copy control that used to sit in a column beside it is
- * gone, because the operator asked for the value itself to behave like text and
- * not for a second control per row.
- */
-void detail_row(const char* glyph, const char* name, std::string_view value) {
-    if (value.empty())
-        return;
-
-    ImGui::TableNextRow();
-
-    ImGui::TableNextColumn();
-    if (glyph != nullptr && show_detail_glyph) {
-        ImGui::TextDisabled("%s", glyph);
-        ImGui::SetItemTooltip("%s", name);
+template <typename Body>
+void edit_card(const char* id, const char* glyph, const char* title,
+    bool changed, float width, float height, Body body) {
+    const bool open = widget::begin_card(id, width, height, changed);
+    if (open) {
+        widget::card_title(glyph, title,
+            changed ? theme::edit_changed_colour
+                    : ImGui::GetColorU32(theme::dim_text()));
+        if (changed) {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                ImGui::ColorConvertU32ToFloat4(theme::edit_changed_colour));
+        }
+        body();
+        if (changed)
+            ImGui::PopStyleColor();
     }
-
-    ImGui::TableNextColumn();
-    ImGui::TextUnformatted(name);
-    /*
-     * A narrow pane elides the longest names to keep the value whole, so the
-     * name is readable in full on hover.
-     */
-    ImGui::SetItemTooltip("%s", name);
-
-    ImGui::TableNextColumn();
-    /*
-     * The width the input itself wraps at. It reserves the scrollbar's width
-     * before wrapping, so measuring at the cell's full width would size the box
-     * for a line that is one character too long.
-     */
-    const float wrap_width = std::max(
-        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
-        1.0f);
-    widget::text_value(name, value, wrap_width);
-}
-
-/**
- * @brief One editable row of the details pane, in the read-only row's shape.
- *
- * The glyph, the name and the value column are the same three the read-only
- * writer uses, so a field does not move when the pane enters edit mode. The
- * caller supplies only the value cell, which is what lets a single text box and
- * the host and port pair share one row.
- *
- * A changed row is drawn in the theme's edit colour on its name and on its
- * value. There is no background wash: a fill behind a value being read makes
- * the value harder to read, which is the opposite of what the mark is for. The
- * colour is the whole mark, and the name carries it as well so a field that was
- * cleared to nothing is still visibly changed.
- */
-template <typename Draw_value>
-void edit_row(const char* glyph, const char* name, bool changed,
-    Draw_value draw_value) {
-    ImGui::TableNextRow();
-
-    ImGui::TableNextColumn();
-    if (glyph != nullptr && show_detail_glyph) {
-        ImGui::TextDisabled("%s", glyph);
-        ImGui::SetItemTooltip("%s", name);
-    }
-
-    if (changed)
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(theme::edit_changed_colour));
-
-    ImGui::TableNextColumn();
-    ImGui::TextUnformatted(name);
-    ImGui::SetItemTooltip("%s", name);
-
-    ImGui::TableNextColumn();
-    draw_value();
-
-    if (changed)
-        ImGui::PopStyleColor();
+    widget::end_card();
 }
 
 /** @brief Records the control just submitted as a target a capture can name. */
@@ -1541,7 +1487,7 @@ void observe_item(std::string_view target, const char* label) {
 }
 
 /**
- * @brief The in-place editor's two controls, on the picture's own line.
+ * @brief The in-place editor's two controls.
  *
  * Save is on the left of the pair and Reset on the right, and Reset is the
  * safer of the two to reach for by accident because it puts back what the store
@@ -1552,21 +1498,11 @@ void observe_item(std::string_view target, const char* label) {
  * waited for the row to catch up. Reset reads the drafts back from the store
  * and leaves the operator in edit mode, because putting the fields back is not
  * the same as finishing.
+ *
+ * The pair is drawn where the pane's head has already put the cursor, which is
+ * why nothing here aligns them: the head owns the line and the right edge.
  */
 void draw_edit_controls(const render_input& input, window_ui_state& window) {
-    /*
-     * Right aligned on the line already open, which is the picture's when one
-     * was drawn and a line of its own when it was not. The leftover width is
-     * read from the cursor, so the pair lands against the content edge whatever
-     * width the picture had. The pane is a child that never scrolls, so a pane
-     * too narrow clips the pair in the frame rather than raising a bar.
-     */
-    const float controls = ImGui::GetFrameHeight() * 2.0f
-        + ImGui::GetStyle().ItemSpacing.x;
-    const float room = ImGui::GetContentRegionAvail().x;
-    ImGui::SetCursorPosX(
-        ImGui::GetCursorPosX() + std::max(room - controls, 0.0f));
-
     const bool saved = widget::icon_button("instance-save", icon::save,
         "Save the changes to this instance");
     observe_item("instance-save", "pane");
@@ -1584,28 +1520,175 @@ void draw_edit_controls(const render_input& input, window_ui_state& window) {
 }
 
 /**
- * @brief The pane's editable rows, in the read-only pane's own order.
+ * @brief The pane's head: the instance's picture, its name, its state and the
+ * controls the pane offers.
+ *
+ * The picture is drawn here rather than in a card because it is a square and a
+ * card is a line of text; a picture squeezed into a card's body would be a
+ * postage stamp. The name, the state word and the labels sit beside it so a
+ * reader knows what the wall below is about before reading any of it. The
+ * labels are here rather than in a card because they are the operator's own
+ * words for the instance and read as its tags, not as one more field of its
+ * record.
+ *
+ * The pane carries no control of its own any more. The shortcut toggle that
+ * used to sit at its top right lives in the toolbar, so what is left here is
+ * the instance's own report. Save and Reset join the head only while the pane
+ * is editable, which is what keeps the pair of them on one line at the pane's
+ * head instead of floating over the wall.
+ */
+void draw_pane_header(const render_input& input, window_ui_state& window,
+    const instance& row, const instance_status& status, bool editing) {
+    const std::string directory = input.instance_icons != nullptr
+        ? input.instance_icons->directory : std::string{};
+    const std::string picture_path =
+        widget::instance_picture_path(directory, row.icon_key);
+    const std::uint64_t picture = instance_icon_texture(input, row.id);
+
+    if (picture != 0) {
+        const float side = ImGui::GetFrameHeight() * 2.0f;
+        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
+        ImGui::SetItemTooltip("%s", picture_path.c_str());
+        ImGui::SameLine();
+    } else if (!row.icon_key.empty()) {
+        /*
+         * A key whose asset is not installed says so rather than drawing
+         * nothing. Nothing drawn is what an instance with no picture looks
+         * like, and a choice the install cannot satisfy is a different fact.
+         */
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
+        ImGui::TextUnformatted(icon::warning);
+        ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s No picture is installed for the key \"%s\".",
+            icon::warning, row.icon_key.c_str());
+        ImGui::SameLine();
+    }
+
+    ImGui::TextUnformatted(row.name.c_str());
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(
+            theme::probe_state_colour(status.result, status.observed)));
+    ImGui::TextUnformatted(
+        theme::probe_state_word(status.result, status.observed));
+    ImGui::PopStyleColor();
+
+    /*
+     * Save and Reset are pushed against the pane's right edge while the pane is
+     * editable, measured from the room left on the line rather than from the
+     * pane's own width, so the pair lands there whatever the picture and the
+     * name took. With no controls there is nothing to push, so the cursor is
+     * left where the head finished.
+     */
+    const float icon_width = ImGui::GetFrameHeight();
+    const float controls = editing
+        ? icon_width * 2.0f + ImGui::GetStyle().ItemSpacing.x
+        : 0.0f;
+    /*
+     * The room is read after SameLine rather than before it. A text item leaves
+     * the cursor at the start of the next line, so the available region read
+     * there is the pane's whole width and adding it to the cursor would put the
+     * controls past the pane's edge, where ImGui culls them. SameLine puts the
+     * cursor back on the line first, and what is left from there is the room
+     * the controls have to fit in.
+     */
+    ImGui::SameLine();
+    const float room = ImGui::GetContentRegionAvail().x;
+
+    /*
+     * The labels sit at the head beside the picture rather than in a card of
+     * their own, because a label is the operator's own word for the instance
+     * and reads as one of its tags rather than as a field of its record. They
+     * are the same pills the list draws, so one label is one colour wherever it
+     * appears. The row is given the room left after the controls, so a long set
+     * of them is counted rather than drawn under the buttons.
+     */
+    const auto attached = labels_of(input, labelling_owner::instance, row.id);
+    const float pill_room = room - controls - ImGui::GetStyle().ItemSpacing.x;
+    if (!attached.empty() && pill_room > 0.0f) {
+        /*
+         * A zero width is the pill row's own "draw everything", so a pane with
+         * no room for a pill at all draws none rather than drawing them over
+         * the controls. The count pill makes the same choice for a row too
+         * narrow for its first label.
+         */
+        static_cast<void>(
+            widget::label_pill_row(widget::pills_for(attached), pill_room));
+        ImGui::SameLine();
+    }
+
+    if (editing) {
+        const float controls_room = ImGui::GetContentRegionAvail().x;
+        ImGui::SetCursorPosX(
+            ImGui::GetCursorPosX() + std::max(controls_room - controls, 0.0f));
+        draw_edit_controls(input, window);
+    }
+}
+
+/**
+ * @brief The pane while it is the form: every field editable, in cards.
  *
  * Every field is drawn whether or not the row carries it, because an empty
- * field is what an operator fills and a hidden one could never be. That is the
- * one place edit mode differs from the read-only pane, which leaves a blank
- * field out rather than drawing a blank line.
+ * field is what an operator fills and a hidden one could never be. The topics
+ * and the order are the read-only pane's, so a field does not move when the
+ * pane enters edit mode.
  */
-void draw_edit_fields(const render_input& input, window_ui_state& window,
-    const instance& row) {
+void draw_edit_topics(const render_input& input, window_ui_state& window,
+    const instance& row, float pane_width, float width, float height,
+    int columns) {
     instance_edit_state& edit = window.instance_edit;
     const auto address = widget::split_host_port(row.nats_url);
+    int column = 0;
 
-    edit_row(icon::instance, "Name", buffer_text(edit.name) != row.name, [&] {
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputText("##instance-edit-name", edit.name.data(),
-            edit.name.size());
-    });
+    /*
+     * Where the next card goes and how wide it is. A full width card starts its
+     * own line, so a row part drawn ends here and the card after it opens a new
+     * row. The cursor is already on the next line after the card before, which
+     * is why beginning one is a matter of not asking for SameLine.
+     */
+    const auto next_card_width = [&](bool full_width) {
+        if (full_width) {
+            column = 0;
+            return pane_width;
+        }
+        widget::card_slot(column, columns);
+        return width;
+    };
 
-    edit_row(icon::link, "Host",
+    ImGui::SeparatorText("Identity");
+    column = 0;
+
+    widget::card_slot(column, columns);
+    edit_card("edit-name", icon::instance, "Name",
+        buffer_text(edit.name) != row.name, width, height, [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-name", edit.name.data(),
+                edit.name.size());
+        });
+
+    widget::card_slot(column, columns);
+    edit_card("edit-labels", nullptr, "Labels",
+        buffer_text(edit.labels)
+            != joined_labels(input, labelling_owner::instance, row.id),
+        width, height, [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputTextWithHint("##instance-edit-labels",
+                "labels, comma separated", edit.labels.data(),
+                edit.labels.size());
+            ImGui::SetItemTooltip("%s",
+                "Labels attached to this instance. A name that does not exist "
+                "yet is created.");
+        });
+
+    ImGui::SeparatorText("Connection");
+    column = 0;
+
+    widget::card_slot(column, columns);
+    edit_card("edit-host", icon::link, "Host",
         buffer_text(edit.host) != address.host
             || buffer_text(edit.port) != address.port,
-        [&] {
+        width, height, [&] {
             const float half = (ImGui::GetContentRegionAvail().x
                 - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
             ImGui::SetNextItemWidth(half);
@@ -1617,15 +1700,17 @@ void draw_edit_fields(const render_input& input, window_ui_state& window,
                 edit.port.size());
         });
 
-    edit_row(nullptr, "Subject prefix",
-        buffer_text(edit.subject) != row.subject_prefix, [&] {
+    widget::card_slot(column, columns);
+    edit_card("edit-subject", nullptr, "Subject prefix",
+        buffer_text(edit.subject) != row.subject_prefix, width, height, [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
             ImGui::InputText("##instance-edit-subject", edit.subject.data(),
                 edit.subject.size());
         });
 
-    edit_row(nullptr, "Wire format",
-        buffer_text(edit.wire_format) != row.wire_format, [&] {
+    widget::card_slot(column, columns);
+    edit_card("edit-wire", nullptr, "Wire format",
+        buffer_text(edit.wire_format) != row.wire_format, width, height, [&] {
             const std::string_view picked = buffer_text(edit.wire_format);
             ImGui::SetNextItemWidth(-FLT_MIN);
             if (ImGui::BeginCombo("##instance-edit-wire-format",
@@ -1639,209 +1724,196 @@ void draw_edit_fields(const render_input& input, window_ui_state& window,
             ImGui::SetItemTooltip("%s", "Wire format");
         });
 
-    edit_row(nullptr, "CA certificate", buffer_text(edit.tls_ca) != row.tls_ca,
+    ImGui::SeparatorText("Certificates and keys");
+    column = 0;
+
+    edit_card("edit-ca", nullptr, "CA certificate",
+        buffer_text(edit.tls_ca) != row.tls_ca, next_card_width(true), height,
         [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
             ImGui::InputText("##instance-edit-tls-ca", edit.tls_ca.data(),
                 edit.tls_ca.size());
         });
 
-    edit_row(nullptr, "Client cert", buffer_text(edit.tls_cert) != row.tls_cert,
-        [&] {
+    edit_card("edit-cert", nullptr, "Client cert",
+        buffer_text(edit.tls_cert) != row.tls_cert, next_card_width(true),
+        height, [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
             ImGui::InputText("##instance-edit-tls-cert", edit.tls_cert.data(),
                 edit.tls_cert.size());
         });
 
-    edit_row(icon::unlock, "Client key",
-        buffer_text(edit.tls_key) != row.tls_key, [&] {
+    edit_card("edit-key", icon::unlock, "Client key",
+        buffer_text(edit.tls_key) != row.tls_key, next_card_width(true), height,
+        [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
             ImGui::InputText("##instance-edit-tls-key", edit.tls_key.data(),
                 edit.tls_key.size());
         });
-
-    edit_row(nullptr, "Labels",
-        buffer_text(edit.labels)
-            != joined_labels(input, labelling_owner::instance, row.id),
-        [&] {
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            ImGui::InputTextWithHint("##instance-edit-labels",
-                "labels, comma separated", edit.labels.data(),
-                edit.labels.size());
-            ImGui::SetItemTooltip("%s",
-                "Labels attached to this instance. A name that does not exist "
-                "yet is created.");
-        });
 }
 
 /**
- * @brief One row of the details table whose value carries the probe's colour.
+ * @brief The pane read only: the row's fields as cards, grouped by topic.
  *
- * The colour is the same one the tree's glyph is painted with, so the answer
- * the pane gives agrees with the row that led to it. It is pushed on the value
- * cell alone rather than the whole row, because the field's name is a fact
- * about the layout and not about the instance.
+ * The topics are the ones the data actually has, and a topic appears only when
+ * it has something to show. A topic with one card is not a topic, so a lone
+ * card follows the cards above it under their heading rather than carrying a
+ * heading of its own.
+ *
+ * The probe's answers are the last topic, because they are a measurement of the
+ * deployment rather than a property of the record, and a reader looking for why
+ * a row is red starts at the bottom. The probe's own sentence leads that topic,
+ * because the state word is already on the pane's head and on the status bar
+ * and the foot of the wall is what gives when it does not fit.
  */
-void probe_state_row(const char* glyph, const char* name, const char* word,
-    std::uint32_t colour) {
-    ImGui::TableNextRow();
+void draw_read_only_topics(const render_input& input, const instance& row,
+    const instance_status& status, float pane_width, float width, float height,
+    int columns) {
+    const auto address = widget::split_host_port(row.nats_url);
 
-    ImGui::TableNextColumn();
-    if (show_detail_glyph) {
-        ImGui::TextDisabled("%s", glyph);
-        ImGui::SetItemTooltip("%s", name);
+    const auto text_card = [](const char* id, const char* glyph,
+                               const char* title, std::string value,
+                               const char* caption, std::uint32_t colour = 0,
+                               bool full_width = false) {
+        return widget::card_spec{id, glyph, title, std::move(value), caption,
+            colour, full_width};
+    };
+    const auto add = [&](widget::topic_spec& topic, const char* id,
+                         const char* glyph,
+                         const char* title, std::string value,
+                         const char* caption, std::uint32_t colour = 0,
+                         bool full_width = false) {
+        if (value.empty())
+            return;
+        topic.cards.push_back(text_card(
+            id, glyph, title, std::move(value), caption, colour, full_width));
+    };
+
+    std::vector<widget::topic_spec> topics;
+
+    /*
+     * The labels are not a card here. They are drawn at the pane's head beside
+     * the picture, where they read as the instance's tags rather than as one
+     * more field of its record, and the same pills the list draws are used
+     * there so a label is one colour on every surface.
+     */
+    widget::topic_spec identity;
+    identity.title = "Identity";
+    identity.cards.push_back(
+        text_card("name", icon::instance, "Name", row.name,
+            "the instance's own name"));
+    const std::string directory = input.instance_icons != nullptr
+        ? input.instance_icons->directory : std::string{};
+    add(identity, "picture-file", nullptr, "Picture file",
+        widget::instance_picture_path(directory, row.icon_key),
+        "the illustration this instance names", 0, true);
+    topics.push_back(std::move(identity));
+
+    widget::topic_spec connection;
+    connection.title = "Connection";
+    add(connection, "host", icon::link, "Host",
+        widget::join_host_port(widget::host_port{
+            std::string{}, address.host, address.port}),
+        "where the broker answers");
+    add(connection, "subject", nullptr, "Subject prefix", row.subject_prefix,
+        "what every service of it answers to");
+    add(connection, "wire", nullptr, "Wire format", row.wire_format,
+        "how the client writes its messages");
+    topics.push_back(std::move(connection));
+
+    widget::topic_spec certificates;
+    certificates.title = "Certificates and keys";
+    add(certificates, "ca", nullptr, "CA certificate", row.tls_ca,
+        "the authority that signed the others", 0, true);
+    add(certificates, "cert", nullptr, "Client cert", row.tls_cert,
+        "what this client presents", 0, true);
+    add(certificates, "key", icon::unlock, "Client key", row.tls_key,
+        "the private half of that certificate", 0, true);
+    topics.push_back(std::move(certificates));
+
+    widget::topic_spec diagnostics;
+    diagnostics.title = "Diagnostics";
+    /*
+     * The probe's own sentence comes first in this topic, ahead of the state it
+     * explains. The state word already sits at the pane's head and on the
+     * status bar, so the row a reader has to work down the wall for is the
+     * cause rather than the answer they have been given twice. The path cards
+     * take a line each, so this topic is the tallest of the wall and a reader
+     * reaches its foot by scrolling the pane.
+     */
+    if (!status.detail.empty()) {
+        const bool failing = status.result.reach == reachability::unreachable
+            || status.result.ready != readiness::ready;
+        add(diagnostics, "detail", nullptr,
+            status.result.bootstrap ? "IAM message" : "Detail",
+            status.detail, "what the probe reported",
+            failing ? theme::probe_state_colour(status.result, true) : 0, true);
     }
-
-    ImGui::TableNextColumn();
-    ImGui::TextUnformatted(name);
-    ImGui::SetItemTooltip("%s", name);
-
-    ImGui::TableNextColumn();
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
-    const float wrap_width = std::max(
-        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
-        1.0f);
-    widget::text_value(name, word, wrap_width);
-    ImGui::PopStyleColor();
-}
-
-/**
- * @brief The widths of the details pane's own columns.
- *
- * The value column is the third one and takes whatever the first two leave, so
- * where the values start is decided by the glyph and the field columns. The
- * diagnostics sit in a table of their own below a separator, and a table that
- * measured its own columns would fit them to the shorter diagnostic names and
- * start its values somewhere else from the fields above. One width given to
- * both tables is what keeps the pane one column of values rather than two, and
- * it is measured from the longest name either table writes so no field is cut.
- *
- * The glyph and field columns refuse resizing because their width is the
- * alignment and not a preference. A drag that moved one table's column would
- * break the value column in two.
- *
- * There is no control column any more. The value is selectable and copyable in
- * place, so nothing has to be reserved beside it, and the copy control that
- * used to take the fourth column is what the operator asked to be rid of.
- */
-void setup_detail_columns() {
-    constexpr std::string_view widest_field = "CA certificate";
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float padding = style.CellPadding.x * 2.0f;
-    const ImGuiTableColumnFlags fixed =
-        ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize;
-
-    const float glyph_width = ImGui::CalcTextSize(icon::instance).x + padding;
-    const float natural_field = ImGui::CalcTextSize(widest_field.data(),
-        widest_field.data() + widest_field.size()).x + padding;
-
-    /*
-     * The field column is sized from the pane rather than from the longest name
-     * the pane could ever write. It was pinned to "TLS client certificate"
-     * whatever the pane was, so on a narrow pane the glyph and that name alone
-     * wanted more width than the table had and the value collapsed to a letter.
-     * The three TLS names were shortened to the words the form uses as well,
-     * because a name longer than the pane's own floor can show beside a value
-     * is a name that cannot do its job.
-     *
-     * Two floors decide the split. The value keeps enough width to be read as a
-     * value and the field keeps enough to be read as a name. What is left goes
-     * to the field, up to the width its longest name needs.
-     */
-    constexpr float value_floor = 44.0f;
-    constexpr float field_floor = 100.0f;
-    const float room = std::max(ImGui::GetContentRegionAvail().x, 0.0f);
-
-    /*
-     * The glyph is decoration and the name is content, so the glyph is what
-     * goes when the pane cannot hold both it and the name's floor. A dropped
-     * column still needs a width, because ImGui reads a zero as "size to
-     * contents" rather than as nothing, so it is given a sliver and the rows
-     * are told not to paint in it.
-     */
-    show_detail_glyph = room - value_floor >= glyph_width + field_floor;
-    const float glyph = show_detail_glyph ? glyph_width : 1.0f;
-    const float field_room = std::max(room - glyph, 0.0f);
-    const float field = std::min(natural_field,
-        std::max(field_room - value_floor, std::min(field_floor, field_room)));
-
-    ImGui::TableSetupColumn("##glyph", fixed, glyph);
-    ImGui::TableSetupColumn("##field", fixed, field);
-    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
-}
-
-/**
- * @brief The probe's own sentence, wrapped and set apart from the fields.
- *
- * Every other row here is a word or a number, so this is the only one that can
- * be a sentence and the only one that has to wrap. A cause cut off at the
- * pane's edge is a cause nobody can act on, and the value column is where it
- * has to fit because that is where the fields above keep their values.
- *
- * A failing instance's sentence is marked by the glyph in the row's first
- * column alone, drawn in the same colour the probe state row above paints its
- * state word with. A wash across the whole value cell was tried and taken out,
- * because a sentence an operator is trying to read is made harder to read by
- * colour behind it, which is the opposite of what the mark was for. The two
- * marks are one colour on purpose, so the pane says a fault once rather than
- * three times at three sizes.
- *
- * A healthy instance's sentence carries the neutral information glyph and no
- * colour, because there is nothing wrong for the pane to point at.
- *
- * The sentence is also the one value here that cannot be shortened to fit, so
- * it is the reason the value has to wrap and the reason it has to be selectable
- * in full. A failure an operator cannot get out of the window is a failure they
- * cannot report.
- */
-void probe_detail_row(const char* name, std::string_view detail, bool failing,
-    std::uint32_t colour) {
-    if (detail.empty())
-        return;
-
-    ImGui::TableNextRow();
-
-    ImGui::TableNextColumn();
-    if (failing) {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(colour));
-        ImGui::TextUnformatted(icon::error);
-        ImGui::PopStyleColor();
-    } else {
-        ImGui::TextDisabled("%s", icon::information);
+    diagnostics.cards.push_back(
+        text_card("probe-state", icon::probe, "Probe state",
+            theme::probe_state_word(status.result, status.observed),
+            "the last probe's answer",
+            theme::probe_state_colour(status.result, status.observed)));
+    diagnostics.cards.push_back(
+        text_card("reachability", icon::connect, "Reachability",
+            std::string{hedgr::model::domain::to_string(status.result.reach)},
+            "whether the broker answered"));
+    diagnostics.cards.push_back(
+        text_card("readiness", icon::ready, "Readiness",
+            std::string{hedgr::model::domain::to_string(status.result.ready)},
+            "whether IAM is behind it"));
+    if (status.result.bootstrap) {
+        const auto& bootstrap = *status.result.bootstrap;
+        add(diagnostics, "bootstrap", nullptr, "Bootstrap mode",
+            bootstrap.in_bootstrap_mode ? "yes" : "no",
+            "whether it is still setting itself up");
+        add(diagnostics, "tenant", nullptr, "Has tenant",
+            bootstrap.has_tenant ? "yes" : "no",
+            "whether it has a tenant yet");
+        if (bootstrap.version) {
+            add(diagnostics, "version", nullptr, "Version",
+                *bootstrap.version, "the version it reported");
+        }
     }
-    ImGui::SetItemTooltip("%s",
-        failing ? "What the probe could not do" : "What the probe reported");
+    if (status.result.latency_us > 0) {
+        add(diagnostics, "latency", icon::clock, "Latency",
+            std::format("{:.1f} ms",
+                static_cast<double>(status.result.latency_us) / 1000.0),
+            "the last round trip");
+    }
+    if (status.result.observed_at_ns > 0
+        && input.now_ns >= status.result.observed_at_ns) {
+        add(diagnostics, "observed", icon::clock, "Observed",
+            std::format("{:.0f} s ago",
+                static_cast<double>(
+                    input.now_ns - status.result.observed_at_ns) / 1.0e9),
+            "when the last probe ran");
+    }
+    topics.push_back(std::move(diagnostics));
 
-    ImGui::TableNextColumn();
-    ImGui::TextUnformatted(name);
-
-    ImGui::TableNextColumn();
     /*
-     * Wrapped at the cell's own edge rather than the window's, so the sentence
-     * uses the value column's whole width and does not run under the table.
+     * The wall is drawn from the shared card widget, so the Instances window
+     * and the Accounts window lay their cards out by one set of rules: a topic
+     * with two cards or more takes its heading, a topic with one folds into the
+     * row above it, and a full width card takes a line of its own.
      */
-    const float wrap_width = std::max(
-        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
-        1.0f);
-    widget::text_value(name, detail, wrap_width);
+    widget::draw_topics(topics, pane_width, width, height, columns);
 }
 
 /**
  * @brief Draws one instance's details, in the browser's right hand pane.
  *
  * Read only until the toolbar's edit control puts the pane into edit mode, and
- * then the same rows become editable in place. The pane is the form while it is
- * in that mode, which is why the drafts and the two controls live here rather
- * than in a dialog: an operator changes the field they are looking at instead
- * of a copy of it.
+ * then the same cards become editable in place. The pane is the form while it
+ * is in that mode, which is why the drafts and the two controls live here
+ * rather than in a dialog: an operator changes the field they are looking at
+ * instead of a copy of it.
  *
- * A field the model does not have is left out rather than drawn blank, which is
- * why the three TLS paths and the labels appear only for an instance that
- * carries them. Edit mode draws every field whether or not the row carries it,
- * because an empty field is what an operator fills. The probe is shown only
- * once one has answered, because before that there is no measurement to report
- * and the row would be an invented one.
+ * The wall is sized from the pane, so the number of columns follows the window
+ * the operator chose. The pane scrolls when the wall is taller than it, so a
+ * window too short for every topic raises the theme's bar rather than clipping
+ * what falls past its foot, and the topics stay ordered as they are because a
+ * reader working down the wall still meets the record before its measurement.
  */
 void instance_details(const tree_leaf& leaf, const render_input& input,
     window_ui_state& window) {
@@ -1866,247 +1938,19 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
         apply_capture_field(window);
     }
 
-    /*
-     * The environment's own picture, when the instance names one, on a line of
-     * its own above the fields. It used to share a table row with the
-     * Environment field, drawn into the glyph column, and that column is a
-     * glyph wide: a table cell clips its content to the column's own rectangle,
-     * so the square asked for here was cut to a vertical slice. The pane is
-     * narrow, so the picture is drawn outside the columns where it gets the
-     * pane's whole width, and it is sized to fit even the pane's own floor of
-     * two hundred pixels.
-     *
-     * Ninety six pixels is picked from the asset, which is a two hundred and
-     * fifty six pixel square: at a bit over a third it stays legible, it is
-     * about six rows of the pane's text tall so it does not swallow the fields
-     * under it, and it leaves the value column the width the values need. The
-     * illustration is optional; an instance with no key draws no picture and no
-     * empty slot.
-     *
-     * A key whose asset is not installed says so here rather than drawing
-     * nothing. Nothing drawn is what an instance with no picture looks like, and
-     * a choice the install cannot satisfy is a different fact that the operator
-     * has to be able to act on.
-     */
-    const std::string directory = input.instance_icons != nullptr
-        ? input.instance_icons->directory : std::string{};
-    const std::string picture_path =
-        widget::instance_picture_path(directory, row.icon_key);
-    const std::uint64_t picture = instance_icon_texture(input, row.id);
-    const bool have_picture = picture != 0;
-    if (have_picture) {
-        const float side = std::min(96.0f, ImGui::GetContentRegionAvail().x);
-        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
-        ImGui::SetItemTooltip("%s", picture_path.c_str());
-    } else if (!row.icon_key.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
-        ImGui::TextWrapped("%s No picture is installed for the key \"%s\".",
-            icon::warning, row.icon_key.c_str());
-        ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%s", picture_path.c_str());
-    }
+    const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
+    const int columns = widget::card_columns(pane_width);
+    const float width = widget::card_width(pane_width, columns);
+    const float height = widget::card_height();
 
-    /*
-     * The two edit controls ride the picture's line when there is one. That is
-     * where edit mode's room comes from: the square is drawn at the pane's left
-     * and the rest of the line was empty, so on an instance with a picture the
-     * mode costs no row at all. Without one the pair takes a line of its own.
-     */
-    if (editing) {
-        if (have_picture)
-            ImGui::SameLine();
-        draw_edit_controls(input, window);
-    }
+    draw_pane_header(input, window, row, status, editing);
 
-    constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit
-        | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
-    if (!ImGui::BeginTable("##instance-details", 3, flags))
-        return;
-
-    setup_detail_columns();
-
-    /*
-     * Where the pictures live and which one this instance names. The folder is
-     * shown whether or not a picture is set, because a person who has a file to
-     * add needs to know where to put it, and the file row is the path of the
-     * one in use, which is the string they paste into a shell. Both are
-     * ordinary value rows, so both can be selected and copied.
-     */
-    detail_row(icon::folder, "Picture folder", directory);
-    detail_row(nullptr, "Picture file", picture_path);
-
-    /*
-     * The same fields in the same order either way. Edit mode draws every one
-     * of them, including the ones the row leaves blank, because a blank field
-     * is exactly what an operator has come to fill; the read-only pane drops a
-     * blank field rather than drawing a line with nothing on it.
-     */
-    if (editing) {
-        draw_edit_fields(input, window, row);
-    } else {
-        detail_row(icon::instance, "Name", row.name);
-
-        /*
-         * The host and the port are one fact to a reader even though the editor
-         * holds them apart, so the address is put back together here without
-         * its scheme. The scheme is which transport is used, and a reader
-         * asking where an instance is wants the host.
-         */
-        const auto address = widget::split_host_port(row.nats_url);
-        detail_row(icon::link, "Host",
-            widget::join_host_port(widget::host_port{std::string{}, address.host,
-                address.port}));
-
-        detail_row(nullptr, "Subject prefix", row.subject_prefix);
-        detail_row(nullptr, "Wire format", row.wire_format);
-        /*
-         * The TLS rows say which piece of material each one is, in the words
-         * the editor uses, rather than prefixing all three with a protocol the
-         * section they sit in already implies. The prefix was also what made a
-         * name longer than the pane's own floor could show beside a value, and
-         * a name that cannot be shown is not doing its job.
-         */
-        detail_row(nullptr, "CA certificate", row.tls_ca);
-        detail_row(nullptr, "Client cert", row.tls_cert);
-        detail_row(icon::unlock, "Client key", row.tls_key);
-
-        const auto attached =
-            labels_of(input, labelling_owner::instance, row.id);
-        if (!attached.empty()) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            /* No icon, because the set has no label concept. */
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted("Labels");
-            ImGui::TableNextColumn();
-            static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
-                ImGui::GetContentRegionAvail().x));
-        }
-    }
-
-    /*
-     * The shortcut to this instance, as a control that reports whether it is
-     * already on the bar. The glyph carries the state and the tooltip names
-     * the action, which is the rule every other control here follows: a filled
-     * in control is not a label, it is the answer to "is this there", and the
-     * click is the change.
-     */
-    {
-        const bool on_bar = shortcuts_bar_holds(input.shortcuts,
-            window_kind::accounts, row.id);
-
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        /* No glyph, because the set has no shortcuts concept. */
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted("Shortcuts bar");
-        ImGui::TableNextColumn();
-
-        if (widget::icon_button("shortcut-toggle",
-                on_bar ? icon::remove : icon::add,
-                on_bar ? "Take this instance off the shortcuts bar"
-                       : "Put this instance on the shortcuts bar")) {
-            input.commands.push(shortcut_toggle_command(input,
-                window_kind::accounts, row.id));
-        }
-    }
-
-    ImGui::EndTable();
-
-    /*
-     * The probe's answers, set apart from the row's configuration by a rule and
-     * a name. They used to be rows of the same table, which read as more
-     * configuration; they are a measurement of the deployment rather than a
-     * property of the record, and a reader looking for why a row is red starts
-     * at the bottom of the pane.
-     *
-     * The pane has a fixed height and never scrolls, so a pane too short for
-     * both tables clips what falls past its foot rather than growing a bar.
-     * The order is the priority. The fields are drawn first, and the detail
-     * sentence, which is last and the only row whose height is not one line,
-     * is what a short pane loses.
-     */
-    ImGui::Spacing();
-    ImGui::SeparatorText("Probe");
-
-    if (!ImGui::BeginTable("##instance-probe", 3, flags))
-        return;
-    setup_detail_columns();
-
-    if (!status.observed) {
-        detail_row(icon::probe, "Last probe",
-            "no probe has answered for this instance yet");
-        ImGui::EndTable();
-        return;
-    }
-
-    /*
-     * The word first, in the colour the tree's glyph carries, and the two
-     * answers it is made of underneath it. The colour is deliberately coarser
-     * than the pair, so an operator asking the harder question gets the exact
-     * answer without having to open the form.
-     */
-    probe_state_row(icon::probe, "Probe state",
-        theme::probe_state_word(status.result, true),
-        theme::probe_state_colour(status.result, true));
-
-    detail_row(icon::connect, "Reachability",
-        hedgr::model::domain::to_string(status.result.reach));
-    detail_row(icon::ready, "Readiness",
-        hedgr::model::domain::to_string(status.result.ready));
-
-    /*
-     * The deployment's own bootstrap answer, one field per row, and only for
-     * the fields it stated. The old pane flattened this answer into a sentence
-     * and showed it whole, which made a reader pick the deployment's version
-     * out of a line of prose and left nothing to copy but the line. A version
-     * the deployment did not name draws no row, which is the rule the TLS paths
-     * above already follow. No glyph, because the set has no bootstrap concept
-     * and a checkmark would say the field had passed rather than what it
-     * answers.
-     */
-    if (status.result.bootstrap) {
-        const auto& bootstrap = *status.result.bootstrap;
-        detail_row(nullptr, "Bootstrap mode",
-            bootstrap.in_bootstrap_mode ? "yes" : "no");
-        detail_row(nullptr, "Has tenant", bootstrap.has_tenant ? "yes" : "no");
-        if (bootstrap.version)
-            detail_row(nullptr, "Version", *bootstrap.version);
-    }
-
-    if (status.result.latency_us > 0)
-        detail_row(icon::clock, "Latency",
-            std::format("{:.1f} ms",
-                static_cast<double>(status.result.latency_us) / 1000.0));
-
-    /*
-     * An age rather than a timestamp, because the probe carries the monotonic
-     * clock and that has no wall time in it. "4 s ago" is the question a reader
-     * is asking when they look at when the probe last ran.
-     */
-    if (status.result.observed_at_ns > 0
-        && input.now_ns >= status.result.observed_at_ns)
-        detail_row(icon::clock, "Observed",
-            std::format("{:.0f} s ago",
-                static_cast<double>(
-                    input.now_ns - status.result.observed_at_ns) / 1.0e9));
-
-    /*
-     * The free text last, and set apart from the words above it. A probe that
-     * never reached the bootstrap read has no fields at all and this is its
-     * whole answer, which is why it keeps the name Detail; a deployment that
-     * did answer puts its own remark here, and the name says whose it is. The
-     * presence of the structured answer is what tells the two apart, so the
-     * pane never has to guess which kind of sentence it is holding.
-     */
-    const bool failing = status.result.reach == reachability::unreachable
-        || status.result.ready != readiness::ready;
-    probe_detail_row(status.result.bootstrap ? "IAM message" : "Detail",
-        status.detail, failing,
-        theme::probe_state_colour(status.result, true));
-
-    ImGui::EndTable();
+    if (editing)
+        draw_edit_topics(
+            input, window, row, pane_width, width, height, columns);
+    else
+        draw_read_only_topics(
+            input, row, status, pane_width, width, height, columns);
 }
 
 }
@@ -2129,174 +1973,6 @@ void change_instance_field_for_capture(std::string_view field,
     std::string_view value) {
     pending_capture_field = std::string{field};
     pending_capture_value = std::string{value};
-}
-
-namespace {
-
-/**
- * @brief The status line's own metrics.
- *
- * Two text rows and a little air, measured from the current font rather than
- * fixed, so a theme that installs a larger face does not clip the message.
- *
- * Two and not one because the messages are sentences and the window can be
- * made narrow: a single row would either clip the end of the sentence or be
- * elided, and a fact that is worth announcing is worth announcing in full.
- * The second row costs nothing when the sentence fits on one.
- */
-constexpr int status_row_lines = 2;
-constexpr float status_row_extra = 8.0f;
-
-/**
- * @brief The rows an error gets, which is one more than a remark gets.
- *
- * The runtime's failures are whole sentences that name the record and the
- * reason -- "cannot remove folder instance-root: it is the root of the
- * instances tree" -- and the longest of them, the store's schema refusal,
- * names a path and two version numbers on top of that. Two rows elide it on a
- * narrow window, and an error that is elided is an error that will be read as
- * whatever fits. The extra row is reserved only while an error is on the bar,
- * so a window showing a remark is exactly the height it always was.
- */
-constexpr int status_error_row_lines = 3;
-
-}
-
-/**
- * @brief Draws the window's status line: the last thing that happened.
- *
- * The bar itself decides what is on it and whether its time is up; this only
- * gives it the frame's clock and the moment to age itself. Reading the clock
- * here rather than keeping one is what makes the fade frame-rate independent
- * without a timer anywhere in the interface.
- *
- * An error is drawn differently from a remark, and it is drawn differently in
- * two ways at once because the difference has to survive a glance at a line
- * that may be at the far side of the screen: a glyph in front of it and the
- * palette's red rather than the dim grey every other message uses. A remark
- * keeps the disabled text colour, because it is a thing that happened; red on
- * a fade would read as a second alarm going off.
- *
- * The red is the palette's own, named once in the theme rather than borrowed
- * from the lock's helper, which would tie a message about a refused save to a
- * fact about the lock.
- */
-void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
-    status.advance(now_ns);
-
-    const bool error =
-        status.severity() == widget::status_severity::error;
-
-    /*
-     * The fade is a style alpha rather than a colour of its own, so the line
-     * keeps the interface's disabled text colour on the way out. A message
-     * that changed colour as it went would read as a second message. An error
-     * never fades, so it keeps its red for as long as it is on the bar.
-     */
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
-
-    /*
-     * An error is white behind its red glyph rather than the disabled grey a
-     * remark gets. Disabled grey is what an interface uses for something it is
-     * not offering, and a failure the operator has to act on is the opposite
-     * of that.
-     */
-    float glyph_width = 0.0f;
-    if (error) {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
-        ImGui::TextUnformatted(hedgr::ui::icon::error);
-        ImGui::PopStyleColor();
-        glyph_width =
-            ImGui::GetItemRectSize().x + ImGui::GetStyle().ItemSpacing.x;
-        ImGui::SameLine(glyph_width);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    }
-
-    /*
-     * The message is a selectable value like the pane's fields, so a failure
-     * can be dragged across and copied out of the bar as well as read in it.
-     * The box is given its whole wrapped height and the foot keeps its fixed
-     * number of rows, so a sentence longer than the foot is clipped by the foot
-     * and never given a scrollbar. That is the visible line count the drawn
-     * text already had, with the selection added.
-     */
-    const float wrap_width = std::max(
-        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
-        1.0f);
-    widget::text_value("status", status.message(), wrap_width);
-
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
-}
-
-/**
- * @brief How tall the window's foot is, whether or not anything is on it.
- *
- * Counted from the font rather than fixed, so a theme that installs a larger
- * face gets a foot that still fits its own text.
- */
-[[nodiscard]] float status_foot_height(const widget::status_bar& status) {
-    const int rows = status.severity() == widget::status_severity::error
-        ? status_error_row_lines
-        : status_row_lines;
-    return ImGui::GetTextLineHeight() * static_cast<float>(rows)
-        + status_row_extra;
-}
-
-/**
- * @brief Measures the foot of the window and draws the line into it.
- *
- * Both halves are needed and the split is the point. Reserving the space first
- * is what stops the table above from changing height as messages come and go:
- * a table that grew by two rows whenever something was announced would move
- * the row under the pointer at the worst possible moment. Drawing into a child
- * of its own is what pins the line to the window's foot instead of leaving it
- * wherever the browser happened to stop, which is what put it in the middle of
- * the window when it was drawn straight after the table.
- *
- * The reservation is always made, so nothing below knows whether there is a
- * message; the line is drawn only when there is one.
- */
-
-void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
-    const float height = status_foot_height(status);
-
-    /*
-     * The reservation: an empty child of exactly the foot's height, which
-     * advances the cursor past the foot and leaves the line below it with the
-     * window's whole width.
-     */
-    ImGui::BeginChild("##hedgr-status-space", ImVec2(0.0f, height),
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    ImGui::EndChild();
-
-    const float bottom = ImGui::GetWindowHeight() - height
-        - ImGui::GetStyle().WindowPadding.y;
-    ImGui::SetCursorPosY(bottom);
-
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-        ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
-    ImGui::Separator();
-    ImGui::PopStyleVar();
-
-    ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-
-    /*
-     * The status line, and nothing ahead of it. The lock control used to sit
-     * here, at the left of the foot, and it moved into the window's one
-     * toolbar: the foot is where the runtime's messages are read, and a
-     * control that changes the state of the whole window does not belong in
-     * the middle of a sentence about a probe.
-     */
-    if (!status.empty())
-        draw_status_line(status, now_ns);
-
-    ImGui::EndChild();
 }
 
 void render_instances_window(hedgr::model::state::window_handle handle,
@@ -2444,13 +2120,30 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         draw_discard_warning(state);
 
     /*
+     * The selected instance's state, read from the probe table by the
+     * selection the browser holds. An instance the store does not hold, or
+     * none at all, has no state to report and the bar is the message alone.
+     */
+    widget::foot_state foot;
+    if (!state.browser.selected_leaf.empty()) {
+        const auto handle = input.instances.find(state.browser.selected_leaf);
+        if (handle) {
+            const auto probe = status_of(input, state.browser.selected_leaf);
+            foot.name = input.instances.get(*handle)->name;
+            foot.word = theme::probe_state_word(probe.result, probe.observed);
+            foot.colour =
+                theme::probe_state_colour(probe.result, probe.observed);
+        }
+    }
+
+    /*
      * The status bar, last, so that its reservation is made after everything
      * else has taken the height it needs and its own foot is measured back
      * from the window's edge. It carries the runtime's messages and nothing
      * else: the lock control used to live here and moved into the window's one
      * toolbar, so the bar is read and not operated.
      */
-    draw_status_foot(status, input.now_ns);
+    widget::draw_status_foot(status, input.now_ns, foot);
 
     ImGui::PopID();
 }
