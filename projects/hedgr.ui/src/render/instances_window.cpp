@@ -1072,6 +1072,16 @@ void instance_row_labels(const tree_leaf& leaf, const render_input& input,
 }
 
 /**
+ * @brief Whether the glyph column is wide enough to be worth painting in.
+ *
+ * The two details tables each set their columns immediately before their rows,
+ * so the decision is made where the pane's own width is known and read by the
+ * row writers that follow. A pane too narrow for the glyph and a field name
+ * together keeps the name, because the name is what the value beside it means.
+ */
+bool show_detail_glyph = true;
+
+/**
  * @brief One read-only field of the details pane, named and shown.
  *
  * The icon is drawn only where the set carries one that means the field, and
@@ -1096,13 +1106,19 @@ void detail_row(const char* glyph, const char* name, std::string_view value) {
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    if (glyph != nullptr) {
+    if (glyph != nullptr && show_detail_glyph) {
         ImGui::TextDisabled("%s", glyph);
         ImGui::SetItemTooltip("%s", name);
     }
 
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(name);
+    /*
+     * A narrow pane elides the longest names to keep the value and its copy
+     * control whole, so the name is readable in full on hover, which is the
+     * same bargain the value already makes below.
+     */
+    ImGui::SetItemTooltip("%s", name);
 
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(value.data(), value.data() + value.size());
@@ -1131,11 +1147,14 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    ImGui::TextDisabled("%s", glyph);
-    ImGui::SetItemTooltip("%s", name);
+    if (show_detail_glyph) {
+        ImGui::TextDisabled("%s", glyph);
+        ImGui::SetItemTooltip("%s", name);
+    }
 
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(name);
+    ImGui::SetItemTooltip("%s", name);
 
     ImGui::TableNextColumn();
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
@@ -1168,20 +1187,57 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
  * every row.
  */
 void setup_detail_columns() {
-    constexpr std::string_view widest_field = "TLS client certificate";
-    const float padding = ImGui::GetStyle().CellPadding.x * 2.0f;
+    constexpr std::string_view widest_field = "CA certificate";
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float padding = style.CellPadding.x * 2.0f;
     const ImGuiTableColumnFlags fixed =
         ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize;
 
-    ImGui::TableSetupColumn("##glyph", fixed,
-        ImGui::CalcTextSize(icon::instance).x + padding);
-    ImGui::TableSetupColumn("##field", fixed,
-        ImGui::CalcTextSize(widest_field.data(),
-            widest_field.data() + widest_field.size()).x + padding);
+    const float glyph_width = ImGui::CalcTextSize(icon::instance).x + padding;
+    const float copy_width = ImGui::CalcTextSize(icon::duplicate).x
+        + style.FramePadding.x * 2.0f + padding;
+    const float natural_field = ImGui::CalcTextSize(widest_field.data(),
+        widest_field.data() + widest_field.size()).x + padding;
+
+    /*
+     * The field column is sized from the pane rather than from the longest name
+     * the pane could ever write. It was pinned to "TLS client certificate"
+     * whatever the pane was, so on a narrow pane the glyph, that name and the
+     * copy control together wanted two hundred and forty one pixels from a
+     * table that had a hundred and ninety seven: the value column collapsed to
+     * a letter and the copy control was clipped off the right edge, which is
+     * the one part of the row that cannot be lost without losing the action.
+     * The three TLS names were shortened to the words the form uses as well,
+     * because a name longer than the pane's own floor can show beside a value
+     * and a copy control is a name that cannot do its job.
+     *
+     * Two floors decide the split. The value keeps enough width to be read as a
+     * value and the field keeps enough to be read as a name, and the copy
+     * control is reserved first. What is left goes to the field, up to the
+     * width its longest name needs.
+     */
+    constexpr float value_floor = 44.0f;
+    constexpr float field_floor = 100.0f;
+    const float room = std::max(ImGui::GetContentRegionAvail().x - copy_width,
+        0.0f);
+
+    /*
+     * The glyph is decoration and the name is content, so the glyph is what
+     * goes when the pane cannot hold both it and the name's floor. A dropped
+     * column still needs a width, because ImGui reads a zero as "size to
+     * contents" rather than as nothing, so it is given a sliver and the rows
+     * are told not to paint in it.
+     */
+    show_detail_glyph = room - value_floor >= glyph_width + field_floor;
+    const float glyph = show_detail_glyph ? glyph_width : 1.0f;
+    const float field_room = std::max(room - glyph, 0.0f);
+    const float field = std::min(natural_field,
+        std::max(field_room - value_floor, std::min(field_floor, field_room)));
+
+    ImGui::TableSetupColumn("##glyph", fixed, glyph);
+    ImGui::TableSetupColumn("##field", fixed, field);
     ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("##copy", fixed,
-        ImGui::CalcTextSize(icon::duplicate).x
-            + ImGui::GetStyle().FramePadding.x * 2.0f + padding);
+    ImGui::TableSetupColumn("##copy", fixed, copy_width);
 }
 
 /**
@@ -1321,9 +1377,16 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
 
     detail_row(nullptr, "Subject prefix", row.subject_prefix);
     detail_row(nullptr, "Wire format", row.wire_format);
-    detail_row(nullptr, "TLS CA certificate", row.tls_ca);
-    detail_row(nullptr, "TLS client certificate", row.tls_cert);
-    detail_row(icon::unlock, "TLS client key", row.tls_key);
+    /*
+     * The TLS rows say which piece of material each one is, in the words the
+     * form uses, rather than prefixing all three with a protocol the section
+     * they sit in already implies. The prefix was also what made a name longer
+     * than the pane's own floor could ever show beside a value and a copy
+     * control, and a name that cannot be shown is not doing its job.
+     */
+    detail_row(nullptr, "CA certificate", row.tls_ca);
+    detail_row(nullptr, "Client cert", row.tls_cert);
+    detail_row(icon::unlock, "Client key", row.tls_key);
 
     const auto attached = labels_of(input, labelling_owner::instance, row.id);
     if (!attached.empty()) {

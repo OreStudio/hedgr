@@ -220,6 +220,36 @@ HEDGR_UI_EXPORT void end_capture_frame();
 HEDGR_UI_EXPORT void hold_capture_pointer();
 
 /**
+ * @brief Records the clipboard as a copy control has just left it.
+ *
+ * Called where the copy happened, in the frame of the press, which is the one
+ * moment the value on the clipboard is the run's own. Under Wayland the
+ * compositor can take the selection back before the next frame begins, so a
+ * reader that waited would find the desk's value and prove nothing.
+ *
+ * The value recorded is what ImGui's getter returns rather than the value the
+ * control meant to copy, because the question a capture answers is whether the
+ * value reached the backend and not whether a function was called with it.
+ */
+HEDGR_UI_EXPORT void note_capture_copied_value();
+
+/**
+ * @brief Records the clipboard's later state, which is the compositor's verdict.
+ *
+ * A still frame cannot show a clipboard, so a copy control is proved by
+ * pressing one and reading the window system's clipboard back rather than by
+ * looking at a drawn glyph. The record is the captured frame's own path with
+ * @c .clipboard appended, one distinct value per line, and the first line is
+ * always the value the script copied. A later line is the desk's value arriving
+ * after a selection the compositor refused, which is the honest way for a
+ * cancelled selection to show itself.
+ *
+ * Nothing is recorded before a copy, so the desk's own clipboard never becomes
+ * the first line. Inert unless the run was given a script and a frame path.
+ */
+HEDGR_UI_EXPORT void record_capture_clipboard();
+
+/**
  * @brief Records one submitted item, so a later frame can be driven to it.
  *
  * Called where the item is submitted rather than where the script is read,

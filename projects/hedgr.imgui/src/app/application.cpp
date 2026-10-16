@@ -463,6 +463,15 @@ void application::render_loop(GLFWwindow* window) {
         ui::widget::begin_capture_frame(frame);
         ui::widget::drive_capture_steps(frame);
 
+        /*
+         * A copy control records the value it put on the clipboard in the frame
+         * that pressed it, because a capture has no still frame to show a
+         * clipboard in. This is the later half of that record: the clipboard's
+         * own state on each following frame, which is where a compositor that
+         * refused the selection shows itself. Inert without a script.
+         */
+        ui::widget::record_capture_clipboard();
+
         ImGui::NewFrame();
         ui::widget::hold_capture_pointer();
 

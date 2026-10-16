@@ -21,6 +21,7 @@
 #define HEDGR_UI_WIDGET_CONTROLS_HPP
 
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/widget/capture.hpp"
 #include "imgui.h"
 #include <string>
 #include <string_view>
@@ -103,9 +104,15 @@ namespace hedgr::ui::widget {
  * glyphs says nothing about which of them copies which field, and this pane has
  * more than one.
  *
+ * The control offers itself to a capture by the name of the value it copies, so
+ * a script can press it as @c "click\ Host\ |\ copy". A still frame shows that
+ * the glyph was drawn and nothing about what a press does; only a press that
+ * lands a value in the clipboard proves the row is wired to the value beside
+ * it.
+ *
  * @param id ImGui id, unique among the controls of one window.
  * @param value The value to copy, which is left alone when empty.
- * @param name What the value is called, for the tooltip.
+ * @param name What the value is called, for the tooltip and for a capture step.
  * @return Whether the control was pressed and the copy made.
  */
 [[nodiscard]] inline bool copy_button(const char* id, std::string_view value,
@@ -117,7 +124,29 @@ namespace hedgr::ui::widget {
     const bool pressed = ImGui::SmallButton(icon::duplicate);
     ImGui::PopID();
     ImGui::SetItemTooltip("Copy %s", name);
-    return pressed && copy_to_clipboard(value);
+
+    capture_element element;
+    const ImVec2 item_min = ImGui::GetItemRectMin();
+    const ImVec2 item_max = ImGui::GetItemRectMax();
+    element.min_x = item_min.x;
+    element.min_y = item_min.y;
+    element.max_x = item_max.x;
+    element.max_y = item_max.y;
+    element.label_min_x = item_min.x;
+    element.label = "copy";
+    observe_capture_element(name, element);
+
+    if (!(pressed && copy_to_clipboard(value)))
+        return false;
+
+    /*
+     * Read back now, in the frame the press happened, and not on the next one.
+     * Under Wayland the compositor can cancel a selection set from synthetic
+     * input, and the desk's own clipboard arrives on the frame after; a reader
+     * that waited would find the desk's value and prove nothing.
+     */
+    note_capture_copied_value();
+    return true;
 }
 
 }

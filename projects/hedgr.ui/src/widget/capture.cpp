@@ -106,6 +106,33 @@ struct capture_run final {
     std::uint32_t frame = 0;
 
     /**
+     * @brief Where the clipboard is recorded, or empty.
+     *
+     * Empty for a run with no frame path, which is every ordinary run. Read
+     * once at the start, because the environment does not change under a run.
+     */
+    std::string clipboard_path;
+
+    /**
+     * @brief The last clipboard value written, so only changes are appended.
+     *
+     * A copy control holds the clipboard for as long as the selection lasts, so
+     * the value is the same on every frame after the press. Comparing against
+     * this is what keeps the file a record of what changed rather than one
+     * rewritten sixty times a second.
+     */
+    std::string clipboard;
+
+    /**
+     * @brief Whether a copy control has put something on the clipboard yet.
+     *
+     * Nothing is recorded before the first press, because the desk's own
+     * clipboard is not this run's doing. Arming on the press is what makes the
+     * first line of the record the value the script copied.
+     */
+    bool clipboard_armed = false;
+
+    /**
      * @brief Where the script last put the pointer, and whether it has.
      *
      * Held rather than recomputed, because the frames between a move and the
@@ -386,6 +413,21 @@ struct frame_input final {
 }
 
 /**
+ * @brief Where the clipboard is recorded, which is beside the captured frame.
+ *
+ * The frame path is already the run's answer to "where does this capture go",
+ * so the clipboard follows it rather than asking for an environment variable of
+ * its own. It is read here, at the start, because the environment does not
+ * change while the process runs.
+ */
+[[nodiscard]] std::string clipboard_path_for_run() {
+    const char* path = std::getenv("HEDGR_CAPTURE");
+    if (path == nullptr || *path == '\0')
+        return {};
+    return std::string{path} + ".clipboard";
+}
+
+/**
  * @brief Reads a name from the front of @p text, or nothing.
  *
  * Quoted form is @c "a name with spaces" and unquoted form is one word. The
@@ -491,6 +533,9 @@ void start_capture_run() {
     state.elements.clear();
     state.last_frame.clear();
     state.events.clear();
+    state.clipboard_path = clipboard_path_for_run();
+    state.clipboard.clear();
+    state.clipboard_armed = false;
 }
 
 void begin_capture_frame(std::uint32_t frame) {
@@ -569,6 +614,64 @@ void hold_capture_pointer() {
     ImGuiIO& io = ImGui::GetIO();
     io.MousePos = ImVec2(state.pointer_x, state.pointer_y);
     io.MousePosPrev = io.MousePos;
+}
+
+/**
+ * @brief Appends the clipboard to the record when it has moved on.
+ *
+ * The getter reaches the same backend a copy control wrote through, so a value
+ * that appears here is one another program could paste. It is read rather than
+ * taken from the caller, because the question a capture answers is whether the
+ * value reached the backend and not whether a function was called with it.
+ *
+ * Every distinct value is appended on its own line, so a compositor that
+ * refuses a selection set from synthetic input shows up as the desk's value on
+ * a later line rather than silently replacing the run's own. The lines are what
+ * the value's own text is, which is single line for every field in the pane.
+ */
+namespace {
+
+void append_clipboard_value(capture_run& state) {
+    const char* text = ImGui::GetClipboardText();
+    if (text == nullptr)
+        return;
+    if (state.clipboard == text)
+        return;
+
+    state.clipboard = text;
+    std::ofstream out(state.clipboard_path, std::ios::app);
+    out << state.clipboard << '\n';
+}
+
+}
+
+void note_capture_copied_value() {
+    capture_run& state = run();
+    if (!state.active || state.clipboard_path.empty())
+        return;
+
+    /*
+     * Called where the copy happened, in the same frame as the press, so this
+     * line is the value the control put on the clipboard. Reading on a later
+     * frame instead would race the desk's own clipboard, which under Wayland
+     * can take the selection back before the next frame begins.
+     */
+    state.clipboard_armed = true;
+    append_clipboard_value(state);
+}
+
+void record_capture_clipboard() {
+    capture_run& state = run();
+    if (!state.active || state.clipboard_path.empty() || !state.clipboard_armed)
+        return;
+
+    /*
+     * Nothing is recorded before a copy, because the desk's own clipboard is
+     * not this run's doing and would otherwise be the record's first line. What
+     * is recorded after one is the clipboard's own later state, which is how a
+     * cancelled selection shows itself.
+     */
+    append_clipboard_value(state);
 }
 
 }
