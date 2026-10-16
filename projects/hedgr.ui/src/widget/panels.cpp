@@ -122,8 +122,8 @@ estate_series read_estate_series(
 
     /*
      * Then walk the window's minutes and take the bucket belonging to each. A
-     * minute with no bucket stays NaN in all four series, which the plot draws
-     * as a break rather than as a zero.
+     * minute with no bucket stays NaN in every series, which the plot draws as
+     * a break rather than as a zero.
      */
     std::size_t bucket_index = 0;
     for (std::size_t index = 0; index < series.count; ++index) {
@@ -135,18 +135,24 @@ estate_series read_estate_series(
         if (!sampled) {
             series.ready[index] = std::nan("");
             series.not_ready[index] = std::nan("");
-            series.service_missing[index] = std::nan("");
-            series.unreachable[index] = std::nan("");
-            series.unknown[index] = std::nan("");
+            series.fault[index] = std::nan("");
             continue;
         }
 
         const auto& counts = buckets[bucket_index];
+        /*
+         * The sample carries five counts and the chart reads three. An instance
+         * no probe has answered for is not ready and is not a fault, so it is
+         * folded into the amber line rather than dropped, which keeps the three
+         * lines summing to the estate. The two faults share the red line
+         * because the operator asked for one red; they stay apart in the tree
+         * and the details pane.
+         */
         series.ready[index] = static_cast<double>(counts.ready);
-        series.not_ready[index] = static_cast<double>(counts.not_ready);
-        series.service_missing[index] = static_cast<double>(counts.service_missing);
-        series.unreachable[index] = static_cast<double>(counts.unreachable);
-        series.unknown[index] = static_cast<double>(counts.unknown);
+        series.not_ready[index] =
+            static_cast<double>(counts.not_ready + counts.unknown);
+        series.fault[index] =
+            static_cast<double>(counts.service_missing + counts.unreachable);
         ++bucket_index;
     }
 

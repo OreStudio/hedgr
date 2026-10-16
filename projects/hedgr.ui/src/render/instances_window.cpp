@@ -63,6 +63,7 @@ using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
 using hedgr::model::domain::window_kind;
 using hedgr::ui::render::instance_icon_texture;
+using hedgr::ui::render::instance_edit_state;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shortcut_toggle_command;
 using hedgr::ui::render::shortcuts_bar_holds;
@@ -96,6 +97,25 @@ void set_buffer(auto& buffer, std::string_view text) {
 [[nodiscard]] std::string_view buffer_text(const auto& buffer) {
     return std::string_view{buffer.data()};
 }
+
+/*
+ * What a capture asked the window to show, held until the frame that can show
+ * it. File-scope rather than a parameter because the environment is read once,
+ * before any window is drawn, and the selection and the drafts it names belong
+ * to the frames that follow. Every one is empty in an ordinary run.
+ */
+
+/** @brief The folder a capture asked to see selected. */
+std::string pending_capture_folder;
+
+/** @brief The row a capture asked to see being edited. */
+std::string pending_capture_edit_instance;
+
+/** @brief The field a capture asked a changed value to be written into. */
+std::string pending_capture_field;
+
+/** @brief The value that capture's field takes, as typing it would leave it. */
+std::string pending_capture_value;
 
 /** @brief Every live folder of one tree, as the browser wants them. */
 [[nodiscard]] std::vector<tree_folder> tree_folders(const render_input& input,
@@ -303,8 +323,8 @@ void apply_labels(const render_input& input, labelling_owner owner,
     }
 }
 
-/** @brief Loads the form's buffers from an instance row, or leaves them blank. */
-void load_draft(window_ui_state& state, const instance* row) {
+/** @brief Blanks the create form's drafts and starts the wire format default. */
+void clear_create_draft(window_ui_state& state) {
     state.draft_name.fill('\0');
     state.draft_host.fill('\0');
     state.draft_port.fill('\0');
@@ -313,43 +333,31 @@ void load_draft(window_ui_state& state, const instance* row) {
     state.draft_tls_ca.fill('\0');
     state.draft_tls_cert.fill('\0');
     state.draft_tls_key.fill('\0');
+    /*
+     * The format the client speaks unless the operator says otherwise. It is a
+     * starting value and not a stored one, so it is written after the blanks
+     * rather than filled for.
+     */
     set_buffer(state.draft_wire_format, "msgpack");
-
-    if (row == nullptr)
-        return;
-
-    const auto address = widget::split_host_port(row->nats_url);
-    set_buffer(state.draft_name, row->name);
-    set_buffer(state.draft_host, address.host);
-    set_buffer(state.draft_port, address.port);
-    set_buffer(state.draft_subject, row->subject_prefix);
-    set_buffer(state.draft_wire_format, row->wire_format);
-    set_buffer(state.draft_tls_ca, row->tls_ca);
-    set_buffer(state.draft_tls_cert, row->tls_cert);
-    set_buffer(state.draft_tls_key, row->tls_key);
 }
 
-/** @brief Pushes a save for one instance and the labels it should carry. */
-void save_instance(const render_input& input, window_ui_state& state) {
-    const std::string_view editing{state.browser.form_leaf};
-    const auto existing = input.instances.find(editing);
-
-    const bool duplicating = state.browser.form_duplicating;
-
+/**
+ * @brief Pushes a save for a new instance and the labels it should carry.
+ *
+ * Only creation. An existing row is edited in place in the details pane, and
+ * that path writes the fields the pane holds rather than these, so the two
+ * cannot disagree about which draft a save is reading.
+ */
+void save_new_instance(const render_input& input, window_ui_state& state) {
     instance row;
-    if (existing)
-        row = *input.instances.get(*existing);
 
     /*
      * A new instance's key is derived from its name, which the store holds
      * unique. A serial would be unique too and would also mean the same
      * instance had a different key every time it was created in a test.
      */
-    std::string name{buffer_text(state.draft_name)};
-    if (duplicating)
-        name.append(" copy");
-
-    row.id = existing && !duplicating ? row.id : std::format("inst:{}", name);
+    const std::string name{buffer_text(state.draft_name)};
+    row.id = std::format("inst:{}", name);
     row.name = name;
     row.subject_prefix = buffer_text(state.draft_subject);
     row.wire_format = buffer_text(state.draft_wire_format);
@@ -359,15 +367,12 @@ void save_instance(const render_input& input, window_ui_state& state) {
     row.folder_id = state.browser.form_folder;
 
     /*
-     * The scheme is carried through untouched from the stored row: it is not
-     * this form's business which transports exist, and rewriting "tls://" as
-     * "nats://" would silently change which deployment the row points at.
+     * A new row has no stored scheme to carry through, so it starts on the
+     * transport the client is built for. An existing row's scheme never passes
+     * through here, which is what keeps an edit from changing it.
      */
-    const auto scheme = existing
-        ? widget::split_host_port(input.instances.get(*existing)->nats_url).scheme
-        : std::string{"nats://"};
-    row.nats_url = widget::join_host_port(widget::host_port{scheme,
-        std::string{buffer_text(state.draft_host)},
+    row.nats_url = widget::join_host_port(widget::host_port{
+        std::string{"nats://"}, std::string{buffer_text(state.draft_host)},
         std::string{buffer_text(state.draft_port)}});
 
     command request;
@@ -379,6 +384,185 @@ void save_instance(const render_input& input, window_ui_state& state) {
     input.commands.push(std::move(request));
     apply_labels(input, labelling_owner::instance, id,
         buffer_text(state.browser.form_labels));
+}
+
+/** @brief Whether the pane is editing the row with @p id. */
+[[nodiscard]] bool editing_row(const window_ui_state& state,
+    std::string_view id) {
+    return state.instance_edit.active && state.instance_edit.target == id;
+}
+
+/**
+ * @brief Reads the edited row into the pane's drafts.
+ *
+ * The row is read from the store rather than remembered when the edit began, so
+ * a reset always returns to what is held now and not to what was held then.
+ *
+ * @return Whether the store still holds the row, which is what tells the caller
+ *         to clear the pending fill and stop waiting for one.
+ */
+[[nodiscard]] bool fill_edit_drafts(const render_input& input,
+    window_ui_state& state) {
+    instance_edit_state& edit = state.instance_edit;
+    const auto handle = input.instances.find(edit.target);
+    if (!handle)
+        return false;
+
+    const auto& row = *input.instances.get(*handle);
+    const auto address = widget::split_host_port(row.nats_url);
+    set_buffer(edit.name, row.name);
+    set_buffer(edit.host, address.host);
+    set_buffer(edit.port, address.port);
+    set_buffer(edit.subject, row.subject_prefix);
+    set_buffer(edit.wire_format, row.wire_format);
+    set_buffer(edit.tls_ca, row.tls_ca);
+    set_buffer(edit.tls_cert, row.tls_cert);
+    set_buffer(edit.tls_key, row.tls_key);
+    set_buffer(edit.labels,
+        joined_labels(input, labelling_owner::instance, row.id));
+    return true;
+}
+
+/**
+ * @brief Puts the pane into edit mode on @p id.
+ *
+ * The drafts are not filled here. The toolbar callback that reaches this is
+ * handed no tables, so the fill is left pending for the frame the pane draws,
+ * where the row can be read.
+ */
+void begin_instance_edit(window_ui_state& state, std::string id) {
+    instance_edit_state& edit = state.instance_edit;
+    edit.active = true;
+    edit.pending_fill = true;
+    edit.confirm_discard = false;
+    edit.pending_leaf.clear();
+    edit.pending_folder.clear();
+    edit.target = std::move(id);
+}
+
+/** @brief Leaves edit mode and forgets which row it was on. */
+void end_instance_edit(window_ui_state& state) {
+    instance_edit_state& edit = state.instance_edit;
+    edit.active = false;
+    edit.pending_fill = false;
+    edit.confirm_discard = false;
+    edit.target.clear();
+    edit.pending_leaf.clear();
+    edit.pending_folder.clear();
+}
+
+/**
+ * @brief Whether the pane holds anything the store does not.
+ *
+ * Asked of the row the store holds now rather than of the row that was there
+ * when the edit began, so a field put back to its stored value stops being
+ * marked and leaving no longer warns about a change that no longer exists.
+ */
+[[nodiscard]] bool edit_has_changes(const render_input& input,
+    const window_ui_state& state) {
+    const instance_edit_state& edit = state.instance_edit;
+    const auto handle = input.instances.find(edit.target);
+    if (!handle)
+        return false;
+
+    const auto& row = *input.instances.get(*handle);
+    const auto address = widget::split_host_port(row.nats_url);
+    return buffer_text(edit.name) != row.name
+        || buffer_text(edit.host) != address.host
+        || buffer_text(edit.port) != address.port
+        || buffer_text(edit.subject) != row.subject_prefix
+        || buffer_text(edit.wire_format) != row.wire_format
+        || buffer_text(edit.tls_ca) != row.tls_ca
+        || buffer_text(edit.tls_cert) != row.tls_cert
+        || buffer_text(edit.tls_key) != row.tls_key
+        || buffer_text(edit.labels)
+            != joined_labels(input, labelling_owner::instance, row.id);
+}
+
+/**
+ * @brief Pushes a save for the row the pane is editing.
+ *
+ * The row that is written is the one the store already holds, with only the
+ * pane's fields moved onto it, so the picture, the folder and the transport
+ * scheme survive an edit the pane never showed. Edit mode ends on the click,
+ * because the store applies the command on a later frame and a pane that stayed
+ * editable would mark every field changed while it waited for the row to catch
+ * up.
+ */
+void save_edit(const render_input& input, window_ui_state& state) {
+    instance_edit_state& edit = state.instance_edit;
+    const auto handle = input.instances.find(edit.target);
+    if (!handle) {
+        end_instance_edit(state);
+        return;
+    }
+
+    instance row = *input.instances.get(*handle);
+    row.name = buffer_text(edit.name);
+    row.subject_prefix = buffer_text(edit.subject);
+    row.wire_format = buffer_text(edit.wire_format);
+    row.tls_ca = buffer_text(edit.tls_ca);
+    row.tls_cert = buffer_text(edit.tls_cert);
+    row.tls_key = buffer_text(edit.tls_key);
+
+    /*
+     * The scheme is carried through untouched from the stored row. It is not
+     * this pane's business which transports exist, and rewriting "tls://" as
+     * "nats://" would silently change which deployment the row points at.
+     */
+    const auto scheme = widget::split_host_port(row.nats_url).scheme;
+    row.nats_url = widget::join_host_port(widget::host_port{scheme,
+        std::string{buffer_text(edit.host)},
+        std::string{buffer_text(edit.port)}});
+
+    command request;
+    request.kind = command_kind::save_instance;
+    request.instance_id = row.id;
+    request.instance_row = std::move(row);
+
+    const std::string id = request.instance_id;
+    input.commands.push(std::move(request));
+    apply_labels(input, labelling_owner::instance, id,
+        buffer_text(edit.labels));
+
+    end_instance_edit(state);
+}
+
+/**
+ * @brief Writes a capture's own value into the edit draft it names.
+ *
+ * A capture has no keyboard, so the frame that has to show a changed field is
+ * reached by this rather than by typing. An unknown field name writes nothing
+ * at all, which is the safe answer for a hook that exists only to describe a
+ * frame a person could otherwise reach by hand.
+ */
+void apply_capture_field(window_ui_state& state) {
+    if (pending_capture_field.empty())
+        return;
+
+    instance_edit_state& edit = state.instance_edit;
+    const std::string_view value{pending_capture_value};
+    if (pending_capture_field == "name")
+        set_buffer(edit.name, value);
+    else if (pending_capture_field == "host")
+        set_buffer(edit.host, value);
+    else if (pending_capture_field == "port")
+        set_buffer(edit.port, value);
+    else if (pending_capture_field == "subject")
+        set_buffer(edit.subject, value);
+    else if (pending_capture_field == "wire_format")
+        set_buffer(edit.wire_format, value);
+    else if (pending_capture_field == "tls_ca")
+        set_buffer(edit.tls_ca, value);
+    else if (pending_capture_field == "tls_cert")
+        set_buffer(edit.tls_cert, value);
+    else if (pending_capture_field == "tls_key")
+        set_buffer(edit.tls_key, value);
+    else if (pending_capture_field == "labels")
+        set_buffer(edit.labels, value);
+
+    pending_capture_field.clear();
+    pending_capture_value.clear();
 }
 
 /**
@@ -402,10 +586,14 @@ void save_picture(const render_input& input, const instance& row,
     input.commands.push(std::move(request));
 }
 
-/** @brief The instance form: one dialog for adding and for editing. */
-void draw_form(const render_input& input, window_ui_state& state) {
-    const bool editing = !state.browser.form_leaf.empty();
-
+/**
+ * @brief The create form: the one dialog this window still owns.
+ *
+ * Creation keeps a form because there is no row to edit yet. Changing an
+ * existing row happens in the details pane instead, so this dialog is never an
+ * edit and never has a row behind it.
+ */
+void draw_create_form(const render_input& input, window_ui_state& state) {
     /*
      * Fixed, non-resizable, non-collapsible and with no scrolling, like every
      * other dialog here. A modal whose layout can move invites a size that
@@ -417,8 +605,7 @@ void draw_form(const render_input& input, window_ui_state& state) {
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
         | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
-    const char* title = editing ? "Edit instance###hedgr-instance-form"
-                                : "New instance###hedgr-instance-form";
+    const char* title = "New instance###hedgr-instance-form";
     ImGui::OpenPopup(title);
     if (!ImGui::BeginPopupModal(title, nullptr, flags))
         return;
@@ -457,21 +644,6 @@ void draw_form(const render_input& input, window_ui_state& state) {
         ImGui::EndCombo();
     }
     ImGui::SetItemTooltip("%s", "Wire format");
-
-    /*
-     * The labels this instance already carries, as the same pills the list
-     * draws, above the field that edits them. The field shows names because a
-     * name is what a person types; the pills show the colour and the severity
-     * those names will have, so an edit is made against what the row looks like
-     * rather than against a list of words.
-     */
-    const auto attached =
-        labels_of(input, labelling_owner::instance, state.browser.form_leaf);
-    if (!attached.empty()) {
-        ImGui::TextDisabled("Attached:");
-        ImGui::SameLine();
-        static_cast<void>(widget::label_pill_row(widget::pills_for(attached), 0.0f));
-    }
 
     ImGui::SetNextItemWidth(-FLT_MIN);
     ImGui::InputTextWithHint("##instance-labels", "labels, comma separated",
@@ -527,26 +699,20 @@ void draw_form(const render_input& input, window_ui_state& state) {
     const bool saved = ImGui::Button(std::format("{} Save", icon::save).c_str());
     if (!complete)
         ImGui::EndDisabled();
-    ImGui::SetItemTooltip("%s", "Save the instance");
+    ImGui::SetItemTooltip("%s", "Create the instance");
 
     ImGui::SameLine();
     if (ImGui::Button(std::format("{} Cancel", icon::cancel).c_str())) {
         state.browser.form = widget::form_kind::none;
-        state.browser.form_leaf.clear();
         state.browser.form_folder.clear();
-        state.browser.form_duplicating = false;
-        state.browser.duplicate_source.clear();
         ImGui::CloseCurrentPopup();
     }
-    ImGui::SetItemTooltip("%s", "Abandon this edit");
+    ImGui::SetItemTooltip("%s", "Abandon this new instance");
 
     if (saved && complete) {
-        save_instance(input, state);
+        save_new_instance(input, state);
         state.browser.form = widget::form_kind::none;
-        state.browser.form_leaf.clear();
         state.browser.form_folder.clear();
-        state.browser.form_duplicating = false;
-        state.browser.duplicate_source.clear();
         ImGui::CloseCurrentPopup();
     }
 
@@ -563,39 +729,65 @@ void draw_form(const render_input& input, window_ui_state& state) {
 /** @brief Opens the form for a new instance inside @p parent. */
 void open_create_form(window_ui_state& window, std::string_view parent) {
     window.browser.form = widget::form_kind::leaf;
-    window.browser.form_leaf.clear();
     window.browser.form_folder = std::string{parent};
-    window.browser.form_duplicating = false;
     window.browser.form_labels.fill('\0');
-    load_draft(window, nullptr);
+    clear_create_draft(window);
 }
 
-/** @brief Opens the form on an instance, or on a blank copy of one. */
-void open_edit_form(const render_input& input, window_ui_state& window,
-    std::string leaf_id, bool duplicating) {
-    /*
-     * The id is taken by value rather than as a view, because one caller names
-     * the row with the very buffer this assigns to: a view into
-     * @c window.browser.form_leaf would dangle the moment the assignment below
-     * released that string, and the lookup would then read freed memory and
-     * report that the row does not exist.
-     */
-    window.browser.form = widget::form_kind::leaf;
-    window.browser.form_leaf = duplicating ? std::string{} : leaf_id;
-    window.browser.form_duplicating = duplicating;
+/**
+ * @brief The warning shown when leaving would lose an unsaved edit.
+ *
+ * The selection has already been put back on the edited row by the caller, so
+ * the pane behind the dialog still shows exactly what the warning is about.
+ * Discarding follows the click that was held back; keeping the edit leaves the
+ * selection where the caller put it.
+ *
+ * The two choices are named in words rather than drawn as icons. Every other
+ * confirmation in this interface names its choices in words, and a dialog whose
+ * whole purpose is to stop an operator losing work is the last place to make
+ * them hover to find out which button is which.
+ */
+void draw_discard_warning(window_ui_state& state) {
+    const ImVec2 size(460.0f, 170.0f);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
+        | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
+        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
 
-    const auto handle = input.instances.find(leaf_id);
-    load_draft(window, handle ? input.instances.get(*handle) : nullptr);
-    if (handle)
-        window.browser.form_folder = input.instances.get(*handle)->folder_id;
+    const char* title = "Unsaved changes###hedgr-instance-discard";
+    ImGui::OpenPopup(title);
+    if (!ImGui::BeginPopupModal(title, nullptr, flags))
+        return;
 
-    if (duplicating && handle) {
-        const std::string copy =
-            std::format("{} copy", input.instances.get(*handle)->name);
-        set_buffer(window.draft_name, copy);
+    ImGui::TextWrapped(
+        "This instance has changes that have not been saved. Leaving now loses "
+        "them.");
+
+    if (ImGui::Button(std::format("{} Discard", icon::remove).c_str())) {
+        /*
+         * The click that was held back is applied here, and the edit forgotten.
+         * Copying the pending selection out first is what keeps the clear in
+         * @c end_instance_edit from taking the destination with it.
+         */
+        const std::string leaf = state.instance_edit.pending_leaf;
+        const std::string folder = state.instance_edit.pending_folder;
+        end_instance_edit(state);
+        state.browser.selected_leaf = leaf;
+        state.browser.selected_folder = folder;
+        ImGui::CloseCurrentPopup();
     }
-    set_buffer(window.browser.form_labels,
-        joined_labels(input, labelling_owner::instance, leaf_id));
+    ImGui::SetItemTooltip("%s", "Lose the changes and go");
+
+    ImGui::SameLine();
+    if (ImGui::Button(std::format("{} Keep editing", icon::cancel).c_str())) {
+        state.instance_edit.confirm_discard = false;
+        state.instance_edit.pending_leaf.clear();
+        state.instance_edit.pending_folder.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SetItemTooltip("%s", "Stay on this instance");
+
+    ImGui::EndPopup();
 }
 
 /** @brief The removal confirmation, naming what a folder removal takes. */
@@ -670,19 +862,17 @@ void draw_remove_form(const render_input& input, window_ui_state& window) {
 }
 
 /**
- * @brief The five states a row of the instance tree can stand in.
+ * @brief The three series the estate chart draws.
  *
- * The order is the order the lines are drawn in, which no longer matters for
- * what is visible because the lines do not cover one another. It is kept so
- * that the enum reads the way the estate is explained, from the states nothing
- * is known about to the one everything is fine in.
+ * The order is the order the lines are drawn in, which does not matter for what
+ * is visible because the lines do not cover one another. The words and colours
+ * the tree and the details pane use are not this enum: those keep a state of
+ * their own for each answer, and only the chart folds them.
  */
 enum class estate_state : std::uint8_t {
-    unknown,
-    unreachable,
-    service_missing,
-    not_ready,
     ready,
+    not_ready,
+    fault,
 };
 
 /**
@@ -700,15 +890,12 @@ enum class estate_state : std::uint8_t {
     case estate_state::not_ready:
         return ImGui::ColorConvertU32ToFloat4(
             theme::readiness_colour(readiness::bootstrapping));
-    case estate_state::service_missing:
-        return ImGui::ColorConvertU32ToFloat4(
-            theme::readiness_colour(readiness::service_missing));
-    case estate_state::unreachable:
-        return ImGui::ColorConvertU32ToFloat4(
-            theme::reachability_colour(reachability::unreachable));
-    case estate_state::unknown:
-        return ImGui::ColorConvertU32ToFloat4(
-            theme::readiness_colour(readiness::unknown));
+    case estate_state::fault:
+        /*
+         * One red for both faults. The service-missing red stays in the tree
+         * and the details pane, where the two faults are told apart by word.
+         */
+        return ImGui::ColorConvertU32ToFloat4(theme::failure_colour);
     }
     return ImGui::ColorConvertU32ToFloat4(
         theme::readiness_colour(readiness::unknown));
@@ -720,15 +907,11 @@ enum class estate_state : std::uint8_t {
     case estate_state::ready:
         return "Ready";
     case estate_state::not_ready:
-        return "Bootstrapping";
-    case estate_state::service_missing:
-        return "Service missing";
-    case estate_state::unreachable:
-        return "Unreachable";
-    case estate_state::unknown:
-        return "Unknown";
+        return "Not ready";
+    case estate_state::fault:
+        return "Fault";
     }
-    return "Unknown";
+    return "Fault";
 }
 
 /**
@@ -761,16 +944,16 @@ int format_clock(double value, char* buffer, int size, void*) {
 }
 
 /**
- * @brief Instances by state over polling time, as one line a state.
+ * @brief Instances by state over polling time, as one line a series.
  *
  * The panel is not a collapsible header and carries no title. The operator
  * asked for the chart to be part of the window rather than a thing to open, so
  * there is nothing to collapse and nothing above it to say what it is: the clock
  * axis dates the points and the colours say which state is which.
  *
- * One line a state rather than a stack, because the first question the window is
- * asked is about the estate and not about one deployment, and a stack answers it
- * by hiding the part: ready falling while unreachable rises is two lines
+ * One line a series rather than a stack, because the first question the window
+ * is asked is about the estate and not about one deployment, and a stack answers
+ * it by hiding the part: ready falling while a fault rises is two lines
  * crossing, and one bar of the same total whichever way it moved.
  */
 void draw_dashboard(const render_input& input) {
@@ -916,11 +1099,11 @@ void draw_dashboard(const render_input& input) {
              */
             if (count > 0) {
                 /*
-                 * One point per minute and one line per state, not a stack.
-                 * Separate lines let a reader watch ready fall while unreachable
+                 * One point per minute and one line per series, not a stack.
+                 * Separate lines let a reader watch ready fall while a fault
                  * rises, which a stack hides by construction. The fold and the
-                 * gap filling live in the widget layer, where they can be tested
-                 * without a frame; this only draws what they return.
+                 * gap filling live in the widget layer, where they can be
+                 * tested without a frame; this only draws what they return.
                  */
                 const auto series = widget::read_estate_series(
                     history, now_wall_s, input.now_ns, window_minutes);
@@ -945,9 +1128,7 @@ void draw_dashboard(const render_input& input) {
                 if (series.count > 0) {
                     line(estate_state::ready, series.ready);
                     line(estate_state::not_ready, series.not_ready);
-                    line(estate_state::service_missing, series.service_missing);
-                    line(estate_state::unreachable, series.unreachable);
-                    line(estate_state::unknown, series.unknown);
+                    line(estate_state::fault, series.fault);
                 }
             }
 
@@ -1303,6 +1484,175 @@ void detail_row(const char* glyph, const char* name, std::string_view value) {
 }
 
 /**
+ * @brief One editable row of the details pane, in the read-only row's shape.
+ *
+ * The glyph, the name and the value column are the same three the read-only
+ * writer uses, so a field does not move when the pane enters edit mode. The
+ * caller supplies only the value cell, which is what lets a single text box and
+ * the host and port pair share one row.
+ *
+ * A changed row is drawn in the theme's edit colour on its name and on its
+ * value. There is no background wash: a fill behind a value being read makes
+ * the value harder to read, which is the opposite of what the mark is for. The
+ * colour is the whole mark, and the name carries it as well so a field that was
+ * cleared to nothing is still visibly changed.
+ */
+template <typename Draw_value>
+void edit_row(const char* glyph, const char* name, bool changed,
+    Draw_value draw_value) {
+    ImGui::TableNextRow();
+
+    ImGui::TableNextColumn();
+    if (glyph != nullptr && show_detail_glyph) {
+        ImGui::TextDisabled("%s", glyph);
+        ImGui::SetItemTooltip("%s", name);
+    }
+
+    if (changed)
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(theme::edit_changed_colour));
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(name);
+    ImGui::SetItemTooltip("%s", name);
+
+    ImGui::TableNextColumn();
+    draw_value();
+
+    if (changed)
+        ImGui::PopStyleColor();
+}
+
+/**
+ * @brief The in-place editor's two controls, on the picture's own line.
+ *
+ * Save is on the left of the pair and Reset on the right, and Reset is the
+ * safer of the two to reach for by accident because it puts back what the store
+ * already holds rather than writing anything.
+ *
+ * Save ends the edit because the store applies the command on a later frame,
+ * and a pane that stayed editable would mark every field changed while it
+ * waited for the row to catch up. Reset reads the drafts back from the store
+ * and leaves the operator in edit mode, because putting the fields back is not
+ * the same as finishing.
+ */
+void draw_edit_controls(const render_input& input, window_ui_state& window) {
+    /*
+     * Right aligned on the line already open, which is the picture's when one
+     * was drawn and a line of its own when it was not. The leftover width is
+     * read from the cursor, so the pair lands against the content edge whatever
+     * width the picture had. The pane is a child that never scrolls, so a pane
+     * too narrow clips the pair in the frame rather than raising a bar.
+     */
+    const float controls = ImGui::GetFrameHeight() * 2.0f
+        + ImGui::GetStyle().ItemSpacing.x;
+    const float room = ImGui::GetContentRegionAvail().x;
+    ImGui::SetCursorPosX(
+        ImGui::GetCursorPosX() + std::max(room - controls, 0.0f));
+
+    if (widget::icon_button("instance-save", icon::save,
+            "Save the changes to this instance")) {
+        save_edit(input, window);
+        return;
+    }
+    ImGui::SameLine();
+    if (widget::icon_button("instance-reset", icon::cancel,
+            "Reset this instance's fields to the stored values"))
+        static_cast<void>(fill_edit_drafts(input, window));
+}
+
+/**
+ * @brief The pane's editable rows, in the read-only pane's own order.
+ *
+ * Every field is drawn whether or not the row carries it, because an empty
+ * field is what an operator fills and a hidden one could never be. That is the
+ * one place edit mode differs from the read-only pane, which leaves a blank
+ * field out rather than drawing a blank line.
+ */
+void draw_edit_fields(const render_input& input, window_ui_state& window,
+    const instance& row) {
+    instance_edit_state& edit = window.instance_edit;
+    const auto address = widget::split_host_port(row.nats_url);
+
+    edit_row(icon::instance, "Name", buffer_text(edit.name) != row.name, [&] {
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputText("##instance-edit-name", edit.name.data(),
+            edit.name.size());
+    });
+
+    edit_row(icon::link, "Host",
+        buffer_text(edit.host) != address.host
+            || buffer_text(edit.port) != address.port,
+        [&] {
+            const float half = (ImGui::GetContentRegionAvail().x
+                - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+            ImGui::SetNextItemWidth(half);
+            ImGui::InputText("##instance-edit-host", edit.host.data(),
+                edit.host.size());
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-port", edit.port.data(),
+                edit.port.size());
+        });
+
+    edit_row(nullptr, "Subject prefix",
+        buffer_text(edit.subject) != row.subject_prefix, [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-subject", edit.subject.data(),
+                edit.subject.size());
+        });
+
+    edit_row(nullptr, "Wire format",
+        buffer_text(edit.wire_format) != row.wire_format, [&] {
+            const std::string_view picked = buffer_text(edit.wire_format);
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##instance-edit-wire-format",
+                    picked.empty() ? "msgpack" : edit.wire_format.data())) {
+                for (const char* format : wire_formats) {
+                    if (ImGui::Selectable(format, picked == format))
+                        set_buffer(edit.wire_format, format);
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SetItemTooltip("%s", "Wire format");
+        });
+
+    edit_row(nullptr, "CA certificate", buffer_text(edit.tls_ca) != row.tls_ca,
+        [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-tls-ca", edit.tls_ca.data(),
+                edit.tls_ca.size());
+        });
+
+    edit_row(nullptr, "Client cert", buffer_text(edit.tls_cert) != row.tls_cert,
+        [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-tls-cert", edit.tls_cert.data(),
+                edit.tls_cert.size());
+        });
+
+    edit_row(icon::unlock, "Client key",
+        buffer_text(edit.tls_key) != row.tls_key, [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputText("##instance-edit-tls-key", edit.tls_key.data(),
+                edit.tls_key.size());
+        });
+
+    edit_row(nullptr, "Labels",
+        buffer_text(edit.labels)
+            != joined_labels(input, labelling_owner::instance, row.id),
+        [&] {
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::InputTextWithHint("##instance-edit-labels",
+                "labels, comma separated", edit.labels.data(),
+                edit.labels.size());
+            ImGui::SetItemTooltip("%s",
+                "Labels attached to this instance. A name that does not exist "
+                "yet is created.");
+        });
+}
+
+/**
  * @brief One row of the details table whose value carries the probe's colour.
  *
  * The colour is the same one the tree's glyph is painted with, so the answer
@@ -1458,18 +1808,21 @@ void probe_detail_row(const char* name, std::string_view detail, bool failing,
 /**
  * @brief Draws one instance's details, in the browser's right hand pane.
  *
- * Read only, and deliberately so. The toolbar's edit control already opens the
- * form, and a second way to change the same row would be a second thing to keep
- * in step with the store's rules. What is here is every fact the model holds
- * about the instance, so a reader can see a deployment without opening the form
- * the toolbar offers.
+ * Read only until the toolbar's edit control puts the pane into edit mode, and
+ * then the same rows become editable in place. The pane is the form while it is
+ * in that mode, which is why the drafts and the two controls live here rather
+ * than in a dialog: an operator changes the field they are looking at instead
+ * of a copy of it.
  *
  * A field the model does not have is left out rather than drawn blank, which is
  * why the three TLS paths and the labels appear only for an instance that
- * carries them. The probe is shown only once one has answered, because before
- * that there is no measurement to report and the row would be an invented one.
+ * carries them. Edit mode draws every field whether or not the row carries it,
+ * because an empty field is what an operator fills. The probe is shown only
+ * once one has answered, because before that there is no measurement to report
+ * and the row would be an invented one.
  */
-void instance_details(const tree_leaf& leaf, const render_input& input) {
+void instance_details(const tree_leaf& leaf, const render_input& input,
+    window_ui_state& window) {
     const auto handle = input.instances.find(leaf.id);
     if (!handle) {
         ImGui::TextDisabled("This instance is no longer in the store.");
@@ -1477,6 +1830,19 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     }
     const auto& row = *input.instances.get(*handle);
     const auto status = status_of(input, row.id);
+
+    instance_edit_state& edit = window.instance_edit;
+    const bool editing = editing_row(window, row.id);
+    /*
+     * The fill waits until the store holds the row, because a capture or a
+     * click can name an edit before the catalogue is readable. The capture's own
+     * value is written after the fill, so it lands on the drafts as typing would
+     * rather than being overwritten by them.
+     */
+    if (editing && edit.pending_fill && fill_edit_drafts(input, window)) {
+        edit.pending_fill = false;
+        apply_capture_field(window);
+    }
 
     /*
      * The environment's own picture, when the instance names one, on a line of
@@ -1505,7 +1871,8 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     const std::string picture_path =
         widget::instance_picture_path(directory, row.icon_key);
     const std::uint64_t picture = instance_icon_texture(input, row.id);
-    if (picture != 0) {
+    const bool have_picture = picture != 0;
+    if (have_picture) {
         const float side = std::min(96.0f, ImGui::GetContentRegionAvail().x);
         ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
         ImGui::SetItemTooltip("%s", picture_path.c_str());
@@ -1516,6 +1883,18 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
             icon::warning, row.icon_key.c_str());
         ImGui::PopStyleColor();
         ImGui::SetItemTooltip("%s", picture_path.c_str());
+    }
+
+    /*
+     * The two edit controls ride the picture's line when there is one. That is
+     * where edit mode's room comes from: the square is drawn at the pane's left
+     * and the rest of the line was empty, so on an instance with a picture the
+     * mode costs no row at all. Without one the pair takes a line of its own.
+     */
+    if (editing) {
+        if (have_picture)
+            ImGui::SameLine();
+        draw_edit_controls(input, window);
     }
 
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit
@@ -1535,42 +1914,53 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     detail_row(icon::folder, "Picture folder", directory);
     detail_row(nullptr, "Picture file", picture_path);
 
-    detail_row(icon::instance, "Name", row.name);
-
     /*
-     * The host and the port are one fact to a reader even though the form edits
-     * them apart, so the address is put back together here without its scheme.
-     * The scheme is which transport is used, and a reader asking where an
-     * instance is wants the host.
+     * The same fields in the same order either way. Edit mode draws every one
+     * of them, including the ones the row leaves blank, because a blank field
+     * is exactly what an operator has come to fill; the read-only pane drops a
+     * blank field rather than drawing a line with nothing on it.
      */
-    const auto address = widget::split_host_port(row.nats_url);
-    detail_row(icon::link, "Host",
-        widget::join_host_port(widget::host_port{std::string{}, address.host,
-            address.port}));
+    if (editing) {
+        draw_edit_fields(input, window, row);
+    } else {
+        detail_row(icon::instance, "Name", row.name);
 
-    detail_row(nullptr, "Subject prefix", row.subject_prefix);
-    detail_row(nullptr, "Wire format", row.wire_format);
-    /*
-     * The TLS rows say which piece of material each one is, in the words the
-     * form uses, rather than prefixing all three with a protocol the section
-     * they sit in already implies. The prefix was also what made a name longer
-     * than the pane's own floor could show beside a value, and a name that
-     * cannot be shown is not doing its job.
-     */
-    detail_row(nullptr, "CA certificate", row.tls_ca);
-    detail_row(nullptr, "Client cert", row.tls_cert);
-    detail_row(icon::unlock, "Client key", row.tls_key);
+        /*
+         * The host and the port are one fact to a reader even though the editor
+         * holds them apart, so the address is put back together here without
+         * its scheme. The scheme is which transport is used, and a reader
+         * asking where an instance is wants the host.
+         */
+        const auto address = widget::split_host_port(row.nats_url);
+        detail_row(icon::link, "Host",
+            widget::join_host_port(widget::host_port{std::string{}, address.host,
+                address.port}));
 
-    const auto attached = labels_of(input, labelling_owner::instance, row.id);
-    if (!attached.empty()) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        /* No icon, because the set has no label concept. */
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted("Labels");
-        ImGui::TableNextColumn();
-        static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
-            ImGui::GetContentRegionAvail().x));
+        detail_row(nullptr, "Subject prefix", row.subject_prefix);
+        detail_row(nullptr, "Wire format", row.wire_format);
+        /*
+         * The TLS rows say which piece of material each one is, in the words
+         * the editor uses, rather than prefixing all three with a protocol the
+         * section they sit in already implies. The prefix was also what made a
+         * name longer than the pane's own floor could show beside a value, and
+         * a name that cannot be shown is not doing its job.
+         */
+        detail_row(nullptr, "CA certificate", row.tls_ca);
+        detail_row(nullptr, "Client cert", row.tls_cert);
+        detail_row(icon::unlock, "Client key", row.tls_key);
+
+        const auto attached =
+            labels_of(input, labelling_owner::instance, row.id);
+        if (!attached.empty()) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            /* No icon, because the set has no label concept. */
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted("Labels");
+            ImGui::TableNextColumn();
+            static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
+                ImGui::GetContentRegionAvail().x));
+        }
     }
 
     /*
@@ -1701,34 +2091,18 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
 
 namespace hedgr::ui::render {
 
-namespace {
-
-/**
- * @brief A folder a capture asked to see selected, on the next draw.
- *
- * A file-scope variable rather than a parameter, because it is read on the
- * frame after it is written and the renderer's signature is the frame's. It is
- * empty in every ordinary run, and it is consumed the first time the window
- * draws.
- */
-std::string pending_capture_folder;
-
-/**
- * @brief The instance row a capture asked to see the form for, on the next draw.
- *
- * Empty in every ordinary run, and cleared the first time the window draws, so
- * it can open a form once and never again.
- */
-std::string pending_capture_edit_instance;
-
-}
-
 void select_folder_for_capture(std::string_view folder_id) {
     pending_capture_folder = std::string{folder_id};
 }
 
-void open_instance_form_for_capture(std::string_view instance_id) {
+void open_instance_edit_for_capture(std::string_view instance_id) {
     pending_capture_edit_instance = std::string{instance_id};
+}
+
+void change_instance_field_for_capture(std::string_view field,
+    std::string_view value) {
+    pending_capture_field = std::string{field};
+    pending_capture_value = std::string{value};
 }
 
 namespace {
@@ -1920,14 +2294,44 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     if (!pending_capture_edit_instance.empty()) {
         /*
          * The same scratch a click on the row's edit icon writes, and no more:
-         * the fill below then loads the row into the fields, which is what
-         * makes the captured form the one an operator would see.
+         * the pane fills the drafts from the row on the frame it draws, which
+         * is what makes the captured edit the one an operator would see.
          */
-        state.browser.form = widget::form_kind::leaf;
-        state.browser.form_leaf = pending_capture_edit_instance;
-        state.browser.form_duplicating = false;
-        state.draft_name.fill('\0');
+        state.browser.selected_leaf = pending_capture_edit_instance;
+        state.browser.selected_folder.clear();
+        begin_instance_edit(state, pending_capture_edit_instance);
         pending_capture_edit_instance.clear();
+    }
+
+    /*
+     * A click on another row or another folder changes the selection inside the
+     * browser, so leaving is caught here, before the browser draws, and the
+     * selection is put back. The operator is warned only when the pane actually
+     * holds something: an edit with nothing changed is abandoned silently,
+     * because a warning that appears when there is nothing to lose is worse
+     * than no warning at all.
+     *
+     * Closing the window is not a way out of an edit. The Instances window is
+     * root and carries no close control, so there is no path here to warn
+     * about. The lock and the overlays are not ways out either, because they
+     * leave the drafts where they are and the pane resumes them.
+     */
+    if (state.instance_edit.active && !state.instance_edit.confirm_discard) {
+        const bool left_leaf =
+            state.browser.selected_leaf != state.instance_edit.target;
+        const bool left_folder = !state.browser.selected_folder.empty();
+        if (left_leaf || left_folder) {
+            if (edit_has_changes(input, state)) {
+                state.instance_edit.pending_leaf = state.browser.selected_leaf;
+                state.instance_edit.pending_folder =
+                    state.browser.selected_folder;
+                state.instance_edit.confirm_discard = true;
+                state.browser.selected_leaf = state.instance_edit.target;
+                state.browser.selected_folder.clear();
+            } else {
+                end_instance_edit(state);
+            }
+        }
     }
 
     /*
@@ -1971,32 +2375,17 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     };
     model.edit_leaf = [](window_ui_state& window, std::string_view leaf_id) {
         /*
-         * The row is read on the next frame, not here, because a function
-         * pointer carries no state across the boundary. This callback asks for
-         * the form and names the row; the renderer fills the fields below, and
-         * only when the draft is still empty, so a form in progress is never
-         * overwritten by its own row.
+         * Clicking edit on the row already being edited does nothing, because
+         * refilling the drafts from the store would throw away what the
+         * operator has typed and the toolbar button is the one they will reach
+         * for again. A reset is offered in the pane for putting the fields back
+         * deliberately.
          */
-        window.browser.form = widget::form_kind::leaf;
-        window.browser.form_leaf = std::string{leaf_id};
-        window.browser.form_duplicating = false;
-        window.draft_name.fill('\0');
+        if (editing_row(window, leaf_id))
+            return;
+        begin_instance_edit(window, std::string{leaf_id});
     };
-    model.duplicate_leaf = [](window_ui_state& window, std::string_view leaf_id) {
-        window.browser.form = widget::form_kind::leaf;
-        window.browser.form_leaf.clear();
-        window.browser.form_folder =
-            window.browser.selected_folder;
-        window.browser.form_duplicating = true;
-        window.draft_name.fill('\0');
-        /*
-         * The row the copy is made from is remembered for the fill that follows
-         * on the next frame. The form's folder is the row's own when the copy
-         * is requested from the list rather than from the tree.
-         */
-        window.browser.duplicate_source = std::string{leaf_id};
-    };
-    model.leaf_form = &draw_form;
+    model.leaf_form = &draw_create_form;
     model.remove_form = &draw_remove_form;
     model.can_reparent = [](const render_input& in, std::string_view id,
                              widget::node_kind, std::string_view to) {
@@ -2015,20 +2404,13 @@ void render_instances_window(hedgr::model::state::window_handle handle,
 
     widget::render_browser(model, state, input);
 
-
     /*
-     * A form the callbacks above opened but did not fill is filled here, once
-     * per frame, from the tables the renderer holds. Doing it after the browser
-     * means the fill lands before the form is drawn on the next frame, which is
-     * what makes the two-step look like one.
+     * The leave warning, drawn over the window once the browser has put it up.
+     * It is opened by the guard above and stays up until the operator answers,
+     * so the pane behind it keeps showing the row whose changes are at stake.
      */
-    if (state.browser.form == widget::form_kind::leaf
-        && buffer_text(state.draft_name).empty()) {
-        if (!state.browser.form_leaf.empty())
-            open_edit_form(input, state, state.browser.form_leaf, false);
-        else if (!state.browser.duplicate_source.empty())
-            open_edit_form(input, state, state.browser.duplicate_source, true);
-    }
+    if (state.instance_edit.confirm_discard)
+        draw_discard_warning(state);
 
     /*
      * The status bar, last, so that its reservation is made after everything

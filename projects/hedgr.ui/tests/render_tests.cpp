@@ -817,9 +817,9 @@ TEST_CASE("four estate polls read back as four different chart points",
     };
 
     /*
-     * Four polls a minute apart, each in a different state. A reader that took
-     * the newest sample for every minute would draw one flat line here, which
-     * is the defect this test exists to catch.
+     * Four polls a minute apart, each carrying a different mix. A reader that
+     * took the newest sample for every minute would draw one flat line here,
+     * which is the defect this test exists to catch.
      */
     constexpr std::int64_t minute_ns = 60'000'000'000;
     add(0 * minute_ns, 0, 0, 0, 0, 3);
@@ -841,19 +841,27 @@ TEST_CASE("four estate polls read back as four different chart points",
     REQUIRE(series.minutes[base + 0] == 997.5);
     REQUIRE(series.minutes[base + 3] == 1000.5);
 
-    REQUIRE(series.unknown[base + 0] == 3);
+    /*
+     * The three series and how the five counted states fold into them. An
+     * instance no probe has answered for is amber with the bootstrapping ones,
+     * and the two faults are one red line, so each minute reaches the three
+     * instances the poll counted.
+     */
+    REQUIRE(series.not_ready[base + 0] == 3);
     REQUIRE(series.ready[base + 1] == 1);
-    REQUIRE(series.unknown[base + 1] == 2);
-    REQUIRE(series.service_missing[base + 2] == 1);
-    REQUIRE(series.unreachable[base + 2] == 1);
+    REQUIRE(series.not_ready[base + 1] == 2);
+    REQUIRE(series.fault[base + 2] == 2);
+    REQUIRE(series.not_ready[base + 2] == 1);
+    REQUIRE(series.fault[base + 3] == 1);
     REQUIRE(series.not_ready[base + 3] == 1);
 
-    /* Four minutes, four different values, and no one value repeated. */
+    /* Four minutes, no one series value repeated across them. */
     REQUIRE(series.ready[base + 0] != series.ready[base + 1]);
-    REQUIRE(series.unreachable[base + 1] != series.unreachable[base + 2]);
-    REQUIRE(series.not_ready[base + 2] != series.not_ready[base + 3]);
-    REQUIRE(series.service_missing[base + 1] != series.service_missing[base + 2]);
-    REQUIRE(series.unknown[base + 0] != series.unknown[base + 3]);
+    REQUIRE(series.ready[base + 2] != series.ready[base + 3]);
+    REQUIRE(series.fault[base + 0] != series.fault[base + 2]);
+    REQUIRE(series.fault[base + 2] != series.fault[base + 3]);
+    REQUIRE(series.not_ready[base + 0] != series.not_ready[base + 1]);
+    REQUIRE(series.not_ready[base + 1] != series.not_ready[base + 2]);
 
     /*
      * The minutes ascend, and a minute before the first poll is a gap. A NaN is

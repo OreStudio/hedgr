@@ -94,6 +94,11 @@ struct dashboard_counts final {
  * of inventing a reading, and a sampled minute with a count of zero keeps its
  * real zero.
  *
+ * Three series and not five. The chart is read by colour alone, with no legend,
+ * and the operator asked for one red rather than a line for every word the
+ * details pane can say. The three still sum to the estate, so a bar of them
+ * reaches the instance count.
+ *
  * This is a pure function of the history and the two clocks, which is what
  * makes the chart's arithmetic testable without a frame. The same polls fed in
  * have to come out as different minutes with the counts they carried.
@@ -108,17 +113,24 @@ struct estate_series final {
     /** @brief Instances ready in that minute, NaN where nothing was polled. */
     std::array<double, capacity> ready{};
 
-    /** @brief Instances bootstrapping, NaN where nothing polled. */
+    /**
+     * @brief Instances not ready, NaN where nothing was polled.
+     *
+     * Bootstrapping is folded in with an instance no probe has answered for
+     * yet. Both are a question rather than a fault and neither is ready, so
+     * they share the amber line, and the chart still accounts for every
+     * instance.
+     */
     std::array<double, capacity> not_ready{};
 
-    /** @brief Instances with a broker but no IAM service, NaN where none. */
-    std::array<double, capacity> service_missing{};
-
-    /** @brief Instances no connection was opened to, NaN where none polled. */
-    std::array<double, capacity> unreachable{};
-
-    /** @brief Instances no probe has answered for, NaN where none polled. */
-    std::array<double, capacity> unknown{};
+    /**
+     * @brief Instances in a fault, NaN where nothing was polled.
+     *
+     * A broker that never answered and a broker that answered with nothing
+     * behind it are one red line here. They stay two words in the tree and the
+     * details pane, which is where the distinction is actually read.
+     */
+    std::array<double, capacity> fault{};
 
     /** @brief How many entries of each array the window uses. */
     std::size_t count = 0;
