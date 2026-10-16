@@ -130,9 +130,24 @@ void application::run() {
      */
     if (const char* folder = std::getenv("HEDGR_CAPTURE_SELECT_FOLDER"))
         ui::render::select_folder_for_capture(folder);
+    if (const char* selected = std::getenv("HEDGR_CAPTURE_SELECT_INSTANCE");
+        selected != nullptr && *selected != '\0')
+        ui::render::select_instance_for_capture(selected);
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
-        ui::render::open_instance_form_for_capture(editing);
+        ui::render::open_instance_edit_for_capture(editing);
+
+    /*
+     * A capture has no keyboard, so the frame that shows a changed field needs
+     * the draft written for it. The pair is read together, because a value with
+     * no field names nothing to write it into.
+     */
+    if (const char* field = std::getenv("HEDGR_CAPTURE_EDIT_FIELD");
+        field != nullptr && *field != '\0') {
+        const char* value = std::getenv("HEDGR_CAPTURE_EDIT_VALUE");
+        ui::render::change_instance_field_for_capture(field,
+            value != nullptr ? value : "");
+    }
 
     /*
      * A capture can also be driven, not only described: the script names rows a
@@ -148,7 +163,13 @@ void application::run() {
         return;
     }
 
-    if (cfg_.fullscreen)
+    /*
+     * A hidden capture window is already created at the size fullscreen would
+     * have given it, and a fullscreen request would need the shell role it
+     * does not have, so the capture skips the call rather than have GLFW log a
+     * failure for a request that cannot land.
+     */
+    if (cfg_.fullscreen && capture_path_.empty())
         toggle_fullscreen(window);
 
     render_loop(window);
@@ -222,8 +243,36 @@ GLFWwindow* application::initialise_graphics() {
     glfwWindowHintString(GLFW_X11_CLASS_NAME, window_identity);
     glfwWindowHintString(GLFW_X11_INSTANCE_NAME, window_identity);
 
+    /*
+     * A capture exists to write one frame and leave, and nobody is watching
+     * while that frame is drawn. A hidden window is one the compositor never
+     * maps, so the operator's own desktop keeps its focus and never shows a
+     * client that is only there to be photographed. An ordinary run leaves the
+     * hint alone because a person is using the window.
+     */
+    const bool capturing = !capture_path_.empty();
+    if (capturing)
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
     windowed_width_ = 1600;
     windowed_height_ = 900;
+    /*
+     * A capture used to reach the size of its frame by going fullscreen, and a
+     * hidden window cannot, because GLFW puts the fullscreen request on a
+     * shell role that only a shown window creates. The same size is therefore
+     * asked for at creation, from the mode fullscreen would have used, so the
+     * frame keeps the dimensions every check in this project reads.
+     */
+    if (capturing && cfg_.fullscreen) {
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode =
+            monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
+        if (mode != nullptr) {
+            windowed_width_ = mode->width;
+            windowed_height_ = mode->height;
+        }
+    }
+
     GLFWwindow* window =
         glfwCreateWindow(windowed_width_, windowed_height_, "Hedgr", nullptr, nullptr);
     if (window == nullptr) {
@@ -452,6 +501,25 @@ void application::capture_frame(GLFWwindow* window) {
 }
 
 void application::render_loop(GLFWwindow* window) {
+    /*
+     * A hidden Wayland window is never mapped, so the compositor never sends
+     * the frame callbacks a visible swap waits on and the loop would run as
+     * fast as it can draw. A capture counts frames rather than seconds because
+     * a surface behind the store's key derivation is not ready at the usual
+     * eighth frame, so the interval a swap would have waited out is waited out
+     * here instead, and a capture frame keeps the place in the run it was
+     * chosen for. An ordinary run leaves the pacing to the swap.
+     */
+    double capture_interval = 0.0;
+    if (!capture_path_.empty()) {
+        GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode =
+            monitor != nullptr ? glfwGetVideoMode(monitor) : nullptr;
+        const int refresh =
+            mode != nullptr && mode->refreshRate > 0 ? mode->refreshRate : 60;
+        capture_interval = 1.0 / static_cast<double>(refresh);
+    }
+
     while (glfwWindowShouldClose(window) == 0 && !exit_requested_) {
         glfwPollEvents();
 
@@ -556,6 +624,9 @@ void application::render_loop(GLFWwindow* window) {
         }
 
         glfwSwapBuffers(window);
+
+        if (capture_interval > 0.0)
+            glfwWaitEventsTimeout(capture_interval);
     }
 }
 
