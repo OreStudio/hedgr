@@ -83,6 +83,20 @@ const ImVec4 border = colour(0x3e4243ff); // card left edge, x 434 y 450
 const ImVec4 separator = colour(0x494d4eff); // rule under Runtime Overview, x 1600 y 395
 
 /*
+ * The scrollbar. It matters now that a details pane can hold more than fits,
+ * and it is built from the restyle's own surfaces rather than from ImGui's
+ * defaults so it reads as part of the pane it crosses. The groove is the panel
+ * taken down a step, which makes the track a recess in the surface rather than
+ * a strip laid on top of it. The grab is the card border held solid, because a
+ * bar a reader catches should weigh the same as the outlines around it, and the
+ * hover lifts that grey by a step. The press takes the accent, which is what
+ * every other dragged control in this interface does when it is held.
+ */
+const ImVec4 scrollbar_track = with_alpha(colour(0x131516ff), panel_alpha);
+const ImVec4 scrollbar_grab = border;
+const ImVec4 scrollbar_grab_hover = colour(0x565b5cff);
+
+/*
  * What a reader is meant to read, and the caption beneath it. The third weight
  * below is not a sample. The reference draws no disabled text anywhere, so it
  * is the caption grey taken down by a little under half, which keeps it in the
@@ -208,9 +222,9 @@ void apply_theme() {
     colors[ImGuiCol_TitleBgActive] = bg_title;
     colors[ImGuiCol_TitleBgCollapsed] = bg_base;
     colors[ImGuiCol_MenuBarBg] = bg_title;
-    colors[ImGuiCol_ScrollbarBg] = colour(0x00000000);
-    colors[ImGuiCol_ScrollbarGrab] = colour(0x3e4243ff);
-    colors[ImGuiCol_ScrollbarGrabHovered] = colour(0x565b5cff);
+    colors[ImGuiCol_ScrollbarBg] = scrollbar_track;
+    colors[ImGuiCol_ScrollbarGrab] = scrollbar_grab;
+    colors[ImGuiCol_ScrollbarGrabHovered] = scrollbar_grab_hover;
     colors[ImGuiCol_ScrollbarGrabActive] = accent_active;
     colors[ImGuiCol_CheckMark] = accent;
     colors[ImGuiCol_SliderGrab] = accent;

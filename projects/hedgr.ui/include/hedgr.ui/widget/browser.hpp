@@ -304,7 +304,9 @@ struct browser_model final {
      *
      * The host's window state travels with it because the pane can be a form as
      * well as a report: the Instances pane edits the row in place, and what the
-     * operator typed but has not saved is the host's scratch.
+     * operator typed but has not saved is the host's scratch. Both windows that
+     * use this browser now supply the callback, so a null one leaves the list
+     * for a host that has no pane of its own yet.
      */
     void (*draw_details)(const tree_leaf&,
         const hedgr::ui::render::render_input&,

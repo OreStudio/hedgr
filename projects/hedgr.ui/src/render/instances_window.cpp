@@ -29,8 +29,10 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/browser.hpp"
+#include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -1325,6 +1327,27 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
             state.browser.selected_leaf);
 
     /*
+     * The shortcut toggle used to sit at the pane's top right, where the pane
+     * had no other control and the dismiss glyph on it read as an action on the
+     * instance rather than on the bar. It lives here now, with the window's
+     * other actions, where it carries a word and the pane goes back to being a
+     * place that reports. "Pin" and "Unpin" are the words because the thing it
+     * changes is the shortcuts bar, and the glyphs stay the add and dismiss the
+     * icon set carries since it has no pin of its own.
+     */
+    const bool have_instance = !state.browser.selected_leaf.empty();
+    const bool on_bar = shortcuts_bar_holds(
+        input.shortcuts, window_kind::accounts, state.browser.selected_leaf);
+    if (widget::rail_button("shortcut-toggle",
+            on_bar ? icon::cancel : icon::add, on_bar ? "Unpin" : "Pin",
+            on_bar ? "Take this instance off the shortcuts bar"
+                   : "Put this instance on the shortcuts bar",
+            have_instance)) {
+        input.commands.push(shortcut_toggle_command(
+            input, window_kind::accounts, state.browser.selected_leaf));
+    }
+
+    /*
      * The picture control acts on the selected instance and opens a gallery
      * rather than a text box, because the set of pictures is what is installed
      * and not what a person can spell. It lives in the toolbar rather than in
@@ -1424,200 +1447,6 @@ void instance_row_labels(const tree_leaf& leaf, const render_input& input,
 }
 
 /**
- * @brief One card, as the pane assembles it before it is drawn.
- *
- * A value rather than a drawing call, because the pane decides its topics from
- * the data before it draws any of them: a topic with one card is not a topic,
- * and which topics survive that rule is known only once every card has been
- * collected.
- */
-struct card_spec final {
-    /** @brief ImGui id and capture name, unique among the pane's cards. */
-    const char* id = "";
-
-    /** @brief The glyph that names the field, or null for none. */
-    const char* glyph = nullptr;
-
-    /** @brief The card's title line. */
-    const char* title = "";
-
-    /** @brief The value. */
-    std::string value;
-
-    /** @brief The muted line under the value. */
-    std::string caption;
-
-    /** @brief The value's colour, or zero for the ordinary text colour. */
-    std::uint32_t colour = 0;
-
-    /**
-     * @brief Whether the card takes the pane's whole width.
-     *
-     * A path and a failure sentence are each one long value. Sharing a column
-     * clips them to a sliver, and a path a reader cannot see the end of is a
-     * path they cannot check, which is the whole reason the card shows it. A
-     * card that holds one says so here and the wall gives it a line of its own.
-     * Everything else keeps sharing a row, because a wall of full width cards
-     * is a list and stops being a wall.
-     */
-    bool full_width = false;
-};
-
-/** @brief One topic of the pane: a heading and the cards under it. */
-struct topic_spec final {
-    /** @brief The heading's text. */
-    const char* title = "";
-
-    /** @brief The cards, in the order they are drawn. */
-    std::vector<card_spec> cards;
-};
-
-/** @brief The gap between two cards. */
-constexpr float card_gap = 8.0f;
-
-/** @brief The air inside a card, on every side. */
-constexpr float card_padding = 10.0f;
-
-/**
- * @brief The width below which a card stops being a card.
- *
- * A card holds a title, a value and a caption, and the longest of those is a
- * certificate path. Below this width the value has nowhere to be read and the
- * wall drops a column rather than drawing a column of slivers.
- */
-constexpr float card_min_width = 250.0f;
-
-/** @brief How many cards fit across a pane of @p pane_width. */
-[[nodiscard]] int card_columns(float pane_width) {
-    const int columns = static_cast<int>(
-        (pane_width + card_gap) / (card_min_width + card_gap));
-    return std::clamp(columns, 1, 4);
-}
-
-/** @brief The width of one card in a grid of @p columns. */
-[[nodiscard]] float card_width(float pane_width, int columns) {
-    return (pane_width - card_gap * static_cast<float>(columns - 1))
-        / static_cast<float>(columns);
-}
-
-/**
- * @brief The height of one card, from the three lines it holds.
- *
- * The title, the value and the caption, measured from the font so a theme that
- * installs a larger face gets cards that still hold their own text. Every card
- * in the wall is this tall, which is what makes the wall a grid rather than a
- * ragged set of boxes.
- */
-[[nodiscard]] float card_height() {
-    const ImGuiStyle& style = ImGui::GetStyle();
-    return card_padding * 2.0f + ImGui::GetTextLineHeight() * 2.0f
-        + ImGui::GetFrameHeight() + style.ItemSpacing.y * 2.0f;
-}
-
-/**
- * @brief Moves to the next slot of the wall, wrapping a row at @p columns.
- *
- * The gap is passed to SameLine rather than left to the style, because the
- * style's item spacing also spaces a card from the row above it and the two
- * distances do not have to agree.
- */
-void card_slot(int& column, int columns) {
-    if (column > 0)
-        ImGui::SameLine(0.0f, card_gap);
-    column = (column + 1) % columns;
-}
-
-/**
- * @brief Opens one card and fills its own surface.
- *
- * A child rather than a rectangle into the draw list, because the card holds
- * live widgets and a widget needs a window of its own to be clipped by. The
- * child never scrolls: a card is a box of a fixed size and a value that does
- * not fit is scrolled by its own input rather than by growing the box.
- *
- * A marked card takes the edit colour on its outline and a bar down its inner
- * left edge. The bar is the same shape the rail's chosen row carries, in the
- * colour of a different fact, so an unsaved field is recognisable as a mark
- * rather than as a differently coloured box.
- *
- * @return Whether the card is visible and its body should be submitted. The
- * caller has to call @c end_card either way.
- */
-[[nodiscard]] bool begin_card(const char* id, float width, float height,
-    bool marked) {
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::card_surface());
-    ImGui::PushStyleColor(ImGuiCol_Border,
-        marked ? ImGui::ColorConvertU32ToFloat4(theme::edit_changed_colour)
-               : theme::card_border());
-
-    const bool open = ImGui::BeginChild(id, ImVec2(width, height),
-        ImGuiChildFlags_Borders,
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-    if (marked) {
-        ImDrawList* const draw = ImGui::GetWindowDrawList();
-        const ImVec2 origin = ImGui::GetWindowPos();
-        const float bottom = origin.y + ImGui::GetWindowHeight();
-        draw->AddRectFilled(ImVec2(origin.x + 2.0f, origin.y + 6.0f),
-            ImVec2(origin.x + 4.0f, bottom - 6.0f),
-            theme::edit_changed_colour, 1.0f);
-    }
-    return open;
-}
-
-/** @brief Closes a card, whether or not its body was submitted. */
-void end_card() {
-    ImGui::EndChild();
-    ImGui::PopStyleColor(2);
-}
-
-/** @brief Writes a card's title line, with its glyph where it has one. */
-void card_title(const char* glyph, std::string_view title, ImU32 colour) {
-    const ImVec4 as_float = ImGui::ColorConvertU32ToFloat4(colour);
-    if (glyph != nullptr) {
-        /*
-         * The glyph is the connected green whatever the title's words are,
-         * changed field or not, because the reference draws every card title's
-         * icon in it and the mark of an unsaved edit is already carried by the
-         * card's outline, its bar, its words and its value.
-         */
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(theme::card_title_icon_colour()));
-        ImGui::TextUnformatted(glyph);
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-    }
-    ImGui::PushStyleColor(ImGuiCol_Text, as_float);
-    ImGui::TextUnformatted(title.data(), title.data() + title.size());
-    ImGui::PopStyleColor();
-}
-
-/** @brief Draws one read-only card of the wall. */
-void draw_card(const card_spec& card, float width, float height) {
-    const bool open = begin_card(card.id, width, height, false);
-    if (open) {
-        card_title(
-            card.glyph, card.title, ImGui::GetColorU32(theme::dim_text()));
-
-        const ImU32 colour = card.colour != 0
-            ? card.colour
-            : ImGui::GetColorU32(ImGuiCol_Text);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(colour));
-        widget::text_line(card.id, card.value, -FLT_MIN);
-        ImGui::PopStyleColor();
-
-        if (!card.caption.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text,
-                ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-            ImGui::TextUnformatted(card.caption.c_str());
-            ImGui::PopStyleColor();
-        }
-    }
-    end_card();
-}
-
-/**
  * @brief Opens one editable card and marks it when its draft has changed.
  *
  * The mark is the theme's cyan on the card's outline and bar, on its title and
@@ -1627,9 +1456,9 @@ void draw_card(const card_spec& card, float width, float height) {
 template <typename Body>
 void edit_card(const char* id, const char* glyph, const char* title,
     bool changed, float width, float height, Body body) {
-    const bool open = begin_card(id, width, height, changed);
+    const bool open = widget::begin_card(id, width, height, changed);
     if (open) {
-        card_title(glyph, title,
+        widget::card_title(glyph, title,
             changed ? theme::edit_changed_colour
                     : ImGui::GetColorU32(theme::dim_text()));
         if (changed) {
@@ -1640,7 +1469,7 @@ void edit_card(const char* id, const char* glyph, const char* title,
         if (changed)
             ImGui::PopStyleColor();
     }
-    end_card();
+    widget::end_card();
 }
 
 /** @brief Records the control just submitted as a target a capture can name. */
@@ -1702,11 +1531,11 @@ void draw_edit_controls(const render_input& input, window_ui_state& window) {
  * words for the instance and read as its tags, not as one more field of its
  * record.
  *
- * The shortcut control is here rather than in a card because it is an action
- * and not a fact about the row. It is drawn whenever the pane is, and Save and
- * Reset join it while the pane is editable, which is what keeps the two
- * controls of the edit on one line at the pane's head instead of floating over
- * the wall.
+ * The pane carries no control of its own any more. The shortcut toggle that
+ * used to sit at its top right lives in the toolbar, so what is left here is
+ * the instance's own report. Save and Reset join the head only while the pane
+ * is editable, which is what keeps the pair of them on one line at the pane's
+ * head instead of floating over the wall.
  */
 void draw_pane_header(const render_input& input, window_ui_state& window,
     const instance& row, const instance_status& status, bool editing) {
@@ -1746,17 +1575,16 @@ void draw_pane_header(const render_input& input, window_ui_state& window,
     ImGui::PopStyleColor();
 
     /*
-     * The controls are pushed against the pane's right edge, measured from the
-     * room left on the line rather than from the pane's own width, so the pair
-     * lands there whatever the picture and the name took.
+     * Save and Reset are pushed against the pane's right edge while the pane is
+     * editable, measured from the room left on the line rather than from the
+     * pane's own width, so the pair lands there whatever the picture and the
+     * name took. With no controls there is nothing to push, so the cursor is
+     * left where the head finished.
      */
-    const bool on_bar = shortcuts_bar_holds(
-        input.shortcuts, window_kind::accounts, row.id);
     const float icon_width = ImGui::GetFrameHeight();
-    const int control_count = editing ? 3 : 1;
-    const float controls = icon_width * static_cast<float>(control_count)
-        + ImGui::GetStyle().ItemSpacing.x
-            * static_cast<float>(control_count - 1);
+    const float controls = editing
+        ? icon_width * 2.0f + ImGui::GetStyle().ItemSpacing.x
+        : 0.0f;
     /*
      * The room is read after SameLine rather than before it. A text item leaves
      * the cursor at the start of the next line, so the available region read
@@ -1790,28 +1618,10 @@ void draw_pane_header(const render_input& input, window_ui_state& window,
         ImGui::SameLine();
     }
 
-    const float controls_room = ImGui::GetContentRegionAvail().x;
-    ImGui::SetCursorPosX(
-        ImGui::GetCursorPosX() + std::max(controls_room - controls, 0.0f));
-
-    /*
-     * The glyph says what the click does to the shortcuts bar and not what it
-     * does to the instance. A bin reads as "delete this instance" on the one
-     * control at the pane's top right, so taking the instance off the bar is
-     * drawn as the dismiss the icon set carries rather than as the destroy it
-     * also carries. The set has no pin or unpin concept of its own, which is
-     * why the pair is add and dismiss rather than add and unpin.
-     */
-    if (widget::icon_button("shortcut-toggle",
-            on_bar ? icon::cancel : icon::add,
-            on_bar ? "Take this instance off the shortcuts bar"
-                   : "Put this instance on the shortcuts bar")) {
-        input.commands.push(
-            shortcut_toggle_command(input, window_kind::accounts, row.id));
-    }
-
     if (editing) {
-        ImGui::SameLine();
+        const float controls_room = ImGui::GetContentRegionAvail().x;
+        ImGui::SetCursorPosX(
+            ImGui::GetCursorPosX() + std::max(controls_room - controls, 0.0f));
         draw_edit_controls(input, window);
     }
 }
@@ -1842,14 +1652,14 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
             column = 0;
             return pane_width;
         }
-        card_slot(column, columns);
+        widget::card_slot(column, columns);
         return width;
     };
 
     ImGui::SeparatorText("Identity");
     column = 0;
 
-    card_slot(column, columns);
+    widget::card_slot(column, columns);
     edit_card("edit-name", icon::instance, "Name",
         buffer_text(edit.name) != row.name, width, height, [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
@@ -1857,7 +1667,7 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
                 edit.name.size());
         });
 
-    card_slot(column, columns);
+    widget::card_slot(column, columns);
     edit_card("edit-labels", nullptr, "Labels",
         buffer_text(edit.labels)
             != joined_labels(input, labelling_owner::instance, row.id),
@@ -1874,7 +1684,7 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
     ImGui::SeparatorText("Connection");
     column = 0;
 
-    card_slot(column, columns);
+    widget::card_slot(column, columns);
     edit_card("edit-host", icon::link, "Host",
         buffer_text(edit.host) != address.host
             || buffer_text(edit.port) != address.port,
@@ -1890,7 +1700,7 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
                 edit.port.size());
         });
 
-    card_slot(column, columns);
+    widget::card_slot(column, columns);
     edit_card("edit-subject", nullptr, "Subject prefix",
         buffer_text(edit.subject) != row.subject_prefix, width, height, [&] {
             ImGui::SetNextItemWidth(-FLT_MIN);
@@ -1898,7 +1708,7 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
                 edit.subject.size());
         });
 
-    card_slot(column, columns);
+    widget::card_slot(column, columns);
     edit_card("edit-wire", nullptr, "Wire format",
         buffer_text(edit.wire_format) != row.wire_format, width, height, [&] {
             const std::string_view picked = buffer_text(edit.wire_format);
@@ -1965,10 +1775,11 @@ void draw_read_only_topics(const render_input& input, const instance& row,
                                const char* title, std::string value,
                                const char* caption, std::uint32_t colour = 0,
                                bool full_width = false) {
-        return card_spec{id, glyph, title, std::move(value), caption, colour,
-            full_width};
+        return widget::card_spec{id, glyph, title, std::move(value), caption,
+            colour, full_width};
     };
-    const auto add = [&](topic_spec& topic, const char* id, const char* glyph,
+    const auto add = [&](widget::topic_spec& topic, const char* id,
+                         const char* glyph,
                          const char* title, std::string value,
                          const char* caption, std::uint32_t colour = 0,
                          bool full_width = false) {
@@ -1978,7 +1789,7 @@ void draw_read_only_topics(const render_input& input, const instance& row,
             id, glyph, title, std::move(value), caption, colour, full_width));
     };
 
-    std::vector<topic_spec> topics;
+    std::vector<widget::topic_spec> topics;
 
     /*
      * The labels are not a card here. They are drawn at the pane's head beside
@@ -1986,7 +1797,7 @@ void draw_read_only_topics(const render_input& input, const instance& row,
      * more field of its record, and the same pills the list draws are used
      * there so a label is one colour on every surface.
      */
-    topic_spec identity;
+    widget::topic_spec identity;
     identity.title = "Identity";
     identity.cards.push_back(
         text_card("name", icon::instance, "Name", row.name,
@@ -1998,7 +1809,7 @@ void draw_read_only_topics(const render_input& input, const instance& row,
         "the illustration this instance names", 0, true);
     topics.push_back(std::move(identity));
 
-    topic_spec connection;
+    widget::topic_spec connection;
     connection.title = "Connection";
     add(connection, "host", icon::link, "Host",
         widget::join_host_port(widget::host_port{
@@ -2010,7 +1821,7 @@ void draw_read_only_topics(const render_input& input, const instance& row,
         "how the client writes its messages");
     topics.push_back(std::move(connection));
 
-    topic_spec certificates;
+    widget::topic_spec certificates;
     certificates.title = "Certificates and keys";
     add(certificates, "ca", nullptr, "CA certificate", row.tls_ca,
         "the authority that signed the others", 0, true);
@@ -2020,15 +1831,15 @@ void draw_read_only_topics(const render_input& input, const instance& row,
         "the private half of that certificate", 0, true);
     topics.push_back(std::move(certificates));
 
-    topic_spec diagnostics;
+    widget::topic_spec diagnostics;
     diagnostics.title = "Diagnostics";
     /*
      * The probe's own sentence comes first in this topic, ahead of the state it
      * explains. The state word already sits at the pane's head and on the
      * status bar, so the row a reader has to work down the wall for is the
-     * cause rather than the answer they have been given twice. That matters
-     * because the path cards now take a line each and the foot of this topic is
-     * what gives when the wall is taller than the pane.
+     * cause rather than the answer they have been given twice. The path cards
+     * take a line each, so this topic is the tallest of the wall and a reader
+     * reaches its foot by scrolling the pane.
      */
     if (!status.detail.empty()) {
         const bool failing = status.result.reach == reachability::unreachable
@@ -2081,33 +1892,12 @@ void draw_read_only_topics(const render_input& input, const instance& row,
     topics.push_back(std::move(diagnostics));
 
     /*
-     * The wall. A topic with two cards or more takes its heading; a topic with
-     * one folds into the row above it, because the heading names a set and a
-     * set of one is not a set.
-     *
-     * A full width card is given a line of its own, so a row part drawn ends
-     * there and the next card opens a new row. The cursor is already on the
-     * next line after the card before, which is why beginning one is a matter
-     * of not asking for SameLine.
+     * The wall is drawn from the shared card widget, so the Instances window
+     * and the Accounts window lay their cards out by one set of rules: a topic
+     * with two cards or more takes its heading, a topic with one folds into the
+     * row above it, and a full width card takes a line of its own.
      */
-    int column = 0;
-    for (const auto& topic : topics) {
-        if (topic.cards.empty())
-            continue;
-        if (topic.cards.size() > 1) {
-            ImGui::SeparatorText(topic.title);
-            column = 0;
-        }
-        for (const auto& card : topic.cards) {
-            if (card.full_width) {
-                column = 0;
-                draw_card(card, pane_width, height);
-                continue;
-            }
-            card_slot(column, columns);
-            draw_card(card, width, height);
-        }
-    }
+    widget::draw_topics(topics, pane_width, width, height, columns);
 }
 
 /**
@@ -2120,10 +1910,10 @@ void draw_read_only_topics(const render_input& input, const instance& row,
  * instead of a copy of it.
  *
  * The wall is sized from the pane, so the number of columns follows the window
- * the operator chose. The pane never scrolls, so a window too short for the
- * whole wall clips what falls past its foot rather than raising a bar; the
- * topics are ordered so what a reader loses first is the probe's measurement
- * and not the row's configuration.
+ * the operator chose. The pane scrolls when the wall is taller than it, so a
+ * window too short for every topic raises the theme's bar rather than clipping
+ * what falls past its foot, and the topics stay ordered as they are because a
+ * reader working down the wall still meets the record before its measurement.
  */
 void instance_details(const tree_leaf& leaf, const render_input& input,
     window_ui_state& window) {
@@ -2149,9 +1939,9 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
     }
 
     const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
-    const int columns = card_columns(pane_width);
-    const float width = card_width(pane_width, columns);
-    const float height = card_height();
+    const int columns = widget::card_columns(pane_width);
+    const float width = widget::card_width(pane_width, columns);
+    const float height = widget::card_height();
 
     draw_pane_header(input, window, row, status, editing);
 
@@ -2183,243 +1973,6 @@ void change_instance_field_for_capture(std::string_view field,
     std::string_view value) {
     pending_capture_field = std::string{field};
     pending_capture_value = std::string{value};
-}
-
-namespace {
-
-/**
- * @brief The status line's own metrics.
- *
- * Two text rows and a little air, measured from the current font rather than
- * fixed, so a theme that installs a larger face does not clip the message.
- *
- * Two and not one because the messages are sentences and the window can be
- * made narrow: a single row would either clip the end of the sentence or be
- * elided, and a fact that is worth announcing is worth announcing in full.
- * The second row costs nothing when the sentence fits on one.
- */
-constexpr int status_row_lines = 2;
-constexpr float status_row_extra = 8.0f;
-
-/**
- * @brief The rows an error gets, which is one more than a remark gets.
- *
- * The runtime's failures are whole sentences that name the record and the
- * reason -- "cannot remove folder instance-root: it is the root of the
- * instances tree" -- and the longest of them, the store's schema refusal,
- * names a path and two version numbers on top of that. Two rows elide it on a
- * narrow window, and an error that is elided is an error that will be read as
- * whatever fits. The extra row is reserved only while an error is on the bar,
- * so a window showing a remark is exactly the height it always was.
- */
-constexpr int status_error_row_lines = 3;
-
-}
-
-/**
- * @brief Draws the window's status line: the last thing that happened.
- *
- * The bar itself decides what is on it and whether its time is up; this only
- * gives it the frame's clock and the moment to age itself. Reading the clock
- * here rather than keeping one is what makes the fade frame-rate independent
- * without a timer anywhere in the interface.
- *
- * An error is drawn differently from a remark, and it is drawn differently in
- * two ways at once because the difference has to survive a glance at a line
- * that may be at the far side of the screen: a glyph in front of it and the
- * palette's red rather than the dim grey every other message uses. A remark
- * keeps the disabled text colour, because it is a thing that happened; red on
- * a fade would read as a second alarm going off.
- *
- * The red is the palette's own, named once in the theme rather than borrowed
- * from the lock's helper, which would tie a message about a refused save to a
- * fact about the lock.
- *
- * The line is wrapped short of the room the status bar keeps for the selected
- * instance's state, so a long sentence and the state never write over one
- * another. The state is drawn by the caller rather than here, because this
- * function knows about messages and the caller knows which instance is chosen.
- */
-void draw_status_line(widget::status_bar& status, std::int64_t now_ns,
-    float reserved_width) {
-    status.advance(now_ns);
-
-    const bool error =
-        status.severity() == widget::status_severity::error;
-
-    /*
-     * The fade is a style alpha rather than a colour of its own, so the line
-     * keeps the interface's disabled text colour on the way out. A message
-     * that changed colour as it went would read as a second message. An error
-     * never fades, so it keeps its red for as long as it is on the bar.
-     */
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
-
-    /*
-     * An error is white behind its red glyph rather than the disabled grey a
-     * remark gets. Disabled grey is what an interface uses for something it is
-     * not offering, and a failure the operator has to act on is the opposite
-     * of that.
-     */
-    float glyph_width = 0.0f;
-    if (error) {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
-        ImGui::TextUnformatted(hedgr::ui::icon::error);
-        ImGui::PopStyleColor();
-        glyph_width =
-            ImGui::GetItemRectSize().x + ImGui::GetStyle().ItemSpacing.x;
-        ImGui::SameLine(glyph_width);
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    }
-
-    /*
-     * The message is a selectable value like the pane's fields, so a failure
-     * can be dragged across and copied out of the bar as well as read in it.
-     * The box is given its whole wrapped height and the foot keeps its fixed
-     * number of rows, so a sentence longer than the foot is clipped by the foot
-     * and never given a scrollbar. That is the visible line count the drawn
-     * text already had, with the selection added.
-     */
-    const float wrap_width = std::max(
-        ImGui::GetContentRegionAvail().x - reserved_width
-            - ImGui::GetStyle().ScrollbarSize,
-        1.0f);
-    widget::text_value("status", status.message(), wrap_width);
-
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
-}
-
-/**
- * @brief How tall the window's foot is, whether or not anything is on it.
- *
- * Counted from the font rather than fixed, so a theme that installs a larger
- * face gets a foot that still fits its own text.
- */
-[[nodiscard]] float status_foot_height(const widget::status_bar& status) {
-    const int rows = status.severity() == widget::status_severity::error
-        ? status_error_row_lines
-        : status_row_lines;
-    return ImGui::GetTextLineHeight() * static_cast<float>(rows)
-        + status_row_extra;
-}
-
-/**
- * @brief Measures the foot of the window and draws the line into it.
- *
- * Both halves are needed and the split is the point. Reserving the space first
- * is what stops the table above from changing height as messages come and go:
- * a table that grew by two rows whenever something was announced would move
- * the row under the pointer at the worst possible moment. Drawing into a child
- * of its own is what pins the line to the window's foot instead of leaving it
- * wherever the browser happened to stop, which is what put it in the middle of
- * the window when it was drawn straight after the table.
- *
- * The reservation is always made, so nothing below knows whether there is a
- * message; the line is drawn only when there is one.
- *
- * The selected instance's state is drawn at the foot's right end, in the state
- * colour and the state's own word. The reference carries its target's state at
- * one end of its status bar, and a reader looking at the window rather than at
- * the details pane still needs the one fact the pane was opened for. The name
- * travels with the word because the bar is the one surface that has to say
- * which instance a colour belongs to.
- */
-
-void draw_status_foot(widget::status_bar& status, std::int64_t now_ns,
-    const render_input& input, const window_ui_state& state) {
-    const float height = status_foot_height(status);
-
-    /*
-     * The reservation: an empty child of exactly the foot's height, which
-     * advances the cursor past the foot and leaves the line below it with the
-     * window's whole width.
-     */
-    ImGui::BeginChild("##hedgr-status-space", ImVec2(0.0f, height),
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-    ImGui::EndChild();
-
-    const float bottom = ImGui::GetWindowHeight() - height
-        - ImGui::GetStyle().WindowPadding.y;
-    ImGui::SetCursorPosY(bottom);
-
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-        ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
-    ImGui::Separator();
-    ImGui::PopStyleVar();
-
-    /*
-     * The foot sits on the reference's status surface rather than on the
-     * panel's, so the line reads as a statement about the window rather than
-     * as the last row of its contents. ImGui has no status colour, which is
-     * why the surface is pushed over ChildBg and popped again below.
-     */
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, hedgr::ui::theme::status_surface());
-    ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
-
-    /*
-     * The selected instance's state, read from the probe table by the selection
-     * the browser holds. An instance the store does not hold, or none at all,
-     * has no state to report and the bar is the message alone.
-     */
-    std::string state_name;
-    std::string state_word;
-    ImU32 state_colour = 0;
-    if (!state.browser.selected_leaf.empty()) {
-        const auto handle = input.instances.find(state.browser.selected_leaf);
-        if (handle) {
-            const auto probe = status_of(input, state.browser.selected_leaf);
-            state_name = input.instances.get(*handle)->name;
-            state_word = theme::probe_state_word(probe.result, probe.observed);
-            state_colour =
-                theme::probe_state_colour(probe.result, probe.observed);
-        }
-    }
-
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float state_width = state_word.empty()
-        ? 0.0f
-        : ImGui::CalcTextSize(state_name.c_str()).x
-            + ImGui::CalcTextSize(state_word.c_str()).x + style.ItemSpacing.x;
-
-    /*
-     * The status line, and nothing ahead of it. The lock control used to sit
-     * here, at the left of the foot, and it moved into the window's one
-     * toolbar: the foot is where the runtime's messages are read, and a
-     * control that changes the state of the whole window does not belong in
-     * the middle of a sentence about a probe.
-     */
-    const float state_y = ImGui::GetCursorPosY();
-    const float state_x = ImGui::GetCursorPosX()
-        + ImGui::GetContentRegionAvail().x - state_width;
-    if (!status.empty())
-        draw_status_line(status, now_ns, state_width);
-
-    if (!state_word.empty()) {
-        /*
-         * The state is put back on the foot's first line and against its right
-         * edge, and the message above was wrapped short of the room it takes,
-         * so the two share the bar without either being written over.
-         */
-        ImGui::SetCursorPos(ImVec2(state_x, state_y));
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(state_name.c_str());
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(state_colour));
-        ImGui::TextUnformatted(state_word.c_str());
-        ImGui::PopStyleColor();
-    }
-
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
 }
 
 void render_instances_window(hedgr::model::state::window_handle handle,
@@ -2567,13 +2120,30 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         draw_discard_warning(state);
 
     /*
+     * The selected instance's state, read from the probe table by the
+     * selection the browser holds. An instance the store does not hold, or
+     * none at all, has no state to report and the bar is the message alone.
+     */
+    widget::foot_state foot;
+    if (!state.browser.selected_leaf.empty()) {
+        const auto handle = input.instances.find(state.browser.selected_leaf);
+        if (handle) {
+            const auto probe = status_of(input, state.browser.selected_leaf);
+            foot.name = input.instances.get(*handle)->name;
+            foot.word = theme::probe_state_word(probe.result, probe.observed);
+            foot.colour =
+                theme::probe_state_colour(probe.result, probe.observed);
+        }
+    }
+
+    /*
      * The status bar, last, so that its reservation is made after everything
      * else has taken the height it needs and its own foot is measured back
      * from the window's edge. It carries the runtime's messages and nothing
      * else: the lock control used to live here and moved into the window's one
      * toolbar, so the bar is read and not operated.
      */
-    draw_status_foot(status, input.now_ns, input, state);
+    widget::draw_status_foot(status, input.now_ns, foot);
 
     ImGui::PopID();
 }

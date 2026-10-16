@@ -923,9 +923,12 @@ leaf_of(const widget::browser_model& model, std::string_view id) {
  * @brief The details pane, where a host asked for one.
  *
  * The list's place, taken by the host's own view of one entry. The pane is
- * sized to the space it is given and never scrolls, because the details are a
- * fixed set of fields rather than a collection: a scrollbar here would be a
- * second thing to drag on a window whose shape the operator already chose.
+ * sized to the space it is given and scrolls when the host draws more than
+ * fits. It used to clip instead, on the reasoning that a pane which scrolls
+ * hides things, and that reasoning broke on the card wall: at 1920x1080 a
+ * selected instance is taller than the pane, so the probes and the failure
+ * Detail sat below the fold with no way to reach them. A bar the operator can
+ * drag, and the wheel over the pane, are what make every field reachable.
  *
  * A leaf selection is what the pane reports on, which is the rule the list
  * already followed, so a folder selection and an empty one read the same way.
@@ -939,15 +942,15 @@ void draw_details_pane(const widget::browser_model& model,
     widget::browser_state& state = window.browser;
 
     /*
-     * NoScrollbar as well as the measured size, so a pane whose host draws more
-     * than fits shows a clip in a frame rather than a bar the operator has to
-     * drag. The child is given the exact rectangle the layout computed, which is
-     * what keeps the content box and the pane the same box.
+     * The child is given the exact rectangle the layout computed and is left
+     * with its own scrolling, so a host that draws more than fits raises the
+     * theme's bar at the pane's right edge and answers the wheel over its own
+     * body. The pane is bordered rather than sized to the content, so the bar
+     * belongs to the pane and not to the window around it, and a card is laid
+     * out inside the room the bar leaves rather than under it.
      */
     if (!ImGui::BeginChild("##browser-details", ImVec2(width, height),
-            ImGuiChildFlags_Borders,
-            ImGuiWindowFlags_NoScrollbar
-                | ImGuiWindowFlags_NoScrollWithMouse)) {
+            ImGuiChildFlags_Borders)) {
         ImGui::EndChild();
         return;
     }
