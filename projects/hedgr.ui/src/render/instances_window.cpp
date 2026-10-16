@@ -2283,6 +2283,13 @@ void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
     ImGui::Separator();
     ImGui::PopStyleVar();
 
+    /*
+     * The foot sits on the reference's status surface rather than on the
+     * panel's, so the line reads as a statement about the window rather than
+     * as the last row of its contents. ImGui has no status colour, which is
+     * why the surface is pushed over ChildBg and popped again below.
+     */
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, hedgr::ui::theme::status_surface());
     ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
         ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
@@ -2297,6 +2304,7 @@ void draw_status_foot(widget::status_bar& status, std::int64_t now_ns) {
         draw_status_line(status, now_ns);
 
     ImGui::EndChild();
+    ImGui::PopStyleColor();
 }
 
 void render_instances_window(hedgr::model::state::window_handle handle,

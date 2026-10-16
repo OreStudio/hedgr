@@ -101,6 +101,12 @@ TEST_CASE("every window kind has an icon", "[theme]") {
  * test exists to catch. The expected values are literal rather than read from
  * the palette functions the mapping shares, so that moving the mapping away
  * from red-for-unreachable has to be a deliberate edit here as well.
+ *
+ * The green and the amber moved when the palette was resampled from the
+ * reference screenshot, because those are the two meanings the reference has
+ * colours for. The grey and the two reds did not, because the reference draws
+ * neither a state it does not know nor a failure, and inventing values for
+ * them would be reading the image for something that is not in it.
  */
 TEST_CASE("a probe result maps to the colour and word a row shows",
     "[theme]") {
@@ -125,7 +131,7 @@ TEST_CASE("a probe result maps to the colour and word a row shows",
     bootstrapping.reach = reachability::reachable;
     bootstrapping.ready = readiness::bootstrapping;
     REQUIRE(probe_state_colour(bootstrapping, true)
-        == IM_COL32(255, 193, 7, 255));
+        == IM_COL32(240, 193, 87, 255));
     REQUIRE(std::string{probe_state_word(bootstrapping, true)}
         == "bootstrapping");
 
@@ -144,7 +150,7 @@ TEST_CASE("a probe result maps to the colour and word a row shows",
     probe_result ready;
     ready.reach = reachability::reachable;
     ready.ready = readiness::ready;
-    REQUIRE(probe_state_colour(ready, true) == IM_COL32(0, 200, 83, 255));
+    REQUIRE(probe_state_colour(ready, true) == IM_COL32(106, 233, 149, 255));
     REQUIRE(std::string{probe_state_word(ready, true)} == "ready");
 }
 

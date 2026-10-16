@@ -31,13 +31,27 @@
 namespace hedgr::ui::theme {
 
 /**
- * @brief Applies the dark, dense trading-desk style.
+ * @brief Applies the dark style read off the reference screenshot.
  *
- * Call once, after the ImGui context exists. The palette is deliberately
- * muted and semi-transparent so the photographic background reads through it:
- * a panel is a pane of smoked glass over the desk, not an opaque card.
+ * Call once, after the ImGui context exists. The palette is sampled from
+ * docs/samples rather than chosen, and each value in the implementation names
+ * the region of that image it was read from. The surfaces are opaque, because
+ * the reference is an opaque application on a near black ground and a
+ * translucent panel would composite with the photographic background behind it
+ * and land on a colour nobody sampled.
  */
 HEDGR_UI_EXPORT void apply_theme();
+
+/**
+ * @brief The surface a status line sits on.
+ *
+ * The reference runs a strip along the foot of the window that is darker than
+ * the panel above it rather than lighter, which is what tells a reader the
+ * line is about the window and not part of its contents. ImGui has no style
+ * colour of its own for a status foot, so a widget that draws one pushes this
+ * over ImGuiCol_ChildBg for the duration and pops it afterwards.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 status_surface() noexcept;
 
 /**
  * @brief The palette's red, for anything that reports a failure.
@@ -48,6 +62,12 @@ HEDGR_UI_EXPORT void apply_theme();
  * below, because a failure is not a fact about a lock or a session and the
  * next surface that reports one should not have to pick a neighbour to borrow
  * a colour from. The helpers agree on this value; this is the value.
+ *
+ * The reference screenshot shows no red anywhere, so this could not be
+ * resampled and keeps the value it had. That is deliberate and not an
+ * oversight, because red is the one meaning the reference never has to draw,
+ * and borrowing its amber or its green for a refusal would make the two the
+ * same statement.
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
@@ -61,6 +81,10 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
  * what a deployment partway through setting itself up uses, and the two are
  * unrelated: one is a fact about a machine and the other is something the
  * operator has just done.
+ *
+ * The restyle left this value alone. The reference uses no cyan, so there was
+ * nothing to sample, and the argument above is what the colour is for rather
+ * than what it looks like, so a new palette does not change it.
  */
 inline constexpr ImU32 edit_changed_colour = IM_COL32(0, 188, 212, 255);
 

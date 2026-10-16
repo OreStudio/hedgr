@@ -628,7 +628,13 @@ void application::render_loop(GLFWwindow* window) {
         int display_h = 0;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);
-        glClearColor(0.05f, 0.05f, 0.06f, 1.0f);
+        /*
+         * The reference's near black ground, sampled from the gap between its
+         * two panels. The windows are opaque and sit a shade above it, so this
+         * is what shows at the edges of the desk rather than through the
+         * panels.
+         */
+        glClearColor(0.0627f, 0.0667f, 0.0745f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
