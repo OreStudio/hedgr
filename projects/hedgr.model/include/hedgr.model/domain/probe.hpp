@@ -22,6 +22,7 @@
 
 #include "hedgr.model/export.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -64,6 +65,39 @@ enum class readiness : std::uint8_t {
 };
 
 /**
+ * @brief What a deployment answered about its own setup.
+ *
+ * The bootstrap read is the one question that can be asked before anybody
+ * signs in, and its answer is three facts rather than one sentence. They are
+ * kept as the deployment's own fields so the pane can show each on its own row
+ * and so a missing fact is absent rather than the word "unknown" inside a
+ * sentence nobody can copy a field out of.
+ */
+struct bootstrap_status final {
+    /**
+     * @brief Whether the deployment still needs its first administrator.
+     *
+     * True means setup is incomplete. It is the deployment's own answer, which
+     * is the same fact its readiness is derived from.
+     */
+    bool in_bootstrap_mode = false;
+
+    /** @brief Whether the deployment has a tenant somebody set up. */
+    bool has_tenant = false;
+
+    /**
+     * @brief The build the answering service runs, when it stated one.
+     *
+     * Absent rather than empty for a deployment that named no version, so the
+     * pane draws no version row rather than a blank one, which is the rule
+     * every other absent field follows. The flat sentence this replaced wrote
+     * the word "unknown" in its place, and an absent field carries the same
+     * fact without inventing a value the deployment never sent.
+     */
+    std::optional<std::string> version;
+};
+
+/**
  * @brief What one probe found, and when.
  *
  * A fact about a moment rather than a property of the instance, which is why
@@ -84,11 +118,25 @@ struct probe_result final {
     std::int64_t observed_at_ns = 0;
 
     /**
-     * @brief The low-level cause, for a tooltip.
+     * @brief The deployment's own bootstrap answer, when the read came back.
+     *
+     * One optional struct rather than three optional fields because the three
+     * are one answer: a bootstrap mode with no tenant flag beside it is a
+     * reading no deployment can produce, and a shape that allowed it would make
+     * the pane guess which half to trust. Presence is also what tells a
+     * structured answer apart from a failure, which is a sentence and has no
+     * fields at all.
+     */
+    std::optional<bootstrap_status> bootstrap;
+
+    /**
+     * @brief The free text that explains an unhealthy instance.
      *
      * This is where a reader finds out why an instance is unhealthy: the
-     * subject that had no responder, the address that refused, the sentence
-     * IAM sent. Empty when there is nothing to explain.
+     * subject that had no responder, the address that refused, the sentence IAM
+     * sent. It is the whole answer for a failure that never reached the
+     * structured read, and IAM's own remark beside the fields when one arrived,
+     * so an empty value is what says there is nothing to explain.
      */
     std::string detail;
 };

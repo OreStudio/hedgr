@@ -36,6 +36,7 @@
 #include <utility>
 
 using hedgr::model::domain::account;
+using hedgr::model::domain::bootstrap_status;
 using hedgr::model::domain::combine;
 using hedgr::model::domain::folder;
 using hedgr::model::domain::folder_tree;
@@ -104,6 +105,15 @@ using hedgr::model::state::window_table;
     result.latency_us = 4321;
     result.observed_at_ns = 99;
     result.detail = "no service is handling subject 'iam.v1.ops.bootstrap_status'";
+    /*
+     * A deployment that answered the bootstrap read, with a version it stated.
+     * This is the populated case, so the table test can prove the structured
+     * answer survives the round trip rather than only its empty default.
+     */
+    result.bootstrap = bootstrap_status{
+        .in_bootstrap_mode = false,
+        .has_tenant = true,
+        .version = std::string{"capture build"}};
     return result;
 }
 
@@ -465,10 +475,44 @@ TEST_CASE("a probe result is read back by the handle it was set with",
     REQUIRE(probes.get(handle)->detail ==
         "no service is handling subject 'iam.v1.ops.bootstrap_status'");
 
+    /*
+     * The structured answer comes back whole, field for field, which is what
+     * the details pane draws its rows from. The detail sentence and the fields
+     * travel together on an answered probe, because IAM's own remark is the
+     * sentence and its state is the fields.
+     */
+    REQUIRE(probes.get(handle)->bootstrap.has_value());
+    REQUIRE(probes.get(handle)->bootstrap->in_bootstrap_mode == false);
+    REQUIRE(probes.get(handle)->bootstrap->has_tenant == true);
+    REQUIRE(probes.get(handle)->bootstrap->version.has_value());
+    REQUIRE(*probes.get(handle)->bootstrap->version == "capture build");
+
     /* An instance no probe has answered for has nothing to report. */
     const auto untouched = instances.upsert(make_instance("inst-2", "Other"));
     REQUIRE(probes.get(untouched) == nullptr);
     REQUIRE(probes.size() == 1);
+}
+
+TEST_CASE("a probe result without a bootstrap answer keeps its fields absent",
+    "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto handle = instances.upsert(make_instance("inst-3", "Refused"));
+    probe_result refused;
+    refused.reach = reachability::unreachable;
+    refused.ready = readiness::unknown;
+    refused.detail = "connection refused";
+    /*
+     * No bootstrap answer at all. This is the free-text case: the sentence is
+     * the whole report and the pane must not read the struct's defaults as a
+     * deployment that answered false to everything.
+     */
+    probes.set(handle, refused);
+
+    REQUIRE(probes.get(handle) != nullptr);
+    REQUIRE_FALSE(probes.get(handle)->bootstrap.has_value());
+    REQUIRE(probes.get(handle)->detail == "connection refused");
 }
 
 TEST_CASE("a probe result does not follow a handle into the next occupant",

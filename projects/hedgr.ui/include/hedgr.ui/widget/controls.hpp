@@ -20,7 +20,10 @@
 #ifndef HEDGR_UI_WIDGET_CONTROLS_HPP
 #define HEDGR_UI_WIDGET_CONTROLS_HPP
 
+#include "hedgr.ui/icon/icons.hpp"
 #include "imgui.h"
+#include <string>
+#include <string_view>
 
 namespace hedgr::ui::widget {
 
@@ -66,6 +69,55 @@ namespace hedgr::ui::widget {
  */
 [[nodiscard]] inline float width_before(float height) noexcept {
     return -(height + ImGui::GetStyle().ItemInnerSpacing.x);
+}
+
+/**
+ * @brief Puts @p value on the system clipboard, and says whether it did.
+ *
+ * The clipboard is ImGui's, which its backend backs with the window system's,
+ * so what is copied here is what another program pastes. An empty value copies
+ * nothing, which is what keeps a copy of an absent field from silently
+ * replacing whatever the operator already had.
+ *
+ * The two lines of a read-only field that cannot be selected come to this: a
+ * person diagnosing a deployment wants a host name or a failure sentence in a
+ * terminal, and the buffer has to leave the process for that to happen.
+ */
+[[nodiscard]] inline bool copy_to_clipboard(std::string_view value) {
+    if (value.empty())
+        return false;
+    ImGui::SetClipboardText(std::string{value}.c_str());
+    return true;
+}
+
+/**
+ * @brief A compact control that copies one read-only value.
+ *
+ * Smaller than the toolbar's icons, because it sits inside a details row whose
+ * height belongs to the value's text and a full frame height button would make
+ * every row as tall as a toolbar. The glyph is the copy drawing the catalogue
+ * keeps, reused under its Hedgr name rather than given a new name, since one
+ * picture for one action is what the icon set is for.
+ *
+ * The tooltip names the value as well as the action. A column of identical
+ * glyphs says nothing about which of them copies which field, and this pane has
+ * more than one.
+ *
+ * @param id ImGui id, unique among the controls of one window.
+ * @param value The value to copy, which is left alone when empty.
+ * @param name What the value is called, for the tooltip.
+ * @return Whether the control was pressed and the copy made.
+ */
+[[nodiscard]] inline bool copy_button(const char* id, std::string_view value,
+    const char* name) {
+    if (value.empty())
+        return false;
+
+    ImGui::PushID(id);
+    const bool pressed = ImGui::SmallButton(icon::duplicate);
+    ImGui::PopID();
+    ImGui::SetItemTooltip("Copy %s", name);
+    return pressed && copy_to_clipboard(value);
 }
 
 }

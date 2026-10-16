@@ -1082,6 +1082,12 @@ void instance_row_labels(const tree_leaf& leaf, const render_input& input,
  *
  * A field whose value is empty is not drawn at all, so every row is a fact the
  * model holds rather than a blank one pretending to be one.
+ *
+ * The value is text and stays text, so it selects nothing and copies nothing on
+ * its own. The copy control in the row's last column is the way out of the
+ * window: the operator asked for a host name or a failure sentence to be
+ * takeable to a terminal, and a button that names itself on hover is the
+ * affordance that works for a one-word value and a wrapped sentence alike.
  */
 void detail_row(const char* glyph, const char* name, std::string_view value) {
     if (value.empty())
@@ -1107,6 +1113,9 @@ void detail_row(const char* glyph, const char* name, std::string_view value) {
     if (ImGui::IsItemHovered())
         ImGui::SetItemTooltip("%.*s", static_cast<int>(value.size()),
             value.data());
+
+    ImGui::TableNextColumn();
+    static_cast<void>(widget::copy_button(name, value, name));
 }
 
 /**
@@ -1132,6 +1141,9 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
     ImGui::TextUnformatted(word);
     ImGui::PopStyleColor();
+
+    ImGui::TableNextColumn();
+    static_cast<void>(widget::copy_button(name, word, name));
 }
 
 /**
@@ -1148,6 +1160,12 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
  * The glyph and field columns refuse resizing because their width is the
  * alignment and not a preference. A drag that moved one table's column would
  * break the value column in two.
+ *
+ * The fourth column is the copy control and is deliberately not part of the
+ * value: a value long enough to clip would otherwise push its own copy button
+ * off the pane, and the failure sentence is exactly that value. A column of its
+ * own keeps every copy button at the pane's right edge, in the same place on
+ * every row.
  */
 void setup_detail_columns() {
     constexpr std::string_view widest_field = "TLS client certificate";
@@ -1161,27 +1179,9 @@ void setup_detail_columns() {
         ImGui::CalcTextSize(widest_field.data(),
             widest_field.data() + widest_field.size()).x + padding);
     ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
-}
-
-/**
- * @brief Whether IAM said the deployment is still setting itself up.
- *
- * The readiness says the same thing in its own word, and the plain yes or no is
- * written beside it because "is this deployment still bootstrapping" is a
- * question an operator asks on its own. A deployment whose IAM never answered
- * has not answered no. It has said nothing, and the third word keeps an outage
- * from being read as a setup that is under way.
- */
-[[nodiscard]] const char* bootstrap_word(readiness value) {
-    switch (value) {
-    case readiness::bootstrapping:
-        return "yes";
-    case readiness::ready:
-        return "no";
-    case readiness::unknown:
-        return "unknown";
-    }
-    return "unknown";
+    ImGui::TableSetupColumn("##copy", fixed,
+        ImGui::CalcTextSize(icon::duplicate).x
+            + ImGui::GetStyle().FramePadding.x * 2.0f + padding);
 }
 
 /**
@@ -1197,8 +1197,12 @@ void setup_detail_columns() {
  * red or an amber tree row at a glance, without a wall of red to read the
  * sentence through. A healthy instance's sentence gets no wash, because there
  * is nothing wrong for the pane to point at.
+ *
+ * The sentence is also the one value here that cannot be shortened to fit, and
+ * the reason the copy control exists at all: a failure an operator cannot get
+ * out of the window is a failure they cannot report in full.
  */
-void probe_detail_row(std::string_view detail, bool failing,
+void probe_detail_row(const char* name, std::string_view detail, bool failing,
     std::uint32_t colour) {
     if (detail.empty())
         return;
@@ -1211,7 +1215,7 @@ void probe_detail_row(std::string_view detail, bool failing,
         failing ? "What the probe could not do" : "What the probe reported");
 
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted("Detail");
+    ImGui::TextUnformatted(name);
 
     ImGui::TableNextColumn();
     if (failing) {
@@ -1234,6 +1238,9 @@ void probe_detail_row(std::string_view detail, bool failing,
         ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
     ImGui::TextWrapped("%.*s", static_cast<int>(detail.size()), detail.data());
     ImGui::PopTextWrapPos();
+
+    ImGui::TableNextColumn();
+    static_cast<void>(widget::copy_button(name, detail, name));
 }
 
 /**
@@ -1259,32 +1266,45 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     const auto& row = *input.instances.get(*handle);
     const auto status = status_of(input, row.id);
 
+    /*
+     * The environment's own picture, when the instance names one, on a line of
+     * its own above the fields. It used to share a table row with the
+     * Environment field, drawn into the glyph column, and that column is a
+     * glyph wide: a table cell clips its content to the column's own rectangle,
+     * so the square asked for here was cut to a vertical slice. The pane is
+     * narrow, so the picture is drawn outside the columns where it gets the
+     * pane's whole width, and it is sized to fit even the pane's own floor of
+     * two hundred pixels.
+     *
+     * Ninety six pixels is picked from the asset, which is a two hundred and
+     * fifty six pixel square: at a bit over a third it stays legible, it is
+     * about six rows of the pane's text tall so it does not swallow the fields
+     * under it, and it leaves the value column the width the values need. The
+     * illustration is optional; an instance with no key draws no picture and no
+     * empty slot.
+     */
+    const std::uint64_t picture = instance_icon_texture(input, row.id);
+    if (picture != 0) {
+        const float side = std::min(96.0f, ImGui::GetContentRegionAvail().x);
+        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
+        ImGui::SetItemTooltip("%s", row.icon_key.c_str());
+    }
+
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit
         | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
-    if (!ImGui::BeginTable("##instance-details", 3, flags))
+    if (!ImGui::BeginTable("##instance-details", 4, flags))
         return;
 
     setup_detail_columns();
 
     /*
-     * The environment's own picture, when the instance names one. It is drawn
-     * first because recognising which deployment this is happens before
-     * reading anything about it, and an operator who chose an illustration for
-     * a row asked for it to be the thing they see. An instance with no key
-     * draws no row at all rather than an empty slot, because the illustration
-     * is optional and its absence is honest.
+     * The environment key as an ordinary field row, below the picture and lined
+     * up with the rest of the pane rather than sharing the picture's line. The
+     * key is a fact the model holds whether or not the asset for it was found,
+     * so this row is drawn whenever the key is there and the picture above is
+     * drawn only when the texture is.
      */
-    const std::uint64_t picture = instance_icon_texture(input, row.id);
-    if (picture != 0) {
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(48.0f, 48.0f));
-        ImGui::SetItemTooltip("%s", row.icon_key.c_str());
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted("Environment");
-        ImGui::TableNextColumn();
-        ImGui::TextUnformatted(row.icon_key.c_str());
-    }
+    detail_row(nullptr, "Environment", row.icon_key);
 
     detail_row(icon::instance, "Name", row.name);
 
@@ -1362,7 +1382,7 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     ImGui::Spacing();
     ImGui::SeparatorText("Probe");
 
-    if (!ImGui::BeginTable("##instance-probe", 3, flags))
+    if (!ImGui::BeginTable("##instance-probe", 4, flags))
         return;
     setup_detail_columns();
 
@@ -1389,10 +1409,23 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
         hedgr::model::domain::to_string(status.result.ready));
 
     /*
-     * No glyph, because the set has no bootstrap concept and a checkmark would
-     * say the field had passed rather than what it answers.
+     * The deployment's own bootstrap answer, one field per row, and only for
+     * the fields it stated. The old pane flattened this answer into a sentence
+     * and showed it whole, which made a reader pick the deployment's version
+     * out of a line of prose and left nothing to copy but the line. A version
+     * the deployment did not name draws no row, which is the rule the TLS paths
+     * above already follow. No glyph, because the set has no bootstrap concept
+     * and a checkmark would say the field had passed rather than what it
+     * answers.
      */
-    detail_row(nullptr, "Bootstrap mode", bootstrap_word(status.result.ready));
+    if (status.result.bootstrap) {
+        const auto& bootstrap = *status.result.bootstrap;
+        detail_row(nullptr, "Bootstrap mode",
+            bootstrap.in_bootstrap_mode ? "yes" : "no");
+        detail_row(nullptr, "Has tenant", bootstrap.has_tenant ? "yes" : "no");
+        if (bootstrap.version)
+            detail_row(nullptr, "Version", *bootstrap.version);
+    }
 
     if (status.result.latency_us > 0)
         detail_row(icon::clock, "Latency",
@@ -1412,13 +1445,17 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
                     input.now_ns - status.result.observed_at_ns) / 1.0e9));
 
     /*
-     * The cause last, and set apart from the words above it. Only a deployment
-     * that is not ready has something wrong for the wash to point at, so a
-     * ready row's sentence is drawn plainly.
+     * The free text last, and set apart from the words above it. A probe that
+     * never reached the bootstrap read has no fields at all and this is its
+     * whole answer, which is why it keeps the name Detail; a deployment that
+     * did answer puts its own remark here, and the name says whose it is. The
+     * presence of the structured answer is what tells the two apart, so the
+     * pane never has to guess which kind of sentence it is holding.
      */
     const bool failing = status.result.reach == reachability::unreachable
         || status.result.ready != readiness::ready;
-    probe_detail_row(status.detail, failing,
+    probe_detail_row(status.result.bootstrap ? "IAM message" : "Detail",
+        status.detail, failing,
         theme::probe_state_colour(status.result, true));
 
     ImGui::EndTable();
@@ -1521,6 +1558,20 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
      * never fades, so it keeps its red for as long as it is on the bar.
      */
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
+
+    /*
+     * The copy control comes first, at a fixed left position, and the message
+     * wraps to its right. The line can be a three line sentence and the button
+     * placed after it would sit at the end of whichever line the sentence
+     * happened to finish on; pinned here it is in the same place for a remark
+     * and for a failure, and it copies the whole of either. This is where the
+     * other read-only text in the interface leads: a runtime failure is exactly
+     * the sentence an operator pastes into a bug report, so it gets the same
+     * affordance the details pane rows do.
+     */
+    static_cast<void>(widget::copy_button("status-copy", status.message(),
+        "the status message"));
+    ImGui::SameLine();
 
     /*
      * An error is white behind its red glyph rather than the disabled grey a

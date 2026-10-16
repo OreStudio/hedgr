@@ -134,6 +134,25 @@ struct event final {
     domain::readiness ready = domain::readiness::unknown;
 
     /**
+     * @brief Whether the bootstrap read returned, for probe_result.
+     *
+     * The structured answer below is only meaningful when this is set. A
+     * broker that never opened and an IAM that never answered both leave it
+     * clear, and the two are told apart from a deployment that answered by
+     * this flag rather than by reading a default false as an answer.
+     */
+    bool bootstrap_answered = false;
+
+    /**
+     * @brief The deployment's own bootstrap answer, for probe_result.
+     *
+     * Carried whole rather than flattened into the @c detail sentence, because
+     * the pane shows each field on its own row. A field the deployment did not
+     * state is left absent inside this, so the pane draws no row for it.
+     */
+    domain::bootstrap_status bootstrap;
+
+    /**
      * @brief Where the lock stands, for the store_* kinds.
      *
      * Sent rather than inferred so the interface draws the state the runtime

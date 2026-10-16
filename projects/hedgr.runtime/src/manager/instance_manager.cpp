@@ -2817,6 +2817,14 @@ void instance_manager::apply_probe_result(const event::event& ev) {
     result.latency_us = ev.latency_us;
     result.observed_at_ns = steady_now_ns();
     result.detail = ev.detail;
+    /*
+     * The flag is what keeps a deployment that answered from wearing the
+     * defaults of one that never did: only a probe that reached the read
+     * carries a structured answer, and everything else is the sentence in
+     * detail.
+     */
+    if (ev.bootstrap_answered)
+        result.bootstrap = ev.bootstrap;
     probes_.set(*handle, std::move(result));
 
     /*

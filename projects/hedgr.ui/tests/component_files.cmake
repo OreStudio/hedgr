@@ -9,6 +9,7 @@
 #
 set(files
     "capture_tests.cpp"
+    "controls_tests.cpp"
     "render_tests.cpp"
     "status_bar_tests.cpp"
 )

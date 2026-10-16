@@ -29,11 +29,10 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstdint>
-#include <format>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
-#include <string_view>
 #include <utility>
 
 namespace hedgr::runtime::worker {
@@ -45,14 +44,6 @@ namespace event = hedgr::model::event;
 namespace transport = hedgr::session::transport;
 
 using hedgr::model::command::event_queue;
-
-/**
- * @brief The subject a probe asks, spelled once so a reader sees the question.
- *
- * The deployment-relative spelling, which is what the transport prefixes; the
- * full wire name is only ever built by the transport itself.
- */
-constexpr std::string_view bootstrap_subject = "iam.v1.ops.bootstrap_status";
 
 /** @brief How long the attempt has taken so far, in microseconds. */
 [[nodiscard]] std::int64_t elapsed_us(
@@ -74,26 +65,29 @@ constexpr std::string_view bootstrap_subject = "iam.v1.ops.bootstrap_status";
 }
 
 /**
- * @brief What a deployment said about itself, as one line.
+ * @brief The deployment's own bootstrap answer, as the model holds it.
  *
- * Stated in the deployment's own field names, because the reader of a tooltip
- * is usually the person who will go and look at that deployment.
+ * The three fields move across unchanged; the only decision made here is that
+ * a version the deployment did not state stays absent rather than becoming an
+ * empty string, because the pane draws a row only for a fact that is there.
+ * The word "unknown" the old flat sentence wrote in its place was a value the
+ * deployment never sent.
  */
-[[nodiscard]] std::string describe(const transport::bootstrap_status& status) {
-    auto detail = std::format(
-        "{}: in bootstrap mode = {}, has tenant = {}, version = {}",
-        bootstrap_subject, status.is_in_bootstrap_mode ? "true" : "false",
-        status.has_tenant ? "true" : "false",
-        status.version.empty() ? "unknown" : status.version);
-    if (!status.message.empty())
-        detail.append(std::format("; {}", status.message));
-    return detail;
+[[nodiscard]] domain::bootstrap_status answer_from(
+    const transport::bootstrap_status& status) {
+    domain::bootstrap_status answer;
+    answer.in_bootstrap_mode = status.is_in_bootstrap_mode;
+    answer.has_tenant = status.has_tenant;
+    if (!status.version.empty())
+        answer.version = status.version;
+    return answer;
 }
 
 /** @brief Posts one probe's outcome, tagged with the instance it describes. */
 void push_result(event_queue& events, const domain::instance& instance,
     domain::reachability reach, domain::readiness ready,
-    std::int64_t latency_us, std::string detail) {
+    std::int64_t latency_us, std::string detail,
+    std::optional<domain::bootstrap_status> bootstrap = std::nullopt) {
     event::event fact;
     fact.kind = event::event_kind::probe_result;
     fact.instance_id = instance.id;
@@ -101,6 +95,15 @@ void push_result(event_queue& events, const domain::instance& instance,
     fact.ready = ready;
     fact.latency_us = latency_us;
     fact.detail = std::move(detail);
+    if (bootstrap) {
+        /*
+         * The flag is what says the fields below are the deployment's answer
+         * rather than their defaults, because a deployment that answered false
+         * and one that never answered both carry a false in the mode field.
+         */
+        fact.bootstrap_answered = true;
+        fact.bootstrap = std::move(*bootstrap);
+    }
     events.push(std::move(fact));
 }
 
@@ -180,7 +183,7 @@ boost::asio::awaitable<void> run_probe(probe_job job, event_queue& events,
     push_result(events, job.instance, domain::reachability::reachable,
         status.is_in_bootstrap_mode ? domain::readiness::bootstrapping
                                     : domain::readiness::ready,
-        elapsed_us(started), describe(status));
+        elapsed_us(started), status.message, answer_from(status));
 }
 
 }

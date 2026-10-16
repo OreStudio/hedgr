@@ -1047,14 +1047,19 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
     /*
      * An answered probe returns to the five-second cadence. The answer is
      * synthesised rather than fetched, because a real one needs a live broker
-     * and this asserts the schedule's response to an answer, not the wire.
+     * and this asserts the schedule's response to an answer, not the wire. The
+     * structured fields travel with the flag, which is what separates this from
+     * the refused probes above: they carry no answer and only a sentence.
      */
     event fact;
     fact.kind = event_kind::probe_result;
     fact.instance_id = "inst-refused";
     fact.reach = reachability::reachable;
     fact.ready = readiness::ready;
-    fact.detail = "iam.v1.ops.bootstrap_status: in bootstrap mode = false";
+    fact.bootstrap_answered = true;
+    fact.bootstrap.in_bootstrap_mode = false;
+    fact.bootstrap.has_tenant = true;
+    fact.bootstrap.version = "capture build";
     manager.events().push(fact);
     manager.pump();
 
@@ -1062,6 +1067,10 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
     REQUIRE(answered != nullptr);
     REQUIRE(answered->reach == reachability::reachable);
     REQUIRE(answered->ready == readiness::ready);
+    REQUIRE(answered->bootstrap.has_value());
+    REQUIRE(answered->bootstrap->in_bootstrap_mode == false);
+    REQUIRE(answered->bootstrap->has_tenant == true);
+    REQUIRE(answered->bootstrap->version == "capture build");
 
     const auto reset_deadline = manager.probes().next_probe_ns(*handle);
     const auto after_reset = steady_now_ns();
