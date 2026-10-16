@@ -195,6 +195,36 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
     return ImGui::IsItemClicked();
 }
 
+/**
+ * @brief Puts the bar at the front of the ordinary windows, and every question
+ * above it.
+ *
+ * A window submitted last is not a window kept in front. ImGui raises a window
+ * when it takes focus, so a window the operator clicks moves above the bar and
+ * stays there, because submission decides the frame a window is created in and
+ * not the ones after it. Raising the bar once the walk has submitted every
+ * window puts it back on top, and raising it on each frame keeps it there.
+ *
+ * The raise does not focus the bar. BringWindowToDisplayFront moves it in the
+ * display order alone, so the field the operator is typing into keeps the
+ * keyboard and the next keystroke still lands there.
+ *
+ * A popup or a modal is a window too and is drawn among the ordinary ones, so
+ * the same raise would put the dock over a question the operator is answering.
+ * Every open popup is raised again after the bar, in stack order, which leaves
+ * the topmost question at the very front. The bar yields to those and to
+ * nothing else.
+ */
+void raise_bar_to_front() {
+    ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+
+    ImGuiContext& context = *GImGui;
+    for (const ImGuiPopupData& popup : context.OpenPopupStack) {
+        if (popup.Window != nullptr)
+            ImGui::BringWindowToDisplayFront(popup.Window);
+    }
+}
+
 }
 
 namespace hedgr::ui::render {
@@ -223,6 +253,12 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result) {
      */
     if (!ImGui::BeginCoolBar("##hedgr-shortcuts", settings))
         return;
+
+    /*
+     * The walk has already submitted every ordinary window, so this is the
+     * first point in the frame at which the bar can be put above all of them.
+     */
+    raise_bar_to_front();
 
     for (const auto& row : input.shortcuts.rows()) {
         /*
