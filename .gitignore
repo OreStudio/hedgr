@@ -53,3 +53,7 @@ CMakeUserPresets.json
 
 # scratch: compositor sockets and runtime dirs for headless captures
 tmp/
+
+# everything else under build is scratch: capture evidence, harnesses, logs
+build/*
+!build/scripts/
