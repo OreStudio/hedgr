@@ -38,9 +38,14 @@ using sqlite::result;
  * Idempotent for a file this build wrote: every statement is @c IF @c NOT
  * @c EXISTS, and the version row is written only when the version table is
  * empty, so applying the schema to a fresh file and to an up-to-date one both
- * succeed and leave the same shape.
+ * succeed and leave the same shape. Migration is idempotent for the same
+ * reason. It runs only while the file still says version 7 and it stamps 8 as
+ * part of the same transaction, so applying the schema again leaves it alone.
  *
- * A file written against a different version is refused with
+ * A file written by version 7 is migrated forward. The missing @c icon_key
+ * column is added as empty on every row and the @c shortcut table is created,
+ * both inside one transaction so a failure leaves the file as it was. A file
+ * written against any other version is refused with
  * @c store_errc::schema_mismatch. The @c IF @c NOT @c EXISTS statements would
  * otherwise leave an old table with its old columns and fail later, once per
  * query, far from the cause, so the version is read back and compared. The file

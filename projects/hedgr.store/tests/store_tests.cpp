@@ -45,6 +45,7 @@
 #include <random>
 #include <sqlgen/read.hpp>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
 #include <variant>
@@ -143,6 +144,54 @@ instance sample_instance() {
     row.subject_prefix = "ores.local";
     row.wire_format = "msgpack";
     return row;
+}
+
+/**
+ * @brief The version 7 instance table, kept here as a literal.
+ *
+ * Production no longer carries the version 7 statement, and resurrecting it
+ * would leave a dead copy of the old schema in the component for the test's
+ * sake. The literal is the shape the developer store held before the icon key
+ * was added, so the migration runs against the real old table rather than
+ * against the current table wearing an old version number.
+ */
+constexpr std::string_view version_seven_instance_ddl = R"(CREATE TABLE instance (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL UNIQUE,
+        nats_url TEXT NOT NULL,
+        subject_prefix TEXT NOT NULL,
+        wire_format TEXT NOT NULL,
+        folder_id TEXT NOT NULL,
+        tls_ca TEXT NOT NULL,
+        tls_cert TEXT NOT NULL,
+        tls_key TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    ))";
+
+/**
+ * @brief Writes a version 7 store with two instance rows into an open file.
+ *
+ * Only the two tables the migration touches are created. The rest arrive from
+ * apply_schema after the migration, which is exactly what an operator's open
+ * does, so the test exercises the real path rather than a hand-built replica of
+ * the current schema.
+ */
+void plant_version_seven_store(database& db) {
+    REQUIRE(db.execute(version_seven_instance_ddl).has_value());
+    REQUIRE(db.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+                .has_value());
+    REQUIRE(db.execute("INSERT INTO schema_version (version) VALUES (7)")
+                .has_value());
+
+    const auto planted = db.execute(
+        "INSERT INTO instance "
+        "(id, name, nats_url, subject_prefix, wire_format, folder_id, "
+        "tls_ca, tls_cert, tls_key, created_at) VALUES "
+        "('inst-1', 'Local', 'nats://localhost:20405', 'ores.local', 'msgpack', "
+        "'', '', '', '', '2026-01-01T00:00:00Z'), "
+        "('inst-2', 'Staging', 'nats://localhost:20605', 'ores.staging', 'json', "
+        "'', '', '', '', '2026-01-02T00:00:00Z')");
+    REQUIRE(planted.has_value());
 }
 
 }
@@ -715,12 +764,160 @@ TEST_CASE("a file written with another schema version is refused", "[store]") {
      */
     REQUIRE(std::filesystem::exists(scratch.path()));
 
+    /*
+     * A file from a build newer than this one is refused as well, and it is not
+     * dragged through the version 7 migration on the way: a version above the
+     * current one means the file knows columns this build does not, so reading
+     * it as older would corrupt it.
+     */
+    REQUIRE(reopened.value().execute("UPDATE schema_version SET version = 9")
+                .has_value());
+    const auto from_the_future = reopened.value().apply_schema();
+    REQUIRE_FALSE(from_the_future.has_value());
+    REQUIRE(from_the_future.error().code == store_errc::schema_mismatch);
+    REQUIRE(from_the_future.error().message.contains("9"));
+    REQUIRE(from_the_future.error().message.contains("delete the file"));
+
     /* A file this build wrote opens without complaint. */
     const temporary_database current;
     auto fresh = database::open(current.path());
     REQUIRE(fresh.has_value());
     REQUIRE(fresh.value().apply_schema().has_value());
     REQUIRE(fresh.value().apply_schema().has_value());
+}
+
+TEST_CASE("a version 7 store is migrated and keeps its rows", "[store]") {
+    using hedgr::store::repository::schema_version_entity;
+
+    const temporary_database scratch;
+    {
+        auto opened = database::open(scratch.path());
+        REQUIRE(opened.has_value());
+        plant_version_seven_store(opened.value());
+    }
+
+    auto reopened = database::open(scratch.path());
+    REQUIRE(reopened.has_value());
+    database& db = reopened.value();
+
+    REQUIRE(db.apply_schema().has_value());
+
+    /*
+     * The stamp moves with the schema. It is compared with the build's own
+     * version rather than with a literal, so a future bump that forgets the
+     * migration fails here instead of passing on a stale number.
+     */
+    const auto versions =
+        sqlgen::read<std::vector<schema_version_entity>>(db.connection());
+    REQUIRE(versions.has_value());
+    REQUIRE(versions.value().size() == 1);
+    REQUIRE(versions.value().front().version ==
+            hedgr::store::repository::schema_version());
+
+    /* The rows are still there, ordered by name, with the empty key. */
+    instance_repository repository(db);
+    const auto rows = repository.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 2);
+    REQUIRE(rows.value()[0].id == "inst-1");
+    REQUIRE(rows.value()[0].name == "Local");
+    REQUIRE(rows.value()[0].nats_url == "nats://localhost:20405");
+    REQUIRE(rows.value()[0].subject_prefix == "ores.local");
+    REQUIRE(rows.value()[0].icon_key.empty());
+    REQUIRE(rows.value()[1].id == "inst-2");
+    REQUIRE(rows.value()[1].name == "Staging");
+    REQUIRE(rows.value()[1].icon_key.empty());
+
+    /*
+     * The new column is not merely present. A key saved through the repository
+     * reads back, so the added column is bound by the same code as a fresh
+     * table's.
+     */
+    instance keyed = sample_instance();
+    keyed.id = "inst-3";
+    keyed.name = "Keyed";
+    keyed.icon_key = "brave_hopper";
+    REQUIRE(repository.save(keyed).has_value());
+    const auto after = repository.list();
+    REQUIRE(after.has_value());
+    REQUIRE(after.value().size() == 3);
+    REQUIRE(after.value().front().name == "Keyed");
+    REQUIRE(after.value().front().icon_key == "brave_hopper");
+
+    /* And the new table is usable through its own repository. */
+    shortcut_repository shortcuts(db);
+    shortcut entry;
+    entry.id = "sc-1";
+    entry.target_kind = window_kind::instance_manager;
+    entry.position = 10;
+    REQUIRE(shortcuts.save(entry).has_value());
+    const auto bar = shortcuts.list();
+    REQUIRE(bar.has_value());
+    REQUIRE(bar.value().size() == 1);
+    REQUIRE(bar.value().front().id == "sc-1");
+
+    /*
+     * A second open finds the file already at the current version, so it
+     * migrates nothing, adds no second version row and leaves the rows alone.
+     */
+    REQUIRE(db.apply_schema().has_value());
+    const auto versions_again =
+        sqlgen::read<std::vector<schema_version_entity>>(db.connection());
+    REQUIRE(versions_again.has_value());
+    REQUIRE(versions_again.value().size() == 1);
+    REQUIRE(versions_again.value().front().version ==
+            hedgr::store::repository::schema_version());
+    REQUIRE(repository.list().value().size() == 3);
+    REQUIRE(shortcuts.list().value().size() == 1);
+}
+
+TEST_CASE("a store below the migration cut-off is refused unmigrated",
+    "[store]") {
+    using hedgr::store::repository::schema_version_entity;
+
+    const temporary_database scratch;
+    {
+        auto opened = database::open(scratch.path());
+        REQUIRE(opened.has_value());
+        plant_version_seven_store(opened.value());
+
+        /*
+         * Version 6 is the nearest store below the one this build migrates, so
+         * it is the boundary of the cut-off. The file has no icon key and must
+         * be refused rather than pushed through the version 7 step.
+         */
+        REQUIRE(opened.value().execute("UPDATE schema_version SET version = 6")
+                    .has_value());
+    }
+
+    auto reopened = database::open(scratch.path());
+    REQUIRE(reopened.has_value());
+    const auto applied = reopened.value().apply_schema();
+
+    REQUIRE_FALSE(applied.has_value());
+    REQUIRE(applied.error().code == store_errc::schema_mismatch);
+    REQUIRE(applied.error().message.contains("6"));
+    REQUIRE(applied.error().message.contains("delete the file"));
+
+    /*
+     * Refused, not half-migrated. A statement that names the icon key column is
+     * refused because the column was never added, the shortcut table was not
+     * created either, and the stamp still says 6. A read through the entity
+     * would not prove this, because sqlgen tolerates a missing column and
+     * returns rows without it, so the check is a write that has to name the
+     * column.
+     */
+    REQUIRE_FALSE(
+        reopened.value().execute("UPDATE instance SET icon_key = 'migrated'")
+            .has_value());
+    REQUIRE_FALSE(reopened.value().execute("UPDATE shortcut SET position = 0")
+                      .has_value());
+    const auto versions =
+        sqlgen::read<std::vector<schema_version_entity>>(
+            reopened.value().connection());
+    REQUIRE(versions.has_value());
+    REQUIRE(versions.value().size() == 1);
+    REQUIRE(versions.value().front().version == 6);
 }
 
 TEST_CASE("every repository reports the DDL of its own table", "[store]") {

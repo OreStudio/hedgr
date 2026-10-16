@@ -50,13 +50,15 @@ enum class store_errc : std::uint8_t {
     /** @brief A stored value could not be parsed back into its domain type. */
     corrupt_row,
     /**
-     * @brief The file was written against a different schema version.
+     * @brief The file was written against a version this build cannot reach.
      *
      * A distinct code rather than a generic failure, because the cause is the
-     * file rather than the operation and the remedy is the operator's: the
-     * store is pre-release, so the file is to be deleted and rebuilt. Nothing
-     * in the application deletes it, so a caller that sees this must never
-     * treat it as retryable.
+     * file rather than the operation and the remedy is the operator's. A file
+     * one version behind the current one is migrated rather than reported, so
+     * this means the file is older than the cut-off the store can bring
+     * forward or newer than the build itself, and the sentence beside the code
+     * says which and what to do. Nothing in the application deletes the file,
+     * so a caller that sees this must never treat it as retryable.
      */
     schema_mismatch,
     /** @brief The operation needed an open database and did not get one. */
