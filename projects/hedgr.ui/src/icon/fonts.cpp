@@ -22,6 +22,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "imgui.h"
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -80,18 +81,40 @@ std::filesystem::path icon_sheet_path() {
 /**
  * @brief Where the base UI font lives.
  *
- * A condensed sans is the trading-desk convention: more label per pixel. The
- * list is ordered by preference, and an empty result means fall back to the
- * font embedded in ImGui, which always exists.
+ * A monospace, because this interface is mostly columns of numbers and a
+ * monospace face is what makes those columns line up down the window. A
+ * proportional face sets a paragraph better and a table worse, and the tables
+ * outnumber the paragraphs here.
+ *
+ * The list is ordered by preference, from the faces an operator is likeliest to
+ * have installed deliberately down to the ones a bare distribution ships. An
+ * empty result means fall back to the font embedded in ImGui, which always
+ * exists.
  */
 std::filesystem::path base_font_path() {
-    return first_existing({
-        "/usr/share/fonts/truetype/roboto/hinted/RobotoCondensed-Regular.ttf",
-        "/usr/share/fonts/truetype/roboto/hinted/Roboto-Medium.ttf",
-        "/usr/share/fonts/gfonts/roboto/roboto-v20-latin-regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-    });
+    std::vector<std::filesystem::path> candidates;
+
+    /*
+     * A face the user installed wins, since a person who has put a monospace in
+     * their own font directory is the one asking for one by name. HOME is read
+     * rather than written as a literal path so the lookup works for whoever
+     * runs it.
+     */
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        const auto user_fonts = std::filesystem::path(home) / ".local/share/fonts";
+        candidates.push_back(user_fonts / "JetBrainsMono-Regular.ttf");
+        candidates.push_back(user_fonts / "RobotoMono-Regular.ttf");
+    }
+
+    candidates.push_back(
+        "/usr/share/fonts/truetype/roboto/hinted/RobotoMono-Regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/roboto/RobotoMono-Regular.ttf");
+    candidates.push_back(
+        "/usr/share/fonts/gfonts/roboto-mono/roboto-mono-v13-latin-regular.ttf");
+    candidates.push_back("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    candidates.push_back(
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf");
+    return first_existing(candidates);
 }
 
 /**
