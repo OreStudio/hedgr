@@ -21,6 +21,7 @@
 #define HEDGR_UI_ICON_FONTS_HPP
 
 #include "hedgr.ui/export.hpp"
+#include <filesystem>
 
 namespace hedgr::ui::icon {
 
@@ -41,6 +42,23 @@ namespace hedgr::ui::icon {
  * beside it.
  */
 HEDGR_UI_EXPORT void load_ui_fonts(float base_size_px);
+
+/**
+ * @brief The directory holding the per-environment instance illustrations, or
+ * an empty path when there is none.
+ *
+ * Found by the same rule the icon sheet is found by, because both are assets
+ * that ship beside this component and both have to be reachable from a run
+ * straight out of the build tree and from an installed package. A caller that
+ * decodes the files walks this directory rather than naming one, because the
+ * set of labels is the store's to decide and this component only knows where
+ * an asset of a given name would be.
+ *
+ * The file for a key is the key with a png extension. An empty path means the
+ * illustrations are not installed, which is not an error: an interface with no
+ * pictures draws its own fallback for every instance.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::filesystem::path instance_icon_directory();
 
 }
 

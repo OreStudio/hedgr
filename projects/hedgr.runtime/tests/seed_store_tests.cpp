@@ -185,7 +185,8 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
 
     const auto save_instance = [&](std::string id, std::string name,
                                    std::string url, std::string prefix,
-                                   std::string folder_id) {
+                                   std::string folder_id,
+                                   std::string icon_key) {
         command request;
         request.kind = command_kind::save_instance;
         /*
@@ -199,6 +200,14 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
         request.instance_row.nats_url = std::move(url);
         request.instance_row.subject_prefix = std::move(prefix);
         request.instance_row.folder_id = std::move(folder_id);
+        /*
+         * The illustration is keyed by the same environment label the seeder
+         * reads from a checkout. It is written here so the capture shows a
+         * picture on a row that no checkout backs, which is the only way to
+         * see the decoded texture without a development machine under the
+         * camera.
+         */
+        request.instance_row.icon_key = std::move(icon_key);
         manager.commands().push(std::move(request));
         manager.pump();
     };
@@ -218,9 +227,9 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
         manager.pump();
     }
     save_instance("inst-prod", "production cluster", "nats://manta:20405",
-        "ores.prod.manta", "f-prod");
+        "ores.prod.manta", "f-prod", "brave_hopper");
     save_instance("inst-lab", "laboratory", "nats://lab-01:4222",
-        "ores.lab.one", "f-dev-eu");
+        "ores.lab.one", "f-dev-eu", std::string{});
 
     const auto save_label = [&](std::string name, label_colour colour,
                                 label_severity severity) {
@@ -301,6 +310,31 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
     manager.commands().push(std::move(move));
     manager.pump();
 
+    /*
+     * Two entries on the shortcuts bar, so a capture has something to show and
+     * both drawing paths are exercised: a shortcut to one instance's accounts,
+     * which carries that instance's environment picture, and one to the
+     * Instances window itself, which carries the window kind's glyph.
+     */
+    const auto save_shortcut = [&](std::string id,
+                                   hedgr::model::domain::window_kind kind,
+                                   std::string target_id,
+                                   std::int64_t position) {
+        command request;
+        request.kind = command_kind::save_shortcut;
+        request.shortcut_row.id = std::move(id);
+        request.shortcut_row.target_kind = kind;
+        request.shortcut_row.target_id = std::move(target_id);
+        request.shortcut_row.position = position;
+        manager.commands().push(std::move(request));
+    };
+
+    save_shortcut("sc-instance", hedgr::model::domain::window_kind::accounts,
+        "inst-prod", 0);
+    save_shortcut("sc-manager",
+        hedgr::model::domain::window_kind::instance_manager, std::string{}, 1);
+    manager.pump();
+
     REQUIRE(manager.last_error().empty());
 
     /*
@@ -340,6 +374,7 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
     REQUIRE(manager.accounts().size() == 4);
     REQUIRE(manager.folders().size() == 9);
     REQUIRE(manager.labels().size() == 3);
+    REQUIRE(manager.shortcuts().size() == 2);
     for (const auto& id : std::array<std::string, 3>{ seeded_id, "inst-prod",
              "inst-lab" }) {
         INFO("instance " << id);

@@ -180,6 +180,7 @@ using hedgr::model::state::labelling_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
+using hedgr::model::state::shortcut_table;
 using hedgr::model::state::window_table;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shows_instances;
@@ -195,6 +196,7 @@ struct empty_state final {
     probe_table probes;
     password_policy_state password_policy;
     window_table windows;
+    shortcut_table shortcuts;
     command_queue commands;
 };
 
@@ -210,6 +212,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .probes = state.probes,
         .password_policy = state.password_policy,
         .windows = state.windows,
+        .shortcuts = state.shortcuts,
         .commands = state.commands,
         .store_lock = lock,
     };
@@ -843,4 +846,107 @@ TEST_CASE("four estate polls read back as four different chart points",
     for (std::size_t index = 1; index < series.count; ++index)
         REQUIRE(series.minutes[index] > series.minutes[index - 1]);
     REQUIRE(series.ready[0] != series.ready[0]);
+}
+
+TEST_CASE("a shortcut key names both the kind and the target", "[shortcut]") {
+    /*
+     * The key has to tell apart two targets that share an id, because an
+     * instance and an account can carry the same one. It also has to be
+     * stable, so the entry an operator adds and the entry they later remove
+     * name the same row.
+     */
+    const auto instance = hedgr::ui::render::shortcut_id_for(
+        window_kind::accounts, "shared-id");
+    const auto manager =
+        hedgr::ui::render::shortcut_id_for(window_kind::instance_manager, "");
+    REQUIRE(instance != manager);
+
+    REQUIRE(instance == hedgr::ui::render::shortcut_id_for(
+                            window_kind::accounts, "shared-id"));
+}
+
+TEST_CASE("the bar reports the targets it already holds", "[shortcut]") {
+    hedgr::model::state::shortcut_table table;
+
+    hedgr::model::domain::shortcut row;
+    row.id = "sc-1";
+    row.target_kind = window_kind::accounts;
+    row.target_id = "inst-prod";
+    table.upsert(row);
+
+    REQUIRE(hedgr::ui::render::shortcuts_bar_holds(table,
+        window_kind::accounts, "inst-prod"));
+    /* The same id under a different kind is a different shortcut. */
+    REQUIRE_FALSE(hedgr::ui::render::shortcuts_bar_holds(table,
+        window_kind::instance_manager, "inst-prod"));
+    REQUIRE_FALSE(hedgr::ui::render::shortcuts_bar_holds(table,
+        window_kind::accounts, "inst-lab"));
+}
+
+TEST_CASE("a new shortcut lands after the entries already there", "[shortcut]") {
+    hedgr::model::state::shortcut_table table;
+    REQUIRE(hedgr::ui::render::next_shortcut_position(table) == 0);
+
+    hedgr::model::domain::shortcut first;
+    first.id = "sc-1";
+    first.position = 0;
+    table.upsert(first);
+
+    hedgr::model::domain::shortcut second;
+    second.id = "sc-2";
+    second.position = 4;
+    table.upsert(second);
+
+    REQUIRE(hedgr::ui::render::next_shortcut_position(table) == 5);
+}
+
+TEST_CASE("an icon cache answers zero for a key it does not hold", "[shortcut]") {
+    hedgr::ui::render::instance_icon_textures icons;
+    icons.entries.push_back({"brave_hopper", 7});
+
+    REQUIRE(icons.find("brave_hopper") == 7);
+    REQUIRE(icons.find("") == 0);
+    REQUIRE(icons.find("no_such_environment") == 0);
+}
+
+TEST_CASE("the shortcut control sends the command its own state shows",
+    "[shortcut]") {
+    using hedgr::model::command::command_kind;
+
+    empty_state state;
+    render_input input = input_with(state, store_lock::unlocked);
+
+    /*
+     * Nothing on the bar, so the control shows the add glyph and has to send
+     * the save. The position is after every entry already there, which for an
+     * empty bar is the first one.
+     */
+    const auto add = hedgr::ui::render::shortcut_toggle_command(input,
+        window_kind::accounts, "inst-prod");
+    REQUIRE(add.kind == command_kind::save_shortcut);
+    REQUIRE(add.shortcut_row.target_kind == window_kind::accounts);
+    REQUIRE(add.shortcut_row.target_id == "inst-prod");
+    REQUIRE(add.shortcut_row.id
+        == hedgr::ui::render::shortcut_id_for(window_kind::accounts,
+            "inst-prod"));
+    REQUIRE(add.shortcut_row.position == 0);
+
+    /*
+     * The target is on the bar now, so the same call has to send the removal
+     * under the key the save wrote, or the click would put a second copy on.
+     */
+    hedgr::model::domain::shortcut row;
+    row.id = add.shortcut_row.id;
+    row.target_kind = window_kind::accounts;
+    row.target_id = "inst-prod";
+    state.shortcuts.upsert(row);
+
+    /*
+     * The input borrows the table rather than copying it, so the entry just
+     * written is the one the next call sees without rebuilding anything.
+     */
+    const auto remove = hedgr::ui::render::shortcut_toggle_command(input,
+        window_kind::accounts, "inst-prod");
+    REQUIRE(remove.kind == command_kind::remove_shortcut);
+    REQUIRE(remove.shortcut_row.id == add.shortcut_row.id);
 }

@@ -20,9 +20,11 @@
 #ifndef HEDGR_UI_RENDER_PANELS_HPP
 #define HEDGR_UI_RENDER_PANELS_HPP
 
+#include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -89,6 +91,91 @@ shows_instances(const render_input& input) noexcept;
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept;
+
+/**
+ * @brief Asks for the accounts window of one instance.
+ *
+ * The accounts window is found or made by the runtime, which owns the window
+ * table: the interface names the instance it wants and the runtime answers with
+ * the one window showing it. A second request focuses the window that exists
+ * rather than making another.
+ *
+ * The action lives here rather than at either of its callers because the
+ * Instances window's own toolbar and the shortcuts bar both open an instance's
+ * accounts, and one description of what that means is what stops the two from
+ * drifting.
+ *
+ * An instance the table does not hold is refused here rather than sent. The
+ * runtime would have nothing to bind the window to, and a window bound to
+ * nothing is a surface that can only report its own emptiness.
+ */
+HEDGR_UI_EXPORT void request_accounts_window(const render_input& input,
+    std::string_view instance_id);
+
+/**
+ * @brief The decoded picture of one instance, as a backend texture, or zero.
+ *
+ * Zero means the instance has no picture rather than that the drawing failed.
+ * An instance typed by hand carries no illustration key, and a key whose asset
+ * is not installed has no texture either; both are ordinary states and the
+ * caller draws its own fallback for them. The keys are resolved here because
+ * both the shortcuts bar and the details pane ask the same question of the same
+ * row.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::uint64_t instance_icon_texture(
+    const render_input& input, std::string_view instance_id);
+
+/**
+ * @brief The stable key a bar entry carries for one target.
+ *
+ * Derived from the kind and the target rather than counted, so the entry an
+ * operator adds and the entry they later remove name the same row without
+ * either side having to remember what the other wrote. The kind is in the key
+ * because an instance and an account can carry the same id, and the two
+ * shortcuts are different entries.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::string shortcut_id_for(
+    hedgr::model::domain::window_kind kind, std::string_view target_id);
+
+/**
+ * @brief Whether the bar already holds an entry that opens this target.
+ *
+ * The match is on the kind and the id rather than on the derived key, for the
+ * same reason the store's own removal matches on both halves: a shortcut is a
+ * statement about a target, and two entries claiming one target are one fact
+ * said twice.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool shortcuts_bar_holds(
+    const hedgr::model::state::shortcut_table& table,
+    hedgr::model::domain::window_kind kind, std::string_view target_id);
+
+/**
+ * @brief The position a new entry takes, which is after every entry already on
+ * the bar.
+ *
+ * A new entry lands at the end rather than at the front, because a bar that
+ * rearranged itself as entries were added would be an operator's own order
+ * being overwritten by their next click.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::int64_t next_shortcut_position(
+    const hedgr::model::state::shortcut_table& table) noexcept;
+
+/**
+ * @brief The command that puts a target on the bar, or takes it off.
+ *
+ * One function rather than two branches at the control, because the state the
+ * control draws and the command it sends have to be the same fact. A control
+ * showing that a target is present and then sending the save would be a click
+ * that appears to do nothing, and the two would drift the moment one of them
+ * changed.
+ *
+ * The removal names the derived key, which is what the store removes by, and
+ * the save carries the same key so that an entry added now is the entry removed
+ * later.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::model::command::command
+shortcut_toggle_command(const render_input& input,
+    hedgr::model::domain::window_kind kind, std::string_view target_id);
 
 /**
  * @brief What the startup notice says, as a heading and the reason under it.

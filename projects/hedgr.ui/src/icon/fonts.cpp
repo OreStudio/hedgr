@@ -79,6 +79,26 @@ std::filesystem::path icon_sheet_path() {
 }
 
 /**
+ * @brief Where the per-environment instance illustrations live at run time.
+ *
+ * The same candidates as the icon sheet, with the instances subdirectory in
+ * place of the sheet's file. A directory rather than a file because the caller
+ * walks it: the set of illustrations is the set of files that shipped, and
+ * naming them here would be a second list to keep in step with the assets.
+ */
+std::filesystem::path instance_icon_directory_path() {
+    const auto exe_dir = executable_directory();
+    std::vector<std::filesystem::path> candidates;
+    if (!exe_dir.empty()) {
+        candidates.push_back(
+            exe_dir.parent_path() / "share" / "hedgr.ui" / "instances");
+        candidates.push_back(exe_dir / "instances");
+    }
+    candidates.push_back("assets/instances");
+    return first_existing(candidates);
+}
+
+/**
  * @brief Where the base UI font lives.
  *
  * A monospace, because this interface is mostly columns of numbers and a
@@ -275,6 +295,10 @@ void load_ui_fonts(float base_size_px) {
      * smaller texture format. Saying so is what lets it.
      */
     texture->UseColors = false;
+}
+
+std::filesystem::path instance_icon_directory() {
+    return instance_icon_directory_path();
 }
 
 }

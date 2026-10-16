@@ -224,6 +224,17 @@ private:
     bool startup_notice_open_ = true;
 
     /**
+     * @brief Whether the shortcuts bar asked for the Instances window on top.
+     *
+     * Bringing a window to the front has to happen before that window is
+     * submitted, and the bar is drawn after every window so that it stays above
+     * them. The request is therefore carried from one frame to the next rather
+     * than acted on where it is made, which costs a frame nobody can see and
+     * keeps the bar the topmost surface it should be.
+     */
+    bool focus_instances_ = false;
+
+    /**
      * @brief The one-line notices the windows show and the frame ages.
      *
      * Interface scratch, owned here rather than by the window that draws it,

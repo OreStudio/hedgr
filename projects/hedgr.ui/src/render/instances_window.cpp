@@ -61,7 +61,11 @@ using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::probe_result;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
+using hedgr::model::domain::window_kind;
+using hedgr::ui::render::instance_icon_texture;
 using hedgr::ui::render::render_input;
+using hedgr::ui::render::shortcut_toggle_command;
+using hedgr::ui::render::shortcuts_bar_holds;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_folder;
@@ -946,38 +950,6 @@ void draw_dashboard(const render_input& input) {
 }
 
 /**
- * @brief Draws the Instances window's own actions, in the browser's toolbar.
- *
- * What is left of this window's strip once the actions the browser already
- * offers -- add, edit, duplicate, remove -- are subtracted. Adding an instance
- * is the browser's own add, which creates a leaf in the selected folder, and
- * editing and removing one are the browser's edit and remove, so neither is
- * repeated here.
- */
-/**
- * @brief Asks for the accounts window of one instance.
- *
- * The accounts window is found or made by the runtime, which owns the window
- * table: the interface names the instance it wants and the runtime answers
- * with the one window showing it. A second request focuses the window that
- * exists rather than making another.
- *
- * An instance the table does not hold is refused here rather than sent. The
- * runtime would have nothing to bind the window to, and a window bound to
- * nothing is a surface that can only report its own emptiness.
- */
-void open_accounts_window(const render_input& input, std::string_view instance_id) {
-    if (!input.instances.find(instance_id))
-        return;
-
-    command request;
-    request.kind = command_kind::open_window;
-    request.instance_id = std::string{instance_id};
-    request.new_window_kind = hedgr::model::domain::window_kind::accounts;
-    input.commands.push(std::move(request));
-}
-
-/**
  * @brief Opens an entry, which for an instance is the accounts behind it.
  *
  * The toolbar's open button and a double click on a row arrive here, so there
@@ -991,9 +963,18 @@ void open_accounts_window(const render_input& input, std::string_view instance_i
 void activate_instance(const render_input& input, window_ui_state& state,
     std::string_view leaf_id) {
     static_cast<void>(state);
-    open_accounts_window(input, leaf_id);
+    hedgr::ui::render::request_accounts_window(input, leaf_id);
 }
 
+/**
+ * @brief Draws the Instances window's own actions, in the browser's toolbar.
+ *
+ * What is left of this window's strip once the actions the browser already
+ * offers -- add, edit, duplicate, remove -- are subtracted. Adding an instance
+ * is the browser's own add, which creates a leaf in the selected folder, and
+ * editing and removing one are the browser's edit and remove, so neither is
+ * repeated here.
+ */
 void instance_window_actions(const render_input& input, window_ui_state& state) {
     /*
      * A rule between the browser's own actions and this window's, so the strip
@@ -1016,7 +997,8 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
 
     if (widget::icon_button("open-accounts", icon::account,
             "Open the accounts of the selected instance"))
-        open_accounts_window(input, state.browser.selected_leaf);
+        hedgr::ui::render::request_accounts_window(input,
+            state.browser.selected_leaf);
 }
 
 /** @brief The index of the one column whose cells are label pills. */
@@ -1179,6 +1161,26 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     ImGui::TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
 
+    /*
+     * The environment's own picture, when the instance names one. It is drawn
+     * first because recognising which deployment this is happens before
+     * reading anything about it, and an operator who chose an illustration for
+     * a row asked for it to be the thing they see. An instance with no key
+     * draws no row at all rather than an empty slot, because the illustration
+     * is optional and its absence is honest.
+     */
+    const std::uint64_t picture = instance_icon_texture(input, row.id);
+    if (picture != 0) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(48.0f, 48.0f));
+        ImGui::SetItemTooltip("%s", row.icon_key.c_str());
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Environment");
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(row.icon_key.c_str());
+    }
+
     detail_row(icon::instance, "Name", row.name);
 
     /*
@@ -1208,6 +1210,33 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
         ImGui::TableNextColumn();
         static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
             ImGui::GetContentRegionAvail().x));
+    }
+
+    /*
+     * The shortcut to this instance, as a control that reports whether it is
+     * already on the bar. The glyph carries the state and the tooltip names
+     * the action, which is the rule every other control here follows: a filled
+     * in control is not a label, it is the answer to "is this there", and the
+     * click is the change.
+     */
+    {
+        const bool on_bar = shortcuts_bar_holds(input.shortcuts,
+            window_kind::accounts, row.id);
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        /* No glyph, because the set has no shortcuts concept. */
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Shortcuts bar");
+        ImGui::TableNextColumn();
+
+        if (widget::icon_button("shortcut-toggle",
+                on_bar ? icon::remove : icon::add,
+                on_bar ? "Take this instance off the shortcuts bar"
+                       : "Put this instance on the shortcuts bar")) {
+            input.commands.push(shortcut_toggle_command(input,
+                window_kind::accounts, row.id));
+        }
     }
 
     if (!status.observed) {

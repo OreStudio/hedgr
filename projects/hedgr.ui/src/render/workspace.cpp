@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/workspace.hpp"
 
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/password_meter.hpp"
 
@@ -297,6 +298,18 @@ void workspace::render(const render_input& input) {
             ImGui::SetNextWindowFocus();
 
         /*
+         * A shortcut to the Instances window asks for it on top, and the
+         * request was left by the bar on the previous frame. It is consumed
+         * here, at the only point in the frame where the window can still be
+         * raised, rather than where the click was read.
+         */
+        if (kind == hedgr::model::domain::window_kind::instance_manager
+            && focus_instances_) {
+            ImGui::SetNextWindowFocus();
+            focus_instances_ = false;
+        }
+
+        /*
          * The visible title can change with the data, so the ImGui id
          * is pinned to the stable id after the ### marker. Without it a
          * retitled window would be a different window to ImGui, and would
@@ -377,6 +390,20 @@ void workspace::render(const render_input& input) {
         lock_prompt_offered_ = true;
         open_lock_prompt();
     }
+
+    /*
+     * The shortcuts bar, after the walk rather than before it, because it is a
+     * dock and has to sit above the windows it docks against. It takes no
+     * space from any of them: it is its own window, anchored to the viewport,
+     * so the tree, the chart strip and the toolbar keep the room they had.
+     *
+     * A request to raise the Instances window is kept for the next frame,
+     * because the window it concerns has already been submitted by now.
+     */
+    shortcut_bar_result bar;
+    draw_shortcut_bar(input, bar);
+    if (bar.focus_instances)
+        focus_instances_ = true;
 
     /*
      * Last, and after the control that may have just asked for it, so the form

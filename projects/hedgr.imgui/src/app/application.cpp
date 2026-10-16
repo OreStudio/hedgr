@@ -257,6 +257,7 @@ GLFWwindow* application::initialise_graphics() {
     static_cast<void>(install_capture_input(window));
 
     load_background_texture();
+    load_instance_icon_textures();
 
     BOOST_LOG_SEV(lg(), info) << "Graphics initialised successfully.";
     return window;
@@ -292,6 +293,82 @@ void application::load_background_texture() {
 
     BOOST_LOG_SEV(lg(), info)
         << "Loaded background image: " << background_width_ << "x" << background_height_;
+}
+
+void application::load_instance_icon_textures() {
+    namespace fs = std::filesystem;
+
+    /*
+     * The directory is walked rather than a list of keys being read from the
+     * store, because this runs before the store is open and a bar has to be
+     * able to draw every illustration the install shipped. The decode and the
+     * upload happen once each here, which is what keeps a frame that draws ten
+     * entries reading a table rather than ten files.
+     */
+    const auto directory = ui::icon::instance_icon_directory();
+    if (directory.empty()) {
+        BOOST_LOG_SEV(lg(), warn)
+            << "Instance icon directory not found; no illustrations will be drawn.";
+        return;
+    }
+
+    std::error_code ec;
+    const fs::directory_iterator entries(directory, ec);
+    if (ec) {
+        BOOST_LOG_SEV(lg(), warn)
+            << "Could not read the instance icon directory: " << ec.message();
+        return;
+    }
+
+    for (const auto& entry : entries) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".png")
+            continue;
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* data =
+            stbi_load(entry.path().c_str(), &width, &height, &channels, 4);
+        if (data == nullptr) {
+            /*
+             * One unreadable asset does not cost the others. The entry simply
+             * has no texture and the interface draws its own fallback for it,
+             * which is the same thing it does for an instance with no key.
+             */
+            BOOST_LOG_SEV(lg(), warn) << "Failed to load instance icon "
+                << entry.path() << ": " << stbi_failure_reason();
+            continue;
+        }
+
+        unsigned int texture = 0;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+            GL_UNSIGNED_BYTE, data);
+        stbi_image_free(data);
+
+        instance_icons_.entries.push_back(
+            ui::render::instance_icon_textures::entry{
+                .key = entry.path().stem().string(),
+                .texture = texture,
+            });
+    }
+
+    BOOST_LOG_SEV(lg(), info) << "Loaded " << instance_icons_.entries.size()
+                              << " instance icon(s).";
+}
+
+void application::release_instance_icon_textures() {
+    for (auto& row : instance_icons_.entries) {
+        if (row.texture == 0)
+            continue;
+        const auto texture = static_cast<unsigned int>(row.texture);
+        glDeleteTextures(1, &texture);
+        row.texture = 0;
+    }
+    instance_icons_.entries.clear();
 }
 
 void application::toggle_fullscreen(GLFWwindow* window) {
@@ -385,6 +462,7 @@ void application::render_loop(GLFWwindow* window) {
             .probes = manager_.probes(),
             .password_policy = manager_.password_policy(),
             .windows = manager_.windows(),
+            .shortcuts = manager_.shortcuts(),
             .commands = manager_.commands(),
             .store_lock = manager_.store_lock(),
             .unlocking = manager_.is_unlocking(),
@@ -393,6 +471,7 @@ void application::render_loop(GLFWwindow* window) {
             .background_texture = background_texture_,
             .startup_failure = manager_.startup_failure(),
             .runtime_error = manager_.last_error(),
+            .instance_icons = &instance_icons_,
         };
         workspace_.render(input);
 
@@ -432,6 +511,7 @@ void application::render_loop(GLFWwindow* window) {
 void application::shutdown_graphics(GLFWwindow* window) {
     if (background_texture_ != 0)
         glDeleteTextures(1, &background_texture_);
+    release_instance_icon_textures();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

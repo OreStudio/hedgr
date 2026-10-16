@@ -19,9 +19,13 @@
  */
 #include "hedgr.ui/render/panels.hpp"
 
+#include "hedgr.model/command/command.hpp"
+
+#include <cstdint>
 #include <format>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 namespace {
@@ -152,6 +156,91 @@ bool shows_window(domain::window_kind kind, const render_input& input,
         return false;
     }
     return false;
+}
+
+void request_accounts_window(const render_input& input,
+    std::string_view instance_id) {
+    if (!input.instances.find(instance_id))
+        return;
+
+    hedgr::model::command::command request;
+    request.kind = hedgr::model::command::command_kind::open_window;
+    request.instance_id = std::string{instance_id};
+    request.new_window_kind = domain::window_kind::accounts;
+    input.commands.push(std::move(request));
+}
+
+std::uint64_t instance_icon_texture(const render_input& input,
+    std::string_view instance_id) {
+    if (input.instance_icons == nullptr)
+        return 0;
+
+    const auto handle = input.instances.find(instance_id);
+    if (!handle)
+        return 0;
+
+    /*
+     * An empty key is asked of the cache like any other, and the cache answers
+     * zero for it because no asset is stored under an empty name. The branch is
+     * not written out here because the answer is the same either way, and a
+     * second rule for the empty case would be a second thing to keep in step.
+     */
+    const auto& row = *input.instances.get(*handle);
+    return input.instance_icons->find(row.icon_key);
+}
+
+std::string shortcut_id_for(domain::window_kind kind,
+    std::string_view target_id) {
+    /*
+     * The kind's canonical text is used rather than its number, so the key in
+     * the store reads as what the shortcut opens and survives a window kind
+     * being renumbered.
+     */
+    return std::format("sc:{}/{}", domain::to_string(kind), target_id);
+}
+
+bool shortcuts_bar_holds(const hedgr::model::state::shortcut_table& table,
+    domain::window_kind kind, std::string_view target_id) {
+    for (const auto& row : table.rows()) {
+        if (row.target_kind == kind
+            && std::string_view{row.target_id} == target_id)
+            return true;
+    }
+    return false;
+}
+
+std::int64_t next_shortcut_position(
+    const hedgr::model::state::shortcut_table& table) noexcept {
+    /*
+     * A scan rather than a cached maximum, because the table is what the store
+     * wrote and a cached number would be one more thing a removal could leave
+     * stale. The bar holds tens of entries, so the scan costs nothing.
+     */
+    std::int64_t highest = 0;
+    for (const auto& row : table.rows()) {
+        if (row.position >= highest)
+            highest = row.position + 1;
+    }
+    return highest;
+}
+
+hedgr::model::command::command shortcut_toggle_command(
+    const render_input& input, domain::window_kind kind,
+    std::string_view target_id) {
+    using hedgr::model::command::command_kind;
+
+    hedgr::model::command::command request;
+    request.shortcut_row.id = shortcut_id_for(kind, target_id);
+    if (shortcuts_bar_holds(input.shortcuts, kind, target_id)) {
+        request.kind = command_kind::remove_shortcut;
+        return request;
+    }
+
+    request.kind = command_kind::save_shortcut;
+    request.shortcut_row.target_kind = kind;
+    request.shortcut_row.target_id = std::string{target_id};
+    request.shortcut_row.position = next_shortcut_position(input.shortcuts);
+    return request;
 }
 
 startup_notice startup_notice_for(std::string_view startup_failure) {

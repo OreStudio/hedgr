@@ -34,8 +34,51 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
+#include <vector>
 
 namespace hedgr::ui::render {
+
+/**
+ * @brief The instance pictures the backend has already uploaded, by key.
+ *
+ * The interface names an illustration by the key an instance carries, and the
+ * decode and the upload belong to the component that owns the graphics context.
+ * This is the seam between the two: a plain table of keys beside texture ids,
+ * filled once when the graphics are initialised, so a frame only ever reads it
+ * and never decodes an image on the path that draws.
+ *
+ * It is a flat vector rather than a map because the set is the ten committed
+ * illustrations and a walk of ten beats hashing a string on every item of every
+ * frame.
+ */
+struct instance_icon_textures final {
+    /** @brief One illustration, as the key an instance names and its texture. */
+    struct entry final {
+        std::string key;
+        std::uint64_t texture = 0;
+    };
+
+    /** @brief Every illustration that was found and uploaded. */
+    std::vector<entry> entries;
+
+    /**
+     * @brief The texture for @p key, or zero when there is none.
+     *
+     * Zero is the ordinary answer for an instance with no illustration and for
+     * a key whose asset is not installed, and the caller draws its own fallback
+     * for both. There is deliberately no missing-texture texture here: a
+     * placeholder would be a picture of a picture, and a reader would have to
+     * learn what it meant.
+     */
+    [[nodiscard]] std::uint64_t find(std::string_view key) const noexcept {
+        for (const auto& row : entries) {
+            if (row.key == key)
+                return row.texture;
+        }
+        return 0;
+    }
+};
 
 /**
  * @brief The interface's own scratch state for one window.
@@ -166,6 +209,16 @@ struct render_input final {
     /** @brief The live windows, including the one being drawn. */
     const hedgr::model::state::window_table& windows;
 
+    /**
+     * @brief What the operator has put on the shortcuts bar.
+     *
+     * Read for the bar and for the control that adds to it, both of which ask
+     * the same question of the same table. It is the store's own order rather
+     * than one the interface imposes, so the entries are drawn in the order the
+     * table returns them.
+     */
+    const hedgr::model::state::shortcut_table& shortcuts;
+
     /** @brief Where a renderer puts work for the runtime. */
     hedgr::model::command::command_queue& commands;
 
@@ -241,6 +294,18 @@ struct render_input final {
      * more, and the bar is taken down with it.
      */
     std::string runtime_error;
+
+    /**
+     * @brief The instance pictures the graphics component has uploaded, or
+     * null.
+     *
+     * A pointer rather than a reference because the frame owns the table that
+     * holds them in the application component, and a run with no graphics
+     * context, such as a unit test, simply passes null and draws a fallback.
+     * Every read goes through @c instance_icon_texture, which answers zero for
+     * a null table, so no caller has to write the guard.
+     */
+    const instance_icon_textures* instance_icons = nullptr;
 };
 
 /**

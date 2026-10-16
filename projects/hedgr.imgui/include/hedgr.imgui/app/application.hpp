@@ -72,6 +72,8 @@ private:
     GLFWwindow* initialise_graphics();
     void shutdown_graphics(GLFWwindow* window);
     void load_background_texture();
+    void load_instance_icon_textures();
+    void release_instance_icon_textures();
     void render_loop(GLFWwindow* window);
     void toggle_fullscreen(GLFWwindow* window);
     void capture_frame(GLFWwindow* window);
@@ -91,6 +93,11 @@ private:
     unsigned int background_texture_ = 0;
     int background_width_ = 0;
     int background_height_ = 0;
+    /*
+     * The decoded instance illustrations, uploaded once. The frame reads this
+     * as a lookup, so no image is ever decoded on the path that draws a frame.
+     */
+    ui::render::instance_icon_textures instance_icons_;
     int windowed_x_ = 0;
     int windowed_y_ = 0;
     int windowed_width_ = 1280;
