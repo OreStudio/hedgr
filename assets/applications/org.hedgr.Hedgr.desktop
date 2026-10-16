@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Hedgr
+Comment=Multi-instance OreStudio client
+# No Icon key is shipped because the repository has no Hedgr mark of its own.
+# The ten files under assets/instances are illustrations of OreStudio
+# environments, so pressing one into service as the application icon would
+# name the client after an environment it merely connects to.
+Exec=hedgr.imgui
+Terminal=false
+StartupWMClass=org.hedgr.Hedgr
+Categories=Development;

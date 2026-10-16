@@ -39,6 +39,16 @@ fi
 version=$(basename "${package}" .tar.gz)
 echo "deploying ${version} to ${host}:${remote_dir}"
 
+# The desktop entry is what lets the shell name the window, so a package that
+# lost it would deploy a client the app switcher still calls unknown. Check the
+# archive rather than the build tree, because the build tree can hold a file the
+# packaging step forgot to tar.
+desktop_entry=publish/share/applications/org.hedgr.Hedgr.desktop
+if ! tar -tzf "${package}" | grep -qx "${desktop_entry}"; then
+    echo "error: ${package} has no ${desktop_entry}" >&2
+    exit 1
+fi
+
 ssh "${host}" "mkdir -p '${remote_dir}'"
 scp -q "${package}" "${host}:${remote_dir}/"
 

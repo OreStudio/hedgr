@@ -57,6 +57,17 @@ namespace {
 
 std::string_view logger_name = "hedgr.imgui.app.application";
 
+/*
+ * One identity the shell can match a running window against. The Wayland app
+ * id, the two X11 WM_CLASS fields and the desktop file's StartupWMClass all
+ * have to name this same string, because the shell looks the window up by one
+ * and the launcher up by another, and a mismatch leaves it with nothing to
+ * attach the window to, which is how the client came to be listed as unknown.
+ * The value reads as a reverse DNS name rather than a title because that is
+ * what a Wayland app id and a desktop file id are expected to look like.
+ */
+constexpr const char* window_identity = "org.hedgr.Hedgr";
+
 auto& lg() {
     static auto instance = make_logger(logger_name);
     return instance;
@@ -197,6 +208,19 @@ GLFWwindow* application::initialise_graphics() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
 #endif
+
+    /*
+     * All three are string hints, so they go through the string entry point
+     * rather than glfwWindowHint, which takes an int and would read the
+     * pointer as one. They are set on every backend rather than behind a
+     * platform test, because GLFW keeps a hint it has no use for and ignores
+     * it, and setting them unconditionally keeps the one identity in one place
+     * instead of letting a build that prefers Wayland forget the X11 half of
+     * the pair.
+     */
+    glfwWindowHintString(GLFW_WAYLAND_APP_ID, window_identity);
+    glfwWindowHintString(GLFW_X11_CLASS_NAME, window_identity);
+    glfwWindowHintString(GLFW_X11_INSTANCE_NAME, window_identity);
 
     windowed_width_ = 1600;
     windowed_height_ = 900;

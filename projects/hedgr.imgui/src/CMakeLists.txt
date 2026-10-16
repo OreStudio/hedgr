@@ -71,6 +71,27 @@ install(FILES ${background_image} DESTINATION share/hedgr.imgui
     RENAME background.jpeg)
 
 #
+# Copy the desktop entry to the publish directory, in the applications
+# subdirectory the desktop specification names rather than beside the
+# background image, because a shell only scans share/applications for launchers.
+# The name is the window identity the executable sets as its Wayland app id, so
+# a shell that looks the launcher up by app id finds this file without a second
+# mapping to keep in step. The file is carried beside the exe because the
+# packaging target tars the publish tree, and install() alone never touches it.
+#
+set(application_desktop_file
+    "${CMAKE_SOURCE_DIR}/assets/applications/org.hedgr.Hedgr.desktop")
+add_custom_command(TARGET ${exe_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/applications"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${application_desktop_file}"
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/applications"
+    COMMENT "Copying the desktop entry to publish/share/applications/")
+
+install(FILES ${application_desktop_file} DESTINATION share/applications)
+
+#
 # Make the publish directory self-contained.
 #
 # OreStudio's libraries are not installed on the target and live outside this
