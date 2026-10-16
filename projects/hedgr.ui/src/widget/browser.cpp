@@ -648,7 +648,17 @@ void draw_rail_row(const widget::browser_model& model, widget::node_kind kind,
     ImDrawList* const draw = ImGui::GetWindowDrawList();
 
     const float left = min.x + style.WindowPadding.x;
-    const float text_y = min.y + (height - ImGui::GetTextLineHeight()) * 0.5f;
+    /*
+     * The text is centred in the rectangle the row is drawn as, which is not
+     * the height it was asked for. A selectable widens its hit box by half an
+     * item spacing on each side to close the gap to its neighbour, so the
+     * highlight is six pixels taller than the row and centring on the requested
+     * height would leave the word a few pixels above the middle of the box a
+     * reader sees. The heading and the entry are the same row here and both
+     * take this.
+     */
+    const float text_y = min.y
+        + ((max.y - min.y) - ImGui::GetTextLineHeight()) * 0.5f;
 
     if (heading) {
         const std::string title = rail_case(name);
@@ -1250,19 +1260,22 @@ void render_browser(const browser_model& model, window_ui_state& window,
 
     /*
      * The tree and the right hand pane share what the strip does not take, and
-     * they divide it with the tree taking three tenths and the pane the rest.
-     * Three tenths rather than the third this used to be, because a folder name
-     * is short and the list's columns are what the operator reads across. The
-     * floor under the rail is what keeps a heading and its entries whole on a
-     * window squeezed narrow, and the pane is a list or a details view depending
-     * on whether the host supplied one, the split being the same either way. The
-     * strip's width and the gaps between the three children are
-     * subtracted from the available width rather than guessed at, so the three
-     * fit the window exactly and the split does not depend on a magic number.
+     * they divide it with the tree taking a tenth and a half and the pane the
+     * rest. That is half the three tenths it was: the tree holds a folder name
+     * and an instance name, both short, and the room the left column was
+     * keeping was room the details pane wanted for its paths. The longest
+     * instance name the store seeds, "production cluster", is about a hundred
+     * and fifty pixels with its icon at this font, so the floor under the rail
+     * is what keeps a heading and its entries whole on a window squeezed
+     * narrow, and the pane is a list or a details view depending on whether the
+     * host supplied one, the split being the same either way. The strip's width
+     * and the gaps between the three children are subtracted from the available
+     * width rather than guessed at, so the three fit the window exactly and the
+     * split does not depend on a magic number.
      */
     const float beside =
         std::max(region.x - strip_width - style.ItemSpacing.x, 0.0f);
-    const float tree_width = std::max(beside * 0.30f, 180.0f);
+    const float tree_width = std::max(beside * 0.15f, 190.0f);
     const float list_width =
         std::max(beside - tree_width - style.ItemSpacing.x, 200.0f);
     /*

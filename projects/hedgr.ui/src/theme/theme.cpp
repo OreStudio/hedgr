@@ -41,20 +41,38 @@ constexpr ImVec4 colour(std::uint32_t rgba) {
  * the reading instead of trusting it. Regions are given as an x and y in the
  * reference's own pixels.
  *
- * The surfaces are opaque. The reference is an opaque application on a near
- * black ground, so a translucent panel would composite with whatever is behind
- * it and land on a colour nobody sampled.
+ * The second reference, the glass one at
+ * docs/samples/267987113-b1f2b31e-a315-4ec4-90ea-f6f0ff00134b.png, shows
+ * surfaces that let the render behind them through. Its Outliner panel was
+ * measured against the render behind it by fitting the panel's own colour to
+ * the render just outside its left edge, which gave an alpha of about 0.75, so
+ * about a quarter of what is behind comes through. The window, the panels and
+ * the cards take that reading in steps rather than all at once, because a card
+ * sits on a panel and two layers at the same alpha would lose the step between
+ * them. The alpha is not one number: the photograph behind is already dimmed by
+ * the workspace, and a card holds the smallest text in the window and needs the
+ * most of its own colour to stay readable.
  */
-const ImVec4 bg_base = colour(0x101113ff); // gap between the two panels, x 406 y 700
-const ImVec4 bg_window = colour(0x1b1f20ff); // main panel body, x 1600 y 300
-const ImVec4 bg_panel = colour(0x1f2324ff); // card interior, 60x40 at x 840 y 410
-const ImVec4 bg_status = colour(0x1a1b1dff); // status bar, x 1600 y 1615
-const ImVec4 bg_title = colour(0x292d2eff); // title bar, x 395 y 35
-const ImVec4 bg_frame = colour(0x2b2f30ff); // toolbar field, 300x40 at x 700 y 115
-const ImVec4 bg_frame_hover = colour(0x313637ff);
-const ImVec4 bg_frame_active = colour(0x363b3cff);
-const ImVec4 bg_button = colour(0x292d2eff); // Maps button, 100x40 at x 1170 y 115
-const ImVec4 bg_button_hover = colour(0x313637ff);
+constexpr ImVec4 with_alpha(ImVec4 base, float alpha) {
+    base.w = alpha;
+    return base;
+}
+
+constexpr float window_alpha = 0.72f; // the window's own body
+constexpr float panel_alpha = 0.82f; // a child pane and a card upon it
+constexpr float chrome_alpha = 0.85f; // title bar, status foot, buttons
+constexpr float field_alpha = 0.90f; // a text box or a combo, inside a card
+
+const ImVec4 bg_base = with_alpha(colour(0x101113ff), chrome_alpha); // gap between the two panels, x 406 y 700
+const ImVec4 bg_window = with_alpha(colour(0x1b1f20ff), window_alpha); // main panel body, x 1600 y 300
+const ImVec4 bg_panel = with_alpha(colour(0x1f2324ff), panel_alpha); // card interior, 60x40 at x 840 y 410
+const ImVec4 bg_status = with_alpha(colour(0x1a1b1dff), chrome_alpha); // status bar, x 1600 y 1615
+const ImVec4 bg_title = with_alpha(colour(0x292d2eff), chrome_alpha); // title bar, x 395 y 35
+const ImVec4 bg_frame = with_alpha(colour(0x2b2f30ff), field_alpha); // toolbar field, 300x40 at x 700 y 115
+const ImVec4 bg_frame_hover = with_alpha(colour(0x313637ff), field_alpha);
+const ImVec4 bg_frame_active = with_alpha(colour(0x363b3cff), field_alpha);
+const ImVec4 bg_button = with_alpha(colour(0x292d2eff), chrome_alpha); // Maps button, 100x40 at x 1170 y 115
+const ImVec4 bg_button_hover = with_alpha(colour(0x313637ff), chrome_alpha);
 
 /*
  * Two weights of line. The outline of a card is one pixel and sits barely
@@ -287,6 +305,17 @@ ImVec4 card_border() noexcept {
 
 ImVec4 dim_text() noexcept {
     return text_dim;
+}
+
+ImU32 card_title_icon_colour() noexcept {
+    /*
+     * The connected green, the same value the status dot carries. The reference
+     * writes every card title's icon in it while the title's own words stay a
+     * step below the value, so the icon marks the field and the words only name
+     * it. Every card takes it from here rather than reaching for the accent, so
+     * a change of mind moves the whole wall together.
+     */
+    return good_colour;
 }
 
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {

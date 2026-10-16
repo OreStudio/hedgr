@@ -35,10 +35,10 @@ namespace hedgr::ui::theme {
  *
  * Call once, after the ImGui context exists. The palette is sampled from
  * docs/samples rather than chosen, and each value in the implementation names
- * the region of that image it was read from. The surfaces are opaque, because
- * the reference is an opaque application on a near black ground and a
- * translucent panel would composite with the photographic background behind it
- * and land on a colour nobody sampled.
+ * the region of that image it was read from. The surfaces are glass: the
+ * second reference lets the render behind its panels show through, and the
+ * measurement of it and the alphas that follow from it live in the
+ * implementation beside the colours they modify.
  */
 HEDGR_UI_EXPORT void apply_theme();
 
@@ -82,6 +82,21 @@ HEDGR_UI_EXPORT void apply_theme();
  * of a card have three weights rather than two.
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 dim_text() noexcept;
+
+/**
+ * @brief The colour a card's title glyph is drawn in.
+ *
+ * The reference writes every card title's icon in the connected green while the
+ * title's own words are a step below the value, so the icon identifies the
+ * field and the words only name it. It is a helper rather than a constant each
+ * caller keeps, because the whole wall has to agree on it and a card that
+ * reached for an accent of its own would drift from the one beside it.
+ *
+ * The reference applies this to every card icon and to no other icon. Its
+ * toolbar and its status bar are drawn in the ordinary text colour, so the
+ * green means "the title of a card" rather than "a glyph".
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32 card_title_icon_colour() noexcept;
 
 /**
  * @brief The palette's red, for anything that reports a failure.

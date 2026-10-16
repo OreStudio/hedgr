@@ -69,10 +69,11 @@ namespace hedgr::ui::widget {
  * row's fill and the hover. It spans the strip's own width so the rows line up
  * as a column instead of each being as wide as its word.
  *
- * The glyph is part of the label rather than drawn beside it, because a rail
- * entry's icon and word are one item to the pointer as well as to the eye: two
+ * The glyph and the word are one item to the pointer as well as to the eye: two
  * items on one line would give the row two hit boxes and a gap between them
- * that selects nothing.
+ * that selects nothing. They are painted together in the middle of the row,
+ * because the row is taller than one line and a label left where ImGui puts it
+ * sits at the top of the highlight rather than in the middle of it.
  *
  * The height is roomier than an icon button's, which is what the reference
  * uses: a rail row is about two text heights rather than a hair over one.
@@ -98,7 +99,6 @@ namespace hedgr::ui::widget {
      * are not contiguous fills, so it is the surface that can use it.
      */
     ImGui::PushStyleVar(ImGuiStyleVar_SelectableRounding, 6.0f);
-    const std::string text = std::format("{}  {}", glyph, label);
     /*
      * A zero width is the selectable's own "span what is available": its size
      * argument is read as a requested width and a zero means the row's full
@@ -106,8 +106,40 @@ namespace hedgr::ui::widget {
      * its own word.
      */
     const bool pressed = ImGui::Selectable(
-        text.c_str(), false, ImGuiSelectableFlags_None, ImVec2(0.0f, height));
+        "##row", false, ImGuiSelectableFlags_None, ImVec2(0.0f, height));
     ImGui::PopStyleVar();
+
+    /*
+     * The text is drawn here rather than submitted as the selectable's own
+     * label. ImGui writes a label at the item's top left, which is right for a
+     * one line row and wrong for this one, because the row is taller than its
+     * text and the highlight would sit around a word pinned to the top of it.
+     * An empty label leaves the drawing here, which centres the glyph and the
+     * word in the rectangle the row actually occupies.
+     *
+     * It is drawn before the disabled scope ends, because the dimming of a
+     * disabled item is carried on the style alpha and the colour is read while
+     * that alpha still applies.
+     */
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    const ImU32 colour = ImGui::GetColorU32(ImGuiCol_Text);
+    const float text_y = min.y
+        + ((max.y - min.y) - ImGui::GetTextLineHeight()) * 0.5f;
+    /*
+     * The left inset is half an item spacing rather than the frame padding,
+     * because that is where ImGui's own label sat: a selectable widens its hit
+     * box by half a spacing on each side to close the gap to its neighbour, and
+     * the label was written at the cursor inside that box.
+     */
+    const float glyph_x = min.x + style.ItemSpacing.x * 0.5f;
+    const float word_x =
+        glyph_x + ImGui::CalcTextSize(glyph).x + style.ItemInnerSpacing.x;
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+    draw->AddText(ImVec2(glyph_x, text_y), colour, glyph);
+    draw->AddText(ImVec2(word_x, text_y), colour, label);
+
     if (!enabled)
         ImGui::EndDisabled();
     ImGui::PopID();
