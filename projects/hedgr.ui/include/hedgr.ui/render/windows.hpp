@@ -48,14 +48,42 @@ HEDGR_UI_EXPORT void render_instances_window(
 HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 
 /**
- * @brief Opens the instance form on one row, for a capture that has to show it.
+ * @brief Selects an instance in the Instances window, on the next frame it
+ *        draws.
  *
- * The form is otherwise reached by clicking a row's edit icon, and a capture is
- * not a person. What this writes is that click's own scratch -- the form kind
- * and the row it names -- so the fields are then filled from the row by the
- * same code the click reaches.
+ * The read-only pane is reached by selecting a row, and a capture that wants to
+ * show it without a click has no other way in. The selection is the same
+ * scratch a click writes, so the pane that follows is the one an operator would
+ * have seen.
  */
-HEDGR_UI_EXPORT void open_instance_form_for_capture(std::string_view instance_id);
+HEDGR_UI_EXPORT void select_instance_for_capture(std::string_view instance_id);
+
+/**
+ * @brief Puts the Instances pane into edit mode on one row, for a capture.
+ *
+ * Edit mode is otherwise reached by clicking the row's edit icon, and a capture
+ * is not a person. What this writes is that click's own scratch -- the selected
+ * row and the mode -- so the drafts are then filled from the row by the same
+ * code the click reaches.
+ */
+HEDGR_UI_EXPORT void open_instance_edit_for_capture(std::string_view instance_id);
+
+/**
+ * @brief Overwrites one in-place edit draft, for a capture.
+ *
+ * A capture has no keyboard, so it cannot type a change into the pane and the
+ * frame that has to show a changed field could not be reached by a person's own
+ * gesture. This writes the draft the way typing would, and does nothing unless
+ * an edit is already being filled, so it can never invent a change out of an
+ * ordinary run.
+ *
+ * @param field The field's own name as the pane spells it, which is one of
+ *        name, host, port, subject, wire_format, tls_ca, tls_cert, tls_key or
+ *        labels.
+ * @param value The value to write into that draft.
+ */
+HEDGR_UI_EXPORT void change_instance_field_for_capture(std::string_view field,
+    std::string_view value);
 
 /**
  * @brief The accounts of one instance, as a browser over that instance's tree.

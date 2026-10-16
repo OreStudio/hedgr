@@ -91,6 +91,59 @@ struct instance_icon_textures final {
 };
 
 /**
+ * @brief The in-place edit of one instance, in the details pane.
+ *
+ * The pane is the form, so its drafts live here rather than in a dialog. They
+ * are kept apart from the create form's own drafts because the create form can
+ * be opened over the pane and neither may overwrite the other: a create form
+ * cancelled after an edit was begun would otherwise leave the edit showing the
+ * new row's blanks.
+ *
+ * The target is the row the drafts belong to. The pane compares the drafts
+ * against that row every frame, which is what decides which fields are marked
+ * as changed and whether leaving would lose anything.
+ */
+struct instance_edit_state final {
+    /** @brief Whether the pane is editable. */
+    bool active = false;
+
+    /**
+     * @brief Whether the drafts still have to be read from the store.
+     *
+     * The toolbar callback that begins an edit is handed no tables, so it can
+     * only name the row. The fill happens on the next frame the pane draws,
+     * where the row is readable, and stays pending until the store holds it.
+     */
+    bool pending_fill = false;
+
+    /** @brief The row being edited. */
+    std::string target;
+
+    /** @brief The drafts, one per editable field. */
+    std::array<char, 128> name{};
+    std::array<char, 128> host{};
+    std::array<char, 16> port{};
+    std::array<char, 128> subject{};
+    std::array<char, 64> wire_format{};
+    std::array<char, 256> tls_ca{};
+    std::array<char, 256> tls_cert{};
+    std::array<char, 256> tls_key{};
+    std::array<char, 128> labels{};
+
+    /*
+     * Where the operator was trying to go when the edited row still held
+     * changes, held while the warning is up. The selection is put back on the
+     * edited row so the pane keeps showing what the warning is about, and these
+     * are the click that was held back for the operator to confirm.
+     */
+    std::string pending_leaf;
+    std::string pending_folder;
+
+    /** @brief Whether the leave warning is up. */
+    bool confirm_discard = false;
+};
+
+/**
  * @brief The interface's own scratch state for one window.
  *
  * Not domain state: none of it is persisted and none of it is read by the
@@ -168,6 +221,15 @@ struct window_ui_state final {
     std::array<char, 256> draft_tls_ca{};
     std::array<char, 256> draft_tls_cert{};
     std::array<char, 256> draft_tls_key{};
+
+    /**
+     * @brief The in-place edit of the Instances window's selected row.
+     *
+     * A member of every window's state rather than of the browser's, because
+     * the browser knows a name and a folder and the fields here are the host's.
+     * A window that does not host the Instances pane simply never reads it.
+     */
+    instance_edit_state instance_edit;
 };
 
 /**

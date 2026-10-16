@@ -52,6 +52,18 @@ HEDGR_UI_EXPORT void apply_theme();
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
 /**
+ * @brief The colour of a field whose edited value differs from the stored one.
+ *
+ * The palette's amber, which is the colour every other state that wants an
+ * action uses. An unsaved edit is a thing the operator has done and not a thing
+ * that is wrong, so the failure red would report a fault, and the ordinary text
+ * colour would say nothing at all. It is named here rather than borrowed from a
+ * label or a lock so that the mark says "changed" and not "this is a label" or
+ * "the store is shut".
+ */
+inline constexpr ImU32 edit_changed_colour = IM_COL32(255, 193, 7, 255);
+
+/**
  * @brief The colour of a session status.
  *
  * Disconnected grey, connecting amber, authenticated green, failed red.

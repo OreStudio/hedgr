@@ -111,6 +111,9 @@ std::string pending_capture_folder;
 /** @brief The row a capture asked to see being edited. */
 std::string pending_capture_edit_instance;
 
+/** @brief The row a capture asked to see selected, without editing it. */
+std::string pending_capture_selected_instance;
+
 /** @brief The field a capture asked a changed value to be written into. */
 std::string pending_capture_field;
 
@@ -1523,6 +1526,20 @@ void edit_row(const char* glyph, const char* name, bool changed,
         ImGui::PopStyleColor();
 }
 
+/** @brief Records the control just submitted as a target a capture can name. */
+void observe_item(std::string_view target, const char* label) {
+    widget::capture_element element;
+    const ImVec2 item_min = ImGui::GetItemRectMin();
+    const ImVec2 item_max = ImGui::GetItemRectMax();
+    element.min_x = item_min.x;
+    element.min_y = item_min.y;
+    element.max_x = item_max.x;
+    element.max_y = item_max.y;
+    element.label_min_x = item_min.x;
+    element.label = label;
+    widget::observe_capture_element(target, element);
+}
+
 /**
  * @brief The in-place editor's two controls, on the picture's own line.
  *
@@ -1550,14 +1567,19 @@ void draw_edit_controls(const render_input& input, window_ui_state& window) {
     ImGui::SetCursorPosX(
         ImGui::GetCursorPosX() + std::max(room - controls, 0.0f));
 
-    if (widget::icon_button("instance-save", icon::save,
-            "Save the changes to this instance")) {
+    const bool saved = widget::icon_button("instance-save", icon::save,
+        "Save the changes to this instance");
+    observe_item("instance-save", "pane");
+    if (saved) {
         save_edit(input, window);
         return;
     }
+
     ImGui::SameLine();
-    if (widget::icon_button("instance-reset", icon::cancel,
-            "Reset this instance's fields to the stored values"))
+    const bool reset = widget::icon_button("instance-reset", icon::cancel,
+        "Reset this instance's fields to the stored values");
+    observe_item("instance-reset", "pane");
+    if (reset)
         static_cast<void>(fill_edit_drafts(input, window));
 }
 
@@ -2095,6 +2117,10 @@ void select_folder_for_capture(std::string_view folder_id) {
     pending_capture_folder = std::string{folder_id};
 }
 
+void select_instance_for_capture(std::string_view instance_id) {
+    pending_capture_selected_instance = std::string{instance_id};
+}
+
 void open_instance_edit_for_capture(std::string_view instance_id) {
     pending_capture_edit_instance = std::string{instance_id};
 }
@@ -2290,6 +2316,11 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         state.browser.selected_folder = pending_capture_folder;
         state.browser.selected_leaf.clear();
         pending_capture_folder.clear();
+    }
+    if (!pending_capture_selected_instance.empty()) {
+        state.browser.selected_leaf = pending_capture_selected_instance;
+        state.browser.selected_folder.clear();
+        pending_capture_selected_instance.clear();
     }
     if (!pending_capture_edit_instance.empty()) {
         /*

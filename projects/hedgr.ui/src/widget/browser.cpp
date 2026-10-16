@@ -538,11 +538,28 @@ void draw_toolbar(const widget::browser_model& model,
         model.window_actions(input, window);
     }
 
-    if (widget::icon_button("edit", icon::edit, "Edit the selected entry",
-            writable && have_leaf)
-        && model.edit_leaf != nullptr) {
-        model.edit_leaf(window, state.selected_leaf);
+    const bool edit_pressed = widget::icon_button("edit", icon::edit,
+        "Edit the selected entry", writable && have_leaf);
+    {
+        /*
+         * The edit control offers itself to a capture by name, so a script can
+         * put the pane into edit mode the way a person does rather than through
+         * a hook beside it. The rectangle is the button's own, read here where
+         * ImGui's geometry for it is still current.
+         */
+        widget::capture_element element;
+        const ImVec2 item_min = ImGui::GetItemRectMin();
+        const ImVec2 item_max = ImGui::GetItemRectMax();
+        element.min_x = item_min.x;
+        element.min_y = item_min.y;
+        element.max_x = item_max.x;
+        element.max_y = item_max.y;
+        element.label_min_x = item_min.x;
+        element.label = "toolbar";
+        widget::observe_capture_element("edit", element);
     }
+    if (edit_pressed && model.edit_leaf != nullptr)
+        model.edit_leaf(window, state.selected_leaf);
 
     if (model.can_duplicate) {
         if (widget::icon_button("duplicate", icon::duplicate,
@@ -1094,7 +1111,7 @@ void draw_details_pane(const widget::browser_model& model,
         return;
     }
 
-    model.draw_details(*selected, input);
+    model.draw_details(*selected, input, window);
     ImGui::EndChild();
 }
 

@@ -50,3 +50,6 @@ CMakeUserPresets.json
 
 # Open Code
 .opencode/
+
+# scratch: compositor sockets and runtime dirs for headless captures
+tmp/

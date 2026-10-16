@@ -301,9 +301,14 @@ struct browser_model final {
      * is no selection; the host owns every field drawn inside it. A null
      * callback leaves the pane as the list, which is what the Accounts window
      * still asks for.
+     *
+     * The host's window state travels with it because the pane can be a form as
+     * well as a report: the Instances pane edits the row in place, and what the
+     * operator typed but has not saved is the host's scratch.
      */
     void (*draw_details)(const tree_leaf&,
-        const hedgr::ui::render::render_input&) = nullptr;
+        const hedgr::ui::render::render_input&,
+        hedgr::ui::render::window_ui_state&) = nullptr;
 
     /*
      * The host's callbacks all take the whole window state rather than the
