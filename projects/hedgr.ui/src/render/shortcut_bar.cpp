@@ -31,6 +31,8 @@
 
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/shortcut.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "ImCoolBar.h"
@@ -38,10 +40,12 @@
 #include <cstdint>
 #include <format>
 #include <string>
+#include <utility>
 
 namespace {
 
 namespace domain = hedgr::model::domain;
+namespace signal = hedgr::model::signal;
 namespace theme = hedgr::ui::theme;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shortcut_bar_result;
@@ -122,22 +126,45 @@ constexpr float entry_anim_step = 0.03f;
 }
 
 /**
+ * @brief Raises the signal that says an entry was clicked.
+ *
+ * The bar plays nothing itself. It raises a name, the frame loop drains the
+ * bus, and the player decides whether that name has a sound. Keeping the audio
+ * out of here is what makes a click free of any device or disk work, and it is
+ * what lets a second listener appear later, a status bar saying what was
+ * opened, without touching this function.
+ *
+ * The detail is the entry's tooltip rather than a second sentence, so the
+ * words a reader sees on hover and the words a log keeps are the same ones.
+ */
+void raise_activation(const render_input& input, const domain::shortcut& row) {
+    signal::signal value;
+    value.name = std::string(signal::names::shortcut_activated);
+    value.detail = entry_tooltip(input, row);
+    value.at_ns = input.now_ns;
+    signal::bus().raise(std::move(value));
+}
+
+/**
  * @brief Does what an entry means, for the kinds that mean something yet.
  *
  * The accounts case goes through the same request the Instances window's own
  * toolbar uses, so opening an instance's accounts has one description rather
  * than two. A kind with no surface yet is left alone, which is deliberate: the
  * entry draws and answers its tooltip, and the click is inert rather than
- * pretending to have opened something.
+ * pretending to have opened something. An inert click raises no signal either,
+ * because a sound would be claiming that something happened.
  */
 void activate_entry(const render_input& input, const domain::shortcut& row,
     shortcut_bar_result& result) {
     switch (row.target_kind) {
     case domain::window_kind::instance_manager:
         result.focus_instances = true;
+        raise_activation(input, row);
         return;
     case domain::window_kind::accounts:
         hedgr::ui::render::request_accounts_window(input, row.target_id);
+        raise_activation(input, row);
         return;
     default:
         return;

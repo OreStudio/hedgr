@@ -23,6 +23,7 @@
 #include "hedgr.imgui/config/options.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.ui/render/workspace.hpp"
+#include "hedgr.ui/sound/player.hpp"
 #include <filesystem>
 #include <string>
 
@@ -89,6 +90,13 @@ private:
     std::string ini_path_;
     runtime::manager::instance_manager manager_;
     ui::render::workspace workspace_;
+    /*
+     * The sound player owns its own thread and device, and the frame loop only
+     * hands it names. It is the one subscriber to the signal bus today; see
+     * ADR 8 for why sound is not special and why nothing plays on the frame
+     * loop itself.
+     */
+    ui::sound::player sound_;
     std::string glsl_version_;
     unsigned int background_texture_ = 0;
     int background_width_ = 0;

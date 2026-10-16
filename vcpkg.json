@@ -19,6 +19,7 @@
             ]
         },
         "glew",
+        "miniaudio",
         "openssl",
         "boost-log",
         "boost-scope-exit",

@@ -13,6 +13,11 @@ set(lib_target_name ${name}.lib)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/component_files.cmake)
 
+# miniaudio is the sound backend ADR 8 names, a single header with no
+# dependencies. The vcpkg port ships the header and no CMake config, so it is
+# found by path rather than by find_package, and only this component sees it.
+find_path(HEDGR_MINIAUDIO_INCLUDE_DIR miniaudio.h REQUIRED)
+
 # A component with no sources yet must still configure.
 if(NOT files)
     message(STATUS "hedgr.ui: no sources yet")
@@ -38,13 +43,21 @@ target_include_directories(${lib_target_name} PUBLIC
 # widget by its upstream name rather than by a path into the vendored tree.
 target_include_directories(${lib_target_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/imcoolbar)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/imcoolbar
+    ${HEDGR_MINIAUDIO_INCLUDE_DIR})
 
 target_link_libraries(${lib_target_name}
     PUBLIC
         hedgr.model.lib
         imgui::imgui
         implot::implot
+    PRIVATE
+        # miniaudio's Linux backends are loaded at run time, so what it needs
+        # from the host is the dynamic loader, threads and the math library
+        # rather than a link against ALSA or PulseAudio.
+        ${CMAKE_DL_LIBS}
+        Threads::Threads
+        $<$<PLATFORM_ID:Linux>:m>
 )
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)
@@ -94,3 +107,30 @@ add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMENT "Copying the instance icons to publish/share/hedgr.ui/instances/")
 
 install(FILES ${instance_icons} DESTINATION share/hedgr.ui/instances)
+
+# Copy the curated sound pack to the publish directory, for the same reason the
+# icon sheet goes there: a deployed bundle resolves it through the
+# <exe>/../share/<component> rule with no checkout beside it. The list is
+# written out rather than globbed, so a missing file fails at configure time
+# and the licence text ships beside the sounds it covers.
+set(sound_dir "${CMAKE_SOURCE_DIR}/assets/sounds")
+set(sounds
+    "${sound_dir}/click1.wav"
+    "${sound_dir}/confirmation_001.wav"
+    "${sound_dir}/confirmation_002.wav"
+    "${sound_dir}/error_001.wav"
+    "${sound_dir}/error_002.wav"
+    "${sound_dir}/bong_001.wav")
+add_custom_command(TARGET ${lib_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/sounds"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${sounds}
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/sounds"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${sound_dir}/LICENSE-Kenney.txt"
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/sounds/LICENSE-Kenney.txt"
+    COMMENT "Copying the sound pack to publish/share/hedgr.ui/sounds/")
+
+install(FILES ${sounds} DESTINATION share/hedgr.ui/sounds)
+install(FILES "${sound_dir}/LICENSE-Kenney.txt" DESTINATION share/hedgr.ui/sounds)

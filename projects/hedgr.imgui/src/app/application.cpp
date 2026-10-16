@@ -20,6 +20,7 @@
 #include "hedgr.imgui/app/application.hpp"
 
 #include "hedgr.imgui/app/capture_input.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/renderer.hpp"
@@ -116,6 +117,17 @@ void application::run() {
     }
 
     /*
+     * The player is started once, before the first frame. It opens an output
+     * device when the host has one and stays silent when it does not, which is
+     * the ordinary outcome on a headless box; either way no frame waits on it.
+     */
+    sound_.start();
+    if (!sound_.started()) {
+        BOOST_LOG_SEV(lg(), info)
+            << "No audio output device, so sounds will be silent.";
+    }
+
+    /*
      * Armed before the first frame, so an unattended launch unlocks on the
      * frame the prompt is first drawn rather than after a visible pause.
      */
@@ -133,6 +145,9 @@ void application::run() {
     if (const char* selected = std::getenv("HEDGR_CAPTURE_SELECT_INSTANCE");
         selected != nullptr && *selected != '\0')
         ui::render::select_instance_for_capture(selected);
+    if (const char* selected = std::getenv("HEDGR_CAPTURE_SELECT_ACCOUNT");
+        selected != nullptr && *selected != '\0')
+        ui::render::select_account_for_capture(selected);
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
         ui::render::open_instance_edit_for_capture(editing);
@@ -605,6 +620,15 @@ void application::render_loop(GLFWwindow* window) {
             .instance_icons = &instance_icons_,
         };
         workspace_.render(input);
+
+        /*
+         * Every signal raised since the last frame goes to the player, which
+         * only queues names and returns. The deployment signals were raised by
+         * the runtime during pump and the shortcut signals by the bar during
+         * the draw, so this one drain covers both. A name with no registration
+         * is dropped and costs nothing.
+         */
+        (void)sound_.submit(hedgr::model::signal::bus().drain());
 
         /*
          * The copy a frame made is read here, after the frame has been drawn
