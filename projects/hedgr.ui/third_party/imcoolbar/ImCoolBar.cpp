@@ -67,12 +67,35 @@ static float s_getChannelInv(const ImVec2& arVec, const ImCoolBarFlags aFlags) {
     return arVec.x;
 }
 
-// Use the actual window rect for hover detection.
-// The window rect already fits the bubbled items tightly,
-// so it naturally covers the visible buttons without extending
-// beyond them.  No artificial margin needed.
+// Test the bar at rest rather than the window. The window grows to the
+// bubbled size, so testing it holds the magnifier open for a pointer that
+// never came near the resting bar, and lets that growth move the test out
+// from under the pointer on alternating frames.
 static bool s_isBarHovered(ImGuiWindow* apWindow) {
-    if (!ImGui::IsMouseHoveringRect(apWindow->Rect().Min, apWindow->Rect().Max)) {
+    const auto itemCount = apWindow->StateStorage.GetInt(apWindow->GetID(ICB_PREFIX "ItemCount"));
+    if (itemCount <= 0) {
+        return false;
+    }
+    const auto cbFlags = apWindow->StateStorage.GetInt(apWindow->GetID(ICB_PREFIX "Flags"));
+    const auto normalSize = apWindow->StateStorage.GetFloat(apWindow->GetID(ICB_PREFIX "NormalSize"));
+    const auto crossAnchor = apWindow->StateStorage.GetFloat(apWindow->GetID(ICB_PREFIX "Anchor"));
+    const auto mainAnchor = apWindow->StateStorage.GetFloat(apWindow->GetID(ICB_PREFIX "MainAnchor"));
+    const auto spacing = s_getChannel(ImGui::GetStyle().ItemSpacing, cbFlags);
+    const auto padding = ImGui::GetStyle().WindowPadding * 2.0f;
+    const auto mainSize = itemCount * normalSize + (itemCount - 1) * spacing + s_getChannel(padding, cbFlags);
+    const auto crossSize = normalSize + s_getChannelInv(padding, cbFlags);
+    const auto* const pViewport = apWindow->Viewport;
+    ImVec2 min, size;
+    if (cbFlags & ImCoolBarFlags_Horizontal) {
+        size = ImVec2(mainSize, crossSize);
+        min = ImVec2(pViewport->Pos.x + (pViewport->Size.x - mainSize) * mainAnchor,
+                     pViewport->Pos.y + (pViewport->Size.y - crossSize) * crossAnchor);
+    } else {
+        size = ImVec2(crossSize, mainSize);
+        min = ImVec2(pViewport->Pos.x + (pViewport->Size.x - crossSize) * crossAnchor,
+                     pViewport->Pos.y + (pViewport->Size.y - mainSize) * mainAnchor);
+    }
+    if (!ImGui::IsMouseHoveringRect(min, min + size)) {
         return false;
     }
     // Don't react if another window is on top of the bar
@@ -117,6 +140,7 @@ IMCOOLBAR_API bool ImGui::BeginCoolBar(const char* aLabel, const ImCoolBarSettin
         pWindow->StateStorage.SetInt(pWindow->GetID(ICB_PREFIX "Flags"), arSettings.mode);
         const auto anchor = s_getChannelInv(ImClamp(arSettings.anchor, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f)), arSettings.mode);
         pWindow->StateStorage.SetFloat(pWindow->GetID(ICB_PREFIX "Anchor"), anchor);
+        pWindow->StateStorage.SetFloat(pWindow->GetID(ICB_PREFIX "MainAnchor"), s_getChannel(ImClamp(arSettings.anchor, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f)), arSettings.mode));
         const auto normalSizeId = pWindow->GetID(ICB_PREFIX "NormalSize");
         const auto hoveredSizeId = pWindow->GetID(ICB_PREFIX "HoveredSize");
         pWindow->StateStorage.SetFloat(normalSizeId, arSettings.normalSize);
@@ -160,10 +184,11 @@ IMCOOLBAR_API bool ImGui::BeginCoolBar(const char* aLabel, const ImCoolBarSettin
         // a given viewport size and item count.  CoolBarItem uses it to
         // compute the bubble effect from stable positions.
         const auto padMain = s_getChannel(pad, arSettings.mode);
+        const auto spacingMain = s_getChannel(g.Style.ItemSpacing, arSettings.mode);
         const auto viewMain = s_getChannel(pViewport->Pos, arSettings.mode);
         const auto viewSizeMain = s_getChannel(pViewport->Size, arSettings.mode);
         const auto anchorMainFrac = s_getChannel(clampedAnchor, arSettings.mode);
-        const auto baseBarMain = (prevItemCount > 0) ? (prevItemCount * normalSize + padMain) : s_getChannel(barSize, arSettings.mode);
+        const auto baseBarMain = (prevItemCount > 0) ? (prevItemCount * normalSize + (prevItemCount - 1) * spacingMain + padMain) : s_getChannel(barSize, arSettings.mode);
         const auto baseBarPosMain = viewMain + (viewSizeMain - baseBarMain) * anchorMainFrac;
 
         // Store for CoolBarItem (STABLE position, not the pinned one)
@@ -176,7 +201,7 @@ IMCOOLBAR_API bool ImGui::BeginCoolBar(const char* aLabel, const ImCoolBarSettin
         if (animScale > 0.0f && prevItemCount > 0) {
             const auto mouseMain = s_getChannel(g.IO.MousePos, arSettings.mode);
             const auto wpMain = s_getChannel(ImGui::GetStyle().WindowPadding, arSettings.mode);
-            const auto baseContentSize = prevItemCount * normalSize;
+            const auto baseContentSize = prevItemCount * normalSize + (prevItemCount - 1) * spacingMain;
 
             // Clamp the mouse rel position to the base bar content area.
             // This avoids dragging the bar when the mouse goes past the
@@ -188,11 +213,11 @@ IMCOOLBAR_API bool ImGui::BeginCoolBar(const char* aLabel, const ImCoolBarSettin
             auto totalBubbledContent = 0.0f;
             auto mouseFound = false;
             for (int32_t i = 0; i < prevItemCount; ++i) {
-                const auto baseBtnCenter = baseBarPosMain + wpMain + i * normalSize + normalSize * 0.5f;
+                const auto baseItemStart = static_cast<float>(i) * (normalSize + spacingMain);
+                const auto baseBtnCenter = baseBarPosMain + wpMain + baseItemStart + normalSize * 0.5f;
                 const auto diffPos = (mouseMain - baseBtnCenter) / baseBarMain;
                 const auto es = pWindow->StateStorage.GetFloat(pWindow->GetID(ICB_PREFIX "EffectStrength"));
                 const auto itemSize = s_getHoverSize(diffPos, normalSize, hoveredSize, es, animScale);
-                const auto baseItemStart = static_cast<float>(i) * normalSize;
                 const auto baseItemEnd = baseItemStart + normalSize;
                 if (!mouseFound && mouseBaseRel < baseItemEnd) {
                     const auto fracInItem = ImClamp((mouseBaseRel - baseItemStart) / normalSize, 0.0f, 1.0f);
@@ -200,6 +225,9 @@ IMCOOLBAR_API bool ImGui::BeginCoolBar(const char* aLabel, const ImCoolBarSettin
                     mouseFound = true;
                 }
                 totalBubbledContent += itemSize;
+                if (i + 1 < prevItemCount) {
+                    totalBubbledContent += spacingMain;
+                }
             }
             if (!mouseFound) {
                 mouseBubbledRel = totalBubbledContent;
@@ -272,8 +300,9 @@ IMCOOLBAR_API bool ImGui::CoolBarItem() {
         // it doesn't change when items grow, eliminating the feedback loop that caused edge items to drift from the cursor.
         const auto itemCount = pWindow->StateStorage.GetInt(pWindow->GetID(ICB_PREFIX "ItemCount"));
         const auto baseBarPos = pWindow->StateStorage.GetFloat(pWindow->GetID(ICB_PREFIX "BaseBarPos"));
-        const auto baseBtnCenter = baseBarPos + wp + idx * normalSize + normalSize * 0.5f;
-        const auto baseBarWidth = (itemCount > 0) ? (itemCount * normalSize + wp * 2.0f) : s_getChannel(pWindow->Size, cbFlags);
+        const auto itemSpacing = s_getChannel(g.Style.ItemSpacing, cbFlags);
+        const auto baseBtnCenter = baseBarPos + wp + idx * (normalSize + itemSpacing) + normalSize * 0.5f;
+        const auto baseBarWidth = (itemCount > 0) ? (itemCount * normalSize + (itemCount - 1) * itemSpacing + wp * 2.0f) : s_getChannel(pWindow->Size, cbFlags);
         const auto diffPos = (lastMousePos - baseBtnCenter) / baseBarWidth;
         currentSize = s_getHoverSize(diffPos, normalSize, hoveredSize, effectStrength, animScale);
 
