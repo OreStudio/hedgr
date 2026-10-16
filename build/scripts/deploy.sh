@@ -44,7 +44,10 @@ echo "deploying ${version} to ${host}:${remote_dir}"
 # archive rather than the build tree, because the build tree can hold a file the
 # packaging step forgot to tar.
 desktop_entry=publish/share/applications/org.hedgr.Hedgr.desktop
-if ! tar -tzf "${package}" | grep -qx "${desktop_entry}"; then
+# The listing is read to the end rather than stopped at the first match,
+# because grep -q closes the pipe, tar then dies of SIGPIPE, and pipefail turns
+# a successful match into a failed pipeline.
+if ! tar -tzf "${package}" | grep -Fx "${desktop_entry}" >/dev/null; then
     echo "error: ${package} has no ${desktop_entry}" >&2
     exit 1
 fi
@@ -63,7 +66,35 @@ rm -rf "${version}"
 mkdir -p "${version}"
 tar xzf "${version}.tar.gz" -C "${version}"
 ln -sfn "${version}/publish" current
+
+# A shell scans its own applications directory, not the one inside the bundle,
+# so the entry has to be copied out of the tree that was just unpacked. It is
+# copied rather than symlinked, because removing a version would then leave a
+# launcher pointing at a file that is gone, and it is overwritten so a redeploy
+# carries the current Exec with it.
+applications_dir="${HOME}/.local/share/applications"
+mkdir -p "${applications_dir}"
+entry=org.hedgr.Hedgr.desktop
+install -Dm644 "current/share/applications/${entry}" "${applications_dir}/${entry}"
+
+# Exec=hedgr.imgui assumes the binary resolves on PATH, and the bundle never
+# puts bin on PATH, so the launcher would find nothing to run. An absolute path
+# is written in rather than a wrapper in ~/.local/bin, because that keeps the
+# launcher to one file and lets it follow the current symlink this script
+# already moves. The path belongs to the remote, so it is resolved here instead
+# of being baked in at build time.
+sed -i "s|^Exec=.*$|Exec=${PWD}/current/bin/hedgr.imgui|" \
+    "${applications_dir}/${entry}"
+
+# A shell can read the desktop database rather than the directory, so refresh
+# it when the host has the tool. The entry is still in a directory a shell
+# scans without it, so a host that lacks the tool must not fail the deploy.
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "${applications_dir}" || true
+fi
+
 echo "unpacked into ${remote_dir}/${version}, current now points at it"
+echo "installed ${entry} into ${applications_dir}"
 REMOTE
 
 echo
