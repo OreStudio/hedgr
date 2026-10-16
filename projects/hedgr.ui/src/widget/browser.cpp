@@ -48,262 +48,138 @@ using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
 /**
- * @brief A folder or a leaf, flattened into one row of the drawn tree.
+ * @brief One group of the rail: a folder and the entries that name it.
  *
- * The tree is flattened rather than walked recursively at draw time, because
- * the filter and the drop rules both have to be decided over the whole tree
- * before any of it is drawn, and a flat list with a depth is the shape that
- * lets one pass do that.
- */
-struct tree_row final {
-    /** @brief Whether this row is a folder or a leaf. */
-    widget::node_kind kind = widget::node_kind::folder;
-
-    /** @brief Index into the model's folder or leaf list, by @c kind. */
-    std::size_t index = 0;
-
-    /** @brief Nesting depth, the root at zero. */
-    std::size_t depth = 0;
-
-    /** @brief Whether the row survives the current filter. */
-    bool visible = true;
-};
-
-/** @brief The row's id, whichever list it came from. */
-[[nodiscard]] std::string_view id_of(const widget::browser_model& model,
-    const tree_row& row) {
-    return row.kind == widget::node_kind::folder
-        ? std::string_view{model.folders[row.index].id}
-        : std::string_view{model.leaves[row.index].id};
-}
-
-/** @brief The row's parent id, whichever list it came from. */
-[[nodiscard]] std::string_view parent_of(const widget::browser_model& model,
-    const tree_row& row) {
-    return row.kind == widget::node_kind::folder
-        ? std::string_view{model.folders[row.index].parent_id}
-        : std::string_view{model.leaves[row.index].parent_id};
-}
-
-/** @brief The row's shown text, whichever list it came from. */
-[[nodiscard]] std::string_view name_of(const widget::browser_model& model,
-    const tree_row& row) {
-    return row.kind == widget::node_kind::folder
-        ? std::string_view{model.folders[row.index].name}
-        : std::string_view{model.leaves[row.index].name};
-}
-
-/**
- * @brief Whether the row is the tree's root.
+ * The tree the model holds is a general one and the rail shows one level of it.
+ * A folder is a heading at a fixed indent rather than a node inside a node, and
+ * an entry sits under the heading of the folder it names. A folder nested under
+ * another is therefore drawn as a heading beside it, which is what keeps the
+ * surface one level while every row the store holds is still drawn.
  *
- * Defined ahead of @c glyph_of, which is what a folder's glyph depends on.
+ * The root is a group too, because an entity created with the root selected
+ * names it as its parent, and it is drawn only when something sits directly
+ * under it.
  */
-[[nodiscard]] bool is_root_of(const widget::browser_model& model,
-    const tree_row& row) {
-    return row.kind == widget::node_kind::folder
-        && model.folders[row.index].is_root;
-}
+struct rail_group final {
+    /** @brief Index into the model's folder list. */
+    std::size_t folder = 0;
 
-/** @brief The row's icon and its colour, whichever list it came from. */
-struct row_glyph final {
-    const char* glyph = nullptr;
-    std::uint32_t colour = 0;
-    const std::string* tooltip = nullptr;
+    /** @brief Whether this group is the tree's root. */
+    bool is_root = false;
+
+    /** @brief Indices into the model's leaf list, in the order the model gives. */
+    std::vector<std::size_t> leaves;
 };
 
 /**
- * @brief The row's glyph, its colour and its tooltip.
+ * @brief Flattens the model into the rail's groups.
  *
- * A folder has a glyph chosen from its place in the tree and no colour, which
- * is why this is a struct and not a single pointer: the leaf's colour and its
- * tooltip only exist on a leaf, and reaching for them on a folder would be a
- * read of the wrong list.
+ * Every folder but the root is one group, in the order the host gave them, and
+ * every leaf is placed in the group its parent names. A leaf whose parent the
+ * model does not hold lands in the root's group rather than being dropped: a
+ * row the store holds must not become invisible because the host assembled the
+ * tree in an unexpected order.
  *
- * A leaf's glyph and colour come from the model rather than from constants
- * here, so that the state the host computed is what the tree paints. The list
- * draws no glyph at all: one entry has one icon, in the tree.
+ * The root's group is appended last and taken off again when nothing names it,
+ * so the tree's own name is never a heading over an empty list.
  */
-[[nodiscard]] row_glyph glyph_of(const widget::browser_model& model,
-    const tree_row& row) {
-    if (row.kind == widget::node_kind::folder) {
-        return row_glyph{
-            .glyph = is_root_of(model, row) ? icon::folder_root : icon::folder,
-        };
-    }
-    const auto& leaf = model.leaves[row.index];
-    return row_glyph{
-        .glyph = leaf.icon != nullptr ? leaf.icon : icon::instance,
-        .colour = leaf.icon_colour,
-        .tooltip = leaf.icon_tooltip.empty() ? nullptr : &leaf.icon_tooltip,
-    };
-}
+[[nodiscard]] std::vector<rail_group>
+build_rail_groups(const widget::browser_model& model) {
+    std::vector<rail_group> groups;
 
-/** @brief The tree's root id, or empty when the model names no root. */
-[[nodiscard]] std::string root_id_of(const widget::browser_model& model) {
-    for (const auto& folder : model.folders) {
-        if (folder.is_root)
-            return folder.id;
-    }
-    return {};
-}
-
-/**
- * @brief Whether anything in the model hangs below @p row.
- *
- * The walk needs this to tell a folder that is shut from one that is empty: a
- * shut folder's subtree has to be skipped, and an empty folder's does not
- * exist, so a folder with nothing under it is a leaf wearing a folder's glyph
- * and must not make the walk wait for a depth that never comes.
- */
-[[nodiscard]] bool has_children(const widget::browser_model& model,
-    const tree_row& row) {
-    const std::string_view id = id_of(model, row);
-    const auto hangs_below = [&](std::string_view parent) {
-        return parent == id;
-    };
-    return std::any_of(model.folders.begin(), model.folders.end(),
-               [&](const widget::tree_folder& folder) {
-                   return !folder.is_root && hangs_below(folder.parent_id);
-               })
-        || std::any_of(model.leaves.begin(), model.leaves.end(),
-            [&](const widget::tree_leaf& leaf) {
-                return hangs_below(leaf.parent_id);
-            });
-}
-
-/**
- * @brief Flattens the model's folders and leaves into the order they are drawn.
- *
- * Folders before leaves within one parent, at every level: an operator looks
- * for a container far more often than for the thing inside it, and a stable
- * order is what lets the eye learn the shape of a tree. The root is first
- * because it is what the tree is anchored by.
- *
- * A folder whose parent is missing from the model is drawn at the top rather
- * than dropped: a row the store holds must not become invisible because the
- * host assembled the tree in an unexpected order, and drawing it where it can
- * be seen is a symptom rather than a silence.
- *
- * @return Every row, in draw order.
- */
-[[nodiscard]] std::vector<tree_row>
-flatten_tree(const widget::browser_model& model) {
-    std::vector<tree_row> rows;
-    rows.reserve(model.folders.size() + model.leaves.size());
-
-    /* Stable, so siblings keep the order the host gave them. */
-    auto ordered = std::vector<std::size_t>(model.folders.size());
-    for (std::size_t index = 0; index < ordered.size(); ++index)
-        ordered[index] = index;
-    std::stable_sort(ordered.begin(), ordered.end(),
-        [&](std::size_t left, std::size_t right) {
-            const auto& l = model.folders[left];
-            const auto& r = model.folders[right];
-            if (l.is_root != r.is_root)
-                return l.is_root;
-            return l.parent_id < r.parent_id;
-        });
-
-    const auto append = [&](std::string_view parent, std::size_t depth) {
-        const auto walk = [&](auto&& self, std::string_view current,
-                              std::size_t level) -> void {
-            for (const auto index : ordered) {
-                const auto& folder = model.folders[index];
-                if (folder.is_root || folder.parent_id != current)
-                    continue;
-                rows.push_back(tree_row{widget::node_kind::folder, index, level});
-                self(self, folder.id, level + 1);
-            }
-            for (std::size_t index = 0; index < model.leaves.size(); ++index) {
-                if (model.leaves[index].parent_id != current)
-                    continue;
-                rows.push_back(tree_row{widget::node_kind::leaf, index, level});
-            }
-        };
-        walk(walk, parent, depth);
-    };
-
-    for (const auto index : ordered) {
-        if (!model.folders[index].is_root)
+    std::size_t root = model.folders.size();
+    for (std::size_t index = 0; index < model.folders.size(); ++index) {
+        if (model.folders[index].is_root) {
+            root = index;
             continue;
-        rows.push_back(tree_row{widget::node_kind::folder, index, 0});
-        append(model.folders[index].id, 1);
-    }
-
-    const auto placed = [&](std::size_t folder_index) {
-        return std::any_of(rows.begin(), rows.end(), [&](const tree_row& row) {
-            return row.kind == widget::node_kind::folder
-                && row.index == folder_index;
-        });
-    };
-    for (const auto index : ordered) {
-        if (placed(index))
-            continue;
-        rows.push_back(tree_row{widget::node_kind::folder, index, 0});
-        append(model.folders[index].id, 1);
-    }
-
-    return rows;
-}
-
-/**
- * @brief Marks which rows survive the filter.
- *
- * A row survives when it matches, and a folder also survives when anything
- * below it matches. The propagation runs backwards over the flattened order,
- * which puts every row after its own children, so one pass is enough: a row's
- * parent is always earlier and is therefore marked after the child that
- * justified it.
- *
- * A leaf's @c search_text is read as well as its name, which is how an instance
- * is found by its address without the address taking a column.
- */
-void mark_visible(const widget::browser_model& model,
-    std::vector<tree_row>& rows, std::string_view needle, bool& any_visible) {
-    any_visible = false;
-
-    auto matched = std::vector<bool>(rows.size(), needle.empty());
-    if (!needle.empty()) {
-        for (std::size_t index = 0; index < rows.size(); ++index) {
-            const auto& row = rows[index];
-            matched[index] = row.kind == widget::node_kind::folder
-                ? widget::filter_matches(model.folders[row.index].name, needle)
-                : widget::filter_matches_any(
-                      {model.leaves[row.index].name,
-                          model.leaves[row.index].search_text},
-                      needle);
-
-            /*
-             * A folder survives because something below it matched, and a
-             * matching leaf survives on its own. A leaf that does not match is
-             * dropped here rather than merely hidden, because the list reads
-             * this flag.
-             */
-            rows[index].visible = row.kind == widget::node_kind::leaf && matched[index];
-            any_visible = any_visible || matched[index];
         }
+        groups.push_back(rail_group{index, false, {}});
     }
 
-    /*
-     * Walked backwards, so every row is visited after its own children: the
-     * flattened order puts a parent before its children, and a folder is marked
-     * visible once anything below it has been.
-     */
-    for (std::size_t index = rows.size(); index-- > 0;) {
-        if (!matched[index])
-            continue;
-        rows[index].visible = true;
+    const std::size_t root_group = groups.size();
+    if (root < model.folders.size())
+        groups.push_back(rail_group{root, true, {}});
 
-        const std::string_view parent = parent_of(model, rows[index]);
-        for (std::size_t above = index; above-- > 0;) {
-            if (rows[above].kind != widget::node_kind::folder)
-                continue;
-            if (id_of(model, rows[above]) != parent)
-                continue;
-            rows[above].visible = true;
-            break;
+    const auto bucket_of = [&](std::string_view parent_id) -> std::size_t {
+        for (std::size_t index = 0; index < groups.size(); ++index) {
+            if (model.folders[groups[index].folder].id == parent_id)
+                return index;
         }
+        return root_group;
+    };
+
+    for (std::size_t index = 0; index < model.leaves.size(); ++index) {
+        const auto bucket = bucket_of(model.leaves[index].parent_id);
+        if (bucket < groups.size())
+            groups[bucket].leaves.push_back(index);
     }
+
+    if (root < model.folders.size() && groups[root_group].leaves.empty())
+        groups.pop_back();
+
+    return groups;
+}
+
+/**
+ * @brief The height of one rail entry.
+ *
+ * A rail row is roomier than a control, which is the reference's own measure:
+ * about two text heights rather than a hair over one. Measured from the font so
+ * a theme that installs a larger face gets a row that still holds it.
+ */
+[[nodiscard]] float rail_entry_height() {
+    constexpr float rail_row_extra = 6.0f;
+    return ImGui::GetFrameHeight() + rail_row_extra;
+}
+
+/** @brief The height of a rail group's heading. */
+[[nodiscard]] float rail_heading_height() {
+    return ImGui::GetTextLineHeight() + 12.0f;
+}
+
+/** @brief @p text in capitals, for a group heading. */
+[[nodiscard]] std::string rail_case(std::string_view text) {
+    std::string result{text};
+    for (char& letter : result)
+        letter = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(letter)));
+    return result;
+}
+
+/**
+ * @brief Writes a group heading on a line of its own.
+ *
+ * Shared by the rail and the toolbar, because the reference uses one treatment
+ * for both: the name of a set of rows, in the heading green and in capitals, so
+ * a reader learns one shape for "the rows under this belong together".
+ */
+void draw_group_label(std::string_view text) {
+    ImGui::Spacing();
+    ImGui::TextColored(
+        ImGui::ColorConvertU32ToFloat4(theme::rail_heading_colour), "%s",
+        rail_case(text).c_str());
+    ImGui::Spacing();
+}
+
+/**
+ * @brief The bar and the box the reference draws on its chosen row.
+ *
+ * Drawn after the row itself, because the row's own fill is ImGui's and its
+ * text has already been submitted: a bar along the left edge and a one pixel
+ * box around the row cover neither. The bar is inset from the row's edge and
+ * stops short of its top and bottom, which is what makes it read as a mark
+ * beside the row rather than as the row's own border.
+ */
+void draw_selection_mark(const ImVec2& min, const ImVec2& max) {
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+    constexpr float inset = 4.0f;
+    constexpr float bar_width = 3.0f;
+    constexpr float rounding = 6.0f;
+
+    draw->AddRect(min, max, theme::rail_selection_border, rounding, 0, 1.0f);
+    draw->AddRectFilled(ImVec2(min.x + inset, min.y + inset),
+        ImVec2(min.x + inset + bar_width, max.y - inset),
+        theme::rail_selection_bar, bar_width * 0.5f);
 }
 
 /** @brief The index of a folder in the model, or nothing. */
@@ -414,11 +290,12 @@ void accept_drop(const widget::browser_model& model,
 /**
  * @brief The padlock, which is the whole of the store's state in the strip.
  *
- * An icon and a tooltip, with no sentence beside it. The colour is the state --
+ * An icon, the word for the action and a tooltip. The colour is the state --
  * amber for a store that is shut and for one with no password yet, grey for an
- * open one, red for a refusal -- and the words live in the tooltip, because a
- * toolbar is a row of controls: a sentence in it makes the row taller than the
- * strip it sits in, and the state was already saying itself twice.
+ * open one, red for a refusal -- and the word is the action the click takes, so
+ * the row says what it does as well as what it is. The sentence that names the
+ * state and any reason the last attempt was refused lives in the tooltip,
+ * because a toolbar row holds a word and not a paragraph.
  *
  * One control with two jobs, chosen by the state it is showing. An open store
  * is locked, and anything else asks for the password. That is what makes this
@@ -433,20 +310,24 @@ void draw_lock_button(hedgr::ui::render::lock_control& lock) {
 
     const char* state_text = "The store is unlocked";
     const char* action = "click to lock it";
+    const char* word = "Lock";
     switch (lock.lock) {
     case store_lock::absent:
         state_text = "There is no master password yet";
         action = "click to create one";
+        word = "Create";
         break;
     case store_lock::locked:
         state_text = "The store is locked";
         action = "click to enter the master password";
+        word = "Unlock";
         break;
     case store_lock::unlocked:
         break;
     case store_lock::failed:
         state_text = "The store could not be unlocked";
         action = "click to try again";
+        word = "Retry";
         break;
     }
 
@@ -462,8 +343,8 @@ void draw_lock_button(hedgr::ui::render::lock_control& lock) {
 
     ImGui::PushStyleColor(ImGuiCol_Text,
         ImGui::ColorConvertU32ToFloat4(theme::store_lock_colour(lock.lock)));
-    const bool clicked = widget::icon_button("lock-control",
-        theme::store_lock_icon(lock.lock), tooltip.c_str());
+    const bool clicked = widget::rail_button("lock-control",
+        theme::store_lock_icon(lock.lock), word, tooltip.c_str());
     ImGui::PopStyleColor();
 
     if (!clicked)
@@ -476,11 +357,18 @@ void draw_lock_button(hedgr::ui::render::lock_control& lock) {
 }
 
 /**
- * @brief The toolbar: every action the browser offers, as icons with tooltips.
+ * @brief The toolbar: every action the browser offers, as a rail of words.
  *
- * Which of them appear is the host's choice, because the two browsers offer
+ * The operator asked for this strip to carry its controls as an icon and a word
+ * rather than as bare glyphs, which reverses the interface's rule that a button
+ * carries no text label. That reversal is this strip alone and it is deliberate:
+ * the rule stands everywhere else. The tooltips are kept as well, so a reader
+ * who knows an action by its glyph still has the glyph and a reader who does not
+ * is given the word.
+ *
+ * Which controls appear is the host's choice, because the two browsers offer
  * different sets: only the Instances window has probes to run, and only the
- * Accounts window has a session to sign in. A button for an action a browser
+ * Accounts window has a session to sign in. A control for an action a browser
  * cannot take would be a lie told in a tooltip.
  */
 void draw_toolbar(const widget::browser_model& model,
@@ -491,7 +379,6 @@ void draw_toolbar(const widget::browser_model& model,
     using hedgr::model::command::command_kind;
 
     const bool writable = model.can_write && store_is_open(input);
-    const std::string root_id = root_id_of(model);
     const bool have_folder = !state.selected_folder.empty();
     const bool have_leaf = !state.selected_leaf.empty();
 
@@ -502,49 +389,36 @@ void draw_toolbar(const widget::browser_model& model,
         && model.folders[*folder_index].is_root;
     const bool folder_removable = folder_index && !folder_is_root;
 
+    draw_group_label("Manage");
+
     if (model.create_leaf != nullptr) {
         const bool allowed = writable && have_folder;
-        if (widget::icon_button("add-leaf", icon::add,
+        if (widget::rail_button("add-leaf", icon::add, "Add",
                 "Add an entry to the selected folder", allowed)) {
             model.create_leaf(window, state.selected_folder);
         }
     }
 
-    {
-        /*
-         * A folder is created inside the selection, root included, which is one
-         * of the two things root is for. This button only decides where; the
-         * name is asked for in the form.
-         */
-        if (widget::icon_button("add-folder", icon::folder,
-                "Create a folder in the selected folder", writable && have_folder)) {
-            state.form = widget::form_kind::folder;
-            state.form_folder = state.selected_folder;
-            state.form_name.fill('\0');
-        }
-    }
-
     /*
-     * The host's own actions, in the middle of the strip and after the two
-     * "add" controls: the browser's half of the column is what the tree is for,
-     * and the host's half is what the whole window is for, which is the more
-     * prominent thing and belongs where the eye arrives first among the rest.
+     * A folder is created inside the selection, root included, which is one of
+     * the two things root is for. This control only decides where; the name is
+     * asked for in the form.
      */
-    if (model.window_actions != nullptr) {
-        /*
-         * The browser owns the strip and the host contributes to it, rather
-         * than the host having to remember to begin by joining it.
-         */
-        model.window_actions(input, window);
+    if (widget::rail_button("add-folder", icon::folder, "Folder",
+            "Create a folder in the selected folder",
+            writable && have_folder)) {
+        state.form = widget::form_kind::folder;
+        state.form_folder = state.selected_folder;
+        state.form_name.fill('\0');
     }
 
-    const bool edit_pressed = widget::icon_button("edit", icon::edit,
+    const bool edit_pressed = widget::rail_button("edit", icon::edit, "Edit",
         "Edit the selected entry", writable && have_leaf);
     {
         /*
          * The edit control offers itself to a capture by name, so a script can
          * put the pane into edit mode the way a person does rather than through
-         * a hook beside it. The rectangle is the button's own, read here where
+         * a hook beside it. The rectangle is the control's own, read here where
          * ImGui's geometry for it is still current.
          */
         widget::capture_element element;
@@ -562,7 +436,7 @@ void draw_toolbar(const widget::browser_model& model,
         model.edit_leaf(window, state.selected_leaf);
 
     if (model.can_duplicate) {
-        if (widget::icon_button("duplicate", icon::duplicate,
+        if (widget::rail_button("duplicate", icon::duplicate, "Copy",
                 "Copy the selected entry", writable && have_leaf)
             && model.duplicate_leaf != nullptr) {
             model.duplicate_leaf(window, state.selected_leaf);
@@ -573,12 +447,12 @@ void draw_toolbar(const widget::browser_model& model,
         /*
          * Removal is offered for a leaf and for a folder that is not the root.
          * The root is not offered it at all -- see @c affordances_for -- and
-         * that is why the button is disabled rather than absent here: the strip
-         * is a fixed column, and a button that vanished as the selection moved
-         * would make the column jump under the cursor.
+         * that is why the control is disabled rather than absent here: the
+         * strip is a fixed column, and a control that vanished as the selection
+         * moved would make the column jump under the cursor.
          */
         const bool allowed = writable && (have_leaf || folder_removable);
-        if (widget::icon_button("remove", icon::remove,
+        if (widget::rail_button("remove", icon::remove, "Remove",
                 "Remove the selected entry", allowed)) {
             state.confirm_remove_leaf = have_leaf;
             state.confirm_remove_folder = !have_leaf && folder_removable;
@@ -586,13 +460,24 @@ void draw_toolbar(const widget::browser_model& model,
     }
 
     if (model.can_refresh) {
-        if (widget::icon_button("probe-one", icon::refresh,
+        if (widget::rail_button("probe-one", icon::refresh, "Probe",
                 "Probe the selected instance now", writable && have_leaf)) {
             command request;
             request.kind = command_kind::probe_instance;
             request.instance_id = state.selected_leaf;
             input.commands.push(std::move(request));
         }
+    }
+
+    /*
+     * The host's own actions, after the browser's and under a heading of their
+     * own: the browser's half of the column is what the tree is for, and the
+     * host's half is what the whole window is for. The host draws its own share,
+     * which is also where the words for its controls are chosen.
+     */
+    if (model.window_actions != nullptr) {
+        draw_group_label("Actions");
+        model.window_actions(input, window);
     }
 
     /*
@@ -603,7 +488,7 @@ void draw_toolbar(const widget::browser_model& model,
      */
     if (model.lock != nullptr) {
         const float foot = ImGui::GetWindowHeight()
-            - ImGui::GetFrameHeight() - ImGui::GetStyle().WindowPadding.y;
+            - rail_entry_height() - ImGui::GetStyle().WindowPadding.y;
         ImGui::SetCursorPosY(foot);
         draw_lock_button(*model.lock);
     }
@@ -695,181 +580,152 @@ void draw_folder_form(widget::browser_state& state,
 }
 
 /**
- * @brief One row of the tree, submitted as one ImGui tree node.
+ * @brief One row of the rail: a group's heading or a leaf beneath it.
  *
- * One construction for both kinds of row. A leaf is a tree node carrying
- * @c ImGuiTreeNodeFlags_Leaf and @c ImGuiTreeNodeFlags_NoTreePushOnOpen: it has
- * no children, so it never pushes an id and never opens, and it is drawn by the
- * same code that draws a folder. Two constructions would be two descriptions of
- * what a row is, and the one that drifts is the one whose rows stop being items
- * that ImGui knows about -- which is exactly what happened when a leaf was a
- * hand-painted label over a selectable.
+ * One construction for both kinds, because a heading and an entry are the same
+ * row to the pointer and to the eye: a full width item that can be chosen,
+ * dragged and dropped on. Two constructions would be two descriptions of what a
+ * row is, and the one that drifts is the one whose rows stop being items ImGui
+ * knows about.
  *
- * The glyph is the first thing in the label, submitted as ordinary text, so its
- * size, its baseline, its spacing and its hit box are the font's and ImGui's
- * rather than numbers chosen here. That is also what stops a row from being
- * drawn somewhere its hit box is not.
+ * The glyph and the name are painted into the draw list rather than submitted
+ * as the selectable's label, because the glyph carries the entry's probe state
+ * and the name does not. An entry whose whole row took the state's colour would
+ * shout, and the reference keeps an entry's icon and its word apart in colour.
  *
- * The state's colour is pushed around the whole node and colours the name as
- * well as the glyph. The alternative, a label in the ordinary colour and a
- * glyph in the state's, means either two items on one row or text painted into
- * the draw list, and both put the hit box and the pixels in different places.
- * A uniform tree that works beats a two-colour row that does not.
+ * A heading is a row rather than a label, because in this tree a folder is a
+ * container an operator selects and adds into, and the toolbar's create
+ * controls act on the selection. The reference's headings are not selectable
+ * because its entries are not grouped by anything an operator made.
  *
- * Root is a row like any other here. It is a folder with no parent drawn at
- * depth zero, so it shares the tree's indentation, scrolls with the tree and
- * takes a drop the same way; the one thing that separates it is that
- * @c affordances_for gives it no rename, no move and no delete, so it is not
- * draggable and offers no removal.
- *
- * @param opened Set to whether this row's node was pushed, which is what the
- * caller has to close.
- * @param element When given, the item as a capture sees it, filled here because
+ * @param element When given, the row as a capture sees it, filled here because
  * this is where ImGui's own geometry for the row is still current.
  */
-void draw_tree_row(const widget::browser_model& model, const tree_row& row,
-    window_ui_state& window, const render_input& input, bool& opened,
-    widget::capture_element* element) {
+void draw_rail_row(const widget::browser_model& model, widget::node_kind kind,
+    std::size_t index, window_ui_state& window, const render_input& input) {
     namespace icon = hedgr::ui::icon;
 
     widget::browser_state& state = window.browser;
-    const std::string_view id = id_of(model, row);
-    const bool root = is_root_of(model, row);
-    const bool leaf = row.kind == widget::node_kind::leaf;
+    const bool heading = kind == widget::node_kind::folder;
+    const std::string_view id = heading
+        ? std::string_view{model.folders[index].id}
+        : std::string_view{model.leaves[index].id};
+    const std::string_view name = heading
+        ? std::string_view{model.folders[index].name}
+        : std::string_view{model.leaves[index].name};
 
-    const bool selected = leaf ? state.selected_leaf == id
-                               : state.selected_folder == id;
-    const auto affordances = widget::affordances_for(row.kind, root);
+    const bool selected = heading ? state.selected_folder == id
+                                  : state.selected_leaf == id;
+    const bool root = heading && model.folders[index].is_root;
+    const auto affordances = widget::affordances_for(kind, root);
     const bool draggable = affordances.move && store_is_open(input);
 
+    const float height = heading ? rail_heading_height() : rail_entry_height();
+    const ImGuiStyle& style = ImGui::GetStyle();
+
     ImGui::PushID(id.data());
+    ImGui::PushStyleVar(ImGuiStyleVar_SelectableRounding, 6.0f);
 
-    ImGuiTreeNodeFlags flags = (selected ? ImGuiTreeNodeFlags_Selected : 0)
-        | ImGuiTreeNodeFlags_OpenOnArrow
-        | ImGuiTreeNodeFlags_SpanAvailWidth;
-    if (leaf) {
-        flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    /*
+     * ImGui reaches for the hover colour whether or not the row is chosen, so a
+     * chosen row keeps its wash by having the wash pushed over both. The
+     * unselected hover is the theme's own neutral, which is what tells a row the
+     * pointer crossed from the row that is chosen.
+     */
+    const ImVec4 wash = ImGui::GetStyleColorVec4(ImGuiCol_Header);
+    if (selected) {
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, wash);
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, wash);
+    }
+    const bool clicked = ImGui::Selectable("##row", selected,
+        ImGuiSelectableFlags_AllowDoubleClick, ImVec2(0.0f, height));
+    if (selected)
+        ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar();
+
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+
+    const float left = min.x + style.WindowPadding.x;
+    const float text_y = min.y + (height - ImGui::GetTextLineHeight()) * 0.5f;
+
+    if (heading) {
+        const std::string title = rail_case(name);
+        draw->AddText(ImVec2(left, text_y),
+            selected ? ImGui::GetColorU32(ImGuiCol_Text)
+                     : theme::rail_heading_colour,
+            title.c_str());
     } else {
-        flags |= ImGuiTreeNodeFlags_FramePadding;
+        const auto& leaf = model.leaves[index];
+        const char* glyph = leaf.icon != nullptr ? leaf.icon : icon::instance;
+        const ImU32 glyph_colour = leaf.icon_colour != 0
+            ? leaf.icon_colour
+            : ImGui::GetColorU32(ImGuiCol_Text);
+        draw->AddText(ImVec2(left, text_y), glyph_colour, glyph);
+
+        const float word_x =
+            left + ImGui::CalcTextSize(glyph).x + style.ItemInnerSpacing.x;
+        draw->AddText(
+            ImVec2(word_x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
+            leaf.name.c_str());
     }
 
-    const row_glyph glyph = glyph_of(model, row);
-    const std::string_view name = name_of(model, row);
-    const std::string label =
-        std::format("{}  {}", glyph.glyph, std::string{name});
-
-    /*
-     * Every folder opens the first time it is drawn and its own expander owns
-     * the state from then on, so a reader opening Hedgr sees the whole tree
-     * rather than a column of closed names to work open, and a reader who shuts
-     * one folder keeps that one shut.
-     *
-     * The key is derived from the row's own id, so each folder remembers its own
-     * state. One shared key would make every folder open and shut together,
-     * which is the same as having no expander at all.
-     *
-     * The key is taken once, before the node is submitted, and reused after it.
-     * TreeNodeEx pushes the node's own id while it is open, so a key computed
-     * after it is hashed against a different stack and lands in a different
-     * slot: the read would then never see what the write stored, and a folder
-     * that had been shut could never be opened again.
-     */
-    const ImGuiID open_state = ImGui::GetID("##hedgr-open");
-    if (!leaf) {
-        ImGui::SetNextItemOpen(
-            ImGui::GetStateStorage()->GetInt(open_state, 1) != 0,
-            ImGuiCond_Always);
-    }
-    if (glyph.colour != 0)
-        ImGui::PushStyleColor(ImGuiCol_Text, glyph.colour);
-    const bool open = ImGui::TreeNodeEx("##node", flags, "%s", label.c_str());
-    if (glyph.colour != 0)
-        ImGui::PopStyleColor();
-
-    /*
-     * Folders are open when the node says so. A leaf never pushes, so a leaf is
-     * always closed: that flag is what keeps "this row has a subtree below it"
-     * from being true of a row that has none.
-     */
-    opened = !leaf && open;
-
-    if (element != nullptr) {
-        const ImVec2 item_min = ImGui::GetItemRectMin();
-        const ImVec2 item_max = ImGui::GetItemRectMax();
-        /*
-         * ImGui's own geometry, read back: an arrow occupies the frame height
-         * at the row's start, and the label begins one GetTreeNodeToLabelSpacing
-         * past it. Worked out here rather than in the capture, which then needs
-         * no opinion about how a tree row is laid out.
-         */
-        const float arrow_width = leaf ? 0.0f : ImGui::GetFrameHeight();
-        element->min_x = item_min.x;
-        element->min_y = item_min.y;
-        element->max_x = item_max.x;
-        element->max_y = item_max.y;
-        element->label_min_x =
-            item_min.x + arrow_width + ImGui::GetTreeNodeToLabelSpacing();
-        element->arrow_width = arrow_width;
-        element->open = opened;
-        element->label.clear();
-    }
-
-    /*
-     * Written only when the operator worked the expander, and only after the
-     * node: the first frame reads the default above, and every later frame
-     * reads what the last click left. A leaf has no expander to work, so the
-     * write is a folder's alone and a leaf never reaches it.
-     */
-    if (ImGui::IsItemToggledOpen())
-        ImGui::GetStateStorage()->SetInt(open_state, open ? 1 : 0);
+    if (selected)
+        draw_selection_mark(min, max);
 
     if (root) {
         ImGui::SetItemTooltip("%s",
             "The root of this tree. New folders and entries are created here, "
             "and it cannot be renamed, moved or removed.");
+    } else if (!heading) {
+        const auto& leaf = model.leaves[index];
+        if (!leaf.icon_tooltip.empty())
+            ImGui::SetItemTooltip("%s", leaf.icon_tooltip.c_str());
     }
-    if (glyph.tooltip != nullptr)
-        ImGui::SetItemTooltip("%s", glyph.tooltip->c_str());
+
+    widget::capture_element element;
+    element.min_x = min.x;
+    element.min_y = min.y;
+    element.max_x = max.x;
+    element.max_y = max.y;
+    element.label_min_x = left;
+    element.label.clear();
+    widget::observe_capture_element(name, element);
 
     /*
-     * A click on the row selects it, and a click on the row's own expander does
-     * not: opening a folder is not choosing it, which is the whole reason the
-     * node is drawn with @c OpenOnArrow. ImGui reports the two separately, so
-     * the rule is its answer rather than a comparison of coordinates.
+     * A click on the row chooses it. Opening a group is not a gesture here,
+     * because the rail has no closed groups: every heading is followed by its
+     * own entries on the frame it is drawn.
      */
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-        if (leaf) {
-            state.selected_leaf = std::string{id};
-            state.selected_folder.clear();
-        } else {
+    if (clicked) {
+        if (heading) {
             state.selected_folder = std::string{id};
             state.selected_leaf.clear();
+        } else {
+            state.selected_leaf = std::string{id};
+            state.selected_folder.clear();
         }
     }
 
     /*
      * A second click on an entry opens it, which is the gesture every list in
-     * every desktop program uses and the reason the toolbar's open button is
-     * not the only way in. It is asked of ImGui rather than counted here,
-     * because ImGui already knows the interval two clicks have to fall inside
-     * to count as a double, and a count of our own would be a second opinion
-     * about it.
-     *
-     * The selection above has already run, so the row the operator is about to
-     * act on is the row that is selected by the time the callback reads it.
+     * every desktop program uses. It is asked of ImGui rather than counted
+     * here, because ImGui already knows the interval two clicks have to fall
+     * inside to count as a double.
      */
-    if (leaf && model.activate_leaf != nullptr
-        && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+    if (!heading && clicked && model.activate_leaf != nullptr
+        && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
         model.activate_leaf(input, window, id);
 
     if (draggable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-        const drag_payload_data payload{row.kind, std::string{id}};
+        const drag_payload_data payload{kind, std::string{id}};
         ImGui::SetDragDropPayload(drag_payload, &payload, sizeof(payload));
         ImGui::TextUnformatted(std::string{name}.c_str());
         ImGui::EndDragDropSource();
     }
 
-    if (!leaf && ImGui::BeginDragDropTarget()) {
+    if (heading && ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload =
                 ImGui::AcceptDragDropPayload(drag_payload);
             payload != nullptr
@@ -887,50 +743,41 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
 /**
  * @brief The list's rows, as indices into the model's leaves.
  *
- * A leaf selection lists that one leaf. A folder selection lists every leaf the
- * walk reached under it, filtered, which is what "selecting a folder lists
- * everything beneath it" comes to once the tree is already flattened.
+ * A leaf selection lists that one leaf. A folder selection lists the entries
+ * that name it, because the rail shows one level and a heading stands for its
+ * own entries. With nothing selected, every entry the filter let through is
+ * listed, which is what an untouched tree reports.
  *
- * A subtree is a run in the flattened rows: the selected folder's own row, then
- * every row deeper than it, until a row at its depth or shallower ends it. A
- * shut folder still lists its entries, because whether a folder is open is how
- * the tree is drawn. A list that emptied when a folder was shut would be a
- * second place the same state lives, and closing a folder would then hide rows
- * in two places that can disagree.
+ * The list reads the filter the rail does, so a search that narrows the rail to
+ * one heading narrows the list to that heading's entries rather than to a
+ * different set.
  */
 [[nodiscard]] std::vector<std::size_t> visible_leaf_indices(
-    const widget::browser_model& model, const std::vector<tree_row>& rows,
-    const widget::browser_state& state) {
-    std::vector<std::size_t> kept;
+    const widget::browser_model& model, const widget::browser_state& state) {
+    const std::string_view needle{state.filter.data()};
+    const auto matches = [&](const widget::tree_leaf& leaf) {
+        return needle.empty()
+            || widget::filter_matches_any({leaf.name, leaf.search_text}, needle);
+    };
 
+    std::vector<std::size_t> kept;
     if (!state.selected_leaf.empty()) {
         for (std::size_t index = 0; index < model.leaves.size(); ++index) {
-            if (model.leaves[index].id == state.selected_leaf)
+            if (model.leaves[index].id == state.selected_leaf
+                && matches(model.leaves[index]))
                 kept.push_back(index);
         }
         return kept;
     }
 
-    /*
-     * With no folder named, everything the filter let through is listed. With a
-     * folder named, the rows before its own are passed over and the walk stops
-     * at the first row that is not beneath it.
-     */
-    std::size_t folder_depth = 0;
-    bool in_subtree = state.selected_folder.empty();
-    for (const auto& row : rows) {
-        if (!in_subtree) {
-            if (row.kind == widget::node_kind::folder
-                && id_of(model, row) == state.selected_folder) {
-                in_subtree = true;
-                folder_depth = row.depth;
-            }
+    for (std::size_t index = 0; index < model.leaves.size(); ++index) {
+        const auto& leaf = model.leaves[index];
+        if (!matches(leaf))
             continue;
-        }
-        if (!state.selected_folder.empty() && row.depth <= folder_depth)
-            break;
-        if (row.kind == widget::node_kind::leaf && row.visible)
-            kept.push_back(row.index);
+        if (!state.selected_folder.empty()
+            && leaf.parent_id != state.selected_folder)
+            continue;
+        kept.push_back(index);
     }
     return kept;
 }
@@ -1122,8 +969,7 @@ void draw_details_pane(const widget::browser_model& model,
  * Accounts window show different things without the browser knowing what either
  * of them is looking at.
  */
-void draw_list(const widget::browser_model& model,
-    const std::vector<tree_row>& rows, window_ui_state& window,
+void draw_list(const widget::browser_model& model, window_ui_state& window,
     const render_input& input, float width, float height) {
     widget::browser_state& state = window.browser;
 
@@ -1139,7 +985,7 @@ void draw_list(const widget::browser_model& model,
         return;
     }
 
-    const auto kept = visible_leaf_indices(model, rows, state);
+    const auto kept = visible_leaf_indices(model, state);
     if (kept.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
@@ -1196,11 +1042,34 @@ void draw_list(const widget::browser_model& model,
             ImGui::TableSetColumnIndex(0);
             const ImVec2 row_top = ImGui::GetCursorScreenPos();
             const bool selected = state.selected_leaf == leaf.id;
+            /*
+             * The chosen row keeps the reference's green wash while the pointer
+             * is over it. ImGui reaches for the hover colour whether or not the
+             * row is chosen, so the wash is pushed over it for this row alone;
+             * an unchosen row keeps the theme's neutral hover.
+             */
+            const ImVec4 wash = ImGui::GetStyleColorVec4(ImGuiCol_Header);
+            if (selected) {
+                ImGui::PushStyleColor(ImGuiCol_HeaderHovered, wash);
+                ImGui::PushStyleColor(ImGuiCol_HeaderActive, wash);
+            }
             const bool clicked = ImGui::Selectable("##row", selected,
                 ImGuiSelectableFlags_SpanAllColumns
                     | ImGuiSelectableFlags_AllowOverlap
                     | ImGuiSelectableFlags_AllowDoubleClick,
                 ImVec2(0.0f, ImGui::GetFrameHeight()));
+            if (selected)
+                ImGui::PopStyleColor(2);
+
+            /*
+             * The bar and the box are the list's half of the rail's cue, so a
+             * chosen row reads the same on either surface. They are drawn before
+             * the cells because the cells are text and the mark is behind it.
+             */
+            if (selected) {
+                draw_selection_mark(
+                    ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+            }
 
             /*
              * The selectable advances the cursor past itself, and the cells are
@@ -1350,10 +1219,6 @@ void render_browser(const browser_model& model, window_ui_state& window,
     namespace icon = hedgr::ui::icon;
     browser_state& state = window.browser;
 
-    auto rows = flatten_tree(model);
-    bool any_visible = false;
-    mark_visible(model, rows, std::string_view{state.filter.data()}, any_visible);
-
     /*
      * The filter box sits above the tree, because it narrows the tree and the
      * list together: a box beside either of them would look like it narrowed
@@ -1369,23 +1234,29 @@ void render_browser(const browser_model& model, window_ui_state& window,
     const ImGuiStyle& style = ImGui::GetStyle();
 
     /*
-     * The strip is a column of square icon buttons, so its width is one button
-     * plus the padding a child leaves on each side. Measuring that from the
-     * style rather than naming a number keeps the strip exactly as wide as the
-     * controls it holds, whatever frame height the theme installs.
+     * The strip is a column of rows carrying an icon and a word, so its width is
+     * the longest word the browser itself draws plus the icon and the padding
+     * around both. The host draws its own controls into the same strip, so the
+     * measurement is taken from the browser's own longest word and given room
+     * rather than fitted to every word either side could use. A floor keeps the
+     * strip a column rather than a sliver on a window squeezed narrow.
      */
-    const float strip_width =
-        ImGui::GetFrameHeight() + style.WindowPadding.x * 2.0f;
+    constexpr float strip_floor = 150.0f;
+    const float strip_width = std::max(
+        ImGui::CalcTextSize("Remove").x + ImGui::GetFrameHeight()
+            + style.FramePadding.x * 2.0f + style.WindowPadding.x * 2.0f
+            + style.ItemInnerSpacing.x,
+        strip_floor);
 
     /*
      * The tree and the right hand pane share what the strip does not take, and
      * they divide it with the tree taking three tenths and the pane the rest.
      * Three tenths rather than the third this used to be, because a folder name
      * is short and the list's columns are what the operator reads across. The
-     * floor under the tree is what keeps the expander arrow and a nested name
-     * whole on a window squeezed narrow, and the pane is a list or a details
-     * view depending on whether the host supplied one, the split being the same
-     * either way. The strip's width and the gaps between the three children are
+     * floor under the rail is what keeps a heading and its entries whole on a
+     * window squeezed narrow, and the pane is a list or a details view depending
+     * on whether the host supplied one, the split being the same either way. The
+     * strip's width and the gaps between the three children are
      * subtracted from the available width rather than guessed at, so the three
      * fit the window exactly and the split does not depend on a magic number.
      */
@@ -1418,70 +1289,58 @@ void render_browser(const browser_model& model, window_ui_state& window,
     if (ImGui::BeginChild("##browser-tree",
             ImVec2(tree_width, body_height), ImGuiChildFlags_Borders)) {
         /*
-         * The message is about the filter rather than about the tree, so it is
-         * only said when a filter is what emptied it. A tree with no leaves is
-         * not empty in the same way: it is a tree with nothing in it yet, and
-         * the list beside it already says so.
+         * The tree drawn as a single level. Every folder is a heading and its
+         * own entries follow it, whatever depth the model gave them, because
+         * the operator asked for one level of grouping rather than a tree to
+         * work open.
          */
-        if (!any_visible && state.filter[0] != '\0') {
+        const auto groups = build_rail_groups(model);
+        const std::string_view needle{state.filter.data()};
+        bool any_visible = false;
+
+        for (const auto& group : groups) {
+            const auto& folder = model.folders[group.folder];
+            const bool heading_matches =
+                needle.empty() || widget::filter_matches(folder.name, needle);
+
+            /*
+             * A heading that matches keeps every entry under it, which is what
+             * makes searching for a group's name show the group; a heading that
+             * does not match keeps only the entries that do.
+             */
+            std::vector<std::size_t> shown;
+            for (const auto index : group.leaves) {
+                const auto& leaf = model.leaves[index];
+                if (heading_matches
+                    || widget::filter_matches_any(
+                        {leaf.name, leaf.search_text}, needle)) {
+                    shown.push_back(index);
+                }
+            }
+            if (!heading_matches && shown.empty())
+                continue;
+
+            /*
+             * The message is about the filter rather than about the tree, so
+             * the tree counts itself visible as soon as it draws anything: a
+             * heading with no matching entry is still a row on screen, and a
+             * tree with nothing in it at all is what the list beside it
+             * already reports.
+             */
+            any_visible = true;
+            draw_rail_row(
+                model, widget::node_kind::folder, group.folder, window, input);
+            for (const auto index : shown) {
+                draw_rail_row(
+                    model, widget::node_kind::leaf, index, window, input);
+            }
+        }
+
+        if (!any_visible && !needle.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text,
                 ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
             ImGui::TextUnformatted("Nothing matches the filter.");
             ImGui::PopStyleColor();
-        }
-        /*
-         * A flattened tree drawn into ImGui's nested tree API. A row is closed
-         * when the next visible row is no deeper than it is, which is where its
-         * subtree ends in a flat list.
-         *
-         * The stack holds the rows that pushed an id, so what it holds is
-         * exactly what has to be popped. A leaf is a tree node with no children
-         * and never pushes, so it is never on the stack and never closed; a
-         * folder that is shut never pushes either, and is never closed. The two
-         * cannot get out of step, because the one condition that pushes also
-         * decides whether a row enters the walk's own bookkeeping.
-         *
-         * A shut folder's subtree is not submitted at all. ImGui does not hide
-         * the children of a shut node -- it never had them, they are separate
-         * items -- so a walk that submitted every row would draw them outside
-         * the folder that holds them, and collapsing would do nothing. Skipping
-         * them is what makes an expander mean something.
-         */
-        std::vector<std::size_t> open_rows;
-        std::size_t shut_depth = 0;
-        bool inside_shut_folder = false;
-
-        for (const auto& row : rows) {
-            if (!row.visible)
-                continue;
-
-            if (inside_shut_folder) {
-                if (row.depth > shut_depth)
-                    continue;
-                inside_shut_folder = false;
-            }
-
-            while (!open_rows.empty() && row.depth <= open_rows.back()) {
-                ImGui::TreePop();
-                open_rows.pop_back();
-            }
-
-            bool opened = false;
-            widget::capture_element element;
-            draw_tree_row(model, row, window, input, opened, &element);
-            widget::observe_capture_element(name_of(model, row), element);
-
-            if (opened) {
-                open_rows.push_back(row.depth);
-            } else if (row.kind == widget::node_kind::folder
-                && has_children(model, row)) {
-                inside_shut_folder = true;
-                shut_depth = row.depth;
-            }
-        }
-        while (!open_rows.empty()) {
-            ImGui::TreePop();
-            open_rows.pop_back();
         }
     }
     ImGui::EndChild();
@@ -1490,7 +1349,7 @@ void render_browser(const browser_model& model, window_ui_state& window,
     if (model.draw_details != nullptr)
         draw_details_pane(model, window, input, list_width, body_height);
     else
-        draw_list(model, rows, window, input, list_width, body_height);
+        draw_list(model, window, input, list_width, body_height);
 
     if (model.sign_in_form != nullptr)
         model.sign_in_form(input, window);

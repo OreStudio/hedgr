@@ -54,6 +54,36 @@ HEDGR_UI_EXPORT void apply_theme();
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 status_surface() noexcept;
 
 /**
+ * @brief The surface a card sits on.
+ *
+ * The reference's cards are filled a step above the panel they sit on, which is
+ * what makes a wall of them read as objects rather than as ruled sections. The
+ * value is the card interior sampled from the reference, and it is exported
+ * because a card is drawn as its own child and ImGui has no colour slot for
+ * "the box inside the pane".
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 card_surface() noexcept;
+
+/**
+ * @brief The one pixel outline of a card.
+ *
+ * A card is a fill and an outline and nothing else. The outline is the whole of
+ * the separation the reference uses between one card and the next, so a caller
+ * that drew a card without it would be drawing a smudge rather than a box.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 card_border() noexcept;
+
+/**
+ * @brief The colour a card's title line is written in.
+ *
+ * The reference writes a card's title a step below its value: the value is what
+ * a reader came for and the title only says what it is. ImGui's disabled text
+ * is a step below even this one and is kept for the caption, so the three lines
+ * of a card have three weights rather than two.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 dim_text() noexcept;
+
+/**
  * @brief The palette's red, for anything that reports a failure.
  *
  * Every refusal in the interface is drawn in this colour: a refused unlock, an
@@ -87,6 +117,37 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
  * than what it looks like, so a new palette does not change it.
  */
 inline constexpr ImU32 edit_changed_colour = IM_COL32(0, 188, 212, 255);
+
+/**
+ * @brief The colour of a navigation rail's group heading.
+ *
+ * Read off the reference's "MAIN", "TOOLS" and "SYSTEM" headings, which are set
+ * in a green about a third darker than the connected dot rather than in the
+ * general text colour. It is a separate entry because a heading is not text a
+ * reader follows, it is the name of the set below it, and the reference says so
+ * in colour as well as in size.
+ */
+inline constexpr ImU32 rail_heading_colour = IM_COL32(105, 180, 139, 255);
+
+/**
+ * @brief The bright bar down the left edge of a chosen row.
+ *
+ * The reference marks its chosen navigation row with a bar this bright, a few
+ * pixels inside the row's own left edge, and the bar is the part of the cue a
+ * reader sees before the wash. It is brighter than @c green on purpose: the
+ * wash sits over a panel and darkens the green, so a bar drawn in the dot's own
+ * value would read as a second, duller thing beside the selected icon.
+ */
+inline constexpr ImU32 rail_selection_bar = IM_COL32(124, 241, 171, 255);
+
+/**
+ * @brief The outline drawn around a chosen row, in the bar's green.
+ *
+ * The reference boxes the chosen row as well as washing it. A one pixel rule at
+ * this alpha carries the cue without turning the row into a control, and an
+ * alpha rather than a solid keeps the box from competing with the bar.
+ */
+inline constexpr ImU32 rail_selection_border = IM_COL32(124, 241, 171, 150);
 
 /**
  * @brief The colour of a session status.

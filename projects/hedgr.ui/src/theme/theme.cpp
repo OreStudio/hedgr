@@ -203,13 +203,19 @@ void apply_theme() {
     /*
      * A selected row takes the reference's green wash. Header is the one
      * colour ImGui draws for "this is the chosen one" in a list or a tree, so
-     * it is where the reference's selection background lands. Two muted steps
-     * above it stand in for the hover and the press, which a still image has
-     * no sample of.
+     * it is where the reference's selection background lands.
+     *
+     * The hover and the press are neutral greys, not steps of the same green.
+     * ImGui reaches for HeaderHovered whether or not the row is selected, so a
+     * green hover would have painted the same wash under a row the pointer
+     * merely crossed as under the chosen row, and the reference keeps the two
+     * states apart. A surface that wants the green to survive a hover of the
+     * chosen row pushes it back for that row alone, which is what the browser
+     * does.
      */
     colors[ImGuiCol_Header] = selection_fill;
-    colors[ImGuiCol_HeaderHovered] = colour(0x274d39ff);
-    colors[ImGuiCol_HeaderActive] = colour(0x2a543dff);
+    colors[ImGuiCol_HeaderHovered] = colour(0x282c2dff);
+    colors[ImGuiCol_HeaderActive] = colour(0x323637ff);
     colors[ImGuiCol_Separator] = separator;
     colors[ImGuiCol_SeparatorHovered] = accent_hover;
     colors[ImGuiCol_SeparatorActive] = accent_active;
@@ -269,6 +275,18 @@ void apply_theme() {
 
 ImVec4 status_surface() noexcept {
     return bg_status;
+}
+
+ImVec4 card_surface() noexcept {
+    return bg_panel;
+}
+
+ImVec4 card_border() noexcept {
+    return border;
+}
+
+ImVec4 dim_text() noexcept {
+    return text_dim;
 }
 
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {

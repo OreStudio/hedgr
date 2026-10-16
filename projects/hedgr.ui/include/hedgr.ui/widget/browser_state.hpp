@@ -44,11 +44,10 @@ enum class form_kind : std::uint8_t {
 /**
  * @brief A window's browser: its selection, its filter, and its open form.
  *
- * Interface scratch and nothing else. Expansion is not here: ImGui owns it,
- * keyed by the stable id the browser gives each tree row, which is what keeps a
- * folder open across frames without this struct having to remember it. Nothing
- * here is persisted, so a restarted Hedgr opens with the root selected and the
- * tree as ImGui left it.
+ * Interface scratch and nothing else. Nothing here is persisted, so a restarted
+ * Hedgr opens with the root selected and the rail as the model left it. There
+ * is no expansion to keep, because the rail shows one level and every heading
+ * is followed by its own entries on the frame it is drawn.
  *
  * The selection is a folder and a leaf whose meanings are fixed by one rule:
  * a leaf selection wins, and selecting a folder clears it. That is what "the

@@ -117,7 +117,7 @@ affordances_for(node_kind kind, bool is_root) noexcept;
 
 /** @brief One folder in the tree the browser draws. */
 struct tree_folder final {
-    /** @brief Stable id, used as the ImGui id so expansion survives a frame. */
+    /** @brief Stable id, used as the ImGui id so a choice survives a frame. */
     std::string id;
 
     /** @brief Containing folder's id. Empty only for a tree's root. */
@@ -438,18 +438,22 @@ struct browser_model final {
 };
 
 /**
- * @brief Draws one browser: a folder tree on the left, and a pane on the right.
+ * @brief Draws one browser: a rail on the left, and a pane on the right.
  *
- * Must be called inside an already-begun ImGui window. The tree is rebuilt from
+ * Must be called inside an already-begun ImGui window. The rail is rebuilt from
  * the model every frame, which is what lets a filter narrow it and a drag
- * re-parent it without any state on this side; the expansion, which is the one
- * piece of tree state worth keeping, is ImGui's, keyed by the stable ids the
- * model supplies.
+ * re-parent it without any state on this side.
+ *
+ * The rail shows one level of the tree the model holds. Every folder is a
+ * heading and its own entries follow it, so a folder nested under another is
+ * drawn as a heading beside it rather than as a node inside a node. The model
+ * keeps its nesting, because the accounts tree and the toolbar's create
+ * controls still use it; the surface is what is flat.
  *
  * The right hand pane is a list of the model's leaves, or the selected leaf's
  * details when the host supplied @c draw_details. Either way it reports on the
- * selected tree node and holds no selection of its own, so there is exactly one
- * answer to "what is selected" and no way for the tree and the pane to disagree
+ * selected rail row and holds no selection of its own, so there is exactly one
+ * answer to "what is selected" and no way for the rail and the pane to disagree
  * about it.
  *
  * @param model The host's view of what is being browsed.
