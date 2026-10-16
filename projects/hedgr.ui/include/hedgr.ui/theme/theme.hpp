@@ -54,14 +54,15 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 /**
  * @brief The colour of a field whose edited value differs from the stored one.
  *
- * The palette's amber, which is the colour every other state that wants an
- * action uses. An unsaved edit is a thing the operator has done and not a thing
- * that is wrong, so the failure red would report a fault, and the ordinary text
- * colour would say nothing at all. It is named here rather than borrowed from a
- * label or a lock so that the mark says "changed" and not "this is a label" or
- * "the store is shut".
+ * Cyan, chosen for being the one hue in this palette that nothing else claims.
+ * The state colours are green, amber and two reds, the labels are blue and
+ * purple, and the quiet text is grey, so an unsaved edit borrowing any of them
+ * would read as a state, as a label, or as an absence. It was amber, which is
+ * what a deployment partway through setting itself up uses, and the two are
+ * unrelated: one is a fact about a machine and the other is something the
+ * operator has just done.
  */
-inline constexpr ImU32 edit_changed_colour = IM_COL32(255, 193, 7, 255);
+inline constexpr ImU32 edit_changed_colour = IM_COL32(0, 188, 212, 255);
 
 /**
  * @brief The colour of a session status.
