@@ -93,6 +93,39 @@ if command -v update-desktop-database >/dev/null 2>&1; then
     update-desktop-database "${applications_dir}" || true
 fi
 
+# A deploy that leaves the old process running leaves the operator looking at a
+# version that is no longer on disk, which is the one thing a deploy exists to
+# change. The old process is stopped and the new one started, so what is on the
+# screen afterwards is what was just unpacked.
+#
+# The replacement is detached and its output redirected, because a process
+# started from an ssh command dies when that command's session ends and its
+# output would otherwise go nowhere. The display variables are passed
+# explicitly rather than inherited: an ssh session has no display of its own,
+# so a client started without them opens nothing and exits, which looks exactly
+# like a deploy that worked. Set HEDGR_DEPLOY_NO_RESTART to leave the machine
+# alone, for a deploy to a host nobody is sitting in front of.
+if [ -n "${HEDGR_DEPLOY_NO_RESTART:-}" ]; then
+    echo "not restarting: HEDGR_DEPLOY_NO_RESTART is set"
+else
+    pkill -x hedgr.imgui >/dev/null 2>&1 || true
+    sleep 1
+
+    setsid env \
+        XDG_RUNTIME_DIR="/run/user/$(id -u)" \
+        WAYLAND_DISPLAY=wayland-0 \
+        DISPLAY=:0 \
+        "${PWD}/current/bin/hedgr.imgui" \
+        >>"${HOME}/hedgr/hedgr.log" 2>&1 </dev/null &
+    sleep 2
+
+    if pgrep -x hedgr.imgui >/dev/null 2>&1; then
+        echo "restarted the client on the remote display"
+    else
+        echo "the client did not come up, see ~/hedgr/hedgr.log" >&2
+    fi
+fi
+
 echo "unpacked into ${remote_dir}/${version}, current now points at it"
 echo "installed ${entry} into ${applications_dir}"
 REMOTE
