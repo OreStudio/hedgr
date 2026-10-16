@@ -35,6 +35,7 @@
 #include "hedgr.store/repository/label_repository.hpp"
 #include "hedgr.store/repository/labelling_repository.hpp"
 #include "hedgr.store/repository/master_repository.hpp"
+#include "hedgr.store/repository/shortcut_repository.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <chrono>
@@ -129,6 +130,18 @@ public:
     [[nodiscard]] const model::state::labelling_table& labellings() const
         noexcept {
         return labellings_;
+    }
+
+    /**
+     * @brief The shortcuts bar, in the order it draws in.
+     *
+     * The interface reads this to draw the bar. It is loaded once at start and
+     * then written only by the commands that add, remove or drop an entry, so a
+     * caller never sorts it and never sees an entry the store refused.
+     */
+    [[nodiscard]] const model::state::shortcut_table& shortcuts() const
+        noexcept {
+        return shortcuts_;
     }
 
     [[nodiscard]] const model::state::session_table& sessions() const noexcept {
@@ -263,6 +276,8 @@ private:
     void do_remove_label(const model::command::command& cmd);
     void do_attach_label(const model::command::command& cmd);
     void do_detach_label(const model::command::command& cmd);
+    void do_save_shortcut(const model::command::command& cmd);
+    void do_remove_shortcut(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
     void do_disconnect_session(const model::command::command& cmd);
     void do_set_master_password(const model::command::command& cmd);
@@ -273,6 +288,17 @@ private:
     void do_refresh_window(const model::command::command& cmd);
     void do_probe_instance(const model::command::command& cmd);
     void do_probe_all();
+
+    /**
+     * @brief Drops every shortcut pointing at a target that is going away.
+     *
+     * Called from the two removals whose rows a shortcut can name, so the bar
+     * never offers an entry that opens something the store no longer holds. The
+     * store call is made through @c store_failure like every other write, so a
+     * refusal reaches the status bar rather than leaving the entry behind.
+     */
+    void drop_target_shortcuts(model::domain::window_kind kind,
+                               const std::string& target_id);
 
     /**
      * @brief Spawns a probe for every instance whose deadline has passed.
@@ -460,6 +486,7 @@ private:
     model::state::folder_table folders_;
     model::state::label_table labels_;
     model::state::labelling_table labellings_;
+    model::state::shortcut_table shortcuts_;
     model::state::session_table sessions_;
     model::state::window_table windows_;
     model::state::probe_table probes_;
@@ -473,6 +500,7 @@ private:
     std::unique_ptr<store::repository::folder_repository> folder_repo_;
     std::unique_ptr<store::repository::label_repository> label_repo_;
     std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
+    std::unique_ptr<store::repository::shortcut_repository> shortcut_repo_;
     std::unique_ptr<store::repository::window_repository> window_repo_;
     std::unique_ptr<store::repository::master_repository> master_repo_;
 

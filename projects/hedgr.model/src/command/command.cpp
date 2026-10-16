@@ -65,6 +65,10 @@ std::string_view to_string(command_kind value) noexcept {
         return "unlock_store";
     case command_kind::lock_store:
         return "lock_store";
+    case command_kind::save_shortcut:
+        return "save_shortcut";
+    case command_kind::remove_shortcut:
+        return "remove_shortcut";
     }
     return "unknown";
 }

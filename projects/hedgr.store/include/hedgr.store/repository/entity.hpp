@@ -65,6 +65,18 @@ struct instance_entity final {
 
     sqlgen::PrimaryKey<std::string> id;
     sqlgen::Unique<std::string> name;
+    /**
+     * @brief Which illustration the interface draws, as a key and never bytes.
+     *
+     * The key is the OreStudio environment label, and the picture is an asset
+     * of the install rather than a value in this row. Storing the image would
+     * put a copy in every instance and in every copy of the store, which is the
+     * cost the operator rejected when this column was chosen over a blob.
+     *
+     * Empty is a stored value like any other and means no illustration, which
+     * is what a row created by hand carries.
+     */
+    std::string icon_key;
     std::string nats_url;
     std::string subject_prefix;
     std::string wire_format;
@@ -188,6 +200,29 @@ struct window_spec_entity final {
     std::optional<std::string> session_account_id;
     std::int64_t cadence_ms;
     std::string state_json;
+};
+
+/**
+ * @brief One entry of the shortcuts bar: @c shortcut.
+ *
+ * The target is a kind and an id rather than a foreign key, because the bar
+ * points at things of several kinds and no one table owns them all. The kind is
+ * the window kind's canonical text, so a shortcut to the Instances window
+ * itself is expressible and is not forced to name an instance.
+ *
+ * @c position is the order the bar draws in, and it is a column rather than the
+ * rowid because a reorder is a smaller write when it moves one number than when
+ * it rewrites the table. Ties are broken by id when the rows are read, so the
+ * order is total even if two entries are saved at the same position.
+ */
+struct shortcut_entity final {
+    /** @brief The table this struct describes. */
+    constexpr static const char* tablename = "shortcut";
+
+    sqlgen::PrimaryKey<std::string> id;
+    std::string target_kind;
+    std::string target_id;
+    std::int64_t position;
 };
 
 /**

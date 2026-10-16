@@ -36,6 +36,7 @@
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/probe.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -71,6 +72,7 @@ using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
 using hedgr::model::domain::session_status;
+using hedgr::model::domain::shortcut;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
@@ -200,6 +202,16 @@ private:
     std::string_view id) {
     const auto handle = manager.instances().find(id);
     return handle ? manager.instances().get(*handle) : nullptr;
+}
+
+/** @brief The shortcuts bar entry with this id, or nullptr. */
+[[nodiscard]] const shortcut* find_shortcut(const instance_manager& manager,
+    std::string_view id) {
+    for (const auto& row : manager.shortcuts().rows()) {
+        if (row.id == id)
+            return &row;
+    }
+    return nullptr;
 }
 
 /** @brief An account row belonging to @p instance_id. */
@@ -1172,4 +1184,140 @@ TEST_CASE("an accounts window reopens rather than being made again",
     const auto again = manager.open_accounts_window(seeded.id);
     REQUIRE(again == id);
     REQUIRE(manager.windows().find(again).has_value());
+}
+
+TEST_CASE("a shortcut is saved, ordered and removed by command", "[runtime]") {
+    const temporary_database database("shortcuts");
+    std::string seeded_id;
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        REQUIRE(manager.shortcuts().size() == 0);
+        seeded_id = manager.instances().rows()[0].id;
+
+        const auto save = [&manager](std::string id, window_kind kind,
+                                     std::string target, std::int64_t position) {
+            command request;
+            request.kind = command_kind::save_shortcut;
+            request.shortcut_row.id = std::move(id);
+            request.shortcut_row.target_kind = kind;
+            request.shortcut_row.target_id = std::move(target);
+            request.shortcut_row.position = position;
+            push_command(manager, std::move(request));
+        };
+
+        /*
+         * Saved out of order on purpose. The table holds them by position, and
+         * a bar that came back in the order it was written rather than the
+         * order the operator arranged would be the defect this catches.
+         */
+        save("sc-manager", window_kind::instance_manager, "", 30);
+        save("sc-instance", window_kind::accounts, seeded_id, 10);
+        save("sc-grid", window_kind::grid, "", 20);
+
+        REQUIRE(manager.shortcuts().size() == 3);
+        REQUIRE(manager.shortcuts().rows()[0].id == "sc-instance");
+        REQUIRE(manager.shortcuts().rows()[1].id == "sc-grid");
+        REQUIRE(manager.shortcuts().rows()[2].id == "sc-manager");
+
+        command remove;
+        remove.kind = command_kind::remove_shortcut;
+        remove.shortcut_row.id = "sc-grid";
+        push_command(manager, remove);
+
+        REQUIRE(manager.shortcuts().size() == 2);
+        REQUIRE(find_shortcut(manager, "sc-grid") == nullptr);
+        REQUIRE(manager.last_error().empty());
+
+        manager.stop();
+    }
+
+    /* The bar is read back from the store in the order it was left in. */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.shortcuts().size() == 2);
+
+    const auto& first = reopened.shortcuts().rows()[0];
+    REQUIRE(first.id == "sc-instance");
+    REQUIRE(first.target_kind == window_kind::accounts);
+    REQUIRE(first.target_id == seeded_id);
+    REQUIRE(first.position == 10);
+
+    const auto& second = reopened.shortcuts().rows()[1];
+    REQUIRE(second.id == "sc-manager");
+    REQUIRE(second.target_kind == window_kind::instance_manager);
+    REQUIRE(second.target_id.empty());
+    reopened.stop();
+}
+
+TEST_CASE("removing a target takes its shortcuts with it", "[runtime]") {
+    const temporary_database database("shortcut-cascade");
+    std::string seeded_id;
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        seeded_id = manager.instances().rows()[0].id;
+
+        command save_account;
+        save_account.kind = command_kind::save_account;
+        save_account.account_row = make_account("ident-sc", seeded_id);
+        push_command(manager, save_account);
+
+        const auto save = [&manager](std::string id, window_kind kind,
+                                     std::string target, std::int64_t position) {
+            command request;
+            request.kind = command_kind::save_shortcut;
+            request.shortcut_row.id = std::move(id);
+            request.shortcut_row.target_kind = kind;
+            request.shortcut_row.target_id = std::move(target);
+            request.shortcut_row.position = position;
+            push_command(manager, std::move(request));
+        };
+
+        save("sc-accounts", window_kind::accounts, seeded_id, 10);
+        save("sc-workspace", window_kind::workspace, "ident-sc", 20);
+        /* A target with no row behind it, which no removal may take. */
+        save("sc-manager", window_kind::instance_manager, "", 30);
+        REQUIRE(manager.shortcuts().size() == 3);
+
+        /*
+         * Removing the account drops the entry that opens its workspace and
+         * leaves the entry that opens the instance's accounts alone, because
+         * the match is on both halves of the target.
+         */
+        command remove_account;
+        remove_account.kind = command_kind::remove_account;
+        remove_account.account_id = "ident-sc";
+        push_command(manager, remove_account);
+
+        REQUIRE(manager.shortcuts().size() == 2);
+        REQUIRE(find_shortcut(manager, "sc-workspace") == nullptr);
+        REQUIRE(find_shortcut(manager, "sc-accounts") != nullptr);
+        REQUIRE(manager.last_error().empty());
+
+        /* Removing the instance takes the entry that opened its accounts. */
+        command remove_instance;
+        remove_instance.kind = command_kind::remove_instance;
+        remove_instance.instance_id = seeded_id;
+        push_command(manager, remove_instance);
+
+        REQUIRE(manager.shortcuts().size() == 1);
+        REQUIRE(find_shortcut(manager, "sc-accounts") == nullptr);
+        REQUIRE(find_shortcut(manager, "sc-manager") != nullptr);
+        REQUIRE(manager.last_error().empty());
+
+        manager.stop();
+    }
+
+    /*
+     * The cascade is in the store and not only in the table, so the entries do
+     * not come back when the process does.
+     */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.shortcuts().size() == 1);
+    REQUIRE(reopened.shortcuts().rows()[0].id == "sc-manager");
+    reopened.stop();
 }

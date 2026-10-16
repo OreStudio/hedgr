@@ -47,6 +47,7 @@ dom::instance to_domain(const instance_entity& row) {
     dom::instance value;
     value.id = row.id.get();
     value.name = row.name.get();
+    value.icon_key = row.icon_key;
     value.nats_url = row.nats_url;
     value.subject_prefix = row.subject_prefix;
     value.wire_format = row.wire_format;
@@ -63,6 +64,7 @@ instance_entity to_entity(const dom::instance& row) {
     return instance_entity{
         .id = row.id,
         .name = row.name,
+        .icon_key = row.icon_key,
         .nats_url = row.nats_url,
         .subject_prefix = row.subject_prefix,
         .wire_format = row.wire_format,

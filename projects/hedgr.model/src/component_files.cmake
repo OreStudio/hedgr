@@ -29,6 +29,7 @@ set(files
     "state/password_policy_state.cpp"
     "state/probe_table.cpp"
     "state/session_table.cpp"
+    "state/shortcut_table.cpp"
     "state/window_table.cpp"
 )
 
@@ -47,6 +48,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/probe.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/secret.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/session.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/shortcut.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/store_lock.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window_json_io.hpp"

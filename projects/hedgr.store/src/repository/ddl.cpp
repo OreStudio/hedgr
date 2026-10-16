@@ -133,6 +133,8 @@ std::vector<table_ddl> make_tables() {
     result.push_back(hand_written[2]);
     result.push_back({.name = window_spec_entity::tablename,
                       .text = create_table_sql<window_spec_entity>()});
+    result.push_back({.name = shortcut_entity::tablename,
+                      .text = create_table_sql<shortcut_entity>()});
     result.push_back({.name = schema_version_entity::tablename,
                       .text = create_table_sql<schema_version_entity>()});
     result.push_back({.name = master_entity::tablename,

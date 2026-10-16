@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
@@ -93,6 +94,10 @@ enum class command_kind : std::uint8_t {
     unlock_store = 19,
     /** @brief Drop the held password. The store returns to locked. */
     lock_store = 20,
+    /** @brief Add or replace a shortcuts bar entry, then persist it. */
+    save_shortcut = 21,
+    /** @brief Remove a shortcuts bar entry. */
+    remove_shortcut = 22,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -143,6 +148,9 @@ struct command final {
      * attach the label to the wrong one.
      */
     domain::labelling labelling_row;
+
+    /** @brief Shortcuts bar entry, for save_shortcut and remove_shortcut. */
+    domain::shortcut shortcut_row;
 
     /** @brief Principal for connect_session. Never persisted. */
     std::string principal;

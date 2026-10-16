@@ -267,6 +267,14 @@ TEST_CASE("a seeded store holds one instance per environment", "[seed]") {
     REQUIRE_FALSE(brave.created_at.empty());
 
     /*
+     * The illustration is named by the checkout's label, which is the same word
+     * the environment is known by everywhere else. It is a key and not the
+     * image, so each of the ten environments points at one asset rather than
+     * carrying a copy of it.
+     */
+    REQUIRE(brave.icon_key == "brave_hopper");
+
+    /*
      * The checkout's own certificates, written into the row. That is what makes
      * a store created on this host work on it without anything being typed in,
      * and it is the deployment's answer rather than one this process supplied.
@@ -278,6 +286,7 @@ TEST_CASE("a seeded store holds one instance per environment", "[seed]") {
     const auto swift = instance("inst-env-swift_curie");
     REQUIRE(swift.name == "Swift Curie");
     REQUIRE(swift.nats_url == "nats://localhost:20205");
+    REQUIRE(swift.icon_key == "swift_curie");
 
     const auto festive = instance("inst-env-festive_dijkstra");
     REQUIRE(festive.name == "Festive Dijkstra");
@@ -404,6 +413,14 @@ TEST_CASE("a store with no checkouts beside it keeps the single seed", "[seed]")
     REQUIRE(row.name == "local development");
     REQUIRE(row.nats_url == "nats://localhost:20405");
     REQUIRE(row.folder_id == hedgr::model::domain::instances_root_id);
+
+    /*
+     * No checkout means no label and therefore no illustration. Empty is the
+     * stored value that says so, and the interface draws its own default rather
+     * than the seeder guessing at a picture for an instance that was never an
+     * environment.
+     */
+    REQUIRE(row.icon_key.empty());
 
     manager.stop();
 }

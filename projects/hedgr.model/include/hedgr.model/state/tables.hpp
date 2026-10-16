@@ -26,6 +26,7 @@
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include "hedgr.model/state/handle.hpp"
@@ -348,6 +349,52 @@ public:
 
 private:
     std::vector<domain::labelling> rows_;
+};
+
+/**
+ * @brief The shortcuts bar, kept in the order it draws in.
+ *
+ * A plain ordered vector rather than a slab with an index, because the order is
+ * the data and an operator has tens of entries. Every question asked of this
+ * table is "what is on the bar, in order" or "which entries name this target",
+ * and a sorted vector answers both with no bookkeeping to invalidate. A save
+ * moves at most the entries after the one it touches, which is the smallest
+ * write a reorder can be.
+ */
+class HEDGR_MODEL_EXPORT shortcut_table final {
+public:
+    /**
+     * @brief Adds @p row, or replaces the entry carrying the same id.
+     *
+     * The entry lands where its position and id put it rather than at the end,
+     * so a caller that saves a lower position sees it take effect on the next
+     * read instead of having to sort the bar itself.
+     */
+    void upsert(domain::shortcut row);
+
+    /** @brief Drops the entry with @p id, if it is there. */
+    void remove(std::string_view id);
+
+    /**
+     * @brief Drops every entry that opens @p target_id as @p kind.
+     *
+     * This is what a target removal calls, so an entry never outlives the row
+     * it opens. The match is on both halves, because an instance and an account
+     * can carry the same id and only one of them is the target being removed.
+     */
+    void remove_target(domain::window_kind kind, std::string_view target_id);
+
+    /** @brief Every entry, in the order the bar draws them. */
+    [[nodiscard]] const std::vector<domain::shortcut>& rows() const noexcept {
+        return rows_;
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept { return rows_.size(); }
+
+    void clear() noexcept { rows_.clear(); }
+
+private:
+    std::vector<domain::shortcut> rows_;
 };
 
 /**

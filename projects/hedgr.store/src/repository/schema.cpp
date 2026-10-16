@@ -48,11 +48,13 @@ namespace {
  * folder they sit in, from 6 when the tables stopped being hand-written
  * SQL and started being derived from the entity structs, which moved the
  * `created_at` default out of the table and into the writer, and from 7 when an
- * instance gained its own TLS material as three paths. The store is
+ * instance gained its own TLS material as three paths. It goes to 8 with the
+ * icon key an instance names its illustration by and the shortcut table the
+ * shortcuts bar is kept in. The store is
  * pre-release, so there is no migration: a file written against a different
  * version is refused, and the operator deletes it.
  */
-constexpr std::int64_t current_version = 7;
+constexpr std::int64_t current_version = 8;
 
 /**
  * @brief The version the file was written with, when it records one.

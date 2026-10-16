@@ -53,6 +53,22 @@ struct instance final {
     std::string name;
 
     /**
+     * @brief Which illustration the interface draws for this instance.
+     *
+     * A key rather than the image itself, because the store is copied between
+     * machines and ten instances of one deployment would otherwise carry ten
+     * copies of one picture. The key is the OreStudio environment label the
+     * seeder read, and the asset of that name is looked up from the install
+     * rather than from this row.
+     *
+     * An empty key means no illustration has been chosen, which is the honest
+     * state for an instance typed into the form by hand: nothing behind it is a
+     * checkout, so there is no label to key an asset by. The interface decides
+     * what to draw for that, and this store does not invent a picture for it.
+     */
+    std::string icon_key;
+
+    /**
      * @brief Key of the folder this instance sits in.
      *
      * A key rather than a handle, because an instance is a persisted value

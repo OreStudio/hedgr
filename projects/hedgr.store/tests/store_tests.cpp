@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/entity.hpp"
@@ -31,6 +32,7 @@
 #include "hedgr.store/repository/labelling_repository.hpp"
 #include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/schema.hpp"
+#include "hedgr.store/repository/shortcut_repository.hpp"
 #include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -61,6 +63,7 @@ using hedgr::model::domain::label_severity;
 using hedgr::model::domain::labelling;
 using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::session_key;
+using hedgr::model::domain::shortcut;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
 using hedgr::store::repository::account_repository;
@@ -69,6 +72,7 @@ using hedgr::store::repository::instance_repository;
 using hedgr::store::repository::label_repository;
 using hedgr::store::repository::labelling_repository;
 using hedgr::store::repository::master_repository;
+using hedgr::store::repository::shortcut_repository;
 using hedgr::store::repository::window_repository;
 using hedgr::store::sqlite::database;
 using hedgr::store::sqlite::store_errc;
@@ -209,6 +213,114 @@ TEST_CASE("an instance's TLS paths round-trip, empty ones included", "[store]") 
     REQUIRE(empty.tls_ca.empty());
     REQUIRE(empty.tls_cert.empty());
     REQUIRE(empty.tls_key.empty());
+}
+
+TEST_CASE("an instance's icon key round-trips, an empty one included", "[store]") {
+    auto db = fresh_store();
+    instance_repository repository(db);
+
+    /*
+     * The key is a stored value and not an absent one, so the empty spelling is
+     * round-tripped as well: an instance typed into the form has no environment
+     * behind it and therefore no label to key an asset by, and the store has to
+     * give that row back saying exactly that rather than inventing a picture.
+     */
+    instance keyed = sample_instance();
+    keyed.icon_key = "brave_hopper";
+    REQUIRE(repository.save(keyed).has_value());
+
+    instance unkeyed = sample_instance();
+    unkeyed.id = "inst-2";
+    unkeyed.name = "Typed by hand";
+    REQUIRE(repository.save(unkeyed).has_value());
+
+    const auto rows = repository.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 2);
+
+    /* Ordered by name: "Local" before "Typed by hand". */
+    REQUIRE(rows.value().front().icon_key == "brave_hopper");
+    REQUIRE(rows.value().back().icon_key.empty());
+}
+
+TEST_CASE("a shortcut round-trips and comes back in its order", "[store]") {
+    auto db = fresh_store();
+    shortcut_repository shortcuts(db);
+
+    /*
+     * Saved out of order on purpose: the list has to return them by position
+     * rather than by the sequence the writes happened in, because the order of
+     * the bar is what the operator arranged and not what the store happened to
+     * be told first.
+     */
+    shortcut last;
+    last.id = "sc-last";
+    last.target_kind = window_kind::instance_manager;
+    last.position = 30;
+    REQUIRE(shortcuts.save(last).has_value());
+
+    shortcut first;
+    first.id = "sc-first";
+    first.target_kind = window_kind::accounts;
+    first.target_id = "inst-1";
+    first.position = 10;
+    REQUIRE(shortcuts.save(first).has_value());
+
+    shortcut middle;
+    middle.id = "sc-middle";
+    middle.target_kind = window_kind::grid;
+    middle.position = 20;
+    REQUIRE(shortcuts.save(middle).has_value());
+
+    const auto rows = shortcuts.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 3);
+
+    REQUIRE(rows.value()[0].id == "sc-first");
+    REQUIRE(rows.value()[0].target_kind == window_kind::accounts);
+    REQUIRE(rows.value()[0].target_id == "inst-1");
+    REQUIRE(rows.value()[0].position == 10);
+
+    REQUIRE(rows.value()[1].id == "sc-middle");
+    REQUIRE(rows.value()[2].id == "sc-last");
+
+    /* The Instances window is a target with no id behind it. */
+    REQUIRE(rows.value()[2].target_kind == window_kind::instance_manager);
+    REQUIRE(rows.value()[2].target_id.empty());
+}
+
+TEST_CASE("a shortcut target that is removed takes its entries with it",
+    "[store]") {
+    auto db = fresh_store();
+    shortcut_repository shortcuts(db);
+
+    /*
+     * This is the call the runtime's cascade makes when a target row goes. The
+     * shortcut table cannot carry a foreign key to the target, because the
+     * target is a kind and an id that name several tables, so the store offers
+     * the removal and the runtime asks for it.
+     */
+    shortcut to_instance;
+    to_instance.id = "sc-instance";
+    to_instance.target_kind = window_kind::accounts;
+    to_instance.target_id = "inst-1";
+    to_instance.position = 10;
+    REQUIRE(shortcuts.save(to_instance).has_value());
+
+    shortcut to_other;
+    to_other.id = "sc-other";
+    to_other.target_kind = window_kind::accounts;
+    to_other.target_id = "inst-2";
+    to_other.position = 20;
+    REQUIRE(shortcuts.save(to_other).has_value());
+
+    REQUIRE(shortcuts.remove_for_target(window_kind::accounts, "inst-1")
+                .has_value());
+
+    const auto rows = shortcuts.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 1);
+    REQUIRE(rows.value().front().id == "sc-other");
 }
 
 TEST_CASE("saving the same id twice updates the row", "[store]") {
@@ -620,6 +732,7 @@ TEST_CASE("every repository reports the DDL of its own table", "[store]") {
     labelling_repository labellings(db);
     window_repository windows(db);
     master_repository master(db);
+    shortcut_repository shortcuts(db);
 
     /*
      * The statement a repository reports is the statement the schema applies,
@@ -627,7 +740,7 @@ TEST_CASE("every repository reports the DDL of its own table", "[store]") {
      * that no entity describes comes back empty rather than throwing, and the
      * failure below is what notices.
      */
-    for (const auto& [name, ddl] : std::array<std::pair<std::string, std::string>, 7>{
+    for (const auto& [name, ddl] : std::array<std::pair<std::string, std::string>, 8>{
              std::pair{std::string{"instance"}, instances.sql()},
              std::pair{std::string{"account"}, accounts.sql()},
              std::pair{std::string{"folder"}, folders.sql()},
@@ -635,6 +748,7 @@ TEST_CASE("every repository reports the DDL of its own table", "[store]") {
              std::pair{std::string{"instance_label"}, labellings.sql()},
              std::pair{std::string{"window_spec"}, windows.sql()},
              std::pair{std::string{"master"}, master.sql()},
+             std::pair{std::string{"shortcut"}, shortcuts.sql()},
          }) {
         INFO("table " << name);
         REQUIRE_FALSE(ddl.empty());
@@ -657,6 +771,7 @@ TEST_CASE("every entity reads back from the schema this build applies",
     using hedgr::store::repository::label_entity;
     using hedgr::store::repository::master_entity;
     using hedgr::store::repository::schema_version_entity;
+    using hedgr::store::repository::shortcut_entity;
     using hedgr::store::repository::window_spec_entity;
 
     auto db = fresh_store();
@@ -669,7 +784,7 @@ TEST_CASE("every entity reads back from the schema this build applies",
      * a column the table does not have, so a read through each entity is the
      * check, and it is the same read the repositories do.
      */
-    const auto reads = std::array<std::pair<std::string_view, bool>, 10>{
+    const auto reads = std::array<std::pair<std::string_view, bool>, 11>{
         std::pair<std::string_view, bool>{"instance",
             sqlgen::read<std::vector<instance_entity>>(db.connection()).has_value()},
         std::pair<std::string_view, bool>{"account",
@@ -689,6 +804,9 @@ TEST_CASE("every entity reads back from the schema this build applies",
                 .has_value()},
         std::pair<std::string_view, bool>{"window_spec",
             sqlgen::read<std::vector<window_spec_entity>>(db.connection())
+                .has_value()},
+        std::pair<std::string_view, bool>{"shortcut",
+            sqlgen::read<std::vector<shortcut_entity>>(db.connection())
                 .has_value()},
         std::pair<std::string_view, bool>{"master",
             sqlgen::read<std::vector<master_entity>>(db.connection()).has_value()},

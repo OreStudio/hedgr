@@ -644,6 +644,8 @@ instance_manager::start(const std::filesystem::path& database_path,
         *database_);
     labelling_repo_ = std::make_unique<store::repository::labelling_repository>(
         *database_);
+    shortcut_repo_ = std::make_unique<store::repository::shortcut_repository>(
+        *database_);
     window_repo_ = std::make_unique<store::repository::window_repository>(
         *database_);
     master_repo_ = std::make_unique<store::repository::master_repository>(
@@ -730,6 +732,22 @@ instance_manager::start(const std::filesystem::path& database_path,
     labellings_.clear();
     for (const auto& row : labellings.value())
         labellings_.add(row.owner, row.owner_id, row.label_id);
+
+    /*
+     * The bar is read in the order it was stored in, and the table keeps that
+     * order rather than a caller sorting it, because position and id are what
+     * the bar draws by and the read already used them.
+     */
+    auto shortcuts = shortcut_repo_->list();
+    if (!shortcuts) {
+        last_error_ = store_failure("cannot read the stored shortcuts",
+            shortcuts.error());
+        startup_failure_ = last_error_;
+        return std::unexpected(last_error_);
+    }
+    shortcuts_.clear();
+    for (const auto& row : shortcuts.value())
+        shortcuts_.upsert(row);
 
     auto windows = window_repo_->list();
     if (!windows) {
@@ -869,6 +887,12 @@ void instance_manager::seed_first_run() {
          */
         row.id = std::format("inst-env-{}", environment.label);
         row.name = display_name(environment.label);
+        /*
+         * The checkout's label is the illustration's key. It is the same word
+         * the environment is known by everywhere else, so the interface can
+         * find the asset by name and the store never carries the picture.
+         */
+        row.icon_key = environment.label;
         row.nats_url = environment.nats_url;
         row.subject_prefix = environment.subject_prefix;
         row.wire_format = environment.wire_format;
@@ -1259,6 +1283,12 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::detach_label:
         do_detach_label(cmd);
         break;
+    case command::command_kind::save_shortcut:
+        do_save_shortcut(cmd);
+        break;
+    case command::command_kind::remove_shortcut:
+        do_remove_shortcut(cmd);
+        break;
     case command::command_kind::connect_session:
         do_connect_session(cmd);
         break;
@@ -1409,12 +1439,22 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
     /*
      * The cascade is a walk rather than a lookup: what the accounts table is
      * asked is which rows name this instance, and its handles are what a
-     * removal takes.
+     * removal takes. Each account takes its own shortcuts first, because after
+     * the row is released the id it was keyed by is gone.
      */
     for (const auto account : live_accounts(accounts_)) {
-        if (accounts_.get(account)->instance_id == id)
-            accounts_.remove(account);
+        if (accounts_.get(account)->instance_id != id)
+            continue;
+        const std::string account_id = accounts_.get(account)->id;
+        drop_target_shortcuts(domain::window_kind::workspace, account_id);
+        accounts_.remove(account);
     }
+
+    /*
+     * The accounts window of this instance is a shortcut target of its own, and
+     * it goes with the instance for the same reason its accounts do.
+     */
+    drop_target_shortcuts(domain::window_kind::accounts, id);
 
     /*
      * The instance's own folders go with it: every root of an accounts tree
@@ -1555,6 +1595,13 @@ void instance_manager::do_remove_account(const command::command& cmd) {
 
     if (handle)
         accounts_.remove(*handle);
+
+    /*
+     * A shortcut naming this account as its workspace target goes with it. The
+     * entry is dropped by the same command that removed the row it opens, which
+     * is what stops the bar from offering a surface whose account is gone.
+     */
+    drop_target_shortcuts(domain::window_kind::workspace, id);
 
     if (const auto session = sessions_.find(instance_id, id)) {
         stop_session(running_key(instance_id, id));
@@ -1940,6 +1987,87 @@ void instance_manager::do_detach_label(const command::command& cmd) {
         last_error_ = store_failure(
             std::format("cannot detach label {} from {}", row.label_id,
                 row.owner_id),
+            removed.error());
+    }
+}
+
+void instance_manager::do_save_shortcut(const command::command& cmd) {
+    if (!shortcut_repo_) {
+        last_error_ = "cannot save a shortcut: the store is not open";
+        return;
+    }
+
+    const auto& row = cmd.shortcut_row;
+    if (row.id.empty()) {
+        last_error_ = "cannot save a shortcut: no shortcut was named";
+        return;
+    }
+
+    /*
+     * The entry is read back before it is replaced, so a store that refuses the
+     * write leaves the bar as it was. A bar still offering the previous entry
+     * is the truth; one showing an entry no store accepted is a lie the next
+     * start would contradict.
+     */
+    std::optional<domain::shortcut> previous;
+    for (const auto& existing : shortcuts_.rows()) {
+        if (existing.id == row.id) {
+            previous = existing;
+            break;
+        }
+    }
+
+    shortcuts_.upsert(row);
+
+    if (auto saved = shortcut_repo_->save(row); !saved) {
+        if (previous)
+            shortcuts_.upsert(*previous);
+        else
+            shortcuts_.remove(row.id);
+        last_error_ = store_failure(
+            std::format("cannot save shortcut {}", row.id), saved.error());
+    }
+}
+
+void instance_manager::do_remove_shortcut(const command::command& cmd) {
+    if (!shortcut_repo_) {
+        last_error_ = "cannot remove a shortcut: the store is not open";
+        return;
+    }
+
+    const std::string id = cmd.shortcut_row.id.empty() ? cmd.payload
+                                                       : cmd.shortcut_row.id;
+    if (id.empty()) {
+        last_error_ = "cannot remove a shortcut: no shortcut was named";
+        return;
+    }
+
+    shortcuts_.remove(id);
+
+    if (auto removed = shortcut_repo_->remove(id); !removed) {
+        last_error_ = store_failure(
+            std::format("cannot remove shortcut {}", id), removed.error());
+    }
+}
+
+void instance_manager::drop_target_shortcuts(domain::window_kind kind,
+    const std::string& target_id) {
+    /*
+     * An empty target id is the Instances window and a handful of other kinds
+     * that concern no row. Nothing was removed, so nothing is dropped: treating
+     * empty as a match would empty the bar every time an instance went.
+     */
+    if (target_id.empty())
+        return;
+
+    shortcuts_.remove_target(kind, target_id);
+
+    if (!shortcut_repo_)
+        return;
+    if (auto removed = shortcut_repo_->remove_for_target(kind, target_id);
+        !removed) {
+        last_error_ = store_failure(
+            std::format("cannot remove the shortcuts for target {}", target_id),
             removed.error());
     }
 }
