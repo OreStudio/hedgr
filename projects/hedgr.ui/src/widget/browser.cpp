@@ -912,6 +912,110 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
 }
 
 /**
+ * @brief Whether the right hand pane has to keep the store's rows back.
+ *
+ * A store that is shut or still unlocking has nothing for either pane to
+ * report, so both ask this one question rather than repeating the pair of
+ * conditions and drifting apart on the second.
+ */
+[[nodiscard]] bool store_is_shut(const render_input& input) noexcept {
+    return !store_is_open(input) || input.unlocking;
+}
+
+/**
+ * @brief The shut store's pane: a padlock and no words.
+ *
+ * One drawing for the two panes that can stand on the right, so a locked store
+ * looks the same whether the pane behind it would have been a list or a details
+ * view. The host's callbacks answer with blank text until the catalogue can be
+ * read, so a table or a form submitted anyway would be a shape over rows that
+ * are empty but not absent, which reads as a rendering fault rather than as a
+ * state.
+ *
+ * The state already has a home on the toolbar's own padlock, so a sentence here
+ * would be the third place the same fact is said. A large grey shape in the
+ * middle of the pane is read at a glance and says the one thing that matters,
+ * which is that the pane is shut rather than broken.
+ */
+void draw_shut_store_pane() {
+    const float size = ImGui::GetStyle().FontSizeBase * 4.0f;
+    ImGui::PushFont(nullptr, size);
+    const ImVec2 glyph = ImGui::CalcTextSize(icon::lock_closed);
+    const ImVec2 room = ImGui::GetContentRegionAvail();
+    ImGui::SetCursorPos(ImVec2(
+        ImGui::GetCursorPosX() + (room.x - glyph.x) * 0.5f,
+        ImGui::GetCursorPosY() + (room.y - glyph.y) * 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(icon::lock_closed);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+/** @brief The leaf with @p id, or nothing when the model does not hold one. */
+[[nodiscard]] const widget::tree_leaf*
+leaf_of(const widget::browser_model& model, std::string_view id) {
+    for (const auto& leaf : model.leaves) {
+        if (leaf.id == id)
+            return &leaf;
+    }
+    return nullptr;
+}
+
+/**
+ * @brief The details pane, where a host asked for one.
+ *
+ * The list's place, taken by the host's own view of one entry. The pane is
+ * sized to the space it is given and never scrolls, because the details are a
+ * fixed set of fields rather than a collection: a scrollbar here would be a
+ * second thing to drag on a window whose shape the operator already chose.
+ *
+ * A leaf selection is what the pane reports on, which is the rule the list
+ * already followed, so a folder selection and an empty one read the same way.
+ * The sentence for that case belongs to the browser rather than to the host,
+ * because the browser is what knows whether anything is selected and every host
+ * should say the same thing.
+ */
+void draw_details_pane(const widget::browser_model& model,
+    window_ui_state& window, const render_input& input, float width,
+    float height) {
+    widget::browser_state& state = window.browser;
+
+    /*
+     * NoScrollbar as well as the measured size, so a pane whose host draws more
+     * than fits shows a clip in a frame rather than a bar the operator has to
+     * drag. The child is given the exact rectangle the layout computed, which is
+     * what keeps the content box and the pane the same box.
+     */
+    if (!ImGui::BeginChild("##browser-details", ImVec2(width, height),
+            ImGuiChildFlags_Borders,
+            ImGuiWindowFlags_NoScrollbar
+                | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImGui::EndChild();
+        return;
+    }
+
+    if (store_is_shut(input)) {
+        draw_shut_store_pane();
+        ImGui::EndChild();
+        return;
+    }
+
+    const widget::tree_leaf* selected = leaf_of(model, state.selected_leaf);
+    if (selected == nullptr) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted("Select an entry to see its details.");
+        ImGui::PopStyleColor();
+        ImGui::EndChild();
+        return;
+    }
+
+    model.draw_details(*selected, input);
+    ImGui::EndChild();
+}
+
+/**
  * @brief The list, on the right.
  *
  * A table whose columns the host declares, so the Instances window and the
@@ -921,8 +1025,6 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
 void draw_list(const widget::browser_model& model,
     const std::vector<tree_row>& rows, window_ui_state& window,
     const render_input& input, float width, float height) {
-    namespace icon = hedgr::ui::icon;
-
     widget::browser_state& state = window.browser;
 
     if (!ImGui::BeginChild("##browser-list", ImVec2(width, height),
@@ -931,30 +1033,8 @@ void draw_list(const widget::browser_model& model,
         return;
     }
 
-    /*
-     * A shut store draws a padlock and no words. The host's cell callback
-     * answers with blank text until the catalogue can be read, so a table
-     * submitted anyway is a header over rows that are empty but not absent,
-     * which reads as a rendering fault rather than as a state.
-     *
-     * The state already has a home on the toolbar's own padlock, so a sentence
-     * here would be the third place the same fact is said. A large grey shape
-     * in the middle of the pane is read at a glance and says the one thing
-     * that matters, which is that the pane is shut rather than broken.
-     */
-    if (!store_is_open(input) || input.unlocking) {
-        const float size = ImGui::GetStyle().FontSizeBase * 4.0f;
-        ImGui::PushFont(nullptr, size);
-        const ImVec2 glyph = ImGui::CalcTextSize(icon::lock_closed);
-        const ImVec2 room = ImGui::GetContentRegionAvail();
-        ImGui::SetCursorPos(ImVec2(
-            ImGui::GetCursorPosX() + (room.x - glyph.x) * 0.5f,
-            ImGui::GetCursorPosY() + (room.y - glyph.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(icon::lock_closed);
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
+    if (store_is_shut(input)) {
+        draw_shut_store_pane();
         ImGui::EndChild();
         return;
     }
@@ -1198,11 +1278,13 @@ void render_browser(const browser_model& model, window_ui_state& window,
         ImGui::GetFrameHeight() + style.WindowPadding.x * 2.0f;
 
     /*
-     * The tree and the list share what the strip does not take, and they divide
-     * it the way they always have: the tree takes a third and the list takes
-     * the rest. The strip's width and the gaps between the three children are
-     * subtracted from the available width rather than guessed at, so the three
-     * fit the window exactly and the split does not depend on a magic number.
+     * The tree and the right hand pane share what the strip does not take, and
+     * they divide it the way they always have: the tree takes a third and the
+     * pane takes the rest. The pane is a list or a details view depending on
+     * whether the host supplied one, and the split is the same either way. The
+     * strip's width and the gaps between the three children are subtracted from
+     * the available width rather than guessed at, so the three fit the window
+     * exactly and the split does not depend on a magic number.
      */
     const float beside =
         std::max(region.x - strip_width - style.ItemSpacing.x, 0.0f);
@@ -1302,7 +1384,10 @@ void render_browser(const browser_model& model, window_ui_state& window,
     ImGui::EndChild();
 
     ImGui::SameLine();
-    draw_list(model, rows, window, input, list_width, body_height);
+    if (model.draw_details != nullptr)
+        draw_details_pane(model, window, input, list_width, body_height);
+    else
+        draw_list(model, rows, window, input, list_width, body_height);
 
     if (model.sign_in_form != nullptr)
         model.sign_in_form(input, window);

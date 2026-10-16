@@ -20,10 +20,12 @@
 #ifndef HEDGR_UI_WIDGET_PANELS_HPP
 #define HEDGR_UI_WIDGET_PANELS_HPP
 
+#include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/widget/browser.hpp"
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -74,6 +76,55 @@ struct dashboard_counts final {
 [[nodiscard]] HEDGR_UI_EXPORT dashboard_counts count_instances(
     const hedgr::model::state::instance_table& instances,
     const hedgr::model::state::probe_table& probes);
+
+/**
+ * @brief The estate's counts against wall-clock minutes, ready to plot.
+ *
+ * The x values are the centres of the window's minutes and the four count
+ * arrays line up with them, one point a minute. A minute nobody polled holds a
+ * NaN in every count array rather than a zero, so a line reader breaks there
+ * instead of inventing a reading, and a sampled minute with a count of zero
+ * keeps its real zero.
+ *
+ * This is a pure function of the history and the two clocks, which is what
+ * makes the chart's arithmetic testable without a frame: the same four polls
+ * fed in have to come out as four different minutes with four different
+ * counts.
+ */
+struct estate_series final {
+    /** @brief How many minutes the window can hold. */
+    static constexpr std::size_t capacity = 64;
+
+    /** @brief The centre of each minute, in wall-clock minutes. */
+    std::array<double, capacity> minutes{};
+
+    /** @brief Instances ready in that minute, NaN where nothing was polled. */
+    std::array<double, capacity> ready{};
+
+    /** @brief Instances reachable but not ready, NaN where nothing polled. */
+    std::array<double, capacity> not_ready{};
+
+    /** @brief Instances no connection was opened to, NaN where none polled. */
+    std::array<double, capacity> unreachable{};
+
+    /** @brief Instances no probe has answered for, NaN where none polled. */
+    std::array<double, capacity> unknown{};
+
+    /** @brief How many entries of each array the window uses. */
+    std::size_t count = 0;
+};
+
+/**
+ * @brief Folds a history of polls into one point a wall-clock minute.
+ *
+ * @p now_wall_seconds is the wall clock the points are placed on and
+ * @p now_mono_ns is the same instant on the monotonic clock the samples carry,
+ * because a sample alone has no hour in it. @p window_minutes is how far back
+ * the window reaches.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT estate_series read_estate_series(
+    const hedgr::model::state::estate_history& history,
+    double now_wall_seconds, std::int64_t now_mono_ns, double window_minutes);
 
 /**
  * @brief What a session is, in the terms a Workspace shows it.

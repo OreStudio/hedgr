@@ -707,16 +707,6 @@ enum class estate_state : std::uint8_t {
  */
 constexpr double window_minutes = 30.0;
 
-/** @brief One minute's counts and the wall minute they belong to. */
-struct minute_counts final {
-    /** @brief The minute as wall-clock minutes since the epoch. */
-    std::int64_t minute = 0;
-    std::int32_t ready = 0;
-    std::int32_t not_ready = 0;
-    std::int32_t unreachable = 0;
-    std::int32_t unknown = 0;
-};
-
 /**
  * @brief Writes a wall-clock minute as HH:MM for the x axis.
  *
@@ -818,12 +808,12 @@ void draw_dashboard(const render_input& input) {
             ImPlotStyleVar_FitPadding, ImVec2(0.0f, 0.10f));
         if (ImPlot::BeginPlot("##estate-over-time", canvas, plot_flags)) {
             /*
-             * The y axis carries no word. Its ticks are what a reader measures
-             * against and the window already says what is counted, so a label
-             * beside them would cost a strip this size width it cannot spare
-             * without adding a fact the numbers do not already state.
+             * No axis words. The y ticks are what a reader measures against, the
+             * HH:MM ticks date the points, and the window already says what is
+             * counted, so a label on either axis would cost a strip this size
+             * room without adding a fact the ticks do not already state.
              */
-            ImPlot::SetupAxes("time", nullptr, x_flags, y_flags);
+            ImPlot::SetupAxes(nullptr, nullptr, x_flags, y_flags);
 
             /*
              * The anchor: the newest sample stands in for now, and the wall
@@ -890,126 +880,38 @@ void draw_dashboard(const render_input& input) {
              * An empty history draws the axes and no lines rather than a crash.
              */
             if (count > 0) {
-                const auto* samples = history.data();
-                const auto now_mono_ns = input.now_ns;
-
-                /*
-                 * Several polls inside one minute fold into that minute's
-                 * point. The fold keeps the last poll of the minute, so a point
-                 * says where the estate stood at the end of its minute, and an
-                 * average would put a fraction of an instance on an axis
-                 * measured in whole ones. A minute with no sample is left out of
-                 * this table, which the lines below turn into a gap.
-                 */
-                constexpr std::size_t bucket_capacity = 64;
-                std::array<minute_counts, bucket_capacity> counts_by_minute{};
-                std::size_t minute_count = 0;
-                std::int64_t current_minute = -1;
-                const auto first_minute =
-                    static_cast<std::int64_t>(std::floor(now_minutes))
-                    - static_cast<std::int64_t>(window_minutes);
-                for (std::size_t index = 0; index < count; ++index) {
-                    const auto& sample = samples[index];
-                    const double age_s = static_cast<double>(
-                        now_mono_ns - sample.observed_at_ns) / 1e9;
-                    const auto minute = static_cast<std::int64_t>(
-                        std::floor((now_wall_s - age_s) / 60.0));
-                    if (minute < first_minute)
-                        continue;
-                    if (minute != current_minute) {
-                        if (minute_count == counts_by_minute.size())
-                            break;
-                        counts_by_minute[minute_count] = minute_counts{};
-                        counts_by_minute[minute_count].minute = minute;
-                        current_minute = minute;
-                        ++minute_count;
-                    }
-                    auto& counts = counts_by_minute[minute_count - 1];
-                    counts.ready = sample.ready;
-                    counts.not_ready = sample.not_ready;
-                    counts.unreachable = sample.unreachable;
-                    counts.unknown = sample.unknown;
-                }
-
                 /*
                  * One point per minute and one line per state, not a stack.
-                 * Separate lines let a reader watch ready fall while
-                 * unreachable rises, which a stack hides by construction. The x
-                 * array is the whole window, so the state arrays line up with
-                 * the ticks, and a minute nobody polled carries a NaN in every
-                 * series rather than an x value that is simply absent, because
-                 * a line drawn straight across that minute would invent the
-                 * readings it skipped.
+                 * Separate lines let a reader watch ready fall while unreachable
+                 * rises, which a stack hides by construction. The fold and the
+                 * gap filling live in the widget layer, where they can be tested
+                 * without a frame; this only draws what they return.
                  */
-                const auto last_minute =
-                    static_cast<std::int64_t>(std::floor(now_minutes));
-                const std::size_t point_count = last_minute >= first_minute
-                    ? static_cast<std::size_t>(last_minute - first_minute + 1)
-                    : 0;
+                const auto series = widget::read_estate_series(
+                    history, now_wall_s, input.now_ns, window_minutes);
 
-                std::array<double, bucket_capacity> xs{};
-                std::array<double, bucket_capacity> ready_y{};
-                std::array<double, bucket_capacity> not_ready_y{};
-                std::array<double, bucket_capacity> unreachable_y{};
-                std::array<double, bucket_capacity> unknown_y{};
-
-                std::size_t minute_index = 0;
-                for (std::size_t index = 0; index < point_count; ++index) {
-                    const auto minute =
-                        first_minute + static_cast<std::int64_t>(index);
+                const auto line = [&](estate_state state,
+                                      const std::array<double,
+                                          widget::estate_series::capacity>&
+                                          values) {
+                    const ImVec4 colour = state_colour(state);
+                    const ImPlotSpec spec(ImPlotProp_LineColor, colour);
                     /*
-                     * Centred on its own minute, so a point and the tick
-                     * beneath it agree about which minute the point is.
+                     * ImPlot's own line rasteriser joins the minute points, and
+                     * it stops at a NaN. ImPlotLineFlags_SkipNaN is deliberately
+                     * not set, because skipping the NaN would join the line
+                     * across the gap and draw the readings that were never
+                     * taken.
                      */
-                    xs[index] = static_cast<double>(minute) + 0.5;
+                    ImPlot::PlotLine(state_label(state), series.minutes.data(),
+                        values.data(), static_cast<int>(series.count), spec);
+                };
 
-                    const bool sampled = minute_index < minute_count
-                        && counts_by_minute[minute_index].minute == minute;
-                    if (sampled) {
-                        const auto& counts = counts_by_minute[minute_index];
-                        ready_y[index] = static_cast<double>(counts.ready);
-                        not_ready_y[index] =
-                            static_cast<double>(counts.not_ready);
-                        unreachable_y[index] =
-                            static_cast<double>(counts.unreachable);
-                        unknown_y[index] = static_cast<double>(counts.unknown);
-                        ++minute_index;
-                        continue;
-                    }
-
-                    /*
-                     * Nothing was polled this minute, so every line breaks
-                     * here. A zero would be a reading and a join would be an
-                     * invented one; a NaN is neither.
-                     */
-                    ready_y[index] = std::nan("");
-                    not_ready_y[index] = std::nan("");
-                    unreachable_y[index] = std::nan("");
-                    unknown_y[index] = std::nan("");
-                }
-
-                if (point_count > 0) {
-                    const auto line = [&](estate_state state,
-                                          const std::array<double,
-                                              bucket_capacity>& values) {
-                        const ImVec4 colour = state_colour(state);
-                        const ImPlotSpec spec(ImPlotProp_LineColor, colour);
-                        /*
-                         * ImPlot's own line rasteriser joins the minute points,
-                         * and it stops at a NaN. ImPlotLineFlags_SkipNaN is
-                         * deliberately not set, because skipping the NaN would
-                         * join the line across the gap and draw the readings
-                         * that were never taken.
-                         */
-                        ImPlot::PlotLine(state_label(state), xs.data(),
-                            values.data(), static_cast<int>(point_count),
-                            spec);
-                    };
-
-                    line(estate_state::ready, ready_y);
-                    line(estate_state::not_ready, not_ready_y);
-                    line(estate_state::unreachable, unreachable_y);
-                    line(estate_state::unknown, unknown_y);
+                if (series.count > 0) {
+                    line(estate_state::ready, series.ready);
+                    line(estate_state::not_ready, series.not_ready);
+                    line(estate_state::unreachable, series.unreachable);
+                    line(estate_state::unknown, series.unknown);
                 }
             }
 
@@ -1180,6 +1082,173 @@ void instance_row_labels(const tree_leaf& leaf, const render_input& input,
         return;
     cells[instance_label_column] = widget::pills_for(
         labels_of(input, labelling_owner::instance, leaf.id));
+}
+
+/**
+ * @brief One read-only field of the details pane, named and shown.
+ *
+ * The icon is drawn only where the set carries one that means the field, and
+ * the name is written beside it either way, because a value with no name is a
+ * number a reader has to guess at. The icon names the field for a reader who
+ * hovers it as well, which is where an icon with no obvious sense of its own
+ * gets its meaning.
+ *
+ * A field whose value is empty is not drawn at all, so every row is a fact the
+ * model holds rather than a blank one pretending to be one.
+ */
+void detail_row(const char* glyph, const char* name, std::string_view value) {
+    if (value.empty())
+        return;
+
+    ImGui::TableNextRow();
+
+    ImGui::TableNextColumn();
+    if (glyph != nullptr) {
+        ImGui::TextDisabled("%s", glyph);
+        ImGui::SetItemTooltip("%s", name);
+    }
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(name);
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(value.data(), value.data() + value.size());
+    /*
+     * The pane can be narrow and a TLS path is longer than it, so the whole
+     * value stays readable on hover even where the cell clips it.
+     */
+    if (ImGui::IsItemHovered())
+        ImGui::SetItemTooltip("%.*s", static_cast<int>(value.size()),
+            value.data());
+}
+
+/**
+ * @brief One row of the details table whose value carries the probe's colour.
+ *
+ * The colour is the same one the tree's glyph is painted with, so the answer
+ * the pane gives agrees with the row that led to it. It is pushed on the value
+ * cell alone rather than the whole row, because the field's name is a fact
+ * about the layout and not about the instance.
+ */
+void probe_state_row(const char* glyph, const char* name, const char* word,
+    std::uint32_t colour) {
+    ImGui::TableNextRow();
+
+    ImGui::TableNextColumn();
+    ImGui::TextDisabled("%s", glyph);
+    ImGui::SetItemTooltip("%s", name);
+
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(name);
+
+    ImGui::TableNextColumn();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
+    ImGui::TextUnformatted(word);
+    ImGui::PopStyleColor();
+}
+
+/**
+ * @brief Draws one instance's details, in the browser's right hand pane.
+ *
+ * Read only, and deliberately so. The toolbar's edit control already opens the
+ * form, and a second way to change the same row would be a second thing to keep
+ * in step with the store's rules. What is here is every fact the model holds
+ * about the instance, so a reader can see a deployment without opening the form
+ * the toolbar offers.
+ *
+ * A field the model does not have is left out rather than drawn blank, which is
+ * why the three TLS paths and the labels appear only for an instance that
+ * carries them. The probe is shown only once one has answered, because before
+ * that there is no measurement to report and the row would be an invented one.
+ */
+void instance_details(const tree_leaf& leaf, const render_input& input) {
+    const auto handle = input.instances.find(leaf.id);
+    if (!handle) {
+        ImGui::TextDisabled("This instance is no longer in the store.");
+        return;
+    }
+    const auto& row = *input.instances.get(*handle);
+    const auto status = status_of(input, row.id);
+
+    constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit
+        | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
+    if (!ImGui::BeginTable("##instance-details", 3, flags))
+        return;
+
+    ImGui::TableSetupColumn("##glyph", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("##field", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+
+    detail_row(icon::instance, "Name", row.name);
+
+    /*
+     * The host and the port are one fact to a reader even though the form edits
+     * them apart, so the address is put back together here without its scheme.
+     * The scheme is which transport is used, and a reader asking where an
+     * instance is wants the host.
+     */
+    const auto address = widget::split_host_port(row.nats_url);
+    detail_row(icon::link, "Host",
+        widget::join_host_port(widget::host_port{std::string{}, address.host,
+            address.port}));
+
+    detail_row(nullptr, "Subject prefix", row.subject_prefix);
+    detail_row(nullptr, "Wire format", row.wire_format);
+    detail_row(nullptr, "TLS CA certificate", row.tls_ca);
+    detail_row(nullptr, "TLS client certificate", row.tls_cert);
+    detail_row(icon::unlock, "TLS client key", row.tls_key);
+
+    const auto attached = labels_of(input, labelling_owner::instance, row.id);
+    if (!attached.empty()) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        /* No icon, because the set has no label concept. */
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Labels");
+        ImGui::TableNextColumn();
+        static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
+            ImGui::GetContentRegionAvail().x));
+    }
+
+    if (!status.observed) {
+        detail_row(icon::probe, "Last probe", status.detail);
+        ImGui::EndTable();
+        return;
+    }
+
+    /*
+     * The word first, in the colour the tree's glyph carries, and the two
+     * answers it is made of underneath it. The colour is deliberately coarser
+     * than the pair, so an operator asking the harder question gets the exact
+     * answer without having to open the form.
+     */
+    probe_state_row(icon::probe, "Last probe",
+        theme::probe_state_word(status.result, true),
+        theme::probe_state_colour(status.result, true));
+
+    detail_row(icon::connect, "Reachability",
+        hedgr::model::domain::to_string(status.result.reach));
+    detail_row(icon::ready, "Readiness",
+        hedgr::model::domain::to_string(status.result.ready));
+
+    if (status.result.latency_us > 0)
+        detail_row(icon::clock, "Latency",
+            std::format("{:.1f} ms",
+                static_cast<double>(status.result.latency_us) / 1000.0));
+
+    /*
+     * An age rather than a timestamp, because the probe carries the monotonic
+     * clock and that has no wall time in it. "4 s ago" is the question a reader
+     * is asking when they look at when the probe last ran.
+     */
+    if (status.result.observed_at_ns > 0
+        && input.now_ns >= status.result.observed_at_ns)
+        detail_row(icon::clock, "Observed",
+            std::format("{:.0f} s ago",
+                static_cast<double>(
+                    input.now_ns - status.result.observed_at_ns) / 1.0e9));
+
+    ImGui::EndTable();
 }
 
 }
@@ -1444,6 +1513,14 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     model.activate_leaf = &activate_instance;
     model.row_cells = &instance_row_cells;
     model.row_labels = &instance_row_labels;
+    /*
+     * The right hand pane shows one instance in full rather than every instance
+     * as a row. The columns and the cells above are still declared, because they
+     * are the pane's fallback and a window that stopped describing its rows
+     * would have to grow a second description the day the details callback was
+     * cleared. The browser draws the details whenever this is set.
+     */
+    model.draw_details = &instance_details;
     model.create_leaf = [](window_ui_state& window, std::string_view parent) {
         open_create_form(window, parent);
     };

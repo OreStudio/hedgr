@@ -238,8 +238,8 @@ struct row_cells final {
 };
 
 /**
- * @brief What the browser is browsing: its tree and its list, as the host sees
- * them.
+ * @brief What the browser is browsing: its tree and its right hand pane, as the
+ * host sees them.
  *
  * The browser is generic over its leaf type through this struct rather than
  * through a template, because the Instances window and the Accounts window must
@@ -285,6 +285,25 @@ struct browser_model final {
     void (*row_labels)(const tree_leaf&,
         const hedgr::ui::render::render_input&,
         std::vector<std::vector<label_pill>>&) = nullptr;
+
+    /**
+     * @brief Draws the details of the selected entry, in place of the list.
+     *
+     * The right hand pane is a list while the host declares columns and a
+     * details view once it supplies this callback, because a window that shows
+     * one entry in full wants the room the table was using and does not want to
+     * keep two ways of reading the same row in step. The browser chooses
+     * between the two from this pointer alone and still knows nothing about
+     * what an entry is.
+     *
+     * Called with the selected leaf, and only while a leaf is selected. The
+     * browser owns the pane, its lock and the one sentence it shows when there
+     * is no selection; the host owns every field drawn inside it. A null
+     * callback leaves the pane as the list, which is what the Accounts window
+     * still asks for.
+     */
+    void (*draw_details)(const tree_leaf&,
+        const hedgr::ui::render::render_input&) = nullptr;
 
     /*
      * The host's callbacks all take the whole window state rather than the
@@ -414,7 +433,7 @@ struct browser_model final {
 };
 
 /**
- * @brief Draws one browser: a folder tree on the left, a list on the right.
+ * @brief Draws one browser: a folder tree on the left, and a pane on the right.
  *
  * Must be called inside an already-begun ImGui window. The tree is rebuilt from
  * the model every frame, which is what lets a filter narrow it and a drag
@@ -422,9 +441,11 @@ struct browser_model final {
  * piece of tree state worth keeping, is ImGui's, keyed by the stable ids the
  * model supplies.
  *
- * The list reports on the selected tree node and holds no selection of its own,
- * so there is exactly one answer to "what is selected" and no way for the tree
- * and the list to disagree about it.
+ * The right hand pane is a list of the model's leaves, or the selected leaf's
+ * details when the host supplied @c draw_details. Either way it reports on the
+ * selected tree node and holds no selection of its own, so there is exactly one
+ * answer to "what is selected" and no way for the tree and the pane to disagree
+ * about it.
  *
  * @param model The host's view of what is being browsed.
  * @param window The hosting window's state, which is where the browser's own

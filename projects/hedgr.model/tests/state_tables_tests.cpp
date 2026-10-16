@@ -28,6 +28,7 @@
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
+#include <array>
 #include <cstdint>
 #include <set>
 #include <string>
@@ -694,4 +695,55 @@ TEST_CASE("a probe table records one estate poll per sweep", "[probe]") {
     REQUIRE(second.total() == 3);
     REQUIRE(second.unreachable == 0);
     REQUIRE(probes.estate().at(0).total() == 4);
+}
+
+TEST_CASE("four estate polls read back as four different buckets", "[probe]") {
+    instance_table instances;
+    probe_table probes;
+
+    const auto a = instances.upsert(make_instance("a", "A"));
+    const auto b = instances.upsert(make_instance("b", "B"));
+    const auto c = instances.upsert(make_instance("c", "C"));
+
+    /*
+     * A poll of the whole estate, with the state moving one instance at a time.
+     * A reader that showed the newest counts for every poll would pass on a
+     * single sample and fail here, which is the point of four.
+     */
+    probes.record_snapshot(100, instances.size());
+
+    probes.set(a, make_probe(reachability::reachable, readiness::ready));
+    probes.record_snapshot(200, instances.size());
+
+    probes.set(b, make_probe(reachability::unreachable, readiness::unknown));
+    probes.record_snapshot(300, instances.size());
+
+    probes.set(c,
+        make_probe(reachability::reachable, readiness::bootstrapping));
+    probes.record_snapshot(400, instances.size());
+
+    const auto& history = probes.estate();
+    REQUIRE(history.size() == 4);
+
+    const std::array<std::int32_t, 4> ready{
+        history.at(0).ready, history.at(1).ready,
+        history.at(2).ready, history.at(3).ready};
+    const std::array<std::int32_t, 4> not_ready{
+        history.at(0).not_ready, history.at(1).not_ready,
+        history.at(2).not_ready, history.at(3).not_ready};
+    const std::array<std::int32_t, 4> unreachable{
+        history.at(0).unreachable, history.at(1).unreachable,
+        history.at(2).unreachable, history.at(3).unreachable};
+
+    REQUIRE(ready == std::array<std::int32_t, 4>{0, 1, 1, 1});
+    REQUIRE(not_ready == std::array<std::int32_t, 4>{0, 0, 0, 1});
+    REQUIRE(unreachable == std::array<std::int32_t, 4>{0, 0, 1, 1});
+
+    /* The four polls are four distinct minutes for the chart to place. */
+    REQUIRE(history.at(0).observed_at_ns < history.at(1).observed_at_ns);
+    REQUIRE(history.at(1).observed_at_ns < history.at(2).observed_at_ns);
+    REQUIRE(history.at(2).observed_at_ns < history.at(3).observed_at_ns);
+    for (std::size_t index = 1; index < history.size(); ++index)
+        REQUIRE(history.at(index).observed_at_ns
+            != history.at(index - 1).observed_at_ns);
 }

@@ -777,3 +777,70 @@ TEST_CASE("a store that could not be opened is reported as a notice", "[notice]"
     REQUIRE(notice.reason.find("delete the file and start again")
         != std::string::npos);
 }
+
+TEST_CASE("four estate polls read back as four different chart points",
+    "[widget]") {
+    using hedgr::model::state::estate_history;
+    using hedgr::model::state::estate_sample;
+    using hedgr::ui::widget::read_estate_series;
+
+    estate_history history;
+    const auto add = [&history](std::int64_t observed_at_ns,
+                                 std::int32_t ready, std::int32_t not_ready,
+                                 std::int32_t unreachable,
+                                 std::int32_t unknown) {
+        estate_sample sample;
+        sample.observed_at_ns = observed_at_ns;
+        sample.ready = ready;
+        sample.not_ready = not_ready;
+        sample.unreachable = unreachable;
+        sample.unknown = unknown;
+        history.append(sample);
+    };
+
+    /*
+     * Four polls a minute apart, each in a different state. A reader that took
+     * the newest sample for every minute would draw one flat line here, which
+     * is the defect this test exists to catch.
+     */
+    constexpr std::int64_t minute_ns = 60'000'000'000;
+    add(0 * minute_ns, 0, 0, 0, 3);
+    add(1 * minute_ns, 1, 0, 0, 2);
+    add(2 * minute_ns, 1, 0, 1, 1);
+    add(3 * minute_ns, 1, 1, 1, 0);
+
+    /*
+     * The wall clock is pinned half a minute into minute 1000, and the frame's
+     * monotonic clock to the fourth poll, so the four polls land on the four
+     * wall minutes 997 to 1000 and the window reaches back thirty of them.
+     */
+    const auto series = read_estate_series(history, 1000.0 * 60.0 + 30.0,
+        3 * minute_ns, 30.0);
+
+    REQUIRE(series.count == 31);
+
+    const std::size_t base = series.count - 4;
+    REQUIRE(series.minutes[base + 0] == 997.5);
+    REQUIRE(series.minutes[base + 3] == 1000.5);
+
+    REQUIRE(series.unknown[base + 0] == 3);
+    REQUIRE(series.ready[base + 1] == 1);
+    REQUIRE(series.unknown[base + 1] == 2);
+    REQUIRE(series.unreachable[base + 2] == 1);
+    REQUIRE(series.not_ready[base + 3] == 1);
+
+    /* Four minutes, four different values, and no one value repeated. */
+    REQUIRE(series.ready[base + 0] != series.ready[base + 1]);
+    REQUIRE(series.unreachable[base + 1] != series.unreachable[base + 2]);
+    REQUIRE(series.not_ready[base + 2] != series.not_ready[base + 3]);
+    REQUIRE(series.unknown[base + 0] != series.unknown[base + 3]);
+
+    /*
+     * The minutes ascend, and a minute before the first poll is a gap. A NaN is
+     * not equal to itself, which is the clearest way to say "nothing was
+     * polled" without pulling a math header into this file.
+     */
+    for (std::size_t index = 1; index < series.count; ++index)
+        REQUIRE(series.minutes[index] > series.minutes[index - 1]);
+    REQUIRE(series.ready[0] != series.ready[0]);
+}

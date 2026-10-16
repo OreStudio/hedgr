@@ -21,7 +21,9 @@
 
 #include "hedgr.model/domain/probe.hpp"
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <format>
 #include <numeric>
@@ -63,6 +65,88 @@ dashboard_counts count_instances(
     }
 
     return counts;
+}
+
+estate_series read_estate_series(
+    const hedgr::model::state::estate_history& history,
+    double now_wall_seconds, std::int64_t now_mono_ns, double window_minutes) {
+    using hedgr::model::state::estate_sample;
+
+    estate_series series;
+
+    const double now_minutes = now_wall_seconds / 60.0;
+    const auto first_minute =
+        static_cast<std::int64_t>(std::floor(now_minutes))
+        - static_cast<std::int64_t>(window_minutes);
+    const auto last_minute =
+        static_cast<std::int64_t>(std::floor(now_minutes));
+    const std::size_t point_count = last_minute >= first_minute
+        ? static_cast<std::size_t>(last_minute - first_minute + 1)
+        : 0;
+    series.count = std::min(point_count, estate_series::capacity);
+
+    /*
+     * Fold the polls into minutes first, keeping the last poll of each minute.
+     * A minute says where the estate stood at the end of it, and an average
+     * would put a fraction of an instance on an axis measured in whole ones.
+     */
+    std::array<estate_sample, estate_series::capacity> buckets{};
+    std::array<std::int64_t, estate_series::capacity> bucket_minutes{};
+    std::size_t bucket_count = 0;
+    std::int64_t current_minute = -1;
+    const auto* samples = history.data();
+    for (std::size_t index = 0; index < history.size(); ++index) {
+        const auto& sample = samples[index];
+        /*
+         * The age is measured against the frame's monotonic clock rather than
+         * against the newest sample, so a poll's wall time stays put as the run
+         * advances and the points do not drift between polls.
+         */
+        const double age_s =
+            static_cast<double>(now_mono_ns - sample.observed_at_ns) / 1e9;
+        const auto minute = static_cast<std::int64_t>(
+            std::floor((now_wall_seconds - age_s) / 60.0));
+        if (minute < first_minute)
+            continue;
+        if (minute != current_minute) {
+            if (bucket_count == buckets.size())
+                break;
+            bucket_minutes[bucket_count] = minute;
+            current_minute = minute;
+            ++bucket_count;
+        }
+        buckets[bucket_count - 1] = sample;
+    }
+
+    /*
+     * Then walk the window's minutes and take the bucket belonging to each. A
+     * minute with no bucket stays NaN in all four series, which the plot draws
+     * as a break rather than as a zero.
+     */
+    std::size_t bucket_index = 0;
+    for (std::size_t index = 0; index < series.count; ++index) {
+        const auto minute = first_minute + static_cast<std::int64_t>(index);
+        series.minutes[index] = static_cast<double>(minute) + 0.5;
+
+        const bool sampled = bucket_index < bucket_count
+            && bucket_minutes[bucket_index] == minute;
+        if (!sampled) {
+            series.ready[index] = std::nan("");
+            series.not_ready[index] = std::nan("");
+            series.unreachable[index] = std::nan("");
+            series.unknown[index] = std::nan("");
+            continue;
+        }
+
+        const auto& counts = buckets[bucket_index];
+        series.ready[index] = static_cast<double>(counts.ready);
+        series.not_ready[index] = static_cast<double>(counts.not_ready);
+        series.unreachable[index] = static_cast<double>(counts.unreachable);
+        series.unknown[index] = static_cast<double>(counts.unknown);
+        ++bucket_index;
+    }
+
+    return series;
 }
 
 session_facts collect_session_facts(
