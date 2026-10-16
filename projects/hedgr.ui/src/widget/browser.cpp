@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <format>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -929,6 +930,22 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
 }
 
 /**
+ * @brief How far above the pane's own background the shut padlock is lifted.
+ *
+ * The pane is a child whose background is transparent, so what shows through is
+ * the window's background, and the padlock is derived from that colour rather
+ * than from a grey of its own. It is a watermark: the point of it is that a
+ * reader notices the pane is shut, not that they read a shape, so it sits one
+ * small step above the background and no further. A larger step was tried first
+ * and a field of colour this size read as the brightest thing on the desk.
+ *
+ * Derived rather than stated so that a change to the window background carries
+ * the padlock with it, instead of leaving two literals that happened to agree
+ * on the day they were written.
+ */
+constexpr float shut_pane_lift = 1.9f;
+
+/**
  * @brief The shut store's pane: a padlock and no words.
  *
  * One drawing for the two panes that can stand on the right, so a locked store
@@ -942,20 +959,80 @@ void draw_tree_row(const widget::browser_model& model, const tree_row& row,
  * would be the third place the same fact is said. A large grey shape in the
  * middle of the pane is read at a glance and says the one thing that matters,
  * which is that the pane is shut rather than broken.
+ *
+ * The padlock is built from draw primitives rather than taken from the icon
+ * set. An icon is a bitmap cell packed into the atlas at the base text size,
+ * and a custom rectangle carries no outline for the font to rescale, so asking
+ * for the same glyph at several times that size draws the atlas's
+ * missing-glyph mark instead of the shape. A body and a shackle measured from
+ * the pane take whatever size the pane has and cannot go missing.
  */
 void draw_shut_store_pane() {
-    const float size = ImGui::GetStyle().FontSizeBase * 4.0f;
-    ImGui::PushFont(nullptr, size);
-    const ImVec2 glyph = ImGui::CalcTextSize(icon::lock_closed);
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
     const ImVec2 room = ImGui::GetContentRegionAvail();
-    ImGui::SetCursorPos(ImVec2(
-        ImGui::GetCursorPosX() + (room.x - glyph.x) * 0.5f,
-        ImGui::GetCursorPosY() + (room.y - glyph.y) * 0.5f));
-    ImGui::PushStyleColor(ImGuiCol_Text,
-        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextUnformatted(icon::lock_closed);
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    /*
+     * A fraction of the shorter side, so one drawing fills the pane whatever
+     * shape the window has. The floor keeps it a shape on a pane squeezed small
+     * and the ceiling stops it swallowing a pane with room to spare.
+     */
+    const float extent = std::min(room.x, room.y);
+    const float size = std::clamp(extent * 0.28f, 48.0f, 260.0f);
+
+    /*
+     * The window's own background, lifted by one small step. The style is read
+     * rather than a colour named here, so the padlock follows the theme the way
+     * the words around it do, and it stays a watermark on a theme whose
+     * background is not the dark one this was written against.
+     */
+    ImVec4 tint = ImGui::GetStyleColorVec4(ImGuiCol_WindowBg);
+    tint.x *= shut_pane_lift;
+    tint.y *= shut_pane_lift;
+    tint.z *= shut_pane_lift;
+    const ImU32 colour = ImGui::ColorConvertFloat4ToU32(tint);
+
+    const float left = origin.x + (room.x - size) * 0.5f;
+    const float top = origin.y + (room.y - size) * 0.5f;
+
+    /*
+     * The body takes the bottom of a square of @p size and the shackle stands
+     * on its top edge, narrower than the body so the two are told apart. The
+     * shackle is a stroked arc so it encloses a hole, which is what separates a
+     * padlock from a bag.
+     */
+    const float body_height = size * 0.62f;
+    const float body_top = top + size - body_height;
+    draw->AddRectFilled(ImVec2(left, body_top),
+        ImVec2(left + size, body_top + body_height), colour, size * 0.09f,
+        ImDrawFlags_RoundCornersAll);
+
+    const float shackle_radius = size * 0.30f;
+    const float shackle_thickness = size * 0.11f;
+    const ImVec2 shackle_centre(left + size * 0.5f, body_top);
+    constexpr float half_turn = std::numbers::pi_v<float>;
+    draw->PathArcTo(shackle_centre, shackle_radius, half_turn,
+        half_turn * 2.0f, 32);
+    draw->PathStroke(colour, ImDrawFlags_None, shackle_thickness);
+
+    /*
+     * The keyhole is a darker shade of the body rather than a hole through to
+     * the pane behind it, because the pane is drawn over a photograph and a
+     * hole painted one flat colour would read as a patch. It is the second cue
+     * that says padlock, after the shackle.
+     */
+    ImVec4 groove = tint;
+    groove.x *= 0.45f;
+    groove.y *= 0.45f;
+    groove.z *= 0.45f;
+    const ImU32 groove_colour = ImGui::ColorConvertFloat4ToU32(groove);
+    const ImVec2 key_centre(left + size * 0.5f, body_top + body_height * 0.40f);
+    draw->AddCircleFilled(key_centre, size * 0.075f, groove_colour, 24);
+    draw->AddTriangleFilled(
+        ImVec2(key_centre.x - size * 0.05f, key_centre.y),
+        ImVec2(key_centre.x + size * 0.05f, key_centre.y),
+        ImVec2(key_centre.x, key_centre.y + body_height * 0.36f),
+        groove_colour);
 }
 
 /** @brief The leaf with @p id, or nothing when the model does not hold one. */
