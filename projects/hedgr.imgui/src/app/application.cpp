@@ -336,6 +336,14 @@ void application::load_instance_icon_textures() {
         return;
     }
 
+    /*
+     * The directory travels with the pictures, because the details pane shows
+     * the operator where to drop a new file and the answer has to be the folder
+     * this walk actually read rather than whichever candidate a later lookup
+     * happens to resolve.
+     */
+    instance_icons_.directory = directory.string();
+
     std::error_code ec;
     const fs::directory_iterator entries(directory, ec);
     if (ec) {
@@ -464,11 +472,11 @@ void application::render_loop(GLFWwindow* window) {
         ui::widget::drive_capture_steps(frame);
 
         /*
-         * A copy control records the value it put on the clipboard in the frame
-         * that pressed it, because a capture has no still frame to show a
-         * clipboard in. This is the later half of that record: the clipboard's
-         * own state on each following frame, which is where a compositor that
-         * refused the selection shows itself. Inert without a script.
+         * The clipboard a chord wrote is read at both ends of the frame. The
+         * platform backend may publish the selection as the frame renders or
+         * only when the window system is next polled, and a read that only
+         * happened after the render would miss the second case. Reading a
+         * value twice costs nothing because only a change is recorded.
          */
         ui::widget::record_capture_clipboard();
 
@@ -507,6 +515,16 @@ void application::render_loop(GLFWwindow* window) {
             .instance_icons = &instance_icons_,
         };
         workspace_.render(input);
+
+        /*
+         * The copy a frame made is read here, after the frame has been drawn
+         * and before the next poll of the window system. ImGui writes the
+         * clipboard as it renders the selected input, and under Wayland the
+         * compositor can take the selection back when it next polls, so a read
+         * left to the top of the next frame can miss the run's own value and
+         * find the desk's. Inert without a script.
+         */
+        ui::widget::record_capture_clipboard();
 
         /*
          * The frame is sealed after it is submitted, which is what a gesture of

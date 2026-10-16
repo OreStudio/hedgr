@@ -58,6 +58,18 @@ focus "Brave Hopper"
     REQUIRE(steps[4].target == "Brave Hopper");
 }
 
+TEST_CASE("a drag and a copy are gestures a script can name", "[capture]") {
+    const auto steps = steps_of("drag Host | value\ncopy Host | value\n");
+
+    REQUIRE(steps.size() == 2);
+    REQUIRE(steps[0].kind == capture_step_kind::drag);
+    REQUIRE(steps[0].target == "Host");
+    REQUIRE(steps[0].label == "value");
+    REQUIRE(steps[1].kind == capture_step_kind::copy);
+    REQUIRE(steps[1].target == "Host");
+    REQUIRE(steps[1].label == "value");
+}
+
 TEST_CASE("a step names the line it was written on", "[capture]") {
     const auto steps = steps_of("click Development\n# a remark\n\nclick Production\n");
 

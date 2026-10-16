@@ -32,10 +32,11 @@ namespace hedgr::ui::widget {
 /**
  * @brief The kind of input a scripted capture step asks for.
  *
- * Five, because these are the gestures an operator uses on a browser and a
- * capture could not make: select a row, work its expander, and move the pointer
- * onto a control. A step that named a screen coordinate instead would test the
- * coordinate rather than the interface.
+ * Seven, because these are the gestures an operator uses on a browser and a
+ * capture could not make: select a row, work its expander, move the pointer
+ * onto a control, drag across a value, and copy the selection. A step that
+ * named a screen coordinate instead would test the coordinate rather than the
+ * interface.
  */
 enum class capture_step_kind : std::uint8_t {
     /** @brief Click the middle of a row, which is a click on its label. */
@@ -48,6 +49,23 @@ enum class capture_step_kind : std::uint8_t {
     collapse = 3,
     /** @brief Move the pointer onto a row without pressing anything. */
     focus = 4,
+    /**
+     * @brief Press at a value's left edge, drag across it and release.
+     *
+     * A drag is the one gesture a still frame cannot show, so the capture hook
+     * drives it rather than approximating it with a click. The selection it
+     * leaves is what a following @c copy step copies.
+     */
+    drag = 5,
+    /**
+     * @brief Send Ctrl+C to whatever is active, which is the selection a drag
+     * left behind.
+     *
+     * The step names the value it copies as well, so a script reads as the two
+     * halves of one action and a drag that selected nothing is reported as a
+     * copy step that could not resolve rather than as a silent empty read.
+     */
+    copy = 6,
 };
 
 /**
@@ -132,14 +150,16 @@ struct capture_element final {
  *
  * The steps come from @c HEDGR_CAPTURE_INPUT, one per line, as
  * @c "<gesture> <row> [| <label>]" where the gestures are @c click, @c
- * click_arrow, @c expand, @c collapse and @c focus. A row whose name holds a
- * space is written in quotes, as @c "Brave Hopper"; the label is separated by a
- * bar, and only by one.
+ * click_arrow, @c expand, @c collapse, @c focus, @c drag and @c copy. A row
+ * whose name holds a space is written in quotes, as @c "Brave Hopper"; the label
+ * is separated by a bar, and only by one.
  *
  * The label names which of two things of the same name is meant. An entry is on
  * screen twice, once in the tree and once in the list, and both are called the
  * same thing, so @c "click laboratory" means the tree row and
- * @c "click laboratory | list" means the list row.
+ * @c "click laboratory | list" means the list row. A value the pane draws wears
+ * the label @c value, so a drag across the Host row is
+ * @c "drag Host | value".
  *
  * @c HEDGR_CAPTURE_INPUT_FILE names a file with the same contents, for a script
  * too long to pass through the environment.
@@ -177,12 +197,15 @@ inline constexpr std::uint32_t capture_first_step_frame = 12;
 /**
  * @brief The frames a gesture is spread over.
  *
- * Three: the pointer arrives, the button goes down, and it comes up. The
- * arrival is a frame of its own so the row is hovered before it is clicked, and
- * the frames between one gesture and the next are what let the interface draw
- * the result before the next gesture reads it.
+ * Five. A click spends the first three on the pointer arriving, the button
+ * going down and it coming up, which is the shortest sequence that leaves the
+ * row hovered before it is pressed. A drag needs one more, because ImGui only
+ * extends a selection on a frame where the pointer moves while the button is
+ * held, and a copy needs the same room to press Ctrl and C and to release them.
+ * The unused frames are what let the interface draw the result before the next
+ * gesture reads it.
  */
-inline constexpr std::uint32_t capture_frames_per_step = 3;
+inline constexpr std::uint32_t capture_frames_per_step = 5;
 
 /**
  * @brief Starts a capture frame: forgets what the last one drew.
@@ -220,32 +243,32 @@ HEDGR_UI_EXPORT void end_capture_frame();
 HEDGR_UI_EXPORT void hold_capture_pointer();
 
 /**
- * @brief Records the clipboard as a copy control has just left it.
+ * @brief Arms the clipboard record and takes the desk's current value as the
+ * baseline the run's own copy has to beat.
  *
- * Called where the copy happened, in the frame of the press, which is the one
- * moment the value on the clipboard is the run's own. Under Wayland the
- * compositor can take the selection back before the next frame begins, so a
- * reader that waited would find the desk's value and prove nothing.
- *
- * The value recorded is what ImGui's getter returns rather than the value the
- * control meant to copy, because the question a capture answers is whether the
- * value reached the backend and not whether a function was called with it.
+ * Called on the frame a @c copy step begins, before the key chord is queued.
+ * The value on the clipboard at that moment belongs to the desk and not to the
+ * run, so it is remembered rather than written, and the record only grows when
+ * the clipboard later changes. That is what keeps the first line of the record
+ * the value the run copied even though the run cannot observe the moment ImGui
+ * writes it.
  */
-HEDGR_UI_EXPORT void note_capture_copied_value();
+HEDGR_UI_EXPORT void arm_capture_clipboard();
 
 /**
  * @brief Records the clipboard's later state, which is the compositor's verdict.
  *
- * A still frame cannot show a clipboard, so a copy control is proved by
- * pressing one and reading the window system's clipboard back rather than by
- * looking at a drawn glyph. The record is the captured frame's own path with
- * @c .clipboard appended, one distinct value per line, and the first line is
- * always the value the script copied. A later line is the desk's value arriving
- * after a selection the compositor refused, which is the honest way for a
- * cancelled selection to show itself.
+ * A still frame cannot show a clipboard, so a selection is proved by driving a
+ * drag and a Ctrl+C and reading the window system's clipboard back rather than
+ * by looking at a drawn highlight. The record is the captured frame's own path
+ * with @c .clipboard appended, one distinct value per line, and the first line
+ * is the value the run copied. A later line is the desk's value arriving after
+ * a selection the compositor refused, which is the honest way for a cancelled
+ * selection to show itself.
  *
- * Nothing is recorded before a copy, so the desk's own clipboard never becomes
- * the first line. Inert unless the run was given a script and a frame path.
+ * Nothing is recorded until a copy step has armed the record, so the desk's own
+ * clipboard never becomes the first line. Inert unless the run was given a
+ * script and a frame path.
  */
 HEDGR_UI_EXPORT void record_capture_clipboard();
 

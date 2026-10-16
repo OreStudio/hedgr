@@ -49,17 +49,15 @@ struct probe_job final {
 };
 
 /**
- * @brief The sentence the pane shows for a probe that did not get an answer.
+ * @brief The two lines the pane shows for a probe that did not get an answer.
  *
- * The transport's own words name the subject that had no responder, which is
- * the right line for a log and the wrong headline for an operator, who reads
- * it as a statement about the deployment rather than about the wire. The
- * sentence here says what was measured, and it says which of the two failures
- * the measurement rules out. A deployment that still needs bootstrapping
- * answers this read, so an unanswered read is a service that is not there,
- * not a state the deployment announced. The wire's own sentence is kept in
- * parentheses, because it is the line an administrator pastes into a ticket
- * once the headline has told them what it is for.
+ * The first line names the thing that is not working, because that is the
+ * answer a reader stops at: the broker that never answered reads as "NATS is
+ * down", and a broker that answered with nothing behind it reads as "IAM is
+ * down". Those are different faults with different fixes, and every other
+ * failure keeps the short sentence its code already carries. The transport's
+ * own text follows on the second line, unparaphrased, because it names the
+ * subject and is the line an administrator pastes into a ticket.
  *
  * @param error the failure the bootstrap read ended in.
  */

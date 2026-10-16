@@ -44,10 +44,10 @@ namespace widget = hedgr::ui::widget;
 /**
  * @brief A gesture's own part, placed in time.
  *
- * An event carries a position or a button and never both: the frame input is
- * built from several events and an event that claimed both would do only the
- * first of them, which is how a press built from the move it follows can be
- * lost.
+ * An event carries a position, a button or a key and never more than one: the
+ * frame input is built from several events and an event that claimed two would
+ * do only the first of them, which is how a press built from the move it
+ * follows can be lost.
  */
 struct scheduled_event final {
     /** @brief The frame it is driven on. */
@@ -62,6 +62,24 @@ struct scheduled_event final {
 
     /** @brief Whether this event moves the pointer at all. */
     bool moves = false;
+
+    /** @brief Whether this event drives a key rather than the pointer. */
+    bool key = false;
+
+    /** @brief Which key, when this event drives one. */
+    ImGuiKey key_code = ImGuiKey_None;
+
+    /** @brief Whether the key goes down or comes up. */
+    bool key_down = false;
+
+    /**
+     * @brief Whether this event is the one that arms the clipboard record.
+     *
+     * The first part of a copy gesture, and only that one, so the desk's value
+     * is taken as the baseline once and the value the chord writes is the
+     * change the record then keeps.
+     */
+    bool arms_clipboard = false;
 };
 
 /**
@@ -239,8 +257,10 @@ void report_unreachable(const capture_run& state, std::string_view target,
     switch (step.kind) {
     case widget::capture_step_kind::click:
     case widget::capture_step_kind::click_arrow:
+    case widget::capture_step_kind::drag:
         return true;
     case widget::capture_step_kind::focus:
+    case widget::capture_step_kind::copy:
         return false;
     case widget::capture_step_kind::expand:
         return !element.open;
@@ -282,9 +302,101 @@ void report_unreachable(const capture_run& state, std::string_view target,
               + part);
 }
 
+/**
+ * @brief The two ends of a drag across an element.
+ *
+ * The drag starts just inside the left edge and finishes just inside the right
+ * one, which is how a person sweeps a whole value. The vertical middle is the
+ * line under the pointer, so a value the pane wrapped is swept along one line
+ * and a single-line value is swept whole.
+ */
+struct drag_span final {
+    ImVec2 start;
+    ImVec2 end;
+};
+
+[[nodiscard]] drag_span drag_span_for(const widget::capture_element& element) {
+    const float middle_y = (element.min_y + element.max_y) * 0.5f;
+    return drag_span{
+        .start = ImVec2(element.min_x + 1.0f, middle_y),
+        .end = ImVec2(element.max_x - 1.0f, middle_y),
+    };
+}
+
 /** @brief Adds one gesture's move, and its press and release when it has one. */
 void schedule(capture_run& state, const widget::capture_step& step,
     const widget::capture_element& element, std::size_t gesture) {
+    if (step.kind == widget::capture_step_kind::copy) {
+        /*
+         * Ctrl and C are pressed and released on four frames rather than two,
+         * because ImGui reads one key event per frame and the chord has to be
+         * down together on the frame the input sees it. The first part arms the
+         * clipboard record, and only the first, so the desk's value is taken as
+         * the baseline and the value the chord writes is kept.
+         */
+        scheduled_event ctrl;
+        ctrl.frame = frame_for(gesture, 0);
+        ctrl.key = true;
+        ctrl.key_code = ImGuiMod_Ctrl;
+        ctrl.key_down = true;
+        ctrl.arms_clipboard = true;
+        state.events.push_back(ctrl);
+
+        scheduled_event letter = ctrl;
+        letter.frame = frame_for(gesture, 1);
+        letter.key_code = ImGuiKey_C;
+        letter.arms_clipboard = false;
+        state.events.push_back(letter);
+
+        scheduled_event letter_up = letter;
+        letter_up.frame = frame_for(gesture, 2);
+        letter_up.key_down = false;
+        state.events.push_back(letter_up);
+
+        scheduled_event ctrl_up = ctrl;
+        ctrl_up.frame = frame_for(gesture, 3);
+        ctrl_up.key_down = false;
+        ctrl_up.arms_clipboard = false;
+        state.events.push_back(ctrl_up);
+        return;
+    }
+
+    if (step.kind == widget::capture_step_kind::drag) {
+        const drag_span span = drag_span_for(element);
+
+        scheduled_event move_start;
+        move_start.frame = frame_for(gesture, 0);
+        move_start.x = span.start.x;
+        move_start.y = span.start.y;
+        move_start.moves = true;
+        state.events.push_back(move_start);
+
+        scheduled_event down = move_start;
+        down.frame = frame_for(gesture, 1);
+        down.moves = false;
+        down.down = true;
+        state.events.push_back(down);
+
+        /*
+         * The move with the button still down is the whole gesture. ImGui only
+         * extends a selection on a frame where the pointer moves while the
+         * button is held, so a drag made of a press and a release alone would
+         * click and select nothing.
+         */
+        scheduled_event move_end = move_start;
+        move_end.frame = frame_for(gesture, 2);
+        move_end.x = span.end.x;
+        move_end.y = span.end.y;
+        state.events.push_back(move_end);
+
+        scheduled_event up = move_end;
+        up.frame = frame_for(gesture, 3);
+        up.moves = false;
+        up.down = false;
+        state.events.push_back(up);
+        return;
+    }
+
     scheduled_event move;
     move.frame = frame_for(gesture, 0);
     const ImVec2 point = point_for(element, step);
@@ -366,7 +478,7 @@ void resolve_due_steps(capture_run& state) {
     }
 }
 
-/** @brief What the pointer does on one frame, if anything. */
+/** @brief What the pointer and the keyboard do on one frame, if anything. */
 struct frame_input final {
     /** @brief Whether the pointer is moved, and where to. */
     bool moves = false;
@@ -376,6 +488,14 @@ struct frame_input final {
     /** @brief Whether the left button is driven, and in which direction. */
     bool have_button = false;
     bool down = false;
+
+    /** @brief Whether a key is driven, which key, and in which direction. */
+    bool have_key = false;
+    ImGuiKey key_code = ImGuiKey_None;
+    bool key_down = false;
+
+    /** @brief Whether this frame begins a copy and arms the clipboard record. */
+    bool arms_clipboard = false;
 };
 
 [[nodiscard]] frame_input input_for(const capture_run& state,
@@ -384,7 +504,11 @@ struct frame_input final {
     for (const auto& event : state.events) {
         if (event.frame != frame)
             continue;
-        if (event.moves) {
+        if (event.key) {
+            input.have_key = true;
+            input.key_code = event.key_code;
+            input.key_down = event.key_down;
+        } else if (event.moves) {
             input.moves = true;
             input.x = event.x;
             input.y = event.y;
@@ -392,6 +516,8 @@ struct frame_input final {
             input.have_button = true;
             input.down = event.down;
         }
+        if (event.arms_clipboard)
+            input.arms_clipboard = true;
     }
     return input;
 }
@@ -511,6 +637,10 @@ std::vector<capture_step> parse_capture_steps(std::string_view text) {
             step.kind = capture_step_kind::collapse;
         else if (gesture == "focus")
             step.kind = capture_step_kind::focus;
+        else if (gesture == "drag")
+            step.kind = capture_step_kind::drag;
+        else if (gesture == "copy")
+            step.kind = capture_step_kind::copy;
         else
             continue;
 
@@ -581,7 +711,7 @@ void drive_capture_steps(std::uint32_t frame) {
     resolve_due_steps(state);
 
     const frame_input input = input_for(state, frame);
-    if (!input.moves && !input.have_button)
+    if (!input.moves && !input.have_button && !input.have_key)
         return;
 
     /*
@@ -598,6 +728,16 @@ void drive_capture_steps(std::uint32_t frame) {
     }
     if (input.have_button)
         io.AddMouseButtonEvent(0, input.down);
+    if (input.have_key)
+        io.AddKeyEvent(input.key_code, input.key_down);
+
+    /*
+     * Armed before the frame draws, which is before ImGui sees the chord and
+     * writes the clipboard. The desk's value is taken as the baseline here and
+     * the run's value is the change the later read finds.
+     */
+    if (input.arms_clipboard)
+        arm_capture_clipboard();
 }
 
 void hold_capture_pointer() {
@@ -619,10 +759,10 @@ void hold_capture_pointer() {
 /**
  * @brief Appends the clipboard to the record when it has moved on.
  *
- * The getter reaches the same backend a copy control wrote through, so a value
- * that appears here is one another program could paste. It is read rather than
- * taken from the caller, because the question a capture answers is whether the
- * value reached the backend and not whether a function was called with it.
+ * The getter reaches the same backend ImGui writes through, so a value that
+ * appears here is one another program could paste. It is read rather than taken
+ * from a caller, because the question a capture answers is whether the value
+ * reached the backend and not whether a function was called with it.
  *
  * Every distinct value is appended on its own line, so a compositor that
  * refuses a selection set from synthetic input shows up as the desk's value on
@@ -645,19 +785,20 @@ void append_clipboard_value(capture_run& state) {
 
 }
 
-void note_capture_copied_value() {
+void arm_capture_clipboard() {
     capture_run& state = run();
     if (!state.active || state.clipboard_path.empty())
         return;
 
     /*
-     * Called where the copy happened, in the same frame as the press, so this
-     * line is the value the control put on the clipboard. Reading on a later
-     * frame instead would race the desk's own clipboard, which under Wayland
-     * can take the selection back before the next frame begins.
+     * The value on the clipboard before the chord is the desk's and not this
+     * run's doing, so it is remembered as the baseline rather than written. The
+     * record grows only when the chord's own value arrives, which is the frame
+     * the chord is drawn in because ImGui writes the clipboard as it renders.
      */
+    const char* text = ImGui::GetClipboardText();
+    state.clipboard = text != nullptr ? text : std::string{};
     state.clipboard_armed = true;
-    append_clipboard_value(state);
 }
 
 void record_capture_clipboard() {

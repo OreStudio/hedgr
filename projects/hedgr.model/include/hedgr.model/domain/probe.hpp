@@ -136,11 +136,10 @@ struct probe_result final {
      * @brief The free text that explains an unhealthy instance.
      *
      * This is where a reader finds out why an instance is unhealthy. A failure
-     * that never reached the structured read gets a sentence saying what was
-     * measured and which failures the measurement rules out, with the wire's
-     * own words after it in parentheses for the ticket. A read that arrived
-     * carries IAM's own remark here instead. An empty value is what says there
-     * is nothing to explain.
+     * that never reached the structured read gets a short headline naming what
+     * is down, then the wire's own text on the next line for the ticket. A read
+     * that arrived carries IAM's own remark here instead. An empty value is
+     * what says there is nothing to explain.
      */
     std::string detail;
 };

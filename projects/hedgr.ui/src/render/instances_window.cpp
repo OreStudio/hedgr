@@ -381,6 +381,27 @@ void save_instance(const render_input& input, window_ui_state& state) {
         buffer_text(state.browser.form_labels));
 }
 
+/**
+ * @brief Saves one instance with a new picture key and nothing else changed.
+ *
+ * The row that is written is the one the store already holds, so the picture is
+ * the only field the command can move. The save path is the same one the form
+ * uses, which is what keeps this second way of writing an instance subject to
+ * the store's own rules rather than to a rule remembered here.
+ *
+ * An empty key is a real choice and clears the picture. It is not the same as a
+ * key whose asset is missing, and the pane tells the two apart.
+ */
+void save_picture(const render_input& input, const instance& row,
+    std::string key) {
+    command request;
+    request.kind = command_kind::save_instance;
+    request.instance_id = row.id;
+    request.instance_row = row;
+    request.instance_row.icon_key = std::move(key);
+    input.commands.push(std::move(request));
+}
+
 /** @brief The instance form: one dialog for adding and for editing. */
 void draw_form(const render_input& input, window_ui_state& state) {
     const bool editing = !state.browser.form_leaf.empty();
@@ -979,6 +1000,115 @@ void activate_instance(const render_input& input, window_ui_state& state,
 }
 
 /**
+ * @brief The gallery of pictures an instance may be given, as a popup.
+ *
+ * The list is what the graphics component uploaded, which is what the install
+ * actually carries. A free text key would let a person name a file that is not
+ * there and find out only from the blank pane that followed, so the choice is
+ * made from files that exist rather than typed.
+ *
+ * Each tile is the picture itself and the key is the tooltip, because the
+ * illustrations are abstract and the key is the word the store holds. A tile
+ * that was chosen writes the key onto the instance and closes the list. The
+ * control below the tiles clears the key, which is a choice of its own and not
+ * the same as a key whose asset is missing.
+ */
+void draw_picture_gallery(const render_input& input, window_ui_state& state) {
+    browser_state& browser = state.browser;
+    if (!ImGui::BeginPopup("##instance-picture")) {
+        /*
+         * The target is dropped while the list is closed, so a selection made
+         * later can never act on the instance the last open named.
+         */
+        browser.picture_target.clear();
+        return;
+    }
+
+    const auto handle = input.instances.find(browser.picture_target);
+    if (!handle) {
+        ImGui::TextDisabled("This instance is no longer in the store.");
+        ImGui::EndPopup();
+        return;
+    }
+    const auto& row = *input.instances.get(*handle);
+
+    if (input.instance_icons == nullptr
+        || input.instance_icons->entries.empty()) {
+        ImGui::TextDisabled("No pictures are installed.");
+        ImGui::EndPopup();
+        return;
+    }
+
+    /*
+     * Four tiles to a row. The count is fixed rather than measured from the
+     * popup, because the popup sizes itself to what is put in it and a width
+     * read before the grid is the width of the frame before it.
+     */
+    constexpr int tiles_per_row = 4;
+    constexpr float tile_side = 72.0f;
+    int column = 0;
+    for (const auto& entry : input.instance_icons->entries) {
+        ImGui::PushID(entry.key.c_str());
+        const bool chosen = ImGui::ImageButton("##picture",
+            static_cast<ImTextureID>(entry.texture),
+            ImVec2(tile_side, tile_side));
+        ImGui::PopID();
+        ImGui::SetItemTooltip("%s", entry.key.c_str());
+
+        /*
+         * A tile offers itself to a capture by its key, so a script can pick a
+         * named picture and the pane that follows can be read to see the choice
+         * landed. The rectangle is the tile's own, so a click lands on the
+         * picture that was named rather than on its neighbour.
+         */
+        {
+            widget::capture_element element;
+            const ImVec2 item_min = ImGui::GetItemRectMin();
+            const ImVec2 item_max = ImGui::GetItemRectMax();
+            element.min_x = item_min.x;
+            element.min_y = item_min.y;
+            element.max_x = item_max.x;
+            element.max_y = item_max.y;
+            element.label_min_x = item_min.x;
+            element.label = "picture";
+            widget::observe_capture_element(entry.key, element);
+        }
+
+        if (chosen) {
+            save_picture(input, row, entry.key);
+            ImGui::CloseCurrentPopup();
+        }
+        if (++column % tiles_per_row != 0)
+            ImGui::SameLine();
+    }
+
+    /*
+     * A line of its own under the grid, so the clear control is not read as one
+     * more picture in it.
+     */
+    ImGui::NewLine();
+    const bool cleared = widget::icon_button("picture-none", icon::remove,
+        "Give this instance no picture");
+    {
+        widget::capture_element element;
+        const ImVec2 item_min = ImGui::GetItemRectMin();
+        const ImVec2 item_max = ImGui::GetItemRectMax();
+        element.min_x = item_min.x;
+        element.min_y = item_min.y;
+        element.max_x = item_max.x;
+        element.max_y = item_max.y;
+        element.label_min_x = item_min.x;
+        element.label = "picture";
+        widget::observe_capture_element("none", element);
+    }
+    if (cleared) {
+        save_picture(input, row, std::string{});
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+}
+
+/**
  * @brief Draws the Instances window's own actions, in the browser's toolbar.
  *
  * What is left of this window's strip once the actions the browser already
@@ -1008,9 +1138,43 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
     }
 
     if (widget::icon_button("open-accounts", icon::account,
-            "Open the accounts of the selected instance"))
+            "Open the accounts of the selected instance",
+            !state.browser.selected_leaf.empty()))
         hedgr::ui::render::request_accounts_window(input,
             state.browser.selected_leaf);
+
+    /*
+     * The picture control acts on the selected instance and opens a gallery
+     * rather than a text box, because the set of pictures is what is installed
+     * and not what a person can spell. It lives in the toolbar rather than in
+     * the pane so the pane stays a place that reports and never has to make
+     * room for a control.
+     *
+     * The control offers itself to a capture as @c "choose-picture | picture",
+     * the same way a value offers itself, so the gallery can be driven open and
+     * read rather than only pressed by a person.
+     */
+    const bool picture_pressed = widget::icon_button("choose-picture",
+        icon::dashboard, "Choose this instance's environment picture",
+        !state.browser.selected_leaf.empty());
+    {
+        widget::capture_element element;
+        const ImVec2 item_min = ImGui::GetItemRectMin();
+        const ImVec2 item_max = ImGui::GetItemRectMax();
+        element.min_x = item_min.x;
+        element.min_y = item_min.y;
+        element.max_x = item_max.x;
+        element.max_y = item_max.y;
+        element.label_min_x = item_min.x;
+        element.label = "picture";
+        widget::observe_capture_element("choose-picture", element);
+    }
+    if (picture_pressed) {
+        state.browser.picture_target = state.browser.selected_leaf;
+        ImGui::OpenPopup("##instance-picture");
+    }
+
+    draw_picture_gallery(input, state);
 }
 
 /** @brief The index of the one column whose cells are label pills. */
@@ -1100,11 +1264,11 @@ bool show_detail_glyph = true;
  * A field whose value is empty is not drawn at all, so every row is a fact the
  * model holds rather than a blank one pretending to be one.
  *
- * The value is text and stays text, so it selects nothing and copies nothing on
- * its own. The copy control in the row's last column is the way out of the
- * window: the operator asked for a host name or a failure sentence to be
- * takeable to a terminal, and a button that names itself on hover is the
- * affordance that works for a one-word value and a wrapped sentence alike.
+ * The value is an input rather than drawn text, so it can be dragged across and
+ * copied the way text is in every other program, and the stock multiline input
+ * wraps it as well. The copy control that used to sit in a column beside it is
+ * gone, because the operator asked for the value itself to behave like text and
+ * not for a second control per row.
  */
 void detail_row(const char* glyph, const char* name, std::string_view value) {
     if (value.empty())
@@ -1121,24 +1285,21 @@ void detail_row(const char* glyph, const char* name, std::string_view value) {
     ImGui::TableNextColumn();
     ImGui::TextUnformatted(name);
     /*
-     * A narrow pane elides the longest names to keep the value and its copy
-     * control whole, so the name is readable in full on hover, which is the
-     * same bargain the value already makes below.
+     * A narrow pane elides the longest names to keep the value whole, so the
+     * name is readable in full on hover.
      */
     ImGui::SetItemTooltip("%s", name);
 
     ImGui::TableNextColumn();
-    ImGui::TextUnformatted(value.data(), value.data() + value.size());
     /*
-     * The pane can be narrow and a TLS path is longer than it, so the whole
-     * value stays readable on hover even where the cell clips it.
+     * The width the input itself wraps at. It reserves the scrollbar's width
+     * before wrapping, so measuring at the cell's full width would size the box
+     * for a line that is one character too long.
      */
-    if (ImGui::IsItemHovered())
-        ImGui::SetItemTooltip("%.*s", static_cast<int>(value.size()),
-            value.data());
-
-    ImGui::TableNextColumn();
-    static_cast<void>(widget::copy_button(name, value, name));
+    const float wrap_width = std::max(
+        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
+        1.0f);
+    widget::text_value(name, value, wrap_width);
 }
 
 /**
@@ -1165,11 +1326,11 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
 
     ImGui::TableNextColumn();
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(colour));
-    ImGui::TextUnformatted(word);
+    const float wrap_width = std::max(
+        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
+        1.0f);
+    widget::text_value(name, word, wrap_width);
     ImGui::PopStyleColor();
-
-    ImGui::TableNextColumn();
-    static_cast<void>(widget::copy_button(name, word, name));
 }
 
 /**
@@ -1187,11 +1348,9 @@ void probe_state_row(const char* glyph, const char* name, const char* word,
  * alignment and not a preference. A drag that moved one table's column would
  * break the value column in two.
  *
- * The fourth column is the copy control and is deliberately not part of the
- * value: a value long enough to clip would otherwise push its own copy button
- * off the pane, and the failure sentence is exactly that value. A column of its
- * own keeps every copy button at the pane's right edge, in the same place on
- * every row.
+ * There is no control column any more. The value is selectable and copyable in
+ * place, so nothing has to be reserved beside it, and the copy control that
+ * used to take the fourth column is what the operator asked to be rid of.
  */
 void setup_detail_columns() {
     constexpr std::string_view widest_field = "CA certificate";
@@ -1201,32 +1360,25 @@ void setup_detail_columns() {
         ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoResize;
 
     const float glyph_width = ImGui::CalcTextSize(icon::instance).x + padding;
-    const float copy_width = ImGui::CalcTextSize(icon::duplicate).x
-        + style.FramePadding.x * 2.0f + padding;
     const float natural_field = ImGui::CalcTextSize(widest_field.data(),
         widest_field.data() + widest_field.size()).x + padding;
 
     /*
      * The field column is sized from the pane rather than from the longest name
      * the pane could ever write. It was pinned to "TLS client certificate"
-     * whatever the pane was, so on a narrow pane the glyph, that name and the
-     * copy control together wanted two hundred and forty one pixels from a
-     * table that had a hundred and ninety seven: the value column collapsed to
-     * a letter and the copy control was clipped off the right edge, which is
-     * the one part of the row that cannot be lost without losing the action.
+     * whatever the pane was, so on a narrow pane the glyph and that name alone
+     * wanted more width than the table had and the value collapsed to a letter.
      * The three TLS names were shortened to the words the form uses as well,
      * because a name longer than the pane's own floor can show beside a value
-     * and a copy control is a name that cannot do its job.
+     * is a name that cannot do its job.
      *
      * Two floors decide the split. The value keeps enough width to be read as a
-     * value and the field keeps enough to be read as a name, and the copy
-     * control is reserved first. What is left goes to the field, up to the
-     * width its longest name needs.
+     * value and the field keeps enough to be read as a name. What is left goes
+     * to the field, up to the width its longest name needs.
      */
     constexpr float value_floor = 44.0f;
     constexpr float field_floor = 100.0f;
-    const float room = std::max(ImGui::GetContentRegionAvail().x - copy_width,
-        0.0f);
+    const float room = std::max(ImGui::GetContentRegionAvail().x, 0.0f);
 
     /*
      * The glyph is decoration and the name is content, so the glyph is what
@@ -1244,7 +1396,6 @@ void setup_detail_columns() {
     ImGui::TableSetupColumn("##glyph", fixed, glyph);
     ImGui::TableSetupColumn("##field", fixed, field);
     ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("##copy", fixed, copy_width);
 }
 
 /**
@@ -1255,15 +1406,21 @@ void setup_detail_columns() {
  * pane's edge is a cause nobody can act on, and the value column is where it
  * has to fit because that is where the fields above keep their values.
  *
- * A failing instance's sentence is drawn over a faint wash of the state's own
- * colour rather than in a coloured face, so the row reads as the reason for a
- * red or an amber tree row at a glance, without a wall of red to read the
- * sentence through. A healthy instance's sentence gets no wash, because there
- * is nothing wrong for the pane to point at.
+ * A failing instance's sentence is marked by the glyph in the row's first
+ * column alone, drawn in the same colour the probe state row above paints its
+ * state word with. A wash across the whole value cell was tried and taken out,
+ * because a sentence an operator is trying to read is made harder to read by
+ * colour behind it, which is the opposite of what the mark was for. The two
+ * marks are one colour on purpose, so the pane says a fault once rather than
+ * three times at three sizes.
  *
- * The sentence is also the one value here that cannot be shortened to fit, and
- * the reason the copy control exists at all: a failure an operator cannot get
- * out of the window is a failure they cannot report in full.
+ * A healthy instance's sentence carries the neutral information glyph and no
+ * colour, because there is nothing wrong for the pane to point at.
+ *
+ * The sentence is also the one value here that cannot be shortened to fit, so
+ * it is the reason the value has to wrap and the reason it has to be selectable
+ * in full. A failure an operator cannot get out of the window is a failure they
+ * cannot report.
  */
 void probe_detail_row(const char* name, std::string_view detail, bool failing,
     std::uint32_t colour) {
@@ -1273,7 +1430,14 @@ void probe_detail_row(const char* name, std::string_view detail, bool failing,
     ImGui::TableNextRow();
 
     ImGui::TableNextColumn();
-    ImGui::TextDisabled("%s", failing ? icon::error : icon::information);
+    if (failing) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(colour));
+        ImGui::TextUnformatted(icon::error);
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextDisabled("%s", icon::information);
+    }
     ImGui::SetItemTooltip("%s",
         failing ? "What the probe could not do" : "What the probe reported");
 
@@ -1281,29 +1445,14 @@ void probe_detail_row(const char* name, std::string_view detail, bool failing,
     ImGui::TextUnformatted(name);
 
     ImGui::TableNextColumn();
-    if (failing) {
-        /*
-         * The state's colour with most of its alpha taken out. The constant is
-         * low enough that full brightness text stays readable on the wash and
-         * high enough that the row is still told apart from the neutral one
-         * above it on a projector.
-         */
-        constexpr std::uint32_t wash_alpha = 40;
-        ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
-            (colour & 0x00ffffffu) | (wash_alpha << 24));
-    }
-
     /*
      * Wrapped at the cell's own edge rather than the window's, so the sentence
      * uses the value column's whole width and does not run under the table.
      */
-    ImGui::PushTextWrapPos(
-        ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
-    ImGui::TextWrapped("%.*s", static_cast<int>(detail.size()), detail.data());
-    ImGui::PopTextWrapPos();
-
-    ImGui::TableNextColumn();
-    static_cast<void>(widget::copy_button(name, detail, name));
+    const float wrap_width = std::max(
+        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
+        1.0f);
+    widget::text_value(name, detail, wrap_width);
 }
 
 /**
@@ -1345,29 +1494,46 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
      * under it, and it leaves the value column the width the values need. The
      * illustration is optional; an instance with no key draws no picture and no
      * empty slot.
+     *
+     * A key whose asset is not installed says so here rather than drawing
+     * nothing. Nothing drawn is what an instance with no picture looks like, and
+     * a choice the install cannot satisfy is a different fact that the operator
+     * has to be able to act on.
      */
+    const std::string directory = input.instance_icons != nullptr
+        ? input.instance_icons->directory : std::string{};
+    const std::string picture_path =
+        widget::instance_picture_path(directory, row.icon_key);
     const std::uint64_t picture = instance_icon_texture(input, row.id);
     if (picture != 0) {
         const float side = std::min(96.0f, ImGui::GetContentRegionAvail().x);
         ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
-        ImGui::SetItemTooltip("%s", row.icon_key.c_str());
+        ImGui::SetItemTooltip("%s", picture_path.c_str());
+    } else if (!row.icon_key.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
+        ImGui::TextWrapped("%s No picture is installed for the key \"%s\".",
+            icon::warning, row.icon_key.c_str());
+        ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("%s", picture_path.c_str());
     }
 
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit
         | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV;
-    if (!ImGui::BeginTable("##instance-details", 4, flags))
+    if (!ImGui::BeginTable("##instance-details", 3, flags))
         return;
 
     setup_detail_columns();
 
     /*
-     * The environment key as an ordinary field row, below the picture and lined
-     * up with the rest of the pane rather than sharing the picture's line. The
-     * key is a fact the model holds whether or not the asset for it was found,
-     * so this row is drawn whenever the key is there and the picture above is
-     * drawn only when the texture is.
+     * Where the pictures live and which one this instance names. The folder is
+     * shown whether or not a picture is set, because a person who has a file to
+     * add needs to know where to put it, and the file row is the path of the
+     * one in use, which is the string they paste into a shell. Both are
+     * ordinary value rows, so both can be selected and copied.
      */
-    detail_row(nullptr, "Environment", row.icon_key);
+    detail_row(icon::folder, "Picture folder", directory);
+    detail_row(nullptr, "Picture file", picture_path);
 
     detail_row(icon::instance, "Name", row.name);
 
@@ -1388,8 +1554,8 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
      * The TLS rows say which piece of material each one is, in the words the
      * form uses, rather than prefixing all three with a protocol the section
      * they sit in already implies. The prefix was also what made a name longer
-     * than the pane's own floor could ever show beside a value and a copy
-     * control, and a name that cannot be shown is not doing its job.
+     * than the pane's own floor could show beside a value, and a name that
+     * cannot be shown is not doing its job.
      */
     detail_row(nullptr, "CA certificate", row.tls_ca);
     detail_row(nullptr, "Client cert", row.tls_cert);
@@ -1452,7 +1618,7 @@ void instance_details(const tree_leaf& leaf, const render_input& input) {
     ImGui::Spacing();
     ImGui::SeparatorText("Probe");
 
-    if (!ImGui::BeginTable("##instance-probe", 4, flags))
+    if (!ImGui::BeginTable("##instance-probe", 3, flags))
         return;
     setup_detail_columns();
 
@@ -1630,55 +1796,40 @@ void draw_status_line(widget::status_bar& status, std::int64_t now_ns) {
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, status.alpha(now_ns));
 
     /*
-     * The copy control comes first, at a fixed left position, and the message
-     * wraps to its right. The line can be a three line sentence and the button
-     * placed after it would sit at the end of whichever line the sentence
-     * happened to finish on; pinned here it is in the same place for a remark
-     * and for a failure, and it copies the whole of either. This is where the
-     * other read-only text in the interface leads: a runtime failure is exactly
-     * the sentence an operator pastes into a bug report, so it gets the same
-     * affordance the details pane rows do.
-     */
-    static_cast<void>(widget::copy_button("status-copy", status.message(),
-        "the status message"));
-    ImGui::SameLine();
-
-    /*
      * An error is white behind its red glyph rather than the disabled grey a
      * remark gets. Disabled grey is what an interface uses for something it is
      * not offering, and a failure the operator has to act on is the opposite
      * of that.
      */
+    float glyph_width = 0.0f;
     if (error) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
         ImGui::TextUnformatted(hedgr::ui::icon::error);
         ImGui::PopStyleColor();
-        ImGui::SameLine();
-
-        /*
-         * Wrapped from where the glyph left off rather than from the line's
-         * start, because these sentences are long: the store's own schema
-         * refusal runs to three lines in this bar, and a wrap position that
-         * ignored the glyph would run the last one off the window's edge.
-         */
-        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x
-            + ImGui::GetContentRegionAvail().x);
+        glyph_width =
+            ImGui::GetItemRectSize().x + ImGui::GetStyle().ItemSpacing.x;
+        ImGui::SameLine(glyph_width);
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
     } else {
-        /*
-         * A remark is wrapped from the line's start, which is where it is
-         * drawn: it has no glyph in front of it.
-         */
-        ImGui::PushTextWrapPos(ImGui::GetCursorPos().x
-            + ImGui::GetContentRegionAvail().x);
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     }
 
-    ImGui::TextWrapped("%s", status.message().c_str());
+    /*
+     * The message is a selectable value like the pane's fields, so a failure
+     * can be dragged across and copied out of the bar as well as read in it.
+     * The box is given its whole wrapped height and the foot keeps its fixed
+     * number of rows, so a sentence longer than the foot is clipped by the foot
+     * and never given a scrollbar. That is the visible line count the drawn
+     * text already had, with the selection added.
+     */
+    const float wrap_width = std::max(
+        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
+        1.0f);
+    widget::text_value("status", status.message(), wrap_width);
+
     ImGui::PopStyleColor();
-    ImGui::PopTextWrapPos();
     ImGui::PopStyleVar();
 }
 

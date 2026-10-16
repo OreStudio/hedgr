@@ -143,6 +143,16 @@ struct browser_state final {
      * host leaves it here when it opens the form.
      */
     std::string form_owner;
+
+    /**
+     * @brief The instance whose picture the open gallery is choosing for.
+     *
+     * Held rather than read from the selection, because the gallery is a popup
+     * that stays open while the pointer moves over it and a click that changed
+     * the selection would otherwise change which instance the next picture is
+     * given to. It is cleared when the gallery closes.
+     */
+    std::string picture_target;
 };
 
 }

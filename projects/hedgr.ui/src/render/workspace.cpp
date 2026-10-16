@@ -293,9 +293,19 @@ void workspace::render(const render_input& input) {
          * frame showing the wrong surface without saying so. The name is a
          * window id rather than a title, because a title changes with the data
          * and an id does not.
+         *
+         * The raise stands aside while any popup is open. A window focused
+         * from under a popup it just opened takes the popup down with it, and
+         * an active child loses the focus a keyboard copy is routed to, so a
+         * capture of a chooser or of a copy would find the surface gone before
+         * it could be read.
          */
-        if (capture_focus_id() == input.windows.id(handle))
-            ImGui::SetNextWindowFocus();
+        if (capture_focus_id() == input.windows.id(handle)) {
+            const bool any_popup = ImGui::IsPopupOpen(nullptr,
+                ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+            if (!any_popup)
+                ImGui::SetNextWindowFocus();
+        }
 
         /*
          * A shortcut to the Instances window asks for it on top, and the

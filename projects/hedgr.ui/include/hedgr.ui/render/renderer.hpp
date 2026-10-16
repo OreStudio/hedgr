@@ -63,6 +63,16 @@ struct instance_icon_textures final {
     std::vector<entry> entries;
 
     /**
+     * @brief The directory the pictures were read from, or empty.
+     *
+     * Carried rather than looked up again, because the pane shows the operator
+     * where to put a file and the answer has to be the directory this table was
+     * actually filled from. A second lookup could resolve to a different
+     * candidate and point at a folder the running interface is not using.
+     */
+    std::string directory;
+
+    /**
      * @brief The texture for @p key, or zero when there is none.
      *
      * Zero is the ordinary answer for an instance with no illustration and for

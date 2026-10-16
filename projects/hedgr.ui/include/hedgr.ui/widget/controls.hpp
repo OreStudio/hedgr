@@ -23,6 +23,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/widget/capture.hpp"
 #include "imgui.h"
+#include <algorithm>
 #include <string>
 #include <string_view>
 
@@ -73,57 +74,72 @@ namespace hedgr::ui::widget {
 }
 
 /**
- * @brief Puts @p value on the system clipboard, and says whether it did.
+ * @brief The height a read-only value needs once wrapped at @p wrap_width.
  *
- * The clipboard is ImGui's, which its backend backs with the window system's,
- * so what is copied here is what another program pastes. An empty value copies
- * nothing, which is what keeps a copy of an absent field from silently
- * replacing whatever the operator already had.
+ * The stock multiline input reserves the width of its own scrollbar before it
+ * wraps, so the box is measured at the width the input will use rather than at
+ * the pane's full width. A value that fits on one line measures as one frame
+ * height, which is what lets a short field and a wrapped sentence share one
+ * widget without either being given a size of its own.
  *
- * The two lines of a read-only field that cannot be selected come to this: a
- * person diagnosing a deployment wants a host name or a failure sentence in a
- * terminal, and the buffer has to leave the process for that to happen.
+ * The measured height is rounded up by a pixel. ImGui counts lines with a
+ * wrap rule that keeps trailing blanks while this measurement drops them, so
+ * the two can disagree by a line at a boundary, and a box one line short of its
+ * text grows an inner scrollbar in a pane that must never raise one. Erring
+ * tall costs a sliver of blank space and never a bar.
  */
-[[nodiscard]] inline bool copy_to_clipboard(std::string_view value) {
-    if (value.empty())
-        return false;
-    ImGui::SetClipboardText(std::string{value}.c_str());
-    return true;
+[[nodiscard]] inline float text_value_height(std::string_view value,
+    float wrap_width) {
+    const ImVec2 measured = ImGui::CalcTextSize(value.data(),
+        value.data() + value.size(), false, wrap_width);
+    return measured.y + ImGui::GetStyle().FramePadding.y * 2.0f + 1.0f;
 }
 
 /**
- * @brief A compact control that copies one read-only value.
+ * @brief A read-only value drawn as text that can be selected and copied.
  *
- * Smaller than the toolbar's icons, because it sits inside a details row whose
- * height belongs to the value's text and a full frame height button would make
- * every row as tall as a toolbar. The glyph is the copy drawing the catalogue
- * keeps, reused under its Hedgr name rather than given a new name, since one
- * picture for one action is what the icon set is for.
+ * The value behaves the way text does in every other program. A drag across it
+ * highlights the characters and Ctrl+C puts the selection on the system
+ * clipboard, which is what the operator asked for twice and what a copy control
+ * per row was a poor substitute for.
  *
- * The tooltip names the value as well as the action. A column of identical
- * glyphs says nothing about which of them copies which field, and this pane has
- * more than one.
+ * ImGui 1.92 makes this a stock input rather than a widget of our own.
+ * @c ImGuiInputTextFlags_WordWrap was added to the multiline input, and
+ * @c ImGuiInputTextFlags_ReadOnly still lets the stb editor track a selection,
+ * so @c InputTextMultiline with both flags selects, copies and wraps at once.
+ * A single line @c InputText is the one that cannot wrap, and that is the whole
+ * of the earlier claim that a read-only input could not.
  *
- * The control offers itself to a capture by the name of the value it copies, so
- * a script can press it as @c "click\ Host\ |\ copy". A still frame shows that
- * the glyph was drawn and nothing about what a press does; only a press that
- * lands a value in the clipboard proves the row is wired to the value beside
- * it.
+ * The buffer ImGui edits is this function's own and is handed back untouched.
+ * Read-only mode reads the value and never writes it, so the model string stays
+ * const, and a copy is needed only because ImGui wants a mutable char pointer.
+ * One thread local buffer is reused rather than a fresh string per row per
+ * frame, because each call finishes with it before the next one starts.
  *
- * @param id ImGui id, unique among the controls of one window.
- * @param value The value to copy, which is left alone when empty.
- * @param name What the value is called, for the tooltip and for a capture step.
- * @return Whether the control was pressed and the copy made.
+ * The box is exactly as tall as the wrapped text, so it cannot scroll. A
+ * multiline input taller than its text grows an inner scrollbar, and the pane
+ * this sits in is one that must not raise one.
+ *
+ * @param id ImGui id and capture name, unique among the values of one window.
+ * @param value The value to show, drawn whole and never truncated.
+ * @param wrap_width The width the input wraps at, with the scrollbar allowance
+ *        already taken out.
  */
-[[nodiscard]] inline bool copy_button(const char* id, std::string_view value,
-    const char* name) {
+inline void text_value(const char* id, std::string_view value,
+    float wrap_width) {
     if (value.empty())
-        return false;
+        return;
+
+    static thread_local std::string buffer;
+    buffer.assign(value);
 
     ImGui::PushID(id);
-    const bool pressed = ImGui::SmallButton(icon::duplicate);
+    const float height = text_value_height(value, wrap_width);
+    const ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly
+        | ImGuiInputTextFlags_WordWrap;
+    static_cast<void>(ImGui::InputTextMultiline("##value", buffer.data(),
+        buffer.size() + 1, ImVec2(-FLT_MIN, height), flags));
     ImGui::PopID();
-    ImGui::SetItemTooltip("Copy %s", name);
 
     capture_element element;
     const ImVec2 item_min = ImGui::GetItemRectMin();
@@ -133,20 +149,30 @@ namespace hedgr::ui::widget {
     element.max_x = item_max.x;
     element.max_y = item_max.y;
     element.label_min_x = item_min.x;
-    element.label = "copy";
-    observe_capture_element(name, element);
+    element.label = "value";
+    observe_capture_element(id, element);
+}
 
-    if (!(pressed && copy_to_clipboard(value)))
-        return false;
+/**
+ * @brief The file a picture key names under the picture directory.
+ *
+ * The key and the asset are related by the extension alone, which is the
+ * relation the loader already relies on when it takes a file's stem as the key.
+ * An empty directory or an empty key has no file, and that is the same answer
+ * the pane gives for both rather than a path that would name a file nobody
+ * installed.
+ */
+[[nodiscard]] inline std::string instance_picture_path(
+    std::string_view directory, std::string_view key) {
+    if (directory.empty() || key.empty())
+        return {};
 
-    /*
-     * Read back now, in the frame the press happened, and not on the next one.
-     * Under Wayland the compositor can cancel a selection set from synthetic
-     * input, and the desk's own clipboard arrives on the frame after; a reader
-     * that waited would find the desk's value and prove nothing.
-     */
-    note_capture_copied_value();
-    return true;
+    std::string path{directory};
+    if (path.back() != '/')
+        path.push_back('/');
+    path.append(key.data(), key.size());
+    path.append(".png");
+    return path;
 }
 
 }
