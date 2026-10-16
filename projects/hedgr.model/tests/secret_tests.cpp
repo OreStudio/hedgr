@@ -21,6 +21,7 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <new>
 #include <string>
 #include <type_traits>
@@ -84,37 +85,60 @@ TEST_CASE("a secret is move-only in spirit and keeps its value across a move",
 TEST_CASE("the secret's buffer is wiped when it is destroyed", "[secret]") {
     /*
      * The point of the whole type, and it needs a real look at the bytes to be
-     * worth anything: asserting that a destructor ran proves nothing about what
-     * it did.
+     * worth anything, because asserting that a destructor ran proves nothing
+     * about what it did.
      *
-     * The secret is placed in a buffer this test owns, so that reading the
-     * bytes after its destruction is reading storage that is still alive and
-     * merely dead as an object. The password is long enough that libstdc++ puts
-     * it on the heap rather than in a small-string buffer, so the scan below
-     * would find it in that allocation if the wipe did not happen.
+     * The bytes worth looking at are the characters' own storage rather than
+     * the object that points at them. A std::string keeps its characters on the
+     * heap once they outgrow a small internal buffer, and the object itself
+     * then holds only a pointer, a size and a capacity, so a scan of the object
+     * would be a scan of those fields and would say nothing about the password.
+     * This secret is short enough to live in the object, which means the bytes
+     * the destructor wipes are bytes in storage this test owns and placed
+     * deliberately, and they can be read after the object is dead without
+     * touching memory that has been released.
+     *
+     * A longer secret would be the more obvious demonstration, and the
+     * destructor does wipe it on the heap, but std::string releases that
+     * allocation in the same destructor before the test can look, after which
+     * the allocator is entitled to write its own bookkeeping over the freed
+     * bytes. The in-object buffer is the same wipe on the same code path and it
+     * is the one that can be checked honestly.
      */
     alignas(secret_string) unsigned char storage[sizeof(secret_string)]{};
 
-    const std::string password =
-        "correct horse battery staple correct horse battery staple";
+    const std::string password = "wiped-on-death";
     auto* secret = new (storage) secret_string{password};
     REQUIRE(secret->view() == password);
-    REQUIRE(secret->size() == 57);
+    REQUIRE(secret->size() == password.size());
+
+    /*
+     * Captured while the object is alive, because afterwards there is nothing
+     * left to ask. The address is the buffer the destructor wipes, and the
+     * bounds check below is what makes the later scan safe, since it shows the
+     * characters live in this test's own storage rather than in an allocation
+     * that has already been released.
+     */
+    const char* const buffer = secret->view().data();
+    const std::size_t length = secret->size();
+    const auto begin = reinterpret_cast<std::uintptr_t>(storage);
+    const auto position = reinterpret_cast<std::uintptr_t>(buffer);
+    REQUIRE(position >= begin);
+    REQUIRE(position + length <= begin + sizeof(storage));
+    REQUIRE(std::string(buffer, length) == password);
 
     secret->~secret_string();
 
-    const std::string bytes(reinterpret_cast<const char*>(storage),
-        sizeof(secret_string));
+    const std::string bytes(buffer, length);
 
     /*
-     * Neither the password nor any single character of it survives. The
-     * character check is the stronger one: a wiped buffer is all zero bytes,
-     * and the password contains no zero byte, so any occurrence of one of its
-     * letters would mean bytes were left.
+     * Neither the password nor any of its characters survives. The character
+     * check is the stronger one, because a wiped buffer is all zero bytes and
+     * the password contains no zero byte, so any non-zero byte would mean bytes
+     * were left.
      */
     REQUIRE(bytes.find(password) == std::string::npos);
-    REQUIRE(bytes.find('c') == std::string::npos);
-    REQUIRE(bytes.find('p') == std::string::npos);
+    REQUIRE(bytes.find_first_not_of('\0') == std::string::npos);
 }
 
 TEST_CASE("a copied secret cleanses its own buffer too", "[secret]") {
@@ -126,20 +150,36 @@ TEST_CASE("a copied secret cleanses its own buffer too", "[secret]") {
      * genuinely needed -- a job struct handed to a worker -- at which point the
      * call site would have reached for std::string and lost the discipline
      * silently.
+     *
+     * The copy is placed in storage this test owns, and the secret is short
+     * enough that the copy keeps its characters in the object, so the sweep
+     * below reads bytes that were written and then wiped rather than the
+     * pointer and the length that are all the object would otherwise hold.
      */
     alignas(secret_string) unsigned char storage[sizeof(secret_string)]{};
 
+    const std::string text = "copied-secret";
+    const char* buffer = nullptr;
+    std::size_t length = 0;
+
     {
-        const secret_string original{
-            std::string{"a-copied-secret-that-must-also-be-wiped"}};
+        const secret_string original{text};
         auto* copy = new (storage) secret_string{original};
-        REQUIRE(copy->view() == "a-copied-secret-that-must-also-be-wiped");
+        REQUIRE(copy->view() == text);
+
+        buffer = copy->view().data();
+        length = copy->size();
+        const auto begin = reinterpret_cast<std::uintptr_t>(storage);
+        const auto position = reinterpret_cast<std::uintptr_t>(buffer);
+        REQUIRE(position >= begin);
+        REQUIRE(position + length <= begin + sizeof(storage));
+
         copy->~secret_string();
     }
 
-    const std::string bytes(reinterpret_cast<const char*>(storage),
-        sizeof(secret_string));
-    REQUIRE(bytes.find("a-copied-secret") == std::string::npos);
+    const std::string bytes(buffer, length);
+    REQUIRE(bytes.find(text) == std::string::npos);
+    REQUIRE(bytes.find_first_not_of('\0') == std::string::npos);
 }
 
 TEST_CASE("clearing a secret wipes it and leaves it empty", "[secret]") {
