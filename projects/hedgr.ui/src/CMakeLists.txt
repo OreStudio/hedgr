@@ -33,9 +33,12 @@ set_target_properties(${lib_target_name}
 target_include_directories(${lib_target_name} PUBLIC
     ${CMAKE_SOURCE_DIR}/projects/hedgr.ui/include)
 # The component's own src/ is on the include path for the renderers' shared
-# private headers, which are deliberately not part of the public interface.
+# private headers, which are deliberately not part of the public interface. The
+# vendored ImCoolBar directory is on it as well, so a ui source reaches the
+# widget by its upstream name rather than by a path into the vendored tree.
 target_include_directories(${lib_target_name} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR})
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/imcoolbar)
 
 target_link_libraries(${lib_target_name}
     PUBLIC
@@ -62,3 +65,32 @@ add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMENT "Copying the icon sheet to publish/share/hedgr.ui/")
 
 install(FILES ${icon_sheet} DESTINATION share/hedgr.ui)
+
+# Copy the per-environment instance icons to the publish directory too, so a
+# deployed bundle can draw an environment's picture on a host that has no
+# checkout beside it. They go in an instances subdirectory rather than beside
+# the sheet, because a reader can then tell the one sheet the loader names from
+# the ten files it looks up by environment label. The list is written out
+# rather than globbed, so a file that goes missing fails at configure time
+# instead of quietly shipping nine icons.
+set(instance_icon_dir "${CMAKE_SOURCE_DIR}/assets/instances")
+set(instance_icons
+    "${instance_icon_dir}/brave_hopper.png"
+    "${instance_icon_dir}/bright_faraday.png"
+    "${instance_icon_dir}/clever_dijkstra.png"
+    "${instance_icon_dir}/eager_maxwell.png"
+    "${instance_icon_dir}/festive_dijkstra.png"
+    "${instance_icon_dir}/jolly_knuth.png"
+    "${instance_icon_dir}/merry_newton.png"
+    "${instance_icon_dir}/prime_origin.png"
+    "${instance_icon_dir}/solid_dirac.png"
+    "${instance_icon_dir}/swift_curie.png")
+add_custom_command(TARGET ${lib_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/instances"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${instance_icons}
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/instances"
+    COMMENT "Copying the instance icons to publish/share/hedgr.ui/instances/")
+
+install(FILES ${instance_icons} DESTINATION share/hedgr.ui/instances)

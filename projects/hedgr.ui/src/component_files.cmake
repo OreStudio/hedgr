@@ -19,6 +19,7 @@ set(files
     "render/workspace.cpp"
     "render/workspace_window.cpp"
     "theme/theme.cpp"
+    "../third_party/imcoolbar/ImCoolBar.cpp"
     "widget/browser.cpp"
     "widget/capture.cpp"
     "widget/label_pill.cpp"
