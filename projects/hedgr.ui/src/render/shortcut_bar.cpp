@@ -58,6 +58,20 @@ constexpr float entry_size = 40.0f;
 constexpr float entry_hovered_size = 150.0f;
 
 /**
+ * @brief How fast the bar grows an entry towards its hovered size.
+ *
+ * The library advances its own bar-wide scale by this fraction every sixtieth
+ * of a second and stops at one, so the reciprocal is how long a full grow takes
+ * in seconds. Three hundredths spreads that over a little more than half a
+ * second, which reads as the bar unfolding under the pointer rather than
+ * snapping to it, and it is still short enough that a reader who has settled on
+ * an entry is not left waiting to see it arrive. The library's own default of
+ * five hundredths covered the same ground in a third of a second, which is the
+ * quickness the operator complained of.
+ */
+constexpr float entry_anim_step = 0.03f;
+
+/**
  * @brief The picture an entry draws, or zero for the kind's own glyph.
  *
  * Only an accounts shortcut stands for an instance, and an instance is the one
@@ -201,7 +215,7 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result) {
      * The library owns the bar's own drawing, so nothing here restyles it.
      */
     const ImGui::ImCoolBarSettings settings(ImVec2(0.5f, 1.0f), entry_size,
-        entry_hovered_size, 0.05f, 0.5f, ImCoolBarFlags_Horizontal);
+        entry_hovered_size, entry_anim_step, 0.5f, ImCoolBarFlags_Horizontal);
 
     /*
      * BeginCoolBar ends the window itself when it returns false, so the only
