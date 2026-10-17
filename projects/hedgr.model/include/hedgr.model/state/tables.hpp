@@ -422,6 +422,7 @@ struct session_columns final {
     std::vector<std::string> party_name;
     std::vector<std::string> party_id;
     std::vector<std::string> token;
+    std::vector<std::string> parties;
     std::vector<domain::deployment_snapshot> deployment;
 };
 
@@ -465,6 +466,12 @@ public:
     void set_account_result(session_handle h, std::string tenant_name,
                              std::string party_name, std::string party_id,
                              std::string token);
+
+    /** @brief Records the parties the login may act as, serialised. */
+    void set_parties(session_handle h, std::string parties);
+
+    /** @brief The parties the login may act as, serialised, or empty. */
+    [[nodiscard]] std::string_view parties(session_handle h) const;
 
     /** @brief The context this session runs in, decided from its tenant. */
     [[nodiscard]] domain::session_mode mode(session_handle h) const;

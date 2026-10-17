@@ -232,6 +232,13 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 authenticated.tenant_name = account.tenant_name;
                 authenticated.party_name = account.party_name;
                 authenticated.party_id = account.party_id;
+                for (const auto& party : account.parties) {
+                    if (!authenticated.parties.empty())
+                        authenticated.parties.push_back('\x1e');
+                    authenticated.parties += party.id;
+                    authenticated.parties.push_back('\x1f');
+                    authenticated.parties += party.name;
+                }
 
                 /*
                  * The deployment's own rule, applied once here: the tenant IAM
