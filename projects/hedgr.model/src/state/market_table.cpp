@@ -22,47 +22,86 @@
 
 namespace hedgr::model::state {
 
-void market_table::set_catalogue(std::vector<domain::market_series_row> rows) {
-    series_ = std::move(rows);
-    catalogue_ = catalogue_state::ready;
-    catalogue_error_.clear();
+namespace {
+
+constexpr char separator = '\x1f';
+
+[[nodiscard]] std::string session_key(std::string_view instance_id,
+    std::string_view account_id) {
+    std::string key;
+    key.reserve(instance_id.size() + account_id.size() + 1);
+    key.append(instance_id);
+    key.push_back(separator);
+    key.append(account_id);
+    return key;
 }
 
-void market_table::begin_catalogue() {
-    catalogue_ = catalogue_state::reading;
-    catalogue_error_.clear();
+[[nodiscard]] std::string points_key(std::string_view instance_id,
+    std::string_view account_id, std::string_view series_id) {
+    std::string key = session_key(instance_id, account_id);
+    key.push_back(separator);
+    key.append(series_id);
+    return key;
 }
 
-void market_table::fail_catalogue(std::string message) {
-    catalogue_ = catalogue_state::failed;
-    catalogue_error_ = std::move(message);
 }
 
-void market_table::set_points(std::string_view series_id,
+void market_table::set_catalogue(std::string_view instance_id,
+    std::string_view account_id,
+    std::vector<domain::market_series_row> rows) {
+    auto& entry = catalogues_[session_key(instance_id, account_id)];
+    entry.series = std::move(rows);
+    entry.state = catalogue_state::ready;
+    entry.error.clear();
+}
+
+void market_table::begin_catalogue(std::string_view instance_id,
+    std::string_view account_id) {
+    auto& entry = catalogues_[session_key(instance_id, account_id)];
+    entry.state = catalogue_state::reading;
+    entry.error.clear();
+}
+
+void market_table::fail_catalogue(std::string_view instance_id,
+    std::string_view account_id, std::string message) {
+    auto& entry = catalogues_[session_key(instance_id, account_id)];
+    entry.state = catalogue_state::failed;
+    entry.error = std::move(message);
+}
+
+const market_catalogue* market_table::catalogue(std::string_view instance_id,
+    std::string_view account_id) const {
+    const auto found = catalogues_.find(session_key(instance_id, account_id));
+    return found == catalogues_.end() ? nullptr : &found->second;
+}
+
+void market_table::set_points(std::string_view instance_id,
+    std::string_view account_id, std::string_view series_id,
     std::vector<domain::market_point> points, std::int64_t observed_at_ns) {
-    auto& snapshot = points_[std::string{series_id}];
+    auto& snapshot = points_[points_key(instance_id, account_id, series_id)];
     snapshot.points = std::move(points);
     snapshot.observed_at_ns = observed_at_ns;
     snapshot.failure.clear();
 }
 
-void market_table::fail_points(std::string_view series_id,
+void market_table::fail_points(std::string_view instance_id,
+    std::string_view account_id, std::string_view series_id,
     std::string message, std::int64_t observed_at_ns) {
-    auto& snapshot = points_[std::string{series_id}];
+    auto& snapshot = points_[points_key(instance_id, account_id, series_id)];
     snapshot.observed_at_ns = observed_at_ns;
     snapshot.failure = std::move(message);
 }
 
-const domain::market_series_snapshot*
-market_table::points(std::string_view series_id) const {
-    const auto found = points_.find(std::string{series_id});
+const domain::market_series_snapshot* market_table::points(
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view series_id) const {
+    const auto found =
+        points_.find(points_key(instance_id, account_id, series_id));
     return found == points_.end() ? nullptr : &found->second;
 }
 
 void market_table::clear() {
-    series_.clear();
-    catalogue_ = catalogue_state::unread;
-    catalogue_error_.clear();
+    catalogues_.clear();
     points_.clear();
 }
 

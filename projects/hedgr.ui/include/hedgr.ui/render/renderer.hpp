@@ -274,6 +274,10 @@ struct window_ui_state final {
 
     /** @brief Whether the series chooser lists only the session's party. */
     bool market_own_party_only = true;
+
+    /** @brief The series last chosen in the chooser's combobox. */
+    std::string market_selected_series_id;
+    std::string market_selected_series_label;
 };
 
 /**

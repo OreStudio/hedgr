@@ -131,11 +131,14 @@ namespace transport = hedgr::session::transport;
         return std::format("series-browser:{}:{}", instance_id, account_id);
     case domain::window_kind::chart:
         /*
-         * One chart per series, so opening GBP/USD twice focuses the plot
-         * already drawn rather than stacking a second one on top of it.
+         * One chart per series per session. Reopening GBP/USD as the same
+         * login focuses the plot already drawn; another login on the same
+         * deployment is another session and gets its own window, with its own
+         * identity bar and its own token.
          */
-        return series_id.empty() ? std::string{}
-                                 : std::format("chart:{}", series_id);
+        return series_id.empty()
+            ? std::string{}
+            : std::format("chart:{}:{}:{}", instance_id, account_id, series_id);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -681,7 +684,7 @@ void instance_manager::stop() noexcept {
     running_.clear();
     attempts_.clear();
     market_.clear();
-    catalogue_reading_ = false;
+    catalogues_reading_.clear();
     points_reading_.clear();
 
     /*
@@ -3049,10 +3052,13 @@ void instance_manager::start_market_read(std::string_view window_id,
         return;
 
     const bool catalogue = series_id.empty();
+    const auto session_key = running_key(instance_id, account_id);
+    const auto points_key =
+        std::format("{}\x1f{}", session_key, series_id);
     if (catalogue) {
-        if (catalogue_reading_)
+        if (catalogues_reading_.contains(session_key))
             return;
-    } else if (points_reading_.contains(std::string{series_id})) {
+    } else if (points_reading_.contains(points_key)) {
         return;
     }
 
@@ -3069,10 +3075,12 @@ void instance_manager::start_market_read(std::string_view window_id,
     job.catalogue = catalogue;
     job.series_id = std::string{series_id};
 
-    if (catalogue)
-        catalogue_reading_ = true;
-    else
-        points_reading_.insert(job.series_id);
+    if (catalogue) {
+        catalogues_reading_.insert(session_key);
+        market_.begin_catalogue(instance_id, account_id);
+    } else {
+        points_reading_.insert(points_key);
+    }
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a market " << (catalogue ? "catalogue" : "points")
@@ -3481,21 +3489,31 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_status_changed:
         sessions_.set_status(*handle, ev.status);
         break;
-    case event::event_kind::series_catalogue:
-        catalogue_reading_ = false;
-        if (ev.message.empty())
-            market_.set_catalogue(ev.series);
-        else
-            market_.fail_catalogue(ev.message);
-        break;
-    case event::event_kind::series_points:
-        points_reading_.erase(ev.series_id);
+    case event::event_kind::series_catalogue: {
+        catalogues_reading_.erase(
+            running_key(ev.instance_id, ev.account_id));
         if (ev.message.empty()) {
-            market_.set_points(ev.series_id, ev.points, ev.observed_at_ns);
+            market_.set_catalogue(ev.instance_id, ev.account_id,
+                ev.series);
         } else {
-            market_.fail_points(ev.series_id, ev.message, ev.observed_at_ns);
+            market_.fail_catalogue(ev.instance_id, ev.account_id,
+                ev.message);
         }
         break;
+    }
+    case event::event_kind::series_points: {
+        const auto key = std::format("{}\x1f{}", 
+            running_key(ev.instance_id, ev.account_id), ev.series_id);
+        points_reading_.erase(key);
+        if (ev.message.empty()) {
+            market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
+                ev.points, ev.observed_at_ns);
+        } else {
+            market_.fail_points(ev.instance_id, ev.account_id, ev.series_id,
+                ev.message, ev.observed_at_ns);
+        }
+        break;
+    }
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.party_id, ev.token);

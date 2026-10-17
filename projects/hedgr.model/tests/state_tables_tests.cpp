@@ -802,7 +802,7 @@ TEST_CASE("four estate polls read back as four different buckets", "[probe]") {
             != history.at(index - 1).observed_at_ns);
 }
 
-TEST_CASE("the market table keeps a catalogue and each series' points",
+TEST_CASE("the market table keeps a catalogue per session and points per chart",
     "[market]") {
     using hedgr::model::domain::market_point;
     using hedgr::model::domain::market_series_row;
@@ -810,37 +810,43 @@ TEST_CASE("the market table keeps a catalogue and each series' points",
     using hedgr::model::state::market_table;
 
     market_table market;
-    REQUIRE(market.catalogue() == catalogue_state::unread);
+    REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
 
-    market.begin_catalogue();
-    REQUIRE(market.catalogue() == catalogue_state::reading);
+    market.begin_catalogue("i-1", "a-1");
+    REQUIRE(market.catalogue("i-1", "a-1")->state == catalogue_state::reading);
 
-    market.set_catalogue(std::vector<market_series_row>{
+    market.set_catalogue("i-1", "a-1", std::vector<market_series_row>{
         {.id = "s-1", .uri = "oresmd://fx/GBP?ccy=USD", .label = "FX GBP/USD",
-            .asset_class = "FX", .producer_kind = "SYNTHETIC", .party_id = "p-1"},
-        {.id = "s-2", .uri = "oresmd://ir/GBP?tenor=1D", .label = "IR GBP 1D",
-            .asset_class = "IR", .producer_kind = "SYNTHETIC", .party_id = "p-1"}});
-    REQUIRE(market.catalogue() == catalogue_state::ready);
-    REQUIRE(market.series().size() == 2);
+            .asset_class = "FX", .producer_kind = "SYNTHETIC", .party_id = "p-1"}});
+    market.set_catalogue("i-2", "a-2", std::vector<market_series_row>{
+        {.id = "s-9", .uri = "oresmd://ir/GBP?tenor=1D", .label = "IR GBP 1D",
+            .asset_class = "IR", .producer_kind = "SYNTHETIC", .party_id = "p-2"}});
 
-    REQUIRE(market.points("s-1") == nullptr);
-    market.set_points("s-1",
+    /*
+     * Two instances, two accounts, two catalogues. One login's list is not
+     * another's, and the pair is the key.
+     */
+    REQUIRE(market.catalogue("i-1", "a-1")->series.size() == 1);
+    REQUIRE(market.catalogue("i-2", "a-2")->series.size() == 1);
+    REQUIRE(market.catalogue("i-1", "a-2") == nullptr);
+
+    REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
+    market.set_points("i-1", "a-1", "s-1",
         std::vector<market_point>{{.at_ns = 2, .value = 1.2},
             {.at_ns = 1, .value = 1.1}},
         10);
-    const auto* points = market.points("s-1");
+    const auto* points = market.points("i-1", "a-1", "s-1");
     REQUIRE(points != nullptr);
     REQUIRE(points->is_read());
     REQUIRE(points->points.size() == 2);
 
     /* A failed read keeps the points and says the read failed. */
-    market.fail_points("s-1", "no responder", 20);
+    market.fail_points("i-1", "a-1", "s-1", "no responder", 20);
     REQUIRE_FALSE(points->is_read());
     REQUIRE(points->points.size() == 2);
     REQUIRE(points->failure == "no responder");
 
     market.clear();
-    REQUIRE(market.series().empty());
-    REQUIRE(market.catalogue() == catalogue_state::unread);
-    REQUIRE(market.points("s-1") == nullptr);
+    REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
+    REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
 }

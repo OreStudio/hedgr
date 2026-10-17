@@ -1383,3 +1383,72 @@ TEST_CASE("removing a target takes its shortcuts with it", "[runtime]") {
     REQUIRE(reopened.shortcuts().rows()[0].id == "sc-manager");
     reopened.stop();
 }
+
+TEST_CASE("two sessions on two instances open their own windows",
+    "[windows]") {
+    const temporary_database database("multi-session");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.last_error().empty());
+
+    const std::string local = manager.instances().rows()[0].id;
+    const std::string other = "inst-other";
+
+    command add_instance;
+    add_instance.kind = command_kind::save_instance;
+    add_instance.instance_id = other;
+    add_instance.instance_row = make_instance(other, "other deployment",
+        "ores.dev.other");
+    push_command(manager, add_instance);
+
+    const auto add_account = [&](std::string id, std::string instance_id) {
+        command request;
+        request.kind = command_kind::save_account;
+        request.account_id = id;
+        request.account_row = make_account(id, instance_id);
+        push_command(manager, request);
+    };
+    add_account("acct-a", local);
+    add_account("acct-b", other);
+
+    const auto push_window = [&](std::string instance_id, std::string account_id,
+                                 window_kind kind, std::string series_id) {
+        command request;
+        request.kind = command_kind::open_window;
+        request.instance_id = std::move(instance_id);
+        request.account_id = std::move(account_id);
+        request.new_window_kind = kind;
+        request.series_id = std::move(series_id);
+        request.series_label = "FX GBP/USD";
+        push_command(manager, request);
+    };
+
+    for (const auto& pair : {std::pair{local, std::string{"acct-a"}},
+             std::pair{other, std::string{"acct-b"}}}) {
+        push_window(pair.first, pair.second, window_kind::workspace, {});
+        push_window(pair.first, pair.second, window_kind::command_centre, {});
+        push_window(pair.first, pair.second, window_kind::series_browser, {});
+        push_window(pair.first, pair.second, window_kind::chart, "s-1");
+    }
+
+    /*
+     * The same series id on two deployments is two charts, because the window's
+     * identity includes the session. Every surface is one per pair.
+     */
+    REQUIRE(manager.windows().find("workspace:" + local + ":acct-a").has_value());
+    REQUIRE(manager.windows().find("workspace:" + other + ":acct-b").has_value());
+    REQUIRE(manager.windows()
+            .find("command-centre:" + local + ":acct-a").has_value());
+    REQUIRE(manager.windows()
+            .find("command-centre:" + other + ":acct-b").has_value());
+    REQUIRE(manager.windows()
+            .find("series-browser:" + local + ":acct-a").has_value());
+    REQUIRE(manager.windows()
+            .find("series-browser:" + other + ":acct-b").has_value());
+    REQUIRE(manager.windows()
+            .find("chart:" + local + ":acct-a:s-1").has_value());
+    REQUIRE(manager.windows()
+            .find("chart:" + other + ":acct-b:s-1").has_value());
+
+    manager.stop();
+}

@@ -617,10 +617,10 @@ private:
     /** @brief The market series and the points each chart holds. */
     model::state::market_table market_;
 
-    /** @brief Whether the catalogue read is out. */
-    bool catalogue_reading_ = false;
+    /** @brief The sessions whose catalogue read is out, by running key. */
+    std::unordered_set<std::string> catalogues_reading_;
 
-    /** @brief The series whose points read is out. */
+    /** @brief The session-and-series whose points read is out. */
     std::unordered_set<std::string> points_reading_;
 
     /**
