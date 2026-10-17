@@ -288,6 +288,8 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     const auto session = input.windows.session_of(handle);
+    if (session)
+        request_flags(input, *session, chart->label);
     const auto* snapshot = session.has_value()
         ? input.market.points(input.sessions.instance_id(*session),
             input.sessions.account_id(*session), chart->series_id)

@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/flag_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
@@ -337,6 +338,9 @@ struct render_input final {
 
     /** @brief The market series and the points each chart holds. */
     const hedgr::model::state::market_table& market;
+
+    /** @brief The currency flags each session has read. */
+    const hedgr::model::state::flag_table& flags;
 
     /**
      * @brief The probes' last results and next deadlines.

@@ -139,6 +139,15 @@ identity_of(const render_input& input,
 [[nodiscard]] HEDGR_UI_EXPORT std::string
 identity_text(const identity_bar_state& state);
 
+/**
+ * @brief Asks the runtime for the flags a label names, once each.
+ *
+ * A flag is an assets image; the screen cannot block on one, so it asks and
+ * draws the primitive until the answer lands.
+ */
+HEDGR_UI_EXPORT void request_flags(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view label);
+
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
 

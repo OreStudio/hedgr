@@ -22,6 +22,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/flags.hpp"
 #include "imgui.h"
 
 #include <cstdint>
@@ -171,6 +172,26 @@ identity_bar_state identity_of(const render_input& input,
     }
 
     return result;
+}
+
+void request_flags(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view label) {
+    const auto instance_id = input.sessions.instance_id(session);
+    const auto account_id = input.sessions.account_id(session);
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    for (const auto& code : {pair.base, pair.quote}) {
+        if (code.empty())
+            continue;
+        const auto* image = input.flags.get(instance_id, account_id, code);
+        if (image != nullptr && image->state != hedgr::model::state::flag_state::unread)
+            continue;
+        hedgr::model::command::command request;
+        request.kind = hedgr::model::command::command_kind::load_flag;
+        request.instance_id = std::string{instance_id};
+        request.account_id = std::string{account_id};
+        request.payload = code;
+        input.commands.push(std::move(request));
+    }
 }
 
 std::string identity_text(const identity_bar_state& state) {

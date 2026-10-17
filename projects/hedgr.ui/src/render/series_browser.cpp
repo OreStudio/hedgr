@@ -331,6 +331,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableHeadersRow();
 
         for (const auto* row : visible) {
+            request_flags(input, *session, row->label);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::PushID(row->id.c_str());

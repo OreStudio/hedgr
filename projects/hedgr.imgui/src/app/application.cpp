@@ -25,10 +25,12 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
+#include "hedgr.ui/image/svg_raster.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/capture.hpp"
+#include "hedgr.ui/widget/flags.hpp"
 #include "ores.logging/make_logger.hpp"
 
 #include <GL/glew.h>
@@ -410,6 +412,14 @@ GLFWwindow* application::initialise_graphics() {
     load_instance_icon_textures();
     load_splash_texture();
 
+    ui::widget::set_flag_texture_resolver(
+        [this](std::string_view code) -> ImTextureID {
+            const auto found = flag_textures_.find(std::string{code});
+            return found == flag_textures_.end()
+                ? static_cast<ImTextureID>(0)
+                : static_cast<ImTextureID>(found->second);
+        });
+
     BOOST_LOG_SEV(lg(), info) << "Graphics initialised successfully.";
     return window;
 }
@@ -551,6 +561,48 @@ void application::load_splash_texture() {
 
     BOOST_LOG_SEV(lg(), info)
         << "Loaded splash image: " << splash_width_ << "x" << splash_height_;
+}
+
+void application::sync_flag_textures() {
+    for (const auto& [code, image] : manager_.flags().all_ready()) {
+        if (image == nullptr || flag_textures_.contains(code))
+            continue;
+
+        unsigned int texture = 0;
+        if (image->mime_type.find("svg") != std::string::npos) {
+            const auto svg = std::string_view{
+                reinterpret_cast<const char*>(image->data.data()),
+                image->data.size()};
+            if (const auto raster = ui::image::rasterize_svg(svg, 64, 44))
+                texture = upload_rgba(raster->pixels.data(),
+                    raster->width, raster->height);
+        } else {
+            int width = 0;
+            int height = 0;
+            int channels = 0;
+            auto* data = stbi_load_from_memory(image->data.data(),
+                static_cast<int>(image->data.size()), &width, &height,
+                &channels, 4);
+            if (data != nullptr) {
+                texture = upload_rgba(data, width, height);
+                stbi_image_free(data);
+            }
+        }
+        if (texture != 0)
+            flag_textures_.emplace(code, texture);
+    }
+}
+
+unsigned int application::upload_rgba(const unsigned char* data, int width,
+    int height) {
+    unsigned int texture = 0;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
+        GL_UNSIGNED_BYTE, data);
+    return texture;
 }
 
 void application::release_instance_icon_textures() {
@@ -719,6 +771,7 @@ void application::render_loop(GLFWwindow* window) {
             .labellings = manager_.labellings(),
             .sessions = manager_.sessions(),
             .market = manager_.market(),
+            .flags = manager_.flags(),
             .probes = manager_.probes(),
             .password_policy = manager_.password_policy(),
             .windows = manager_.windows(),
@@ -733,6 +786,7 @@ void application::render_loop(GLFWwindow* window) {
             .runtime_error = manager_.last_error(),
             .instance_icons = &instance_icons_,
         };
+        sync_flag_textures();
         workspace_.render(input);
 
         /*
@@ -814,6 +868,11 @@ void application::shutdown_graphics(GLFWwindow* window) {
     if (splash_texture_ != 0)
         glDeleteTextures(1, &splash_texture_);
     release_instance_icon_textures();
+    for (auto& [code, texture] : flag_textures_) {
+        static_cast<void>(code);
+        glDeleteTextures(1, &texture);
+    }
+    flag_textures_.clear();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

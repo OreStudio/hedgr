@@ -26,6 +26,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/flag_table.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
@@ -998,6 +999,29 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     REQUIRE(out[1].level == market_level::medium);
     REQUIRE(out[1].point.value == 4.0);
     REQUIRE(aggregator.ticks() == 6);
+}
+
+TEST_CASE("a flag is read once per session and code", "[flags]") {
+    using hedgr::model::state::flag_state;
+    using hedgr::model::state::flag_table;
+
+    flag_table flags;
+    REQUIRE(flags.get("i-1", "a-1", "gb") == nullptr);
+    flags.begin("i-1", "a-1", "gb");
+    REQUIRE(flags.get("i-1", "a-1", "gb")->state == flag_state::reading);
+
+    flags.set("i-1", "a-1", "gb", "image/svg+xml",
+        std::vector<std::uint8_t>{1, 2, 3});
+    const auto* image = flags.get("i-1", "a-1", "gb");
+    REQUIRE(image->state == flag_state::ready);
+    REQUIRE(image->mime_type == "image/svg+xml");
+    REQUIRE(image->data.size() == 3);
+    REQUIRE(flags.all_ready().size() == 1);
+    REQUIRE(flags.all_ready().front().first == "gb");
+
+    flags.fail("i-1", "a-1", "us", "no image");
+    REQUIRE(flags.get("i-1", "a-1", "us")->state == flag_state::failed);
+    REQUIRE(flags.all_ready().size() == 1);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",

@@ -25,10 +25,12 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
+#include "hedgr.model/state/flag_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/flag_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
@@ -169,6 +171,11 @@ public:
     /** @brief The market series and the points each chart holds. */
     [[nodiscard]] const model::state::market_table& market() const noexcept {
         return market_;
+    }
+
+    /** @brief The currency flags each session has read. */
+    [[nodiscard]] const model::state::flag_table& flags() const noexcept {
+        return flags_;
     }
 
     /**
@@ -342,6 +349,9 @@ private:
     /** @brief Asks for one series' points, on the window's session. */
     void start_market_points_read(std::string_view window_id,
         std::string_view series_id);
+
+    /** @brief Reads one currency flag image for a session. */
+    void do_load_flag(const model::command::command& cmd);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
@@ -642,6 +652,12 @@ private:
 
     /** @brief The market series and the points each chart holds. */
     model::state::market_table market_;
+
+    /** @brief The flags each session has read. */
+    model::state::flag_table flags_;
+
+    /** @brief The session-and-code whose flag read is out. */
+    std::unordered_set<std::string> flags_reading_;
 
     /** @brief The sessions whose catalogue read is out, by running key. */
     std::unordered_set<std::string> catalogues_reading_;

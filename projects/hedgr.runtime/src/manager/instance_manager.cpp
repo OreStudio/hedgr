@@ -27,6 +27,7 @@
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
+#include "hedgr.runtime/worker/flag_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
@@ -691,6 +692,8 @@ void instance_manager::stop() noexcept {
     }
     market_streams_.clear();
     market_.clear();
+    flags_.clear();
+    flags_reading_.clear();
     catalogues_reading_.clear();
     points_reading_.clear();
 
@@ -1515,6 +1518,9 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::store_credential:
         do_store_credential(cmd);
+        break;
+    case command::command_kind::load_flag:
+        do_load_flag(cmd);
         break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
@@ -3195,6 +3201,43 @@ void instance_manager::do_probe_all() {
     }
 }
 
+void instance_manager::do_load_flag(const model::command::command& cmd) {
+    if (!database_)
+        return;
+    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto token = std::string{sessions_.token(*session)};
+    if (token.empty())
+        return;
+    const auto instance = instances_.find(cmd.instance_id);
+    if (!instance)
+        return;
+
+    const auto key = std::format("{}\x1f{}",
+        running_key(cmd.instance_id, cmd.account_id), cmd.payload);
+    if (flags_reading_.contains(key))
+        return;
+
+    const auto account = accounts_.find(cmd.account_id);
+    const std::string principal = account
+        ? accounts_.get(*account)->principal : std::string{};
+
+    worker::flag_job job;
+    job.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.instance_id = cmd.instance_id;
+    job.account_id = cmd.account_id;
+    job.token = token;
+    job.principal = principal;
+    job.code = cmd.payload;
+
+    flags_reading_.insert(key);
+    flags_.begin(cmd.instance_id, cmd.account_id, cmd.payload);
+    worker::spawn_flag_read(pool_.context(), std::move(job), events_);
+}
+
 void instance_manager::start_market_backfill(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) {
     if (!database_)
@@ -3785,6 +3828,19 @@ void instance_manager::apply(const event::event& ev) {
         }
         break;
     }
+    case event::event_kind::flag_image: {
+        const auto key = std::format("{}\x1f{}",
+            running_key(ev.instance_id, ev.account_id), ev.image_code);
+        flags_reading_.erase(key);
+        if (ev.message.empty()) {
+            flags_.set(ev.instance_id, ev.account_id, ev.image_code,
+                ev.mime_type, ev.bytes);
+        } else {
+            flags_.fail(ev.instance_id, ev.account_id, ev.image_code,
+                ev.message);
+        }
+        break;
+    }
     case event::event_kind::series_points: {
         const auto key = std::format("{}\x1f{}", 
             running_key(ev.instance_id, ev.account_id), ev.series_id);
@@ -3857,9 +3913,9 @@ void instance_manager::apply(const event::event& ev) {
          * brackets, so the tooltip carries both: the sentence says who to ask,
          * the code says what to tell them.
          */
-        sessions_.set_last_error(*handle, ev.code.empty()
+        sessions_.set_last_error(*handle, ev.image_code.empty()
                 ? ev.message
-                : std::format("{} ({})", ev.message, ev.code));
+                : std::format("{} ({})", ev.message, ev.image_code));
         break;
     }
     case event::event_kind::session_data:
