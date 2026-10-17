@@ -180,6 +180,24 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     const std::string filter{state.filter.data()};
 
     /*
+     * A deployment keeps a series per party for the same instrument, and the
+     * list is tenant-wide, so the same pair arrives once per party with the
+     * same label. The session acts as one party, and that is the set it should
+     * start on: five rows all reading "FX AUD/USD" are one instrument five
+     * times, not five instruments. The box stays available for a reader who
+     * wants the whole tenant.
+     */
+    if (!state.market_party_default_applied
+        && catalogue_state == hedgr::model::state::catalogue_state::ready) {
+        state.market_party_default_applied = true;
+        state.market_own_party_only = !session_party.empty()
+            && std::any_of(rows.begin(), rows.end(),
+                [&session_party](const auto& row) {
+                    return row.party_id == session_party;
+                });
+    }
+
+    /*
      * The filtered series, in one vector so the combobox and the table list
      * exactly the same rows. The combobox is the quick way in; the table is the
      * overview, and a row in either opens the same chart.
