@@ -26,6 +26,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include <cctype>
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -171,6 +172,17 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             continue;
         }
         visible.push_back(&row);
+    }
+
+    if (visible.empty() && !rows.empty()) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("No series match the filters.");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear filters")) {
+            state.market_synthetic_only = false;
+            state.market_own_party_only = false;
+            std::fill(state.filter.begin(), state.filter.end(), '\0');
+        }
     }
 
     ImGui::TextUnformatted("Series");

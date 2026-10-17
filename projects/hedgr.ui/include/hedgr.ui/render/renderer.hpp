@@ -269,11 +269,17 @@ struct window_ui_state final {
     /** @brief This window's tabs, if it is a command centre. */
     command_centre_ui_state command_centre;
 
-    /** @brief Whether the series chooser lists only synthetic series. */
-    bool market_synthetic_only = true;
+    /**
+     * @brief Whether the series chooser lists only synthetic series.
+     *
+     * Off by default: a deployment may hold only vendor series, and a chooser
+     * that opens empty because of a filter nobody set reads as a chooser with
+     * no series at all.
+     */
+    bool market_synthetic_only = false;
 
     /** @brief Whether the series chooser lists only the session's party. */
-    bool market_own_party_only = true;
+    bool market_own_party_only = false;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;

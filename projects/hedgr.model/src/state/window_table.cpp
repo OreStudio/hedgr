@@ -35,6 +35,8 @@ void grow(window_columns& columns, std::size_t count) {
     columns.id.resize(count);
     columns.cadence_ms.resize(count, 1000);
     columns.state.resize(count);
+    columns.session_instance.resize(count);
+    columns.session_account.resize(count);
 }
 
 }
@@ -51,6 +53,10 @@ window_handle window_table::insert(const domain::window_spec& spec) {
     columns_.id[index] = spec.id;
     columns_.cadence_ms[index] = spec.cadence.count();
     columns_.state[index] = spec.state;
+    columns_.session_instance[index] =
+        spec.session ? spec.session->instance_id : std::string{};
+    columns_.session_account[index] =
+        spec.session ? spec.session->account_id : std::string{};
 
     const window_handle h{index, layout_.generation[index]};
     by_id_.emplace(columns_.id[index], h);
@@ -64,6 +70,8 @@ void window_table::remove(window_handle h) {
     columns_.id[h.index].clear();
     columns_.session_index[h.index] = handle<session_tag>::invalid_index;
     columns_.session_generation[h.index] = 0;
+    columns_.session_instance[h.index].clear();
+    columns_.session_account[h.index].clear();
     layout_.release(h.index);
 }
 
@@ -137,6 +145,17 @@ window_table::spec(window_handle h, const session_table& sessions) const {
         result.session = domain::session_key{
             std::string(sessions.instance_id(*session)),
             std::string(sessions.account_id(*session)),
+        };
+    } else if (!columns_.session_instance[h.index].empty()
+        || !columns_.session_account[h.index].empty()) {
+        /*
+         * The window is unbound, because its session does not exist yet. The
+         * pair it was saved against is still the answer to "which sign-in makes
+         * this window live", so it is reported rather than dropped.
+         */
+        result.session = domain::session_key{
+            columns_.session_instance[h.index],
+            columns_.session_account[h.index],
         };
     }
     return result;

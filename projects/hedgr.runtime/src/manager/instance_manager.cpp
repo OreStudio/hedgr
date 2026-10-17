@@ -2864,6 +2864,10 @@ void instance_manager::do_open_window(const command::command& cmd) {
     spec.state = default_state_for(cmd.new_window_kind, last_error,
         cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
 
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
+        spec.session = domain::session_key{std::string{cmd.instance_id},
+            std::string{cmd.account_id}};
+
     const auto handle = windows_.insert(spec);
 
     /*
@@ -2953,6 +2957,34 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     fact.kind = event::event_kind::window_data;
     fact.payload = cmd.window_id;
     events_.push(std::move(fact));
+}
+
+void instance_manager::rebind_restored_windows(std::string_view instance_id,
+    std::string_view account_id, model_state::session_handle session) {
+    const auto& layout = windows_.layout();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+
+        const model_state::window_handle window{
+            index, layout.generation[index]};
+        if (windows_.session_of(window))
+            continue;
+
+        const auto spec = windows_.spec(window, sessions_);
+        if (!spec.session)
+            continue;
+        if (spec.session->instance_id != instance_id
+            || spec.session->account_id != account_id) {
+            continue;
+        }
+
+        windows_.bind_session(window, session);
+        windows_.set_next_refresh_ns(window, 0);
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Rebound restored window '" << spec.id << "' to '"
+            << instance_id << "' / '" << account_id << "'";
+    }
 }
 
 void instance_manager::start_deployment_read(std::string_view window_id) {
@@ -3546,6 +3578,13 @@ void instance_manager::apply(const event::event& ev) {
                 : domain::window_kind::workspace;
             do_open_window(open);
         }
+
+        /*
+         * Every other window the wall restored was saved against this same
+         * pair and is still unbound. Binding them here is what makes a
+         * restored series browser or chart live on the sign-in that owns it.
+         */
+        rebind_restored_windows(ev.instance_id, ev.account_id, *handle);
         break;
     case event::event_kind::deployment_snapshot:
         deployment_reads_.erase(
