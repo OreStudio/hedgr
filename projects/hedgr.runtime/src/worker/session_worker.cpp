@@ -230,6 +230,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 authenticated.kind = event::event_kind::session_authenticated;
                 authenticated.token = account.token;
                 authenticated.tenant_name = account.tenant_name;
+                authenticated.tenant_id = account.tenant_id;
                 authenticated.party_name = account.party_name;
                 authenticated.party_id = account.party_id;
                 for (const auto& party : account.parties) {

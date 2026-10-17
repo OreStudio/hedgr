@@ -29,7 +29,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "ores.nats/service/client.hpp"
 #include "ores.nats/service/nats_client.hpp"
+#include "ores.nats/service/subscription.hpp"
 
 namespace hedgr::session::transport {
 
@@ -437,6 +439,20 @@ public:
      * suffix instead, since the transport applies the prefix itself.
      */
     [[nodiscard]] std::string subject(std::string_view suffix) const;
+
+    /**
+     * @brief Subscribes to a subject on this session's connection.
+     *
+     * The transport side of a long-lived read, such as the market tick stream.
+     * The subject is a suffix; this method applies the instance's prefix. The
+     * handle must not outlive the session, and the caller is responsible for
+     * callbacks being safe on the NATS dispatch thread.
+     *
+     * @pre the session is connected.
+     */
+    [[nodiscard]] ores::nats::service::subscription
+    subscribe(std::string_view subject,
+        ores::nats::message_handler handler) const;
 
     /** @brief Who this session is, empty until the instance says. */
     [[nodiscard]] const session_account& account() const noexcept;

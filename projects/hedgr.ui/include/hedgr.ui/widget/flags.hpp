@@ -59,15 +59,17 @@ struct currency_pair final {
 currencies_of(std::string_view label);
 
 /**
- * @brief Draws one currency's flag at @p top_left, sixteen by eleven pixels.
+ * @brief Draws one currency's flag at @p top_left, sixteen by eleven pixels by default.
  *
- * The flags are drawn rather than decoded, because a 16 pixel flag needs a few
- * bars and a canton and nothing more, and a sprite sheet would put a decoder,
- * an upload and an asset licence on the path that draws a list. The artwork is
- * simplified to what identifies the currency at this size.
+ * The flags are drawn rather than decoded, because a flag needs a few bars and
+ * a canton and nothing more, and a sprite sheet would put a decoder, an upload
+ * and an asset licence on the path that draws a list. The artwork is simplified
+ * to what identifies the currency, and @p scale lets a larger surface draw the
+ * same artwork bigger. The series list uses the natural size; the chart header
+ * asks for twice it.
  */
 HEDGR_UI_EXPORT void draw_flag(ImDrawList* draw, ImVec2 top_left,
-    std::string_view currency);
+    std::string_view currency, float scale = 1.0f);
 
 }
 

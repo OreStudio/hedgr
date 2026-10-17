@@ -18,6 +18,9 @@
  *
  */
 #include "hedgr.session/market/series_label.hpp"
+#include "hedgr.session/market/tick_stream.hpp"
+#include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.nats/domain/wire_codec.hpp"
 #include <catch2/catch_test_macros.hpp>
 
 namespace market = hedgr::session::market;
@@ -54,4 +57,40 @@ TEST_CASE("a series asset class is the URI's own word, upper-cased",
     REQUIRE(market::series_asset_class("oresmd://fx/GBP?ccy=USD") == "FX");
     REQUIRE(market::series_asset_class("oresmd://ir/GBP?tenor=1D") == "IR");
     REQUIRE(market::series_asset_class("not-a-uri").empty());
+}
+
+TEST_CASE("a tick payload decodes to its time and value", "[tick]") {
+    using ores::marketdata::messaging::market_tick;
+    using std::chrono::seconds;
+
+    market_tick payload;
+    payload.oresmd_uri = "oresmd://fx/GBP?ccy=USD";
+    payload.value = "1.23456";
+    payload.observation_time =
+        std::chrono::system_clock::time_point{seconds{1'700'000'000}};
+
+    const auto encoded = ores::nats::default_wire_codec().encode(payload);
+    const auto decoded = hedgr::session::market::decode_tick(encoded);
+
+    REQUIRE(decoded.has_value());
+    REQUIRE(decoded->at_ns == 1'700'000'000'000'000'000);
+    REQUIRE(decoded->value == 1.23456);
+}
+
+TEST_CASE("a tick payload with no number is refused", "[tick]") {
+    using ores::marketdata::messaging::market_tick;
+    using std::chrono::seconds;
+
+    for (const auto* text : {"", "abc", "nan"}) {
+        market_tick payload;
+        payload.value = text;
+        payload.observation_time =
+            std::chrono::system_clock::time_point{seconds{1'700'000'000}};
+        const auto encoded = ores::nats::default_wire_codec().encode(payload);
+
+        REQUIRE_FALSE(hedgr::session::market::decode_tick(encoded).has_value());
+    }
+
+    REQUIRE_FALSE(
+        hedgr::session::market::decode_tick({}).has_value());
 }

@@ -9,6 +9,7 @@
 #
 set(files
     "market/series_label.cpp"
+    "market/tick_stream.cpp"
     "transport/session_client.cpp"
     "transport/session_error.cpp"
 )

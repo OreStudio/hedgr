@@ -83,10 +83,22 @@ public:
     catalogue(std::string_view instance_id,
         std::string_view account_id) const;
 
-    /** @brief Records one chart's points and marks the read complete. */
+    /** @brief Seeds one chart's history from a backfill read. */
     void set_points(std::string_view instance_id, std::string_view account_id,
         std::string_view series_id,
         std::vector<domain::market_point> points, std::int64_t observed_at_ns);
+
+    /**
+     * @brief Appends one closed bucket of a live series.
+     *
+     * Late points, older than the newest bucket of their level, are dropped:
+     * the rings run forward in time and a point that arrives out of order
+     * would have to rewrite history to be plotted.
+     */
+    void append_point(std::string_view instance_id,
+        std::string_view account_id, std::string_view series_id,
+        domain::market_level level, domain::market_point point,
+        std::int64_t observed_at_ns);
 
     /** @brief Records a failed points read, keeping the failure visible. */
     void fail_points(std::string_view instance_id, std::string_view account_id,

@@ -34,6 +34,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <deque>
 #include <ctime>
 #include <format>
 #include <string>
@@ -127,6 +128,17 @@ constexpr std::array<chart_span, 6> chart_spans{{
 constexpr std::int64_t live_threshold_ns =
     std::int64_t{10} * 60 * 1'000'000'000;
 
+/** @brief The history level a span reads from. */
+[[nodiscard]] domain::market_level level_for(std::int64_t span_ns) {
+    if (span_ns == 0)
+        return domain::market_level::coarse;
+    if (span_ns <= 2 * domain::market_coarse_ns)
+        return domain::market_level::fine;
+    if (span_ns <= 2 * 24 * domain::market_coarse_ns)
+        return domain::market_level::medium;
+    return domain::market_level::coarse;
+}
+
 /** @brief The date of one instant, in the same zone as the axis ticks. */
 [[nodiscard]] std::string format_date(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
@@ -139,14 +151,10 @@ constexpr std::int64_t live_threshold_ns =
 
 /** @brief The first index of the points that fall in @p span_ns. */
 [[nodiscard]] std::size_t live_window_start(
-    const std::vector<domain::market_point>& points, std::int64_t now_ns,
-    std::int64_t span_ns) {
-    if (points.size() < 2 || now_ns <= 0 || span_ns <= 0)
+    const std::deque<domain::market_point>& points, std::int64_t span_ns) {
+    if (points.size() < 2 || span_ns <= 0)
         return 0;
-    const auto newest = points.back().at_ns;
-    if (newest <= 0 || now_ns - newest > live_threshold_ns)
-        return 0;
-    const auto cutoff = newest - span_ns;
+    const auto cutoff = points.back().at_ns - span_ns;
     std::size_t first = 0;
     while (first + 1 < points.size() && points[first].at_ns < cutoff)
         ++first;
@@ -154,29 +162,106 @@ constexpr std::int64_t live_threshold_ns =
     return points.size() - first < 2 ? 0 : first;
 }
 
+/** @brief One candle, built from the points of its interval. */
+struct candle final {
+    std::int64_t at_ns = 0;
+    double open = 0.0;
+    double high = 0.0;
+    double low = 0.0;
+    double close = 0.0;
+};
+
+/** @brief How wide a candle is, and which ring it is built from. */
+struct candle_plan final {
+    std::int64_t width_ns = 0;
+    domain::market_level level = domain::market_level::fine;
+};
+
+/**
+ * @brief The candle width a span reads best at.
+ *
+ * Around sixty candles fill the width without turning into a smear. The
+ * finer rings carry one second buckets, the medium ring one minute and the
+ * coarse ring one hour, so a wider candle combines the ring beneath it.
+ */
+[[nodiscard]] candle_plan candle_plan_for(std::int64_t span_ns) {
+    if (span_ns <= 60 * domain::market_fine_ns)
+        return {.width_ns = domain::market_fine_ns,
+            .level = domain::market_level::fine};
+    if (span_ns <= 300 * domain::market_fine_ns)
+        return {.width_ns = 5 * domain::market_fine_ns,
+            .level = domain::market_level::fine};
+    if (span_ns <= 900 * domain::market_fine_ns)
+        return {.width_ns = 15 * domain::market_fine_ns,
+            .level = domain::market_level::fine};
+    if (span_ns <= 3600 * domain::market_fine_ns)
+        return {.width_ns = domain::market_medium_ns,
+            .level = domain::market_level::medium};
+    if (span_ns <= 24 * 3600 * domain::market_fine_ns)
+        return {.width_ns = 15 * domain::market_medium_ns,
+            .level = domain::market_level::medium};
+    return {.width_ns = 24 * domain::market_coarse_ns,
+        .level = domain::market_level::coarse};
+}
+
+/** @brief Combines ring points into candles of @p width_ns. */
+[[nodiscard]] std::vector<candle> build_candles(
+    const std::deque<domain::market_point>& points, std::size_t start,
+    std::int64_t width_ns) {
+    std::vector<candle> candles;
+    if (width_ns <= 0)
+        return candles;
+    for (std::size_t i = start; i < points.size(); ++i) {
+        const auto& point = points[i];
+        const double open = point.open != 0.0 || point.high != 0.0
+                || point.low != 0.0
+            ? point.open
+            : point.value;
+        const double high = point.high != 0.0 ? point.high : point.value;
+        const double low = point.low != 0.0 ? point.low : point.value;
+        const auto bucket = point.at_ns / width_ns;
+        if (candles.empty() || candles.back().at_ns / width_ns != bucket) {
+            candles.push_back(candle{.at_ns = bucket * width_ns,
+                .open = open, .high = high, .low = low, .close = point.value});
+            continue;
+        }
+        auto& last = candles.back();
+        last.high = std::max(last.high, high);
+        last.low = std::min(last.low, low);
+        last.close = point.value;
+    }
+    return candles;
+}
+
 /** @brief The series as flags and its name, the header's left end. */
 void draw_series_name(std::string_view label) {
     const auto pair = widget::currencies_of(label);
+    constexpr float flag_scale = 2.0f;
+    const float flag_w = widget::flag_width * flag_scale;
+    const float flag_h = widget::flag_height * flag_scale;
+    const float text_h = ImGui::GetTextLineHeight();
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    float x = origin.x;
-    const float y = origin.y + (ImGui::GetTextLineHeight()
-        - widget::flag_height) * 0.5f;
+    const float text_w = ImGui::CalcTextSize(label.data(), label.data()
+            + label.size()).x;
     auto* draw = ImGui::GetWindowDrawList();
+    float x = origin.x;
     if (!pair.base.empty()) {
-        widget::draw_flag(draw, ImVec2(x, y), pair.base);
-        x += widget::flag_width + 2.0f;
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.base, flag_scale);
+        x += flag_w + 3.0f;
     }
     if (!pair.quote.empty()) {
-        widget::draw_flag(draw, ImVec2(x, y), pair.quote);
-        x += widget::flag_width + 2.0f;
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote, flag_scale);
+        x += flag_w + 3.0f;
     }
     if (x == origin.x) {
         ImGui::TextUnformatted(label.data(), label.data() + label.size());
         return;
     }
-    ImGui::Dummy(ImVec2(x - origin.x + 4.0f, ImGui::GetTextLineHeight()));
-    ImGui::SameLine(0.0f, 0.0f);
-    ImGui::TextUnformatted(label.data(), label.data() + label.size());
+    const float text_x = x + 4.0f;
+    draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+        ImVec2(text_x, origin.y + (flag_h - text_h) * 0.5f),
+        ImGui::GetColorU32(ImGuiCol_Text), std::string{label}.c_str());
+    ImGui::Dummy(ImVec2(text_x - origin.x + text_w, flag_h));
 }
 
 }
@@ -223,79 +308,112 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::SameLine();
     draw_series_name(chart->label);
 
-    if (snapshot != nullptr && !snapshot->points.empty()) {
-        const auto& points = snapshot->points;
-        const std::size_t start = live_window_start(points, input.now_ns,
-            state.market_chart_span_ns);
-        const double first = points[start].value;
-        const double last = points.back().value;
-        const double change = last - first;
-        const double percent = first != 0.0 ? change / first * 100.0 : 0.0;
-        const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
-        const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
+    if (snapshot != nullptr) {
+        const auto& points =
+            snapshot->level(level_for(state.market_chart_span_ns));
+        if (!points.empty()) {
+            const bool live = snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns
+                && input.now_ns - snapshot->observed_at_ns
+                        <= live_threshold_ns;
+            const std::size_t start = live_window_start(points,
+                live ? state.market_chart_span_ns : 0);
+            const double first = points[start].value;
+            const double last = points.back().value;
+            const double change = last - first;
+            const double percent =
+                first != 0.0 ? change / first * 100.0 : 0.0;
+            const ImU32 colour =
+                change < 0.0 ? theme::failure_colour : up_colour;
+            const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
 
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextColored(tint, "%s", format_price(last).c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(tint, "%+.2f%%", percent);
-        ImGui::PopFont();
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            ImGui::PushFont(icon::numeric_font());
+            ImGui::TextColored(tint, "%s", format_price(last).c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(tint, "%+.2f%%", percent);
+            ImGui::PopFont();
 
-        const bool live = input.now_ns > 0
-            && input.now_ns - points.back().at_ns <= live_threshold_ns;
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        if (!live) {
-            ImGui::TextDisabled("All points");
-            ImGui::SetItemTooltip("%s",
-                "The newest point is older than ten minutes, so the series is "
-                "history and is plotted whole");
-        } else {
-            for (const auto& span : chart_spans) {
-                const bool selected = span.ns == state.market_chart_span_ns;
-                if (selected) {
-                    ImGui::PushStyleColor(ImGuiCol_Button,
-                        ImGui::ColorConvertU32ToFloat4(
-                            theme::rail_selection_bar));
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            if (!live) {
+                ImGui::TextDisabled("All points");
+                ImGui::SetItemTooltip("%s",
+                    "The newest point is older than ten minutes, so the series "
+                    "is history and is plotted whole");
+            } else {
+                for (const auto& span : chart_spans) {
+                    const bool selected =
+                        span.ns == state.market_chart_span_ns;
+                    if (selected) {
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::ColorConvertU32ToFloat4(
+                                theme::rail_selection_bar));
+                    }
+                    if (ImGui::SmallButton(span.label))
+                        state.market_chart_span_ns = span.ns;
+                    if (selected)
+                        ImGui::PopStyleColor();
+                    if (span.ns == 0) {
+                        ImGui::SetItemTooltip("%s", "Plot the whole series");
+                    } else {
+                        ImGui::SetItemTooltip("Plot the last %s", span.label);
+                    }
+                    ImGui::SameLine();
                 }
-                if (ImGui::SmallButton(span.label))
-                    state.market_chart_span_ns = span.ns;
-                if (selected)
-                    ImGui::PopStyleColor();
-                if (span.ns == 0) {
-                    ImGui::SetItemTooltip("%s", "Plot the whole series");
-                } else {
-                    ImGui::SetItemTooltip("Plot the last %s", span.label);
-                }
-                ImGui::SameLine();
             }
-        }
-        ImGui::NewLine();
-
-        /*
-         * The date once, rather than in every tick, and the freshness beside
-         * it. The ticks themselves carry only the time of day.
-         */
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
-        ImGui::PopFont();
-        ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
-
-        if (snapshot->observed_at_ns != 0
-            && input.now_ns >= snapshot->observed_at_ns) {
-            const auto age_s = static_cast<double>(
-                input.now_ns - snapshot->observed_at_ns) / 1.0e9;
-            const ImU32 poll_colour = age_s > 10.0
-                ? theme::readiness_colour(domain::readiness::bootstrapping)
-                : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 1.5f);
+            if (state.market_candles) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+            }
+            if (ImGui::SmallButton("Candles"))
+                state.market_candles = true;
+            if (state.market_candles)
+                ImGui::PopStyleColor();
             ImGui::SameLine();
-            ImGui::TextDisabled("\u00b7");
+            if (!state.market_candles) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+            }
+            if (ImGui::SmallButton("Line"))
+                state.market_candles = false;
+            if (!state.market_candles)
+                ImGui::PopStyleColor();
+            ImGui::NewLine();
+
+            /*
+             * The date once, rather than in every tick, and the freshness
+             * beside it. The ticks themselves carry only the time of day.
+             */
+            ImGui::PushFont(icon::numeric_font());
+            ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
+            ImGui::PopFont();
             ImGui::SameLine();
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(poll_colour),
-                "polled %.0f s ago", age_s);
-            ImGui::SetItemTooltip("%s",
-                "The window reads the series on its cadence; this is when the "
-                "last read finished");
+            ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
+
+            if (snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns) {
+                const auto age_s = static_cast<double>(
+                    input.now_ns - snapshot->observed_at_ns) / 1.0e9;
+                const ImU32 poll_colour = age_s > 10.0
+                    ? theme::readiness_colour(
+                          domain::readiness::bootstrapping)
+                    : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+                ImGui::SameLine();
+                ImGui::TextDisabled("\u00b7");
+                ImGui::SameLine();
+                if (age_s < 3.0) {
+                    ImGui::TextColored(
+                        ImGui::ColorConvertU32ToFloat4(poll_colour), "live");
+                } else {
+                    ImGui::TextColored(
+                        ImGui::ColorConvertU32ToFloat4(poll_colour),
+                        "stale %.0f s", age_s);
+                }
+                ImGui::SetItemTooltip("%s",
+                    "Ticks arrive on the session's market subscription; this "
+                    "is when the last one landed");
+            }
         }
     }
 
@@ -315,17 +433,38 @@ void render_chart(window_handle handle, const render_input& input,
         if (snapshot == nullptr
             || (!snapshot->is_read() && snapshot->failure.empty())) {
             ImGui::TextDisabled("Reading the series...");
-        } else if (snapshot->points.empty()) {
+        } else if (snapshot->fine.empty() && snapshot->medium.empty()
+            && snapshot->coarse.empty()) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
-            const auto& points = snapshot->points;
-            const std::size_t start = live_window_start(points, input.now_ns,
-                state.market_chart_span_ns);
+            const auto& points =
+                snapshot->level(level_for(state.market_chart_span_ns));
+            const bool live = snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns
+                && input.now_ns - snapshot->observed_at_ns
+                        <= live_threshold_ns;
+            const std::size_t start = live_window_start(points,
+                live ? state.market_chart_span_ns : 0);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
             const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
             const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
+
+            /*
+             * A historical series is plotted whole, so its candles are sized
+             * from the history it actually has rather than from a span button
+             * that does not apply.
+             */
+            const auto candle_span = live
+                ? state.market_chart_span_ns
+                : points.back().at_ns - points[start].at_ns;
+            const auto plan = candle_plan_for(candle_span);
+            const auto candle_points = state.market_candles
+                ? build_candles(points, start, plan.width_ns)
+                : std::vector<candle>{};
+            const bool use_candles =
+                state.market_candles && !candle_points.empty();
 
             std::vector<double> xs;
             std::vector<double> ys;
@@ -346,9 +485,12 @@ void render_chart(window_handle handle, const render_input& input,
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
                 | ImPlotFlags_NoMenus;
-            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_AutoFit;
-            constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit
-                | ImPlotAxisFlags_Opposite;
+            const ImPlotAxisFlags x_flags = use_candles
+                ? ImPlotAxisFlags_None
+                : ImPlotAxisFlags_AutoFit;
+            const ImPlotAxisFlags y_flags = use_candles
+                ? ImPlotAxisFlags_Opposite
+                : ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
@@ -372,17 +514,72 @@ void render_chart(window_handle handle, const render_input& input,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
 
-                /*
-                 * The fill reaches the bottom of the range rather than zero:
-                 * an FX rate is nowhere near zero, and a fill to zero would be
-                 * the whole plot rather than the area under the line.
-                 */
-                ImPlotSpec fill;
-                fill.FillColor = line_colour;
-                fill.FillAlpha = 0.16f;
-                fill.Flags = ImPlotItemFlags_NoLegend;
-                ImPlot::PlotShaded("##fill", xs.data(), ys.data(),
-                    static_cast<int>(xs.size()), floor, fill);
+                if (use_candles) {
+                    double candle_low = candle_points.front().low;
+                    double candle_high = candle_points.front().high;
+                    for (const auto& candle : candle_points) {
+                        candle_low = std::min(candle_low, candle.low);
+                        candle_high = std::max(candle_high, candle.high);
+                    }
+                    const double pad = (candle_high - candle_low) * 0.08;
+                    const double width_s =
+                        static_cast<double>(plan.width_ns) / 1.0e9;
+                    ImPlot::SetupAxisLimits(ImAxis_X1,
+                        static_cast<double>(candle_points.front().at_ns) / 1.0e9
+                            - width_s,
+                        static_cast<double>(candle_points.back().at_ns) / 1.0e9
+                            + width_s * 2.0,
+                        ImPlotCond_Always);
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, candle_low - pad,
+                        candle_high + pad, ImPlotCond_Always);
+
+                    auto* plot_draw = ImPlot::GetPlotDrawList();
+                    ImPlot::PushPlotClipRect();
+                    for (const auto& candle : candle_points) {
+                        const double x =
+                            static_cast<double>(candle.at_ns) / 1.0e9;
+                        const auto p_open = ImPlot::PlotToPixels(x, candle.open);
+                        const auto p_close =
+                            ImPlot::PlotToPixels(x, candle.close);
+                        const auto p_high = ImPlot::PlotToPixels(x, candle.high);
+                        const auto p_low = ImPlot::PlotToPixels(x, candle.low);
+                        const ImU32 body_colour = candle.close >= candle.open
+                            ? up_colour
+                            : theme::failure_colour;
+                        plot_draw->AddLine(ImVec2(p_open.x, p_high.y),
+                            ImVec2(p_open.x, p_low.y), body_colour, 1.0f);
+                        const float body_half = std::max(
+                            (ImPlot::PlotToPixels(x + width_s, candle.open).x
+                                - p_open.x) * 0.65f * 0.5f,
+                            0.5f);
+                        const float top = std::min(p_open.y, p_close.y);
+                        const float bottom = std::max(p_open.y, p_close.y);
+                        if (bottom - top < 1.0f) {
+                            plot_draw->AddLine(ImVec2(p_open.x - body_half, top),
+                                ImVec2(p_open.x + body_half, top), body_colour,
+                                1.5f);
+                        } else {
+                            plot_draw->AddRectFilled(
+                                ImVec2(p_open.x - body_half, top),
+                                ImVec2(p_open.x + body_half, bottom),
+                                body_colour);
+                        }
+                    }
+                    ImPlot::PopPlotClipRect();
+                } else {
+                    /*
+                     * The fill reaches the bottom of the range rather than
+                     * zero: an FX rate is nowhere near zero, and a fill to
+                     * zero would be the whole plot rather than the area under
+                     * the line.
+                     */
+                    ImPlotSpec fill;
+                    fill.FillColor = line_colour;
+                    fill.FillAlpha = 0.16f;
+                    fill.Flags = ImPlotItemFlags_NoLegend;
+                    ImPlot::PlotShaded("##fill", xs.data(), ys.data(),
+                        static_cast<int>(xs.size()), floor, fill);
+                }
 
                 /*
                  * The last price is a line across the plot and a tag on the
@@ -397,11 +594,13 @@ void render_chart(window_handle handle, const render_input& input,
                     | static_cast<int>(ImPlotInfLinesFlags_Horizontal));
                 ImPlot::PlotInfLines("##last", &last, 1, last_line);
 
-                ImPlotSpec line;
-                line.LineColor = line_colour;
-                line.LineWeight = 1.5f;
-                ImPlot::PlotLine("##line", xs.data(), ys.data(),
-                    static_cast<int>(xs.size()), line);
+                if (!use_candles) {
+                    ImPlotSpec line;
+                    line.LineColor = line_colour;
+                    line.LineWeight = 1.5f;
+                    ImPlot::PlotLine("##line", xs.data(), ys.data(),
+                        static_cast<int>(xs.size()), line);
+                }
 
                 ImPlot::TagY(last, line_colour, "%s",
                     format_price(last).c_str());

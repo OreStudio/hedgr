@@ -29,6 +29,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include "ores.iam.api/messaging/account_operations_protocol.hpp"
 #include "ores.iam.api/messaging/bootstrap_protocol.hpp"
 #include "ores.iam.api/messaging/login_protocol.hpp"
@@ -43,7 +44,6 @@
 #include "hedgr.session/market/series_label.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
-#include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
@@ -531,6 +531,12 @@ result<session_account> session_client::authenticate(std::string_view principal,
     }
 }
 
+ores::nats::service::subscription session_client::subscribe(
+    std::string_view subject,
+    ores::nats::message_handler handler) const {
+    return client().transport().subscribe(subject, std::move(handler));
+}
+
 result<void> session_client::select_party(std::string_view party_id) {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,
@@ -577,6 +583,7 @@ result<void> session_client::select_party(std::string_view party_id) {
         nats_.set_auth(std::move(info));
 
         account_.token = answer.token;
+        account_.party_id = std::string(party_id);
         account_.party_name = answer.party_name;
         if (!answer.tenant_name.empty())
             account_.tenant_name = answer.tenant_name;
@@ -974,6 +981,9 @@ session_client::market_series(std::uint32_t limit) const {
                 list_market_series_request::nats_subject, request,
                 options_.request_timeout);
         if (!answer) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The market series answer could not be decoded: "
+                << answer.error().what();
             return fail(session_errc::protocol_error,
                 "the market series answer could not be decoded");
         }
