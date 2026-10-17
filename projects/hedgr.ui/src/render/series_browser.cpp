@@ -137,6 +137,56 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     const std::string session_party{input.sessions.party_id(*session)};
     const std::string filter{state.filter.data()};
+
+    /*
+     * The filtered series, in one vector so the combobox and the table list
+     * exactly the same rows. The combobox is the quick way in; the table is the
+     * overview, and a row in either opens the same chart.
+     */
+    std::vector<const domain::market_series_row*> visible;
+    visible.reserve(input.market.series().size());
+    for (const auto& row : input.market.series()) {
+        if (state.market_synthetic_only
+            && row.producer_kind != "SYNTHETIC") {
+            continue;
+        }
+        if (state.market_own_party_only && !session_party.empty()
+            && row.party_id != session_party) {
+            continue;
+        }
+        if (!contains_ci(row.label, filter)
+            && !contains_ci(row.asset_class, filter)
+            && !contains_ci(row.uri, filter)
+            && !contains_ci(row.producer_kind, filter)) {
+            continue;
+        }
+        visible.push_back(&row);
+    }
+
+    ImGui::TextUnformatted("Series");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(420.0f);
+    const char* preview = state.market_selected_series_label.empty()
+        ? "Select a series..."
+        : state.market_selected_series_label.c_str();
+    if (ImGui::BeginCombo("##series-combo", preview,
+            ImGuiComboFlags_HeightLarge)) {
+        for (const auto* row : visible) {
+            const bool chosen =
+                row->id == state.market_selected_series_id;
+            if (ImGui::Selectable(row->label.c_str(), chosen)) {
+                state.market_selected_series_id = row->id;
+                state.market_selected_series_label = row->label;
+                open_chart(input, *session, *row);
+            }
+            if (chosen)
+                ImGui::SetItemDefaultFocus();
+        }
+        if (visible.empty())
+            ImGui::TextDisabled("No series matches the filter.");
+        ImGui::EndCombo();
+    }
+
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_RowBg
         | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp
         | ImGuiTableFlags_ScrollY;
@@ -151,37 +201,24 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
 
-        for (const auto& row : input.market.series()) {
-            if (state.market_synthetic_only
-                && row.producer_kind != "SYNTHETIC") {
-                continue;
-            }
-            if (state.market_own_party_only && !session_party.empty()
-                && row.party_id != session_party) {
-                continue;
-            }
-            if (!contains_ci(row.label, filter)
-                && !contains_ci(row.asset_class, filter)
-                && !contains_ci(row.uri, filter)
-                && !contains_ci(row.producer_kind, filter)) {
-                continue;
-            }
-
+        for (const auto* row : visible) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::Selectable(row.label.c_str(), false,
+            ImGui::Selectable(row->label.c_str(), false,
                 ImGuiSelectableFlags_SpanAllColumns
                     | ImGuiSelectableFlags_AllowDoubleClick);
             if (ImGui::IsItemHovered()
                 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                open_chart(input, *session, row);
+                state.market_selected_series_id = row->id;
+                state.market_selected_series_label = row->label;
+                open_chart(input, *session, *row);
             }
-            ImGui::SetItemTooltip("%s", row.uri.c_str());
+            ImGui::SetItemTooltip("%s", row->uri.c_str());
 
             ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", row.asset_class.c_str());
+            ImGui::TextDisabled("%s", row->asset_class.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", row.producer_kind.c_str());
+            ImGui::TextDisabled("%s", row->producer_kind.c_str());
         }
         ImGui::EndTable();
     }
