@@ -661,6 +661,9 @@ private:
         std::string account_id;
         std::unique_ptr<worker::market_stream> stream;
         std::unordered_map<std::string, std::string> watched;
+
+        /** @brief Series refused by the watch cap, logged only once. */
+        std::unordered_set<std::string> refused;
     };
 
     std::unordered_map<std::string, market_stream_entry> market_streams_;

@@ -62,6 +62,9 @@ struct market_stream_options final {
  */
 class HEDGR_RUNTIME_EXPORT market_stream final {
 public:
+    /** @brief The most series one session may watch at once. */
+    static constexpr std::size_t max_watched_series = 512;
+
     explicit market_stream(market_stream_options options);
     ~market_stream();
 
@@ -108,6 +111,11 @@ public:
     /** @brief Series currently subscribed. */
     [[nodiscard]] std::size_t subscriptions() const noexcept {
         return subscriptions_.load(std::memory_order_relaxed);
+    }
+
+    /** @brief Buckets dropped because the frame loop was too far behind. */
+    [[nodiscard]] std::size_t dropped() const noexcept {
+        return ring_.dropped();
     }
 
 private:

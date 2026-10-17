@@ -3305,14 +3305,19 @@ void instance_manager::pump_market_streams() {
         const auto instance_id = sessions_.instance_id(*session);
         const auto account_id = sessions_.account_id(*session);
         const auto* catalogue = market_.catalogue(instance_id, account_id);
-        if (catalogue == nullptr) {
+        if (catalogue == nullptr
+            || catalogue->state
+                == model_state::catalogue_state::failed) {
             /*
              * A restored chart has a series id and no catalogue to turn it into
              * the URI a subscription needs. Reading the catalogue is what the
              * series browser does; doing it here as well is what lets a chart
-             * that outlived the process come back to life without one.
+             * that outlived the process come back to life without one. A
+             * failed read is left to the browser's cadence rather than retried
+             * on every frame.
              */
-            start_market_catalogue_read(windows_.id(window));
+            if (catalogue == nullptr)
+                start_market_catalogue_read(windows_.id(window));
             continue;
         }
 
@@ -3361,6 +3366,15 @@ void instance_manager::pump_market_streams() {
         for (const auto& [series_id, uri] : desired) {
             if (entry.watched.contains(series_id))
                 continue;
+            if (entry.watched.size() >= worker::market_stream::max_watched_series) {
+                if (entry.refused.insert(series_id).second) {
+                    BOOST_LOG_SEV(lg(), ores::logging::warn)
+                        << "Not watching series '" << series_id
+                        << "': the session already watches the maximum of "
+                        << worker::market_stream::max_watched_series;
+                }
+                continue;
+            }
             entry.stream->watch(series_id, uri);
             entry.watched.emplace(series_id, uri);
             start_market_backfill(entry.instance_id, entry.account_id,
