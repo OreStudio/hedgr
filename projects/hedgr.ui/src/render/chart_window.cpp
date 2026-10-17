@@ -94,6 +94,33 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
     return std::format("{:.{}f}", value, decimals);
 }
 
+/**
+ * @brief The span a chart starts on, measured back from its newest point.
+ *
+ * A synthetic series is written with a back-dated close as well as the moment
+ * it ticked, so the newest read holds points from the previous business day.
+ * Plotting all of them squeezes the last few minutes into the right edge; the
+ * reader who opens a live series is asking what it did just now. Five minutes
+ * is the window the header states, and a series with no recent points at all,
+ * such as the imported vendor history, still plots in full.
+ */
+constexpr std::int64_t live_window_ns =
+    std::int64_t{5} * 60 * 1'000'000'000;
+
+/** @brief The first index of the points that fall in the live window. */
+[[nodiscard]] std::size_t live_window_start(
+    const std::vector<domain::market_point>& points) {
+    if (points.size() < 2)
+        return 0;
+    const auto newest = points.back().at_ns;
+    const auto cutoff = newest - live_window_ns;
+    std::size_t first = 0;
+    while (first + 1 < points.size() && points[first].at_ns < cutoff)
+        ++first;
+    /* Two points are the least a line needs; a sparse series keeps it all. */
+    return points.size() - first < 2 ? 0 : first;
+}
+
 /** @brief The series as flags and its name, the header's left end. */
 void draw_series_name(std::string_view label) {
     const auto pair = widget::currencies_of(label);
@@ -164,7 +191,8 @@ void render_chart(window_handle handle, const render_input& input,
 
     if (snapshot != nullptr && !snapshot->points.empty()) {
         const auto& points = snapshot->points;
-        const double first = points.front().value;
+        const std::size_t start = live_window_start(points);
+        const double first = points[start].value;
         const double last = points.back().value;
         const double change = last - first;
         const double percent = first != 0.0 ? change / first * 100.0 : 0.0;
@@ -178,7 +206,10 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::TextColored(tint, "%+.2f%%", percent);
 
         ImGui::SameLine();
-        ImGui::TextDisabled("%zu points", points.size());
+        ImGui::TextDisabled("%s", start > 0 ? "5m" : "all");
+
+        ImGui::SameLine();
+        ImGui::TextDisabled("%zu points", points.size() - start);
 
         if (snapshot->observed_at_ns != 0
             && input.now_ns >= snapshot->observed_at_ns) {
@@ -212,7 +243,8 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
             const auto& points = snapshot->points;
-            const double first = points.front().value;
+            const std::size_t start = live_window_start(points);
+            const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
             const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
@@ -220,11 +252,12 @@ void render_chart(window_handle handle, const render_input& input,
 
             std::vector<double> xs;
             std::vector<double> ys;
-            xs.reserve(points.size());
-            ys.reserve(points.size());
+            xs.reserve(points.size() - start);
+            ys.reserve(points.size() - start);
             double low = last;
             double high = last;
-            for (const auto& point : points) {
+            for (std::size_t i = start; i < points.size(); ++i) {
+                const auto& point = points[i];
                 xs.push_back(static_cast<double>(point.at_ns) / 1.0e9);
                 ys.push_back(point.value);
                 low = std::min(low, point.value);
