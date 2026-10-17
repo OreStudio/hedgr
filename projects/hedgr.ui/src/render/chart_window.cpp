@@ -34,6 +34,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <deque>
 #include <ctime>
 #include <format>
 #include <string>
@@ -139,14 +140,10 @@ constexpr std::int64_t live_threshold_ns =
 
 /** @brief The first index of the points that fall in @p span_ns. */
 [[nodiscard]] std::size_t live_window_start(
-    const std::vector<domain::market_point>& points, std::int64_t now_ns,
-    std::int64_t span_ns) {
-    if (points.size() < 2 || now_ns <= 0 || span_ns <= 0)
+    const std::deque<domain::market_point>& points, std::int64_t span_ns) {
+    if (points.size() < 2 || span_ns <= 0)
         return 0;
-    const auto newest = points.back().at_ns;
-    if (newest <= 0 || now_ns - newest > live_threshold_ns)
-        return 0;
-    const auto cutoff = newest - span_ns;
+    const auto cutoff = points.back().at_ns - span_ns;
     std::size_t first = 0;
     while (first + 1 < points.size() && points[first].at_ns < cutoff)
         ++first;
@@ -223,10 +220,21 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::SameLine();
     draw_series_name(chart->label);
 
-    if (snapshot != nullptr && !snapshot->points.empty()) {
-        const auto& points = snapshot->points;
-        const std::size_t start = live_window_start(points, input.now_ns,
-            state.market_chart_span_ns);
+    if (snapshot != nullptr) {
+        const auto& points = snapshot->level(
+            state.market_chart_span_ns == 0
+                ? domain::market_level::coarse
+                : state.market_chart_span_ns <= 2 * domain::market_coarse_ns
+                ? domain::market_level::fine
+                : state.market_chart_span_ns <= 2 * 24 * domain::market_coarse_ns
+                ? domain::market_level::medium
+                : domain::market_level::coarse);
+        if (!points.empty()) {
+        const bool live = snapshot->observed_at_ns != 0
+            && input.now_ns >= snapshot->observed_at_ns
+            && input.now_ns - snapshot->observed_at_ns <= live_threshold_ns;
+        const std::size_t start = live_window_start(points,
+            live ? state.market_chart_span_ns : 0);
         const double first = points[start].value;
         const double last = points.back().value;
         const double change = last - first;
@@ -241,8 +249,6 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::TextColored(tint, "%+.2f%%", percent);
         ImGui::PopFont();
 
-        const bool live = input.now_ns > 0
-            && input.now_ns - points.back().at_ns <= live_threshold_ns;
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         if (!live) {
             ImGui::TextDisabled("All points");
@@ -292,10 +298,11 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("\u00b7");
             ImGui::SameLine();
             ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(poll_colour),
-                "polled %.0f s ago", age_s);
+                age_s < 3.0 ? "live" : "stale %.0f s", age_s);
             ImGui::SetItemTooltip("%s",
-                "The window reads the series on its cadence; this is when the "
-                "last read finished");
+                "Ticks arrive on the session's market subscription; this is "
+                "when the last one landed");
+        }
         }
     }
 
@@ -315,12 +322,25 @@ void render_chart(window_handle handle, const render_input& input,
         if (snapshot == nullptr
             || (!snapshot->is_read() && snapshot->failure.empty())) {
             ImGui::TextDisabled("Reading the series...");
-        } else if (snapshot->points.empty()) {
+        } else if (snapshot->fine.empty() && snapshot->medium.empty()
+            && snapshot->coarse.empty()) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
-            const auto& points = snapshot->points;
-            const std::size_t start = live_window_start(points, input.now_ns,
-                state.market_chart_span_ns);
+            const auto& points = snapshot->level(
+                state.market_chart_span_ns == 0
+                    ? domain::market_level::coarse
+                    : state.market_chart_span_ns <= 2 * domain::market_coarse_ns
+                    ? domain::market_level::fine
+                    : state.market_chart_span_ns
+                            <= 2 * 24 * domain::market_coarse_ns
+                    ? domain::market_level::medium
+                    : domain::market_level::coarse);
+            const bool live = snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns
+                && input.now_ns - snapshot->observed_at_ns
+                        <= live_threshold_ns;
+            const std::size_t start = live_window_start(points,
+                live ? state.market_chart_span_ns : 0);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;

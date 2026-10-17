@@ -141,6 +141,9 @@ struct event final {
     /** @brief Tenant IAM resolved, for session_authenticated. */
     std::string tenant_name;
 
+    /** @brief Key of the tenant IAM resolved, for session_authenticated. */
+    std::string tenant_id;
+
     /**
      * @brief The context the session runs in, for session_authenticated.
      *

@@ -182,6 +182,7 @@ void market_table::append_point(std::string_view instance_id,
         break;
     }
     snapshot.observed_at_ns = std::max(snapshot.observed_at_ns, observed_at_ns);
+    snapshot.failure.clear();
 }
 
 void market_table::fail_points(std::string_view instance_id,

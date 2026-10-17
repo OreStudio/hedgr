@@ -29,6 +29,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/folder_repository.hpp"
@@ -341,6 +342,20 @@ private:
     /** @brief Asks for one series' points, on the window's session. */
     void start_market_points_read(std::string_view window_id,
         std::string_view series_id);
+
+    /** @brief Seeds one watched series' history on a fresh connection. */
+    void start_market_backfill(std::string_view instance_id,
+        std::string_view account_id, std::string_view series_id);
+
+    /** @brief Opens the live stream for one authenticated session. */
+    void start_market_stream(const model::event::event& ev);
+
+    /** @brief Stops and forgets one session's live stream. */
+    void stop_market_stream(std::string_view instance_id,
+        std::string_view account_id);
+
+    /** @brief Reconciles watches, drains buckets and applies them to the model. */
+    void pump_market_streams();
     void do_probe_instance(const model::command::command& cmd);
     void do_probe_all();
 
@@ -633,6 +648,22 @@ private:
 
     /** @brief The session-and-series whose points read is out. */
     std::unordered_set<std::string> points_reading_;
+
+    /**
+     * @brief One authenticated session's live prices.
+     *
+     * The stream owns the connection and its thread; the manager owns the
+     * watch set, the backfill and the drain into the model. Keyed by the
+     * session's running key.
+     */
+    struct market_stream_entry final {
+        std::string instance_id;
+        std::string account_id;
+        std::unique_ptr<worker::market_stream> stream;
+        std::unordered_map<std::string, std::string> watched;
+    };
+
+    std::unordered_map<std::string, market_stream_entry> market_streams_;
 
     /**
      * @brief The attempt each pair is on, by the pair's running key.
