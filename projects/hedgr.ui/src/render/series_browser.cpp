@@ -298,7 +298,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             ImGui::PushID(row->id.c_str());
             const bool chosen =
                 row->id == state.market_selected_series_id;
-            if (ImGui::Selectable("##combo-row", chosen)) {
+            if (ImGui::Selectable("##combo-row", chosen,
+                    ImGuiSelectableFlags_None,
+                    ImVec2(0.0f, hedgr::ui::widget::flag_height + 4.0f))) {
                 state.market_selected_series_id = row->id;
                 state.market_selected_series_label = row->label;
                 open_chart(input, *session, *row);
@@ -331,7 +333,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableHeadersRow();
 
         for (const auto* row : visible) {
-            ImGui::TableNextRow();
+            ImGui::TableNextRow(ImGuiTableRowFlags_None,
+                hedgr::ui::widget::flag_height + 6.0f);
             ImGui::TableNextColumn();
             ImGui::PushID(row->id.c_str());
             ImGui::Selectable("##row", false,

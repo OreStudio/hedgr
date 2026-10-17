@@ -96,7 +96,17 @@ namespace {
     for (const auto& point : points) {
         if (point.at_ns <= 0)
             continue;
-        by_bucket[point.at_ns / interval] = point;
+        auto [found, inserted] = by_bucket.try_emplace(point.at_ns / interval,
+            domain::market_point{.at_ns = point.at_ns, .value = point.value,
+                .open = point.value, .high = point.value,
+                .low = point.value});
+        if (inserted)
+            continue;
+        auto& bucket = found->second;
+        bucket.at_ns = point.at_ns;
+        bucket.value = point.value;
+        bucket.high = std::max(bucket.high, point.value);
+        bucket.low = std::min(bucket.low, point.value);
     }
     std::deque<domain::market_point> result;
     for (const auto& [bucket, point] : by_bucket) {
@@ -120,14 +130,16 @@ void merge_level(std::deque<domain::market_point>& ring,
     std::size_t capacity) {
     if (seeded.empty())
         return;
-    std::map<std::int64_t, double> merged;
+    std::map<std::int64_t, domain::market_point> merged;
     for (const auto& point : seeded)
-        merged[point.at_ns] = point.value;
+        merged[point.at_ns] = point;
     for (const auto& point : ring)
-        merged[point.at_ns] = point.value;
+        merged[point.at_ns] = point;
     ring.clear();
-    for (const auto& [at_ns, value] : merged)
-        ring.push_back(domain::market_point{.at_ns = at_ns, .value = value});
+    for (const auto& [at_ns, point] : merged) {
+        static_cast<void>(at_ns);
+        ring.push_back(point);
+    }
     while (ring.size() > capacity)
         ring.pop_front();
 }

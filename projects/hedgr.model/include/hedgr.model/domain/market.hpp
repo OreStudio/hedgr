@@ -111,8 +111,23 @@ struct market_point final {
     /** @brief The observation time, in nanoseconds since the Unix epoch. */
     std::int64_t at_ns = 0;
 
-    /** @brief The observed value. */
+    /** @brief The observed value, and the close of a bucket. */
     double value = 0.0;
+
+    /**
+     * @brief The bucket's first value.
+     *
+     * Zero on a point that was not built from a bucket, which a candle reads
+     * as "use the value for all four prices". Live aggregation and backfill
+     * fill all of open, high and low.
+     */
+    double open = 0.0;
+
+    /** @brief The highest value in the bucket. */
+    double high = 0.0;
+
+    /** @brief The lowest value in the bucket. */
+    double low = 0.0;
 };
 
 /**

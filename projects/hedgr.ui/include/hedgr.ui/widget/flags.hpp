@@ -28,10 +28,10 @@
 namespace hedgr::ui::widget {
 
 /** @brief The width of a flag at its natural height. */
-inline constexpr float flag_width = 16.0f;
+inline constexpr float flag_width = 32.0f;
 
 /** @brief The height of a flag, one row of text. */
-inline constexpr float flag_height = 11.0f;
+inline constexpr float flag_height = 22.0f;
 
 /**
  * @brief Whether this build knows a currency's flag.
@@ -59,9 +59,9 @@ struct currency_pair final {
 currencies_of(std::string_view label);
 
 /**
- * @brief Draws one currency's flag at @p top_left, sixteen by eleven pixels.
+ * @brief Draws one currency's flag at @p top_left, thirty-two by twenty-two pixels.
  *
- * The flags are drawn rather than decoded, because a 16 pixel flag needs a few
+ * The flags are drawn rather than decoded, because a large flag needs a few
  * bars and a canton and nothing more, and a sprite sheet would put a decoder,
  * an upload and an asset licence on the path that draws a list. The artwork is
  * simplified to what identifies the currency at this size.

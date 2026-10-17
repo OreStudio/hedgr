@@ -887,6 +887,9 @@ TEST_CASE("a backfill fills all three levels and live points win",
     const auto* snapshot = market.points("i-1", "a-1", "s-1");
     REQUIRE(snapshot != nullptr);
     REQUIRE(snapshot->fine.size() == 3);
+    REQUIRE(snapshot->fine.front().open == 1.0);
+    REQUIRE(snapshot->fine.front().high == 2.0);
+    REQUIRE(snapshot->fine[1].high == 3.0);
     REQUIRE(snapshot->fine.back().value == 4.0);
     REQUIRE(snapshot->medium.size() == 2);
     REQUIRE(snapshot->coarse.size() == 1);
@@ -969,6 +972,9 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     REQUIRE(out.front().level == market_level::fine);
     REQUIRE(out.front().point.at_ns == 800'000'000);
     REQUIRE(out.front().point.value == 2.0);
+    REQUIRE(out.front().point.open == 1.0);
+    REQUIRE(out.front().point.high == 2.0);
+    REQUIRE(out.front().point.low == 1.0);
 
     aggregator.on_tick(61'200'000'000, 4.0);
     REQUIRE(ring.drain(out) == 2);
@@ -976,6 +982,10 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     REQUIRE(out[0].point.value == 3.0);
     REQUIRE(out[1].level == market_level::medium);
     REQUIRE(out[1].point.at_ns == 1'200'000'000);
+    REQUIRE(out[1].point.open == 1.0);
+    REQUIRE(out[1].point.high == 3.0);
+    REQUIRE(out[1].point.low == 1.0);
+    REQUIRE(out[1].point.value == 3.0);
 
     /* A late tick is dropped by every level, not written out of order. */
     aggregator.on_tick(500'000'000, 9.0);

@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.model/state/bucket_aggregator.hpp"
+#include <algorithm>
 #include <utility>
 
 namespace hedgr::model::state {
@@ -55,8 +56,14 @@ void bucket_aggregator::on_tick(std::int64_t at_ns, double value) {
                     .point = current_[i]});
             }
             bucket_start_[i] = bucket;
+            current_[i] = domain::market_point{.at_ns = at_ns, .value = value,
+                .open = value, .high = value, .low = value};
+        } else {
+            current_[i].at_ns = at_ns;
+            current_[i].value = value;
+            current_[i].high = std::max(current_[i].high, value);
+            current_[i].low = std::min(current_[i].low, value);
         }
-        current_[i] = domain::market_point{.at_ns = at_ns, .value = value};
     }
 }
 
