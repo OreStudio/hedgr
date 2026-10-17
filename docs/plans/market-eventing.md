@@ -161,10 +161,12 @@ with no poll, logged its first live tick, and showed the age of the last
 arrival. The tick stream subscribed with the session's party and the price
 landed in the model through the ring.
 
-Two environment problems surfaced and are not in this path. The running
-marketdata service encodes `recorded_at` with a space between the date and the
-time, while the current ORE headers parse the dotted form, so the catalogue
-read fails to decode until the service is rebuilt from the same source. And
+Two environment problems surfaced and are not in this path. The catalogue read failed to decode because the client had reached
+reflect-cpp's default time parser instead of ORE's, which accepts the
+deployment's timestamp shape; the ORE reflectors are now included before the
+protocol headers in every translation unit that decodes one. The running
+marketdata service is also older than the current ORE source and should be
+rebuilt with it. And
 ORE's NATS disconnect callback can log after the logging core is torn down,
 which segfaults at exit; the callback is in libores.nats, after the client has
 finished.

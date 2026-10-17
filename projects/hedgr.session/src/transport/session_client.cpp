@@ -29,6 +29,7 @@
 #include <span>
 #include <string>
 #include <utility>
+#include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include "ores.iam.api/messaging/account_operations_protocol.hpp"
 #include "ores.iam.api/messaging/bootstrap_protocol.hpp"
 #include "ores.iam.api/messaging/login_protocol.hpp"
@@ -43,7 +44,6 @@
 #include "hedgr.session/market/series_label.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
-#include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
