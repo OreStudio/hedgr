@@ -20,6 +20,7 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/probe.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -30,6 +31,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <ctime>
@@ -95,33 +97,56 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 }
 
 /**
- * @brief The span a chart starts on, measured back from its newest point.
+ * @brief The spans the header offers, as buttons.
  *
- * A synthetic series is written with a back-dated close as well as the moment
- * it ticked, so the newest read holds points from the previous business day.
- * Plotting all of them squeezes the last few minutes into the right edge; the
- * reader who opens a live series is asking what it did just now. Five minutes
- * is the window the header states, and a series with no recent points at all,
- * such as the imported vendor history, still plots in full.
+ * A live series is written with a back-dated close as well as the moment it
+ * ticked, so plotting every point squeezes the recent ticks into the right
+ * edge. One of these is what the reader chooses to see instead.
  */
-constexpr std::int64_t live_window_ns =
-    std::int64_t{5} * 60 * 1'000'000'000;
+struct chart_span final {
+    const char* label;
+    std::int64_t ns;
+};
+
+constexpr std::array<chart_span, 6> chart_spans{{
+    {"1M", std::int64_t{1} * 60 * 1'000'000'000},
+    {"5M", std::int64_t{5} * 60 * 1'000'000'000},
+    {"15M", std::int64_t{15} * 60 * 1'000'000'000},
+    {"1H", std::int64_t{60} * 60 * 1'000'000'000},
+    {"1D", std::int64_t{24} * 60 * 60 * 1'000'000'000},
+    {"All", 0},
+}};
 
 /**
- * @brief The first index of the points that fall in the live window.
+ * @brief How old a series may be and still be read as a live feed.
  *
- * A series whose newest point is older than the window is history, not a live
- * feed, and history is plotted whole: the imported vendor series end years ago
- * and cropping them to five minutes would leave two points and a lie.
+ * A series whose newest point is older than this is history, and history is
+ * plotted whole whatever span is chosen: the imported vendor series end years
+ * ago, and cropping one to five minutes would leave two points and a lie.
  */
+constexpr std::int64_t live_threshold_ns =
+    std::int64_t{10} * 60 * 1'000'000'000;
+
+/** @brief The date of one instant, in the same zone as the axis ticks. */
+[[nodiscard]] std::string format_date(std::int64_t at_ns) {
+    const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
+    std::tm utc{};
+    gmtime_r(&seconds, &utc);
+    char buffer[32]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y", &utc);
+    return buffer;
+}
+
+/** @brief The first index of the points that fall in @p span_ns. */
 [[nodiscard]] std::size_t live_window_start(
-    const std::vector<domain::market_point>& points, std::int64_t now_ns) {
-    if (points.size() < 2 || now_ns <= 0)
+    const std::vector<domain::market_point>& points, std::int64_t now_ns,
+    std::int64_t span_ns) {
+    if (points.size() < 2 || now_ns <= 0 || span_ns <= 0)
         return 0;
     const auto newest = points.back().at_ns;
-    if (newest <= 0 || now_ns - newest > live_window_ns)
+    if (newest <= 0 || now_ns - newest > live_threshold_ns)
         return 0;
-    const auto cutoff = newest - live_window_ns;
+    const auto cutoff = newest - span_ns;
     std::size_t first = 0;
     while (first + 1 < points.size() && points[first].at_ns < cutoff)
         ++first;
@@ -184,9 +209,10 @@ void render_chart(window_handle handle, const render_input& input,
         : nullptr;
 
     /*
-     * One row of chrome above the plot and no more. A trading screen is read at
-     * a glance, so what the reader needs is the series, the last price, the
-     * change and the freshness, in that order, on one line.
+     * Two rows of chrome above the plot and no more. The first is the series,
+     * the last price, the change and the span; the second is the date, the
+     * point count and the poll's age. A trading screen is read at a glance, so
+     * the first row carries what changes and the second what a reader checks.
      */
     if (widget::icon_button("refresh", icon::refresh,
             "Read the series again")) {
@@ -199,7 +225,8 @@ void render_chart(window_handle handle, const render_input& input,
 
     if (snapshot != nullptr && !snapshot->points.empty()) {
         const auto& points = snapshot->points;
-        const std::size_t start = live_window_start(points, input.now_ns);
+        const std::size_t start = live_window_start(points, input.now_ns,
+            state.market_chart_span_ns);
         const double first = points[start].value;
         const double last = points.back().value;
         const double change = last - first;
@@ -208,16 +235,51 @@ void render_chart(window_handle handle, const render_input& input,
         const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
 
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        ImGui::PushFont(icon::numeric_font());
         ImGui::TextColored(tint, "%s", format_price(last).c_str());
-
         ImGui::SameLine();
         ImGui::TextColored(tint, "%+.2f%%", percent);
+        ImGui::PopFont();
 
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", start > 0 ? "5m" : "all");
+        const bool live = input.now_ns > 0
+            && input.now_ns - points.back().at_ns <= live_threshold_ns;
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        if (!live) {
+            ImGui::TextDisabled("All points");
+            ImGui::SetItemTooltip("%s",
+                "The newest point is older than ten minutes, so the series is "
+                "history and is plotted whole");
+        } else {
+            for (const auto& span : chart_spans) {
+                const bool selected = span.ns == state.market_chart_span_ns;
+                if (selected) {
+                    ImGui::PushStyleColor(ImGuiCol_Button,
+                        ImGui::ColorConvertU32ToFloat4(
+                            theme::rail_selection_bar));
+                }
+                if (ImGui::SmallButton(span.label))
+                    state.market_chart_span_ns = span.ns;
+                if (selected)
+                    ImGui::PopStyleColor();
+                if (span.ns == 0) {
+                    ImGui::SetItemTooltip("%s", "Plot the whole series");
+                } else {
+                    ImGui::SetItemTooltip("Plot the last %s", span.label);
+                }
+                ImGui::SameLine();
+            }
+        }
+        ImGui::NewLine();
 
+        /*
+         * The date once, rather than in every tick, and the freshness beside
+         * it. The ticks themselves carry only the time of day.
+         */
+        ImGui::PushFont(icon::numeric_font());
+        ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
+        ImGui::PopFont();
         ImGui::SameLine();
-        ImGui::TextDisabled("%zu points", points.size() - start);
+        ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
 
         if (snapshot->observed_at_ns != 0
             && input.now_ns >= snapshot->observed_at_ns) {
@@ -226,6 +288,8 @@ void render_chart(window_handle handle, const render_input& input,
             const ImU32 poll_colour = age_s > 10.0
                 ? theme::readiness_colour(domain::readiness::bootstrapping)
                 : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+            ImGui::SameLine();
+            ImGui::TextDisabled("\u00b7");
             ImGui::SameLine();
             ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(poll_colour),
                 "polled %.0f s ago", age_s);
@@ -255,7 +319,8 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
             const auto& points = snapshot->points;
-            const std::size_t start = live_window_start(points, input.now_ns);
+            const std::size_t start = live_window_start(points, input.now_ns,
+                state.market_chart_span_ns);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
@@ -281,13 +346,15 @@ void render_chart(window_handle handle, const render_input& input,
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
                 | ImPlotFlags_NoMenus;
-            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_AutoFit
-                | ImPlotAxisFlags_NoGridLines;
+            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_AutoFit;
             constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit
                 | ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
+                ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
+            ImGui::PushFont(icon::numeric_font());
             if (ImPlot::BeginPlot("##series", ImVec2(-1.0f, -1.0f),
                     plot_flags)) {
                 ImPlot::SetupAxes("", "", x_flags, y_flags);
@@ -296,9 +363,11 @@ void render_chart(window_handle handle, const render_input& input,
                  * intraday one needs the minute. The span decides, because the
                  * formatter sees one tick and not the axis.
                  */
-                const bool wide = xs.size() > 1
-                    && (xs.back() - xs.front()) > 90.0 * 24.0 * 3600.0;
-                const char* pattern = wide ? "%d %b %Y" : "%d %b %H:%M";
+                const double seconds = xs.size() > 1
+                    ? xs.back() - xs.front() : 0.0;
+                const char* pattern = seconds <= 6.0 * 3600.0 ? "%H:%M:%S"
+                    : seconds <= 90.0 * 24.0 * 3600.0 ? "%d %b %H:%M"
+                    : "%d %b %Y";
                 ImPlot::SetupAxisFormat(ImAxis_X1, format_time,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
@@ -338,6 +407,8 @@ void render_chart(window_handle handle, const render_input& input,
                     format_price(last).c_str());
                 ImPlot::EndPlot();
             }
+            ImGui::PopFont();
+            ImPlot::PopStyleColor();
             ImPlot::PopStyleVar(2);
         }
     }

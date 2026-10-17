@@ -122,6 +122,22 @@ std::filesystem::path instance_icon_directory_path() {
  * An empty result means fall back to the font embedded in ImGui, which always
  * exists.
  */
+std::filesystem::path numeric_font_path() {
+    std::vector<std::filesystem::path> candidates;
+    if (const char* home = std::getenv("HOME"); home != nullptr && *home != '\0') {
+        const auto user_fonts = std::filesystem::path(home) / ".local/share/fonts";
+        candidates.push_back(user_fonts / "JetBrainsMono-Regular.ttf");
+        candidates.push_back(user_fonts / "RobotoMono-Regular.ttf");
+    }
+    candidates.push_back(
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+    candidates.push_back(
+        "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf");
+    candidates.push_back(
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf");
+    return first_existing(candidates);
+}
+
 std::filesystem::path base_font_path() {
     std::vector<std::filesystem::path> candidates;
 
@@ -198,7 +214,20 @@ namespace {
 
 }
 
+namespace {
+
+ImFont* numeric_font_instance = nullptr;
+
+}
+
 namespace hedgr::ui::icon {
+
+ImFont* numeric_font() {
+    if (numeric_font_instance != nullptr)
+        return numeric_font_instance;
+    ImGuiIO& io = ImGui::GetIO();
+    return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
+}
 
 void load_ui_fonts(float base_size_px) {
     ImGuiIO& io = ImGui::GetIO();
@@ -221,6 +250,19 @@ void load_ui_fonts(float base_size_px) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Loaded the interface font from " << base.string();
         io.Fonts->AddFontFromFileTTF(base.string().c_str(), base_size_px);
+    }
+
+    /*
+     * The numbers get a face of their own. It is loaded before the icons are
+     * merged, so the icon glyphs stay on the base font and the numbers' face
+     * carries digits and nothing else.
+     */
+    const auto numeric = numeric_font_path();
+    if (!numeric.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Loaded the numeric font from " << numeric.string();
+        numeric_font_instance =
+            io.Fonts->AddFontFromFileTTF(numeric.string().c_str(), base_size_px);
     }
 
     /*

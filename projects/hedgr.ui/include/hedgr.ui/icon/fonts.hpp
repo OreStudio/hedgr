@@ -23,6 +23,8 @@
 #include "hedgr.ui/export.hpp"
 #include <filesystem>
 
+struct ImFont;
+
 namespace hedgr::ui::icon {
 
 /**
@@ -42,6 +44,16 @@ namespace hedgr::ui::icon {
  * beside it.
  */
 HEDGR_UI_EXPORT void load_ui_fonts(float base_size_px);
+
+/**
+ * @brief The monospaced face for numbers, or the base face when there is none.
+ *
+ * Prices and time ticks are read as digits in columns, and a proportional face
+ * lets a changing digit move the ones beside it. Every number the interface
+ * shows for a market is set in this face; prose is not. When no monospaced font
+ * is installed the base face is returned, so a caller never has to check.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImFont* numeric_font();
 
 /**
  * @brief The directory holding the per-environment instance illustrations, or

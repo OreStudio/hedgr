@@ -34,6 +34,7 @@
 #include "hedgr.ui/export.hpp"
 #include <array>
 #include <cstdint>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -289,6 +290,15 @@ struct window_ui_state final {
      * not about the session.
      */
     std::string market_party_id;
+
+    /**
+     * @brief The span a chart plots, in nanoseconds.
+     *
+     * Five minutes is what a live series is read for. The header's 1M to All
+     * buttons change it, and each chart window keeps its own choice.
+     */
+    std::int64_t market_chart_span_ns =
+        std::int64_t{5} * 60 * 1'000'000'000;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
