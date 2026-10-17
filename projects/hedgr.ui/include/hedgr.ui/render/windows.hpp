@@ -31,6 +31,10 @@ namespace hedgr::ui::render {
  * It manages every instance and the folder tree they sit in, through the
  * browser widget that the Accounts window is built from as well. Everything it
  * can do is an icon with a tooltip, because there is no menu bar anywhere.
+ *
+ * It carries a close control like every other window. The shortcut bar's entry
+ * for it is what opens it again, and that entry is only drawn while the store
+ * is open, so the close control is offered only then as well.
  */
 HEDGR_UI_EXPORT void render_instances_window(
     hedgr::model::state::window_handle handle, const render_input& input,
@@ -94,6 +98,16 @@ HEDGR_UI_EXPORT void open_instance_edit_for_capture(std::string_view instance_id
  */
 HEDGR_UI_EXPORT void change_instance_field_for_capture(std::string_view field,
     std::string_view value);
+
+/**
+ * @brief Closes the Instances window on the frame it next draws, for a capture.
+ *
+ * The close control is a title bar button that no scripted step can name, and
+ * the frame that has to show the closed root cannot be reached through any
+ * observed control. This pushes the command that the control pushes and nothing
+ * else, so the closed frame is the one a click would have produced.
+ */
+HEDGR_UI_EXPORT void close_instances_for_capture();
 
 /**
  * @brief The accounts of one instance, as a browser over that instance's tree.

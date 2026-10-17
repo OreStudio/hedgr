@@ -35,6 +35,7 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/capture.hpp"
 #include "ImCoolBar.h"
 #include "imgui.h"
 #include <cstdint>
@@ -47,6 +48,7 @@ namespace {
 namespace domain = hedgr::model::domain;
 namespace signal = hedgr::model::signal;
 namespace theme = hedgr::ui::theme;
+namespace widget = hedgr::ui::widget;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shortcut_bar_result;
 
@@ -159,6 +161,15 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
     shortcut_bar_result& result) {
     switch (row.target_kind) {
     case domain::window_kind::instance_manager:
+        /*
+         * The root carries a close control now, and only the runtime can bring
+         * it back, because the row is removed when it closes and raising the
+         * focus of a window that is gone would do nothing. The request opens
+         * the window when the table no longer holds it and sets it open when it
+         * does, and the focus is still asked for because a window that was
+         * already on screen belongs on top of the one the operator is reading.
+         */
+        hedgr::ui::render::request_instances_window(input);
         result.focus_instances = true;
         raise_activation(input, row);
         return;
@@ -219,6 +230,24 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
     }
 
     ImGui::InvisibleButton(id, ImVec2(size, size));
+
+    /*
+     * The entry offers itself to a capture by its row id, so a script can click
+     * the bar the way a person does rather than through a hook beside it. The
+     * entry is the one control here that is painted rather than submitted as a
+     * word, so its rectangle has to be recorded where ImGui's geometry for it
+     * is still current.
+     */
+    widget::capture_element element;
+    const ImVec2 item_min = ImGui::GetItemRectMin();
+    const ImVec2 item_max = ImGui::GetItemRectMax();
+    element.min_x = item_min.x;
+    element.min_y = item_min.y;
+    element.max_x = item_max.x;
+    element.max_y = item_max.y;
+    element.label_min_x = item_min.x;
+    widget::observe_capture_element(row.id, element);
+
     return ImGui::IsItemClicked();
 }
 

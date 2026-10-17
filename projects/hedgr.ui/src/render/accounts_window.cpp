@@ -865,7 +865,6 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     const auto instance_state = instance_state_of(input, instance_id);
     widget::foot_state foot;
     if (!instance_id.empty()) {
-        foot.name = instance_state.name;
         foot.word =
             theme::probe_state_word(instance_state.result, instance_state.observed);
         foot.colour = theme::probe_state_colour(

@@ -122,6 +122,9 @@ std::string pending_capture_field;
 /** @brief The value that capture's field takes, as typing it would leave it. */
 std::string pending_capture_value;
 
+/** @brief Whether a capture asked to see the Instances window closed. */
+bool pending_capture_close_instances = false;
+
 /** @brief Every live folder of one tree, as the browser wants them. */
 [[nodiscard]] std::vector<tree_folder> tree_folders(const render_input& input,
     folder_tree tree) {
@@ -1520,36 +1523,69 @@ void draw_edit_controls(const render_input& input, window_ui_state& window) {
 }
 
 /**
- * @brief The pane's head: the instance's labels and its picture.
+ * @brief The read-only head's name and labels as the first cards of the wall.
  *
- * The head is what the wall below is about. It carries the labels the operator
- * gave the instance and the picture the instance names, and nothing else. The
- * name and the state word that used to sit here are each already on a card, the
- * name in Identity and the state in the Probe state card, and a fact told twice
- * in one pane reads as two facts. The picture is drawn here rather than in a
- * card because it is a square and a card is a line of text, and it takes a
- * card's height so the head reads as the first thing in the wall.
+ * The head used to hold the labels as bare pills so they read as tags rather
+ * than as one more field, and the operator asked for the card back. A card is
+ * what the wall is made of, so a label beside the name reads as a fact about
+ * the instance, which is what it is. The pills inside the card are still the
+ * list's own, drawn by the shared row, so a label is one colour everywhere.
  *
- * The labels sit to the left of the picture, centred against it, because they
- * are the operator's own words for the instance and belong beside the thing
- * they name rather than in a card. The row ends where it ends. SameLine is
- * called only when an item follows it, so the cursor is left below the head and
- * the Identity heading that follows opens on a line of its own. A head that
- * left the cursor on its own line was what drew the name and the state word
- * over the Identity heading.
+ * The two cards take the wall's column width, so the head lines up with the
+ * topic under it. A card that wrapped to a second row is left there rather than
+ * forced wider, because the pane scrolls and a head narrower than the wall is a
+ * head that lies about the grid.
+ */
+void draw_head_cards(const instance& row,
+    const std::vector<widget::label_pill>& pills, float width, float height,
+    int columns) {
+    int column = 0;
+    widget::card_slot(column, columns);
+    widget::draw_card(
+        widget::card_spec{"name", icon::instance, "Name", row.name,
+            "the instance's own name"},
+        width, height);
+
+    if (pills.empty())
+        return;
+
+    widget::card_slot(column, columns);
+    const bool open = widget::begin_card("labels", width, height, false);
+    if (open) {
+        widget::card_title(
+            nullptr, "Labels", ImGui::GetColorU32(theme::dim_text()));
+        const float interior =
+            width - ImGui::GetStyle().WindowPadding.x * 2.0f;
+        static_cast<void>(widget::label_pill_row(pills, interior));
+    }
+    widget::end_card();
+}
+
+/**
+ * @brief The pane's head: the instance's name, its labels and its picture.
  *
- * An instance that names no picture gets no picture space at all, so the
- * laboratory instance's head is its labels alone and the wall begins directly
- * under them. An instance with neither a picture nor a label has no head and
- * the wall begins at the pane's top.
+ * The head is what the wall below is about. Its first two cards are the name
+ * and the labels, and the picture is taken out of the pane's right edge rather
+ * than set beside them, because the operator wants the name read first and the
+ * square not to push the facts along with it. Edit mode draws no cards here,
+ * because the name and the labels are the form's own fields and belong under
+ * Identity with the rest of them.
+ *
+ * The square takes a card's height so the head reads as the first thing in the
+ * wall. An instance that names no picture gets no picture space at all, so the
+ * laboratory instance's head is its two cards or its name alone, and the wall
+ * begins directly under them. A head that ends in cards still leaves the cursor
+ * below the row, because a cursor left beside the picture would draw the
+ * Connection heading on the same line and over it.
  *
  * The pane carries no control of its own. The shortcut toggle that used to sit
  * at its top right lives in the toolbar, so what is left here is the instance's
  * own report. Save and Reset join the head only while the pane is editable,
- * pushed against the pane's right edge.
+ * pushed against the pane's right edge, and the picture steps aside for them.
  */
 void draw_pane_header(const render_input& input, window_ui_state& window,
-    const instance& row, bool editing) {
+    const instance& row, bool editing, float pane_width, float width,
+    float height, int columns) {
     const std::string directory = input.instance_icons != nullptr
         ? input.instance_icons->directory : std::string{};
     const std::string picture_path =
@@ -1564,43 +1600,44 @@ void draw_pane_header(const render_input& input, window_ui_state& window,
     const bool missing_picture = picture == 0 && !row.icon_key.empty();
     const bool has_picture = picture != 0 || missing_picture;
     const auto attached = labels_of(input, labelling_owner::instance, row.id);
-
-    if (attached.empty() && !has_picture && !editing)
-        return;
+    const auto pills = widget::pills_for(attached);
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const float icon_width = ImGui::GetFrameHeight();
-    const float controls = editing
-        ? icon_width * 2.0f + style.ItemSpacing.x
-        : 0.0f;
-    /*
-     * The picture is as tall as a card, which is what makes it sit in the wall
-     * rather than above it. The labels are given the room left once the picture
-     * and any controls have taken theirs, so a long set of them is counted
-     * rather than drawn under either.
-     */
+    const float controls =
+        editing ? icon_width * 2.0f + style.ItemSpacing.x : 0.0f;
     const float side = widget::card_height();
-    const float pane_room = ImGui::GetContentRegionAvail().x;
     const float gap = style.ItemSpacing.x;
-    const float controls_room = controls > 0.0f ? controls + gap : 0.0f;
-    const float picture_room = has_picture ? side + gap : 0.0f;
-    const float pill_room = pane_room - controls_room - picture_room;
+    const float start_x = ImGui::GetCursorPosX();
+    const float start_y = ImGui::GetCursorPosY();
+    float bottom = start_y;
 
     /*
-     * The labels are the first item of the row. They claim the picture's height
-     * as their band, so a short pill is centred against the tall square beside
-     * it instead of sitting at its top. SameLine is asked for only when
-     * something follows, so a head that ends in a pill row still leaves the
-     * cursor below the row.
+     * The head shares the wall's own column width while two cards and the
+     * square fit on one line together, which is what lines the head up with the
+     * topic under it. A pane too narrow for all three falls back to the column
+     * rule applied to the room the square leaves, so the cards are never drawn
+     * under the picture. The picture is taken from the pane's right edge either
+     * way.
      */
-    if (!attached.empty() && pill_room > 0.0f) {
-        static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
-            pill_room, has_picture ? side : 0.0f));
-        if (has_picture || editing)
-            ImGui::SameLine();
+    if (!editing) {
+        const float picture_room = has_picture ? side + gap : 0.0f;
+        int head_columns = columns;
+        float head_width = width;
+        if (2.0f * head_width + widget::card_gap + picture_room > pane_width) {
+            const float cards_room =
+                std::max(pane_width - picture_room, 1.0f);
+            head_columns = widget::card_columns(cards_room);
+            head_width = widget::card_width(cards_room, head_columns);
+        }
+        draw_head_cards(row, pills, head_width, height, head_columns);
+        bottom = std::max(bottom, ImGui::GetCursorPosY());
     }
 
     if (has_picture) {
+        if (!editing)
+            ImGui::SetCursorPos(ImVec2(
+                start_x + std::max(pane_width - side, 0.0f), start_y));
         if (picture != 0) {
             ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
             ImGui::SetItemTooltip("%s", picture_path.c_str());
@@ -1613,22 +1650,30 @@ void draw_pane_header(const render_input& input, window_ui_state& window,
                 "%s No picture is installed for the key \"%s\".", icon::warning,
                 row.icon_key.c_str());
         }
-        if (editing)
-            ImGui::SameLine();
+        bottom = std::max(bottom, start_y + side);
     }
 
     /*
      * Save and Reset are pushed against the pane's right edge while the pane is
      * editable, measured from the room left on the line rather than from the
-     * pane's own width, so the pair lands there whatever the labels and the
-     * picture took.
+     * pane's own width, so the pair lands there whatever the picture took.
      */
     if (editing) {
+        if (has_picture)
+            ImGui::SameLine();
         const float room = ImGui::GetContentRegionAvail().x;
         ImGui::SetCursorPosX(
             ImGui::GetCursorPosX() + std::max(room - controls, 0.0f));
         draw_edit_controls(input, window);
+        bottom = std::max(bottom, ImGui::GetCursorPosY());
     }
+
+    /*
+     * The cursor is put back to the pane's left, below everything the head
+     * drew. Leaving it at the picture or at the controls would open the first
+     * topic on that line, beside the head rather than under it.
+     */
+    ImGui::SetCursorPos(ImVec2(start_x, bottom));
 }
 
 /**
@@ -1803,22 +1848,11 @@ void draw_read_only_topics(const render_input& input, const instance& row,
     std::vector<widget::topic_spec> topics;
 
     /*
-     * The labels are not a card here. They are drawn at the pane's head beside
-     * the picture, where they read as the instance's tags rather than as one
-     * more field of its record, and the same pills the list draws are used
-     * there so a label is one colour on every surface.
+     * There is no Identity topic. Its two facts are the head's own cards and
+     * the picture it named is the head's square, so a heading here would sit
+     * over cards the head has already drawn. The wall begins where the head
+     * stops, with where the instance is and how the client reaches it.
      */
-    widget::topic_spec identity;
-    identity.title = "Identity";
-    identity.cards.push_back(
-        text_card("name", icon::instance, "Name", row.name,
-            "the instance's own name"));
-    const std::string directory = input.instance_icons != nullptr
-        ? input.instance_icons->directory : std::string{};
-    add(identity, "picture-file", nullptr, "Picture file",
-        widget::instance_picture_path(directory, row.icon_key),
-        "the illustration this instance names", 0, true);
-    topics.push_back(std::move(identity));
 
     widget::topic_spec connection;
     connection.title = "Connection";
@@ -1957,7 +1991,8 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
     const float width = widget::card_width(pane_width, columns);
     const float height = widget::card_height();
 
-    draw_pane_header(input, window, row, editing);
+    draw_pane_header(
+        input, window, row, editing, pane_width, width, height, columns);
 
     if (editing)
         draw_edit_topics(
@@ -1989,18 +2024,32 @@ void change_instance_field_for_capture(std::string_view field,
     pending_capture_value = std::string{value};
 }
 
+void close_instances_for_capture() {
+    pending_capture_close_instances = true;
+}
+
 void render_instances_window(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
-    /*
-     * The Instances window is root: it ignores whether the window table thinks
-     * it is open, because closing it would leave an interface with no way to
-     * open anything again.
-     */
     static_cast<void>(handle);
 
     ImGui::PushID("instances");
+
+    /*
+     * A capture asks for the root to be closed the way the control asks for it,
+     * by pushing the close command the title bar pushes, so the frame that
+     * follows is one a click on the control would have produced. It is read here
+     * because this is the frame the window is still drawn on; the command
+     * removes the row and the frames after it draw no root at all.
+     */
+    if (pending_capture_close_instances) {
+        pending_capture_close_instances = false;
+        hedgr::model::command::command request;
+        request.kind = hedgr::model::command::command_kind::close_window;
+        request.window_id = "instance-manager";
+        input.commands.push(std::move(request));
+    }
 
     if (!pending_capture_folder.empty()) {
         state.browser.selected_folder = pending_capture_folder;
@@ -2032,10 +2081,10 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * because a warning that appears when there is nothing to lose is worse
      * than no warning at all.
      *
-     * Closing the window is not a way out of an edit. The Instances window is
-     * root and carries no close control, so there is no path here to warn
-     * about. The lock and the overlays are not ways out either, because they
-     * leave the drafts where they are and the pane resumes them.
+     * Closing the window is not a way out of an edit either. The window's own
+     * scratch is keyed by its stable id, so the drafts outlive the close and
+     * the shortcut that reopens the window resumes them. The lock and the
+     * overlays are not ways out either, for the same reason.
      */
     if (state.instance_edit.active && !state.instance_edit.confirm_discard) {
         const bool left_leaf =
@@ -2139,15 +2188,11 @@ void render_instances_window(hedgr::model::state::window_handle handle,
      * none at all, has no state to report and the bar is the message alone.
      */
     widget::foot_state foot;
-    if (!state.browser.selected_leaf.empty()) {
-        const auto handle = input.instances.find(state.browser.selected_leaf);
-        if (handle) {
-            const auto probe = status_of(input, state.browser.selected_leaf);
-            foot.name = input.instances.get(*handle)->name;
-            foot.word = theme::probe_state_word(probe.result, probe.observed);
-            foot.colour =
-                theme::probe_state_colour(probe.result, probe.observed);
-        }
+    if (!state.browser.selected_leaf.empty()
+        && input.instances.find(state.browser.selected_leaf)) {
+        const auto probe = status_of(input, state.browser.selected_leaf);
+        foot.word = theme::probe_state_word(probe.result, probe.observed);
+        foot.colour = theme::probe_state_colour(probe.result, probe.observed);
     }
 
     /*

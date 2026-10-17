@@ -247,13 +247,13 @@ void workspace::render(const render_input& input) {
             static_cast<hedgr::model::domain::window_kind>(kind_column[index]);
 
         /*
-         * The open flag culls every window except the Instances window, which
-         * is root: closing it would leave an interface with no way to open
-         * anything again, so it is drawn whether or not the flag is set. The
-         * runtime still owns the flag and may suppress the row entirely.
+         * The open flag culls every window the operator has closed, the
+         * Instances window included. The root used to be drawn whatever the flag
+         * said, because closing it left no way to open it again. The shortcut
+         * bar now asks the runtime to open it, so it follows the same rule as
+         * every other window and disappears when it is closed.
          */
-        if (open_column[index] == 0
-            && kind != hedgr::model::domain::window_kind::instance_manager)
+        if (open_column[index] == 0)
             continue;
 
         const hedgr::model::state::window_handle handle{
@@ -346,18 +346,21 @@ void workspace::render(const render_input& input) {
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
         /*
-         * Every window but the root carries a close control on its title bar.
-         * The root does not, because closing it would leave an interface with
-         * no way to open anything again: it is where the toolbar and the tree
-         * that opens the other windows live.
+         * Every window carries a close control, the root included. Closing is a
+         * command rather than a local hide: the runtime owns the window table,
+         * so a window hidden here would come back on the next frame with its own
+         * row still saying it was open, and the two would disagree about a
+         * window nobody could see.
          *
-         * Closing is a command rather than a local hide. The runtime owns the
-         * window table, so a window hidden here would come back on the next
-         * frame with its own row still saying it was open, and the two would
-         * disagree about a window nobody could see.
+         * The root is closable only while the store is open. The shortcut bar is
+         * what opens it again and the bar is drawn from the catalogue, so a root
+         * closed while the store is locked could not be brought back, because
+         * the lock control lives on the root and there would be nothing left to
+         * click.
          */
         const bool closable =
-            kind != hedgr::model::domain::window_kind::instance_manager;
+            kind != hedgr::model::domain::window_kind::instance_manager
+            || shows_instances(input);
         bool keep_open = true;
         if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr)) {
             /*
