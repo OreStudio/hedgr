@@ -347,6 +347,8 @@ void workspace::render(const render_input& input) {
             ? ImVec2(1180.0f, 820.0f)
             : kind == hedgr::model::domain::window_kind::command_centre
             ? ImVec2(1120.0f, 760.0f)
+            : kind == hedgr::model::domain::window_kind::chart
+            ? ImVec2(1000.0f, 620.0f)
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
