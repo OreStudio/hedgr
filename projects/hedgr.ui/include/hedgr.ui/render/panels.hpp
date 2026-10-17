@@ -113,6 +113,20 @@ HEDGR_UI_EXPORT void request_accounts_window(const render_input& input,
     std::string_view instance_id);
 
 /**
+ * @brief Asks for the Instances window.
+ *
+ * The window is found or made by the runtime, which owns the window table. The
+ * operator can close the root like any other window, and this is the request
+ * that brings it back. A request for a window the table already holds sets it
+ * open rather than adding a second, so the same call both raises a window on
+ * screen and reopens one that was closed.
+ *
+ * The shortcut bar asks through this because its Instances entry is a shortcut
+ * like any other and the bar should not have to know how a window is made.
+ */
+HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
+
+/**
  * @brief The decoded picture of one instance, as a backend texture, or zero.
  *
  * Zero means the instance has no picture rather than that the drawing failed.

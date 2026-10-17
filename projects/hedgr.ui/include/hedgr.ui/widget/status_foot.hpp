@@ -33,14 +33,15 @@ namespace hedgr::ui::widget {
  *
  * A value rather than a drawing call, because the foot knows how to lay a state
  * out and knows nothing about instances or accounts: each window resolves its
- * own selection to a name, a word and a colour and hands the result over. That
- * is what lets the Instances window and the Accounts window share one foot
- * without either reaching into the other's tables.
+ * own selection to a word and a colour and hands the result over. That is what
+ * lets the Instances window and the Accounts window share one foot without
+ * either reaching into the other's tables.
+ *
+ * The name of the thing the state is about is deliberately not here. The pane
+ * above already names the selection, and repeating it at the foot made the two
+ * read as two different subjects.
  */
 struct foot_state final {
-    /** @brief The name of the thing the state is about. */
-    std::string name;
-
     /** @brief The state's own word, or empty when there is no state. */
     std::string word;
 
@@ -67,11 +68,10 @@ struct foot_state final {
  * of its own is what pins the line to the window's foot instead of leaving it
  * wherever the browser happened to stop.
  *
- * A small coloured disc sits at the foot's left end, ahead of the message, and
- * carries the same colour as the state word at the right end. A reader gets the
- * state at a glance from the dot and reads it in words at the right, which is
- * what this interface asks of a colour: it is learned, and the word is what a
- * person reads the first time.
+ * A small coloured disc sits at the foot's right end, ahead of the state word
+ * and carrying the same colour as it. A reader gets the state at a glance from
+ * the dot and reads it in words beside it, which is what this interface asks of
+ * a colour: it is learned, and the word is what a person reads the first time.
  *
  * @param status The bar whose message is drawn, advanced to this frame.
  * @param now_ns The frame's clock, for the fade.

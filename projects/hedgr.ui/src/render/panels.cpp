@@ -170,6 +170,13 @@ void request_accounts_window(const render_input& input,
     input.commands.push(std::move(request));
 }
 
+void request_instances_window(const render_input& input) {
+    hedgr::model::command::command request;
+    request.kind = hedgr::model::command::command_kind::open_window;
+    request.new_window_kind = domain::window_kind::instance_manager;
+    input.commands.push(std::move(request));
+}
+
 std::uint64_t instance_icon_texture(const render_input& input,
     std::string_view instance_id) {
     if (input.instance_icons == nullptr)

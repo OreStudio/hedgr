@@ -153,6 +153,15 @@ void application::run() {
         ui::render::open_instance_edit_for_capture(editing);
 
     /*
+     * The root's close control is a title bar button, which a scripted step
+     * cannot name. A capture that has to show the closed state asks for the
+     * close here instead, through the command the control itself pushes.
+     */
+    if (const char* closed = std::getenv("HEDGR_CAPTURE_CLOSE_INSTANCES");
+        closed != nullptr && *closed != '\0')
+        ui::render::close_instances_for_capture();
+
+    /*
      * A capture has no keyboard, so the frame that shows a changed field needs
      * the draft written for it. The pair is read together, because a value with
      * no field names nothing to write it into.

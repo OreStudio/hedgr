@@ -31,16 +31,14 @@ namespace {
 /**
  * @brief The status line's own metrics.
  *
- * Two text rows and a little air, measured from the current font rather than
- * fixed, so a theme that installs a larger face does not clip the message.
- *
- * Two and not one because the messages are sentences and the window can be
- * made narrow: a single row would either clip the end of the sentence or be
- * elided, and a fact that is worth announcing is worth announcing in full.
- * The second row costs nothing when the sentence fits on one.
+ * Two text rows, measured from the current font rather than fixed, so a theme
+ * that installs a larger face does not clip the message. Two and not one
+ * because the messages are sentences and the window can be made narrow: a
+ * single row would either clip the end of the sentence or be elided, and a fact
+ * that is worth announcing is worth announcing in full. The second row costs
+ * nothing when the sentence fits on one.
  */
 constexpr int status_row_lines = 2;
-constexpr float status_row_extra = 8.0f;
 
 /**
  * @brief The rows an error gets, which is one more than a remark gets.
@@ -132,8 +130,17 @@ float status_foot_height(const status_bar& status) {
     const int rows = status.severity() == status_severity::error
         ? status_error_row_lines
         : status_row_lines;
+    /*
+     * The air above and below the rows is the status line child's own padding,
+     * counted here because the child is created with this height. A child
+     * without a border is given no padding unless it asks for it, and the child
+     * below asks, so the two have to be the same number or the text is clipped.
+     * Taking it from the style is what keeps the message clear of the separator
+     * the foot draws above it when the font changes size.
+     */
+    const ImGuiStyle& style = ImGui::GetStyle();
     return ImGui::GetTextLineHeight() * static_cast<float>(rows)
-        + status_row_extra;
+        + style.WindowPadding.y * 2.0f;
 }
 
 void draw_status_foot(status_bar& status, std::int64_t now_ns,
@@ -165,8 +172,15 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
      * why the surface is pushed over ChildBg and popped again below.
      */
     ImGui::PushStyleColor(ImGuiCol_ChildBg, hedgr::ui::theme::status_surface());
+    /*
+     * The line child asks for its padding rather than getting it free. A child
+     * with no border is given none, and without this the message sits flush
+     * against the separator above it no matter how much height the foot
+     * reserved, because all of that air falls below the text.
+     */
     ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
-        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        ImGuiChildFlags_AlwaysUseWindowPadding,
+        ImGuiWindowFlags_NoScrollbar);
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const bool has_state = !state.word.empty();
@@ -183,9 +197,7 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
     const float dot_side = ImGui::GetTextLineHeight();
     const float state_width = !has_state
         ? 0.0f
-        : dot_side + gap
-            + ImGui::CalcTextSize(state.name.c_str()).x + gap
-            + ImGui::CalcTextSize(state.word.c_str()).x;
+        : dot_side + gap + ImGui::CalcTextSize(state.word.c_str()).x;
 
     /*
      * The state is put against the foot's right edge, and the message is
@@ -209,11 +221,6 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
             state.colour, 32);
 
         ImGui::SetCursorPosX(state_x + dot_side + gap);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(state.name.c_str());
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::ColorConvertU32ToFloat4(state.colour));
         ImGui::TextUnformatted(state.word.c_str());
