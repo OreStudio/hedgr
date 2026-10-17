@@ -132,6 +132,11 @@ bool shows_instances(const render_input& input) noexcept {
     return input.store_lock == domain::store_lock::unlocked;
 }
 
+bool sign_in_needs_password(domain::store_lock lock,
+    bool has_credential) noexcept {
+    return lock != domain::store_lock::unlocked || !has_credential;
+}
+
 bool shows_window(domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept {
     static_cast<void>(window_id);

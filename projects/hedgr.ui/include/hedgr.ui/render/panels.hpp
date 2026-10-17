@@ -88,6 +88,17 @@ shows_instances(const render_input& input) noexcept;
  * they are about to use. It is drawn, and its renderer blanks its own rows
  * from @c shows_instances.
  */
+/**
+ * @brief Whether pressing Sign in has to ask for a password first.
+ *
+ * Two reasons and only two. A closed store cannot be read, so a remembered
+ * password is out of reach. An account with no remembered password has nothing
+ * to read even when the store is open. The rule lives here so it can be tested
+ * without a window, and so the button and the prompt cannot disagree about it.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
+    hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
+
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept;

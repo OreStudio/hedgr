@@ -742,6 +742,23 @@ TEST_CASE("the new window kinds have renderers and titles", "[renderer]") {
         == "Command centre: inst-gone");
 }
 
+TEST_CASE("sign in asks for a password for the two reasons it can", "[renderer]") {
+    using hedgr::ui::render::sign_in_needs_password;
+
+    /*
+     * A closed store cannot be read, so a remembered password is out of reach.
+     * An account with nothing remembered has nothing to read even when the
+     * store is open. Opening a password prompt for any other pair would make
+     * the prompt the default rather than the exception.
+     */
+    REQUIRE(sign_in_needs_password(store_lock::locked, true));
+    REQUIRE(sign_in_needs_password(store_lock::absent, true));
+    REQUIRE(sign_in_needs_password(store_lock::failed, true));
+    REQUIRE(sign_in_needs_password(store_lock::unlocked, false));
+
+    REQUIRE_FALSE(sign_in_needs_password(store_lock::unlocked, true));
+}
+
 TEST_CASE("a command centre is hidden while the store is locked", "[renderer]") {
     /*
      * The command centre is a live surface, like a workspace, but its title and

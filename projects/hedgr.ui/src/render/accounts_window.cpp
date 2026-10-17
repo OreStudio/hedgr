@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
 #include "hedgr.model/command/command.hpp"
@@ -722,7 +723,8 @@ void accounts_window_actions(const render_input& input,
      * mean the click did nothing until the refusal came back, which reads as a
      * button that is broken rather than as a password that is missing.
      */
-    if (input.store_lock != store_lock::unlocked || !row->has_credential) {
+    if (hedgr::ui::render::sign_in_needs_password(input.store_lock,
+            row->has_credential)) {
         state.browser.sign_in_open = true;
         return;
     }

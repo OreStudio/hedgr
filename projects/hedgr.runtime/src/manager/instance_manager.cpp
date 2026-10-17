@@ -1709,6 +1709,13 @@ void instance_manager::do_save_account(const command::command& cmd) {
      * save that races the root's creation still has somewhere to put the row.
      */
     domain::account row = cmd.account_row;
+    /*
+     * The flag is not part of a saved row, so an edit that built its value from
+     * the form would clear it and make the next sign-in ask for a password the
+     * store already holds.
+     */
+    if (previous)
+        row.has_credential = previous->has_credential;
     if (row.folder_id.empty())
         row.folder_id = domain::accounts_root_id_for(row.instance_id);
 
