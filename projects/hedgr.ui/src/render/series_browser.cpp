@@ -24,6 +24,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include <cctype>
@@ -63,6 +64,33 @@ using hedgr::ui::render::window_ui_state;
             return true;
     }
     return false;
+}
+
+/*
+ * The flags sit left of the name, on the row's own background, so a list of
+ * pairs reads as a currency list before it reads as a word list.
+ */
+void draw_series_row(std::string_view label, float extra_indent) {
+    const ImVec2 rect_min = ImGui::GetItemRectMin();
+    const ImVec2 rect_size = ImGui::GetItemRectSize();
+    const auto draw = ImGui::GetWindowDrawList();
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    float x = rect_min.x + 4.0f + extra_indent;
+    const float flag_y = rect_min.y + (rect_size.y - hedgr::ui::widget::flag_height) * 0.5f;
+    if (!pair.base.empty()) {
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.base);
+        x += hedgr::ui::widget::flag_width + 2.0f;
+    }
+    if (!pair.quote.empty()) {
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote);
+        x += hedgr::ui::widget::flag_width + 4.0f;
+    }
+    if (x == rect_min.x + 4.0f + extra_indent)
+        x += 4.0f;
+    const float text_y =
+        rect_min.y + (rect_size.y - ImGui::GetTextLineHeight()) * 0.5f;
+    draw->AddText(ImVec2(x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
+        std::string{label}.c_str());
 }
 
 void open_chart(const render_input& input,
@@ -196,15 +224,18 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     if (ImGui::BeginCombo("##series-combo", preview,
             ImGuiComboFlags_HeightLarge)) {
         for (const auto* row : visible) {
+            ImGui::PushID(row->id.c_str());
             const bool chosen =
                 row->id == state.market_selected_series_id;
-            if (ImGui::Selectable(row->label.c_str(), chosen)) {
+            if (ImGui::Selectable("##combo-row", chosen)) {
                 state.market_selected_series_id = row->id;
                 state.market_selected_series_label = row->label;
                 open_chart(input, *session, *row);
             }
+            draw_series_row(row->label, 0.0f);
             if (chosen)
                 ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
         }
         if (visible.empty())
             ImGui::TextDisabled("No series matches the filter.");
@@ -228,9 +259,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         for (const auto* row : visible) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::Selectable(row->label.c_str(), false,
+            ImGui::PushID(row->id.c_str());
+            ImGui::Selectable("##row", false,
                 ImGuiSelectableFlags_SpanAllColumns
                     | ImGuiSelectableFlags_AllowDoubleClick);
+            draw_series_row(row->label, 0.0f);
             if (ImGui::IsItemHovered()
                 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 state.market_selected_series_id = row->id;
@@ -239,6 +272,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             }
             ImGui::SetItemTooltip("%s", row->uri.c_str());
 
+            ImGui::PopID();
             ImGui::TableNextColumn();
             ImGui::TextDisabled("%s", row->asset_class.c_str());
             ImGui::TableNextColumn();
