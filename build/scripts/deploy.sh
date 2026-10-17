@@ -83,7 +83,10 @@ install -Dm644 "current/share/applications/${entry}" "${applications_dir}/${entr
 # launcher to one file and lets it follow the current symlink this script
 # already moves. The path belongs to the remote, so it is resolved here instead
 # of being baked in at build time.
-sed -i "s|^Exec=.*$|Exec=${PWD}/current/bin/hedgr.imgui|" \
+# Only the command is rewritten. The arguments the entry carries, the shared
+# logging flags among them, are the entry's own and a replacement of the whole
+# line would drop every one of them.
+sed -i "s|^Exec=hedgr.imgui|Exec=${PWD}/current/bin/hedgr.imgui|" \
     "${applications_dir}/${entry}"
 
 # A shell can read the desktop database rather than the directory, so refresh
