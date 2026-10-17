@@ -398,13 +398,45 @@ result<session_account> session_client::authenticate(std::string_view principal,
             ? answer.selected_party_id : answer.default_party_id;
         nats_.set_auth(std::move(info));
 
+        /*
+         * The party the answer scoped the token to, by name. The list the
+         * answer carries is the only place the name is stated, so it is read
+         * here rather than looked up later.
+         */
+        std::string party_name;
+        for (const auto& party : answer.available_parties) {
+            if (party.id == answer.selected_party_id) {
+                party_name = party.name;
+                break;
+            }
+        }
+
         account_ = session_account{
             .token = answer.token,
             .tenant_id = answer.tenant_id,
             .tenant_name = answer.tenant_name,
-            .party_name = std::string(),
+            .party_id = answer.selected_party_id,
+            .party_name = party_name,
             .principal = answer.username.empty()
                 ? std::string(principal) : answer.username};
+
+        /*
+         * A session with no party and parties to choose from has to choose one
+         * before it can act: the deployment's later reads are scoped by the
+         * party, and a single-use token that only select_party may present
+         * would refuse them. The account's default is the account's own
+         * preference, so it wins; otherwise the first party is the only
+         * deterministic choice left.
+         */
+        if (account_.party_id.empty() && !answer.available_parties.empty()) {
+            const std::string chosen = !answer.default_party_id.empty()
+                ? answer.default_party_id
+                : answer.available_parties.front().id;
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Session has no party; selecting '" << chosen << "'";
+            if (auto selected = select_party(chosen); !selected)
+                return std::unexpected(selected.error());
+        }
 
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Signed in as '" << account_.principal << "' on '"

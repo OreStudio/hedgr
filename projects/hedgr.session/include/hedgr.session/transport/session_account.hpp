@@ -44,6 +44,9 @@ struct session_account final {
     /** @brief Human label of that tenant. */
     std::string tenant_name;
 
+    /** @brief Key of the party this session is scoped to, empty for none. */
+    std::string party_id;
+
     /** @brief The party this session is scoped to, empty until one is chosen. */
     std::string party_name;
 

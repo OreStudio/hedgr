@@ -827,6 +827,8 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     }
 
     ImGui::PushID("accounts");
+    hedgr::ui::render::draw_identity_bar(
+        hedgr::ui::render::identity_of(input, handle));
 
     const auto root = input.folders.root(folder_tree::accounts, instance_id);
     const std::string root_id = root ? input.folders.get(*root)->id : std::string{};

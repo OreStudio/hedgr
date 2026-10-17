@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
 #include "hedgr.model/command/command.hpp"
@@ -202,8 +203,7 @@ void draw_bootstrap_card(const render_input& input, hedgr::model::state::instanc
  * a zero beside a failure reads as a measurement.
  */
 void draw_overview(const render_input& input, const domain::deployment_snapshot& snapshot,
-    std::string_view window_id, std::string_view instance_name,
-    std::string_view principal) {
+    std::string_view window_id, std::string_view instance_name) {
     const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
     const int columns = widget::card_columns(pane_width);
     const float width = widget::card_width(pane_width, columns);
@@ -280,10 +280,6 @@ void draw_overview(const render_input& input, const domain::deployment_snapshot&
         .glyph = icon::instance,
         .title = "Instance",
         .value = std::string{instance_name}});
-    deployment.cards.push_back(widget::card_spec{.id = "cc-principal",
-        .glyph = icon::account,
-        .title = "Signed in as",
-        .value = std::string{principal}});
     deployment.cards.push_back(widget::card_spec{.id = "cc-observed",
         .glyph = icon::clock,
         .title = "Read",
@@ -412,6 +408,8 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * have no way to tell.
      */
     if (!live) {
+        hedgr::ui::render::draw_identity_bar(
+            hedgr::ui::render::identity_of(input, handle));
         if (!scratch.session_loss_reported) {
             BOOST_LOG_SEV(lg(), ores::logging::info)
                 << "Command centre for '" << instance_name
@@ -437,6 +435,8 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * against a deployment that cannot answer for itself.
      */
     if (bootstrap != nullptr && bootstrap->in_bootstrap_mode) {
+        hedgr::ui::render::draw_identity_bar(
+            hedgr::ui::render::identity_of(input, handle));
         if (!scratch.bootstrap_reported) {
             BOOST_LOG_SEV(lg(), ores::logging::info)
                 << "Command centre for '" << instance_name
@@ -491,6 +491,9 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         ImGui::EndMenuBar();
     }
 
+    hedgr::ui::render::draw_identity_bar(
+        hedgr::ui::render::identity_of(input, handle));
+
     /*
      * The tab strip is the working set, and the menu is the index. A tab is
      * removed only after the strip has been walked, because removing one while
@@ -500,11 +503,6 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         scratch.screens.emplace_back("overview");
 
     const auto& snapshot = input.sessions.deployment(*session);
-    std::string principal;
-    if (const auto account = input.accounts.find(
-            input.sessions.account_id(*session))) {
-        principal = input.accounts.get(*account)->principal;
-    }
 
     std::vector<std::string> closing;
     if (ImGui::BeginTabBar("##cc-tabs",
@@ -525,7 +523,7 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
                     draw_tenants(snapshot);
                 else
                     draw_overview(input, snapshot,
-                        input.windows.id(handle), instance_name, principal);
+                        input.windows.id(handle), instance_name);
                 ImGui::EndTabItem();
             }
             if (!open)

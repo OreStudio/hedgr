@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
 #include "hedgr.model/command/command.hpp"
@@ -102,6 +103,8 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         workspace != nullptr ? workspace->account_id : std::string{};
 
     ImGui::PushID("workspace");
+    hedgr::ui::render::draw_identity_bar(
+        hedgr::ui::render::identity_of(input, handle));
 
     const auto facts = session
         ? widget::collect_session_facts(input.sessions, input.accounts, *session)
