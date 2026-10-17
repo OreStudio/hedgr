@@ -105,7 +105,11 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::SameLine();
     ImGui::TextUnformatted(chart->label.c_str());
 
-    const auto* snapshot = input.market.points(chart->series_id);
+    const auto session = input.windows.session_of(handle);
+    const auto* snapshot = session.has_value()
+        ? input.market.points(input.sessions.instance_id(*session),
+            input.sessions.account_id(*session), chart->series_id)
+        : nullptr;
     if (snapshot == nullptr || (!snapshot->is_read()
             && snapshot->failure.empty())) {
         ImGui::TextDisabled("Reading the series...");

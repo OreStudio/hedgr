@@ -30,7 +30,7 @@
 
 namespace hedgr::model::state {
 
-/** @brief Where the series catalogue's last read stands. */
+/** @brief Where one session's series catalogue read stands. */
 enum class catalogue_state : std::uint8_t {
     /** @brief Nothing has been asked for. */
     unread = 0,
@@ -42,59 +42,67 @@ enum class catalogue_state : std::uint8_t {
     failed = 3,
 };
 
+/** @brief The catalogue one session read. */
+struct market_catalogue final {
+    /** @brief The series, in the order the chooser shows them. */
+    std::vector<domain::market_series_row> series;
+
+    /** @brief Where the read stands. */
+    catalogue_state state = catalogue_state::unread;
+
+    /** @brief Why the last read failed, or empty. */
+    std::string error;
+};
+
 /**
- * @brief The market series this process knows, and their plotted points.
+ * @brief The market series each session knows, and the points each chart holds.
  *
- * The catalogue is one list because a chooser shows one list. The points are
- * per series because every chart owns its own window and its own time range,
- * and two charts of two series must not wait on each other.
+ * Everything is keyed by the session, not by the process. Two accounts on two
+ * instances are two catalogues: a series is chosen by a login, the list a login
+ * may read is its own, and a chart read with one account's token must not be
+ * handed to a window signed in as another. The points carry the same pair for
+ * the same reason.
  */
 class HEDGR_MODEL_EXPORT market_table final {
 public:
-    /** @brief Records the catalogue and marks the read ready. */
-    void set_catalogue(std::vector<domain::market_series_row> rows);
+    /** @brief Records one session's catalogue and marks the read ready. */
+    void set_catalogue(std::string_view instance_id,
+        std::string_view account_id,
+        std::vector<domain::market_series_row> rows);
 
-    /** @brief Marks the catalogue read as started. */
-    void begin_catalogue();
+    /** @brief Marks one session's catalogue read as started. */
+    void begin_catalogue(std::string_view instance_id,
+        std::string_view account_id);
 
-    /** @brief Records a failed catalogue read. */
-    void fail_catalogue(std::string message);
+    /** @brief Records a failed catalogue read for one session. */
+    void fail_catalogue(std::string_view instance_id,
+        std::string_view account_id, std::string message);
 
-    /** @brief The series, in the order the chooser shows them. */
-    [[nodiscard]] const std::vector<domain::market_series_row>& series() const
-        noexcept {
-        return series_;
-    }
+    /** @brief One session's catalogue, or nullptr when it has none. */
+    [[nodiscard]] const market_catalogue*
+    catalogue(std::string_view instance_id,
+        std::string_view account_id) const;
 
-    /** @brief Where the catalogue read stands. */
-    [[nodiscard]] catalogue_state catalogue() const noexcept {
-        return catalogue_;
-    }
-
-    /** @brief Why the last catalogue read failed, or empty. */
-    [[nodiscard]] const std::string& catalogue_error() const noexcept {
-        return catalogue_error_;
-    }
-
-    /** @brief Records one series' points and marks the read complete. */
-    void set_points(std::string_view series_id,
+    /** @brief Records one chart's points and marks the read complete. */
+    void set_points(std::string_view instance_id, std::string_view account_id,
+        std::string_view series_id,
         std::vector<domain::market_point> points, std::int64_t observed_at_ns);
 
     /** @brief Records a failed points read, keeping the failure visible. */
-    void fail_points(std::string_view series_id, std::string message,
+    void fail_points(std::string_view instance_id, std::string_view account_id,
+        std::string_view series_id, std::string message,
         std::int64_t observed_at_ns);
 
-    /** @brief The points of one series, or nullptr when none are held. */
+    /** @brief One chart's points, or nullptr when none are held. */
     [[nodiscard]] const domain::market_series_snapshot*
-    points(std::string_view series_id) const;
+    points(std::string_view instance_id, std::string_view account_id,
+        std::string_view series_id) const;
 
-    /** @brief Drops the catalogue and every series' points. */
+    /** @brief Drops every catalogue and every chart. */
     void clear();
 
 private:
-    std::vector<domain::market_series_row> series_;
-    catalogue_state catalogue_ = catalogue_state::unread;
-    std::string catalogue_error_;
+    std::unordered_map<std::string, market_catalogue> catalogues_;
     std::unordered_map<std::string, domain::market_series_snapshot> points_;
 };
 

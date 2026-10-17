@@ -118,19 +118,29 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     ImGui::Checkbox("My party only", &state.market_own_party_only);
     ImGui::SetItemTooltip("%s",
         "Show only the series the session's own party owns");
-    ImGui::SameLine();
-    ImGui::TextDisabled("%zu series", input.market.series().size());
+    const std::string instance_id{input.sessions.instance_id(*session)};
+    const std::string account_id{input.sessions.account_id(*session)};
+    const auto* catalogue =
+        input.market.catalogue(instance_id, account_id);
+    static const std::vector<domain::market_series_row> none;
+    const auto& rows = catalogue != nullptr ? catalogue->series : none;
 
-    const auto catalogue = input.market.catalogue();
-    if (catalogue == hedgr::model::state::catalogue_state::failed) {
+    ImGui::SameLine();
+    ImGui::TextDisabled("%zu series", rows.size());
+
+    const auto catalogue_state = catalogue != nullptr
+        ? catalogue->state
+        : hedgr::model::state::catalogue_state::unread;
+    if (catalogue_state == hedgr::model::state::catalogue_state::failed) {
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
-            "%s", input.market.catalogue_error().c_str());
-    } else if (catalogue == hedgr::model::state::catalogue_state::reading
-        && input.market.series().empty()) {
+            "%s", catalogue->error.c_str());
+    } else if (catalogue_state
+            == hedgr::model::state::catalogue_state::reading
+        && rows.empty()) {
         ImGui::TextDisabled("Reading the market series...");
-    } else if (catalogue == hedgr::model::state::catalogue_state::ready
-        && input.market.series().empty()) {
+    } else if (catalogue_state == hedgr::model::state::catalogue_state::ready
+        && rows.empty()) {
         ImGui::TextDisabled(
             "This deployment holds no market series for this session.");
     }
@@ -144,8 +154,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * overview, and a row in either opens the same chart.
      */
     std::vector<const domain::market_series_row*> visible;
-    visible.reserve(input.market.series().size());
-    for (const auto& row : input.market.series()) {
+    visible.reserve(rows.size());
+    for (const auto& row : rows) {
         if (state.market_synthetic_only
             && row.producer_kind != "SYNTHETIC") {
             continue;
