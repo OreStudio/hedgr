@@ -22,8 +22,10 @@
 #include "ores.marketdata.api/domain/tick_subjects.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
 #include <utility>
 
 namespace {
@@ -128,10 +130,17 @@ bool market_tick_stream::subscribe(std::string series_id,
     try {
         const auto subject = ores::marketdata::domain::market_tick_subject(
             tenant_id_, party_id_, oresmd_uri);
+        auto warned = std::make_shared<std::atomic<bool>>(false);
         auto subscription = client_.subscribe(subject,
-            [handler = std::move(handler)](ores::nats::message msg) {
-                if (auto tick = decode_tick(msg.data))
+            [handler = std::move(handler), warned,
+                subject](ores::nats::message msg) {
+                if (auto tick = decode_tick(msg.data)) {
                     handler(*tick);
+                } else if (!warned->exchange(true)) {
+                    BOOST_LOG_SEV(lg(), ores::logging::warn)
+                        << "Could not decode a market tick on '" << subject
+                        << "' (" << msg.data.size() << " bytes)";
+                }
             });
         subscriptions_.insert_or_assign(std::move(series_id),
             std::move(subscription));

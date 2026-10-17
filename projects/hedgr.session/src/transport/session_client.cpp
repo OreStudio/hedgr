@@ -583,6 +583,7 @@ result<void> session_client::select_party(std::string_view party_id) {
         nats_.set_auth(std::move(info));
 
         account_.token = answer.token;
+        account_.party_id = std::string(party_id);
         account_.party_name = answer.party_name;
         if (!answer.tenant_name.empty())
             account_.tenant_name = answer.tenant_name;
@@ -980,6 +981,9 @@ session_client::market_series(std::uint32_t limit) const {
                 list_market_series_request::nats_subject, request,
                 options_.request_timeout);
         if (!answer) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The market series answer could not be decoded: "
+                << answer.error().what();
             return fail(session_errc::protocol_error,
                 "the market series answer could not be decoded");
         }

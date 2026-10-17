@@ -53,8 +53,14 @@ struct market_stream::series_state final {
 
     void on_tick(const session::market::tick& tick) {
         std::lock_guard lock(mu);
+        const bool first = aggregator.ticks() == 0;
         aggregator.on_tick(tick.at_ns, tick.value);
         ticks.fetch_add(1, std::memory_order_relaxed);
+        if (first) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "First live tick for series '" << series_id << "' at '"
+                << tick.at_ns << "'";
+        }
     }
 
     std::string series_id;

@@ -152,3 +152,19 @@ meaning.
 4. Runtime stream, watch diff, drain, lifecycle.
 5. Remove the chart poll, chart level selection, live indicator.
 6. Capture against a synthetic feed.
+
+## Live check
+
+Verified against brave_hopper on 17 October 2026 by publishing a tick to the
+exact party-scoped subject with the tenant's own credentials. The chart moved
+with no poll, logged its first live tick, and showed the age of the last
+arrival. The tick stream subscribed with the session's party and the price
+landed in the model through the ring.
+
+Two environment problems surfaced and are not in this path. The running
+marketdata service encodes `recorded_at` with a space between the date and the
+time, while the current ORE headers parse the dotted form, so the catalogue
+read fails to decode until the service is rebuilt from the same source. And
+ORE's NATS disconnect callback can log after the logging core is torn down,
+which segfaults at exit; the callback is in libores.nats, after the client has
+finished.
