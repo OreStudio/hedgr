@@ -716,12 +716,13 @@ void accounts_window_actions(const render_input& input,
 
     /*
      * A stored credential is used when there is one and the store is open;
-     * otherwise a password is asked for. Whether one is stored is not something
-     * this side can see -- the sealed blob never leaves the store -- so the
-     * closed-lock case is the one that can be decided here, and the runtime's
-     * refusal is what raises the prompt in every other case.
+     * otherwise a password is asked for. Both halves are known before the
+     * attempt: the lock says whether the store can be read, and the account
+     * says whether there is anything to read. Asking the runtime instead would
+     * mean the click did nothing until the refusal came back, which reads as a
+     * button that is broken rather than as a password that is missing.
      */
-    if (input.store_lock != store_lock::unlocked) {
+    if (input.store_lock != store_lock::unlocked || !row->has_credential) {
         state.browser.sign_in_open = true;
         return;
     }

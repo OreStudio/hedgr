@@ -788,8 +788,26 @@ instance_manager::start(const std::filesystem::path& database_path,
         return std::unexpected(last_error_);
     }
     accounts_.clear();
-    for (const auto& row : accounts.value())
-        static_cast<void>(accounts_.upsert(row));
+
+    /*
+     * Whether each account can sign in without a prompt is a fact about the
+     * local store, read once here as a list of ids. The credentials themselves
+     * are not read: the interface only has to know which accounts have one.
+     */
+    const auto with_credentials = account_repo_->ids_with_credential();
+    if (!with_credentials) {
+        last_error_ = store_failure("cannot read the stored credentials",
+            with_credentials.error());
+        startup_failure_ = last_error_;
+        return std::unexpected(last_error_);
+    }
+    const std::unordered_set<std::string> credential_ids(
+        with_credentials->begin(), with_credentials->end());
+    for (const auto& row : accounts.value()) {
+        auto copy = row;
+        copy.has_credential = credential_ids.contains(row.id);
+        static_cast<void>(accounts_.upsert(copy));
+    }
 
     auto folders = folder_repo_->list();
     if (!folders) {
