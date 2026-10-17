@@ -19,6 +19,7 @@
  */
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/market.hpp"
+#include "hedgr.model/domain/probe.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -128,6 +129,27 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::SameLine();
         ImGui::TextDisabled("%.6g  (%zu points)", last.value,
             snapshot->points.size());
+    }
+
+    /*
+     * The poll's own heartbeat. A plot whose series happens to be still looks
+     * broken if nothing else moves, so the last poll's age is stated; the
+     * colour turns when the read has stopped arriving, which is the case a
+     * reader needs to see.
+     */
+    if (snapshot->observed_at_ns != 0
+        && input.now_ns >= snapshot->observed_at_ns) {
+        const auto age_s = static_cast<double>(
+            input.now_ns - snapshot->observed_at_ns) / 1.0e9;
+        ImGui::SameLine();
+        const ImU32 colour = age_s > 10.0 ? theme::readiness_colour(domain::readiness::bootstrapping)
+                                          : ImGui::GetColorU32(
+                                                ImGuiCol_TextDisabled);
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
+            "polled %.0f s ago", age_s);
+        ImGui::SetItemTooltip("%s",
+            "The window reads the series on its cadence; this is when the "
+            "last read finished");
     }
 
     const ImVec2 available = ImGui::GetContentRegionAvail();

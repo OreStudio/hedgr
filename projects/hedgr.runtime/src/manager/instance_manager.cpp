@@ -2856,7 +2856,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
     if (cmd.new_window_kind == domain::window_kind::series_browser)
         spec.cadence = std::chrono::seconds{60};
     if (cmd.new_window_kind == domain::window_kind::chart)
-        spec.cadence = std::chrono::seconds{5};
+        spec.cadence = std::chrono::seconds{2};
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
