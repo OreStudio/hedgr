@@ -3549,6 +3549,7 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.party_id, ev.token);
+        sessions_.set_parties(*handle, ev.parties);
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
 

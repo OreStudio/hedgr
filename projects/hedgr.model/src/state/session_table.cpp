@@ -47,6 +47,7 @@ void grow(session_columns& columns, std::size_t count) {
     columns.party_name.resize(count);
     columns.party_id.resize(count);
     columns.token.resize(count);
+    columns.parties.resize(count);
     columns.deployment.resize(count);
 }
 
@@ -70,6 +71,7 @@ session_table::insert(std::string instance_id, std::string account_id) {
     columns_.party_name[index].clear();
     columns_.party_id[index].clear();
     columns_.token[index].clear();
+    columns_.parties[index].clear();
     columns_.deployment[index] = domain::deployment_snapshot{};
 
     const session_handle h{index, layout_.generation[index]};
@@ -84,6 +86,7 @@ void session_table::remove(session_handle h) {
 
     // The token is a secret: drop it now rather than leave it in a free slot.
     columns_.token[h.index].clear();
+    columns_.parties[h.index].clear();
     columns_.deployment[h.index] = domain::deployment_snapshot{};
     columns_.mode[h.index] =
         static_cast<std::uint8_t>(domain::session_mode::application);
@@ -144,6 +147,14 @@ void session_table::set_account_result(session_handle h, std::string tenant_name
     columns_.party_name[h.index] = std::move(party_name);
     columns_.party_id[h.index] = std::move(party_id);
     columns_.token[h.index] = std::move(token);
+}
+
+void session_table::set_parties(session_handle h, std::string parties) {
+    columns_.parties[h.index] = std::move(parties);
+}
+
+std::string_view session_table::parties(session_handle h) const {
+    return columns_.parties[h.index];
 }
 
 domain::session_mode session_table::mode(session_handle h) const {

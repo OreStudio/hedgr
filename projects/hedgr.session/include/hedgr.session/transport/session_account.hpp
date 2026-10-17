@@ -21,6 +21,7 @@
 #define HEDGR_SESSION_TRANSPORT_SESSION_ACCOUNT_HPP
 
 #include <string>
+#include <vector>
 
 namespace hedgr::session::transport {
 
@@ -34,6 +35,14 @@ namespace hedgr::session::transport {
  * it is never persisted, never logged, and never copied into the state tables
  * the interface renders. It leaves this struct only as an Authorization header.
  */
+struct party_choice final {
+    /** @brief The party's key. */
+    std::string id;
+
+    /** @brief The party's own name, for the picker. */
+    std::string name;
+};
+
 struct session_account final {
     /** @brief The bearer token presented on every authenticated request. */
     std::string token;
@@ -52,6 +61,15 @@ struct session_account final {
 
     /** @brief The principal the deployment answered with, e.g. a username. */
     std::string principal;
+
+    /**
+     * @brief The parties this login may act as.
+     *
+     * IAM's own list, in the order it sent them. The session acts as one of
+     * these at a time; the rest are choices a person can make, not data they
+     * may be shown by default.
+     */
+    std::vector<party_choice> parties;
 };
 
 }

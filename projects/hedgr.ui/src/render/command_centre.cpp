@@ -390,6 +390,8 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         && input.sessions.token(*session).size() > 0;
 
     widget::foot_state foot;
+    foot.identity = hedgr::ui::render::identity_text(
+        hedgr::ui::render::identity_of(input, handle));
     if (!instance_id.empty()) {
         const auto* probe = instance ? input.probes.get(*instance) : nullptr;
         if (probe != nullptr) {
@@ -408,8 +410,6 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * have no way to tell.
      */
     if (!live) {
-        hedgr::ui::render::draw_identity_bar(
-            hedgr::ui::render::identity_of(input, handle));
         if (!scratch.session_loss_reported) {
             BOOST_LOG_SEV(lg(), ores::logging::info)
                 << "Command centre for '" << instance_name
@@ -435,8 +435,6 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * against a deployment that cannot answer for itself.
      */
     if (bootstrap != nullptr && bootstrap->in_bootstrap_mode) {
-        hedgr::ui::render::draw_identity_bar(
-            hedgr::ui::render::identity_of(input, handle));
         if (!scratch.bootstrap_reported) {
             BOOST_LOG_SEV(lg(), ores::logging::info)
                 << "Command centre for '" << instance_name
@@ -497,9 +495,6 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         }
         ImGui::EndMenuBar();
     }
-
-    hedgr::ui::render::draw_identity_bar(
-        hedgr::ui::render::identity_of(input, handle));
 
     /*
      * The tab strip is the working set, and the menu is the index. A tab is

@@ -209,8 +209,25 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
     const float state_y = ImGui::GetCursorPosY();
     const float state_x = ImGui::GetCursorPosX()
         + ImGui::GetContentRegionAvail().x - state_width;
-    if (!status.empty())
+    if (!status.empty()) {
         draw_status_line(status, now_ns, state_width);
+    } else if (!state.identity.empty()) {
+        /*
+         * The identity is clipped rather than wrapped: a long principal and a
+         * long party name on a narrow window would take the second row and
+         * change the foot's height, and the foot never changes height.
+         */
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float right = ImGui::GetWindowPos().x
+            + ImGui::GetWindowContentRegionMax().x - state_width;
+        ImGui::PushClipRect(origin,
+            ImVec2(right, origin.y + ImGui::GetTextLineHeight()), true);
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextUnformatted(state.identity.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopClipRect();
+    }
 
     if (has_state) {
         ImGui::SetCursorPos(ImVec2(state_x, state_y));

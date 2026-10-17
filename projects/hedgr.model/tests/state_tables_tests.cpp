@@ -231,6 +231,22 @@ TEST_CASE("removing a session drops the token it held", "[session]") {
     REQUIRE(sessions.size() == 0);
 }
 
+TEST_CASE("the parties a login may act as are kept with its session", "[session]") {
+    session_table sessions;
+    const auto handle = sessions.insert("inst-1", "id-1");
+    sessions.set_account_result(handle, "acme", "books", "party-1", "token");
+    const std::string parties{"party-1\x1f"
+        "Books\x1e"
+        "party-2\x1f"
+        "Trading"};
+    sessions.set_parties(handle, parties);
+
+    REQUIRE(sessions.parties(handle) == parties);
+
+    sessions.remove(handle);
+    REQUIRE_FALSE(sessions.contains(handle));
+}
+
 TEST_CASE("the status column stays stride-1 over holes", "[session]") {
     session_table sessions;
     const auto first = sessions.insert("inst-1", "id-1");

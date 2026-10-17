@@ -410,11 +410,12 @@ result<session_account> session_client::authenticate(std::string_view principal,
          * here rather than looked up later.
          */
         std::string party_name;
+        std::vector<transport::party_choice> party_choices;
         for (const auto& party : answer.available_parties) {
-            if (party.id == answer.selected_party_id) {
+            if (party.id == answer.selected_party_id)
                 party_name = party.name;
-                break;
-            }
+            party_choices.push_back(transport::party_choice{
+                .id = party.id, .name = party.name});
         }
 
         account_ = session_account{
@@ -445,13 +446,13 @@ result<session_account> session_client::authenticate(std::string_view principal,
         }
 
         /*
-         * The sign-in answer names a party only when it also carries the list
-         * the name is read from. An account whose sign-in is already scoped to
-         * one party carries the id and no list, so the name is read from the
-         * session's own parties. That read is the one place a party id becomes
-         * a name, and it is allowed to every signed-in account.
+         * The parties this login may act as, read every time rather than only
+         * when the answer left the name out. The sign-in answer names the party
+         * it scoped the token to, but the picker in the series browser needs
+         * every party the account may choose, and IAM's own list is the only
+         * authority for that. A failed read leaves the answer's list in place.
          */
-        if (account_.party_name.empty()) {
+        {
             using ores::iam::messaging::get_my_parties_request;
             using ores::iam::messaging::get_my_parties_response;
 
@@ -486,9 +487,15 @@ result<session_account> session_client::authenticate(std::string_view principal,
                     }
                 } else {
                     for (const auto& party : parties->parties) {
-                        if (party.party_id == account_.party_id) {
+                        if (party.party_id == account_.party_id)
                             account_.party_name = party.name;
-                            break;
+                        const bool known = std::any_of(party_choices.begin(),
+                            party_choices.end(), [&party](const auto& known) {
+                                return known.id == party.party_id;
+                            });
+                        if (!known) {
+                            party_choices.push_back(transport::party_choice{
+                                .id = party.party_id, .name = party.name});
                         }
                     }
                 }
@@ -501,6 +508,8 @@ result<session_account> session_client::authenticate(std::string_view principal,
                     << "The parties of this session could not be read";
             }
         }
+
+        account_.parties = std::move(party_choices);
 
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Signed in as '" << account_.principal << "' on '"

@@ -179,6 +179,15 @@ struct event final {
     /** @brief Bearer token, for session_authenticated. */
     std::string token;
 
+    /**
+     * @brief The parties the login may act as, for session_authenticated.
+     *
+     * Serialised as id, unit separator, name, record separator, repeated. The
+     * event crosses components that may not share a container type, and the
+     * list is a handful of short strings.
+     */
+    std::string parties;
+
     /** @brief Subject the payload arrived on, for session_data. */
     std::string subject;
 

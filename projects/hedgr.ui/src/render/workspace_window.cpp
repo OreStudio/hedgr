@@ -27,6 +27,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include <cstdint>
 #include <format>
@@ -82,12 +83,6 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
     hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
     static_cast<void>(lock);
-    /*
-     * Only the Instances window carries the status line today. The parameter
-     * is here because every renderer takes it, so a window that later has
-     * something to announce needs no change to the frame.
-     */
-    static_cast<void>(status);
     static_cast<void>(state);
 
     /*
@@ -101,6 +96,10 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
     const auto* workspace = std::get_if<hedgr::model::domain::workspace_state>(&shape);
     const std::string account_id =
         workspace != nullptr ? workspace->account_id : std::string{};
+
+    widget::foot_state foot;
+    foot.identity = hedgr::ui::render::identity_text(
+        hedgr::ui::render::identity_of(input, handle));
 
     ImGui::PushID("workspace");
 
@@ -128,9 +127,6 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         ImGui::EndMenuBar();
     }
 
-    hedgr::ui::render::draw_identity_bar(
-        hedgr::ui::render::identity_of(input, handle));
-
     const auto facts = session
         ? widget::collect_session_facts(input.sessions, input.accounts, *session)
         : session_facts{};
@@ -155,6 +151,7 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
             request.window_id = std::string{input.windows.id(handle)};
             input.commands.push(std::move(request));
         }
+        widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
@@ -223,6 +220,7 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         ImGuiCond_Appearing);
     if (!ImGui::CollapsingHeader(std::format("{} Session", icon::clock).c_str(),
             &state.panel_open)) {
+        widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
@@ -294,6 +292,7 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         "client speaks. Nothing is shown rather than something invented.");
     ImGui::PopStyleColor();
 
+    widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();
 }
 
