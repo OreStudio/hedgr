@@ -70,6 +70,37 @@ using hedgr::ui::render::window_ui_state;
  * The flags sit left of the name, on the row's own background, so a list of
  * pairs reads as a currency list before it reads as a word list.
  */
+/** @brief One party in the session's picker. */
+struct party_entry final {
+    std::string id;
+    std::string name;
+};
+
+/**
+ * @brief Reads the session's party list, which the runtime serialised.
+ *
+ * The records are id, unit separator, name, and a record separator between
+ * parties. Parsing it here keeps the model's column a flat string, which is
+ * what every other session column is.
+ */
+[[nodiscard]] std::vector<party_entry> parties_of(std::string_view serialised) {
+    std::vector<party_entry> result;
+    while (!serialised.empty()) {
+        const auto record_end = serialised.find('\x1e');
+        const auto record = serialised.substr(0, record_end);
+        const auto unit = record.find('\x1f');
+        if (unit != std::string_view::npos) {
+            result.push_back(party_entry{
+                .id = std::string{record.substr(0, unit)},
+                .name = std::string{record.substr(unit + 1)}});
+        }
+        if (record_end == std::string_view::npos)
+            break;
+        serialised.remove_prefix(record_end + 1);
+    }
+    return result;
+}
+
 void draw_series_row(std::string_view label, float extra_indent) {
     const ImVec2 rect_min = ImGui::GetItemRectMin();
     const ImVec2 rect_size = ImGui::GetItemRectSize();
@@ -145,10 +176,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     ImGui::Checkbox("Synthetic only", &state.market_synthetic_only);
     ImGui::SetItemTooltip("%s",
         "Show only series a synthetic feed produced");
-    ImGui::SameLine();
-    ImGui::Checkbox("My party only", &state.market_own_party_only);
-    ImGui::SetItemTooltip("%s",
-        "Show only the series the session's own party owns");
     const std::string instance_id{input.sessions.instance_id(*session)};
     const std::string account_id{input.sessions.account_id(*session)};
     const auto* catalogue =
@@ -157,7 +184,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     const auto& rows = catalogue != nullptr ? catalogue->series : none;
 
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu series", rows.size());
+    ImGui::TextDisabled("%zu in tenant", rows.size());
 
     const auto catalogue_state = catalogue != nullptr
         ? catalogue->state
@@ -180,21 +207,48 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     const std::string filter{state.filter.data()};
 
     /*
-     * A deployment keeps a series per party for the same instrument, and the
-     * list is tenant-wide, so the same pair arrives once per party with the
-     * same label. The session acts as one party, and that is the set it should
-     * start on: five rows all reading "FX AUD/USD" are one instrument five
-     * times, not five instruments. The box stays available for a reader who
-     * wants the whole tenant.
+     * The parties this login may act as, from the sign-in answer. The session
+     * is signed in as one of them and this window starts on it. A login whose
+     * answer carried no list still has the party it is scoped to, so the
+     * picker is never empty.
      */
-    if (!state.market_party_default_applied
-        && catalogue_state == hedgr::model::state::catalogue_state::ready) {
-        state.market_party_default_applied = true;
-        state.market_own_party_only = !session_party.empty()
-            && std::any_of(rows.begin(), rows.end(),
-                [&session_party](const auto& row) {
-                    return row.party_id == session_party;
-                });
+    auto parties = parties_of(input.sessions.parties(*session));
+    if (parties.empty() && !session_party.empty()) {
+        parties.push_back(party_entry{.id = session_party,
+            .name = std::string{input.sessions.party_name(*session)}});
+    }
+    if (state.market_party_id.empty()) {
+        state.market_party_id = session_party.empty()
+            ? (parties.empty() ? std::string{} : parties.front().id)
+            : session_party;
+    }
+
+    if (!parties.empty()) {
+        std::string current{state.market_party_id};
+        for (const auto& party : parties) {
+            if (party.id == state.market_party_id)
+                current = party.name;
+        }
+        const std::string session_party_name{
+            input.sessions.party_name(*session)};
+
+        ImGui::TextUnformatted("Party");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(300.0f);
+        if (ImGui::BeginCombo("##party", current.c_str())) {
+            for (const auto& party : parties) {
+                const bool chosen = party.id == state.market_party_id;
+                if (ImGui::Selectable(party.name.c_str(), chosen))
+                    state.market_party_id = party.id;
+                if (chosen)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetItemTooltip(
+            "The party whose series this window lists. The session is signed in "
+            "as %s; choosing another party shows its series in this window.",
+            session_party_name.c_str());
     }
 
     /*
@@ -209,8 +263,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             && row.producer_kind != "SYNTHETIC") {
             continue;
         }
-        if (state.market_own_party_only && !session_party.empty()
-            && row.party_id != session_party) {
+        if (!state.market_party_id.empty()
+            && row.party_id != state.market_party_id) {
             continue;
         }
         if (!contains_ci(row.label, filter)
@@ -228,7 +282,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear filters")) {
             state.market_synthetic_only = false;
-            state.market_own_party_only = false;
             std::fill(state.filter.begin(), state.filter.end(), '\0');
         }
     }

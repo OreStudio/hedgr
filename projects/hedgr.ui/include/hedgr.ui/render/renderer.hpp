@@ -278,19 +278,17 @@ struct window_ui_state final {
      */
     bool market_synthetic_only = false;
 
-    /** @brief Whether the series chooser lists only the session's party. */
-    bool market_own_party_only = false;
-
     /**
-     * @brief Whether the own-party default has been decided for this window.
+     * @brief The party whose series this window lists.
      *
-     * The deployment holds one series per party for the same URI, so a
-     * tenant-wide list repeats an instrument once per party and the label
-     * cannot tell the rows apart. The chooser starts scoped to the session's
-     * own party, and the box is left as the operator set it once they have
-     * touched it.
+     * Empty until the window resolves it, which it does from the session's own
+     * party. The deployment holds one series per party for the same URI, so a
+     * tenant-wide list repeats an instrument once per party under the same
+     * label; this window shows one party at a time. Changing it is the active
+     * choice to look at another party, and it is a choice about this window,
+     * not about the session.
      */
-    bool market_party_default_applied = false;
+    std::string market_party_id;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
