@@ -438,10 +438,71 @@ result<session_account> session_client::authenticate(std::string_view principal,
                 return std::unexpected(selected.error());
         }
 
+        /*
+         * The sign-in answer names a party only when it also carries the list
+         * the name is read from. An account whose sign-in is already scoped to
+         * one party carries the id and no list, so the name is read from the
+         * session's own parties. That read is the one place a party id becomes
+         * a name, and it is allowed to every signed-in account.
+         */
+        if (account_.party_name.empty()) {
+            using ores::iam::messaging::get_my_parties_request;
+            using ores::iam::messaging::get_my_parties_response;
+
+            try {
+                const auto parties =
+                    ores::nats::service::authenticated_request_and_decode<
+                        get_my_parties_response>(client(),
+                        get_my_parties_request::nats_subject,
+                        get_my_parties_request{}, options_.request_timeout);
+                if (!parties) {
+                    BOOST_LOG_SEV(lg(), ores::logging::warn)
+                        << "The parties of this session's account could not be "
+                           "decoded";
+                } else if (parties->result.outcome
+                    != ores::utility::domain::outcome::ok) {
+                    BOOST_LOG_SEV(lg(), ores::logging::warn)
+                        << "The deployment refused the parties read: "
+                        << parties->result.message;
+                } else if (account_.party_id.empty()
+                    && parties->parties.size() == 1) {
+                    /*
+                     * One party and no selection is not a choice: the session
+                     * has exactly one place it can act, and leaving it
+                     * unscoped would make every later read refuse.
+                     */
+                    if (auto selected = select_party(
+                            parties->parties.front().party_id);
+                        !selected) {
+                        BOOST_LOG_SEV(lg(), ores::logging::warn)
+                            << "Could not select the only party of this "
+                               "account: " << selected.error().message;
+                    }
+                } else {
+                    for (const auto& party : parties->parties) {
+                        if (party.party_id == account_.party_id) {
+                            account_.party_name = party.name;
+                            break;
+                        }
+                    }
+                }
+            } catch (const std::exception& e) {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The parties of this session could not be read: "
+                    << e.what();
+            } catch (...) {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The parties of this session could not be read";
+            }
+        }
+
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Signed in as '" << account_.principal << "' on '"
             << options_.subject_prefix << "' as tenant '"
-            << account_.tenant_name << "' (" << account_.tenant_id << ")";
+            << account_.tenant_name << "' (" << account_.tenant_id << ")"
+            << (account_.party_name.empty()
+                    ? std::string{" with no party"}
+                    : std::format(" in party '{}'", account_.party_name));
         return account_;
     } catch (const std::exception& e) {
         BOOST_LOG_SEV(lg(), ores::logging::error)
