@@ -63,6 +63,54 @@ inline constexpr std::size_t session_status_count = 4;
 to_string(session_status value) noexcept;
 
 /**
+ * @brief The context a session runs in, decided once when IAM accepts it.
+ *
+ * The rule is the session's tenant, which is the context the deployment scopes
+ * every request by. A super administrator's account belongs to the system
+ * tenant, so the session acts on the deployment. Every other account acts
+ * inside a tenant.
+ *
+ * The value is derived at the transport boundary and carried as a typed fact
+ * rather than recomputed wherever a decision needs it. A window that asked
+ * "does this tenant id mean administrator" would put the deployment's own rule
+ * in the interface, and a change to the rule would then be found in some
+ * surfaces and missed in others.
+ *
+ * See @c ores.iam tenant.hpp, where the system tenant's id is stated.
+ */
+enum class session_mode : std::uint8_t {
+    /** @brief The session acts inside one tenant. */
+    application = 0,
+    /** @brief The session acts on the deployment, as a super administrator. */
+    system_administration = 1,
+};
+
+/**
+ * @brief The id the deployment gives the tenant it keeps for administrators.
+ *
+ * Stated here because the deployment states it in a protocol this client does
+ * not receive at sign-in: the login answer carries the tenant id, and the rule
+ * that says which id means "system" is the maximum UUID. It is a constant of
+ * the deployment's data model rather than a setting, which is why it can be
+ * written down rather than read.
+ */
+inline constexpr std::string_view system_tenant_id =
+    "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
+/** @brief The canonical text of a mode, for logs and tooltips. */
+[[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
+to_string(session_mode value) noexcept;
+
+/**
+ * @brief The mode a session runs in, from the tenant IAM resolved.
+ *
+ * Pure, so the rule can be tested without a deployment: the system tenant is
+ * the only tenant whose session acts on the deployment.
+ */
+[[nodiscard]] HEDGR_MODEL_EXPORT session_mode
+session_mode_for(std::string_view tenant_id) noexcept;
+
+/**
  * @brief A credential for one connection attempt.
  *
  * Never persisted. It exists in memory between the prompt and the connect call

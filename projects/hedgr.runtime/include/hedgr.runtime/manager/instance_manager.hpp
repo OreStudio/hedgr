@@ -46,6 +46,7 @@
 #include <stop_token>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace hedgr::runtime::manager {
 
@@ -286,6 +287,15 @@ private:
     void do_open_window(const model::command::command& cmd);
     void do_close_window(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
+
+    /**
+     * @brief Asks for one command centre's deployment read.
+     *
+     * One read at a time per session. A read already in flight means the
+     * cadence asked again before the deployment answered, and a second read
+     * would queue behind the first for no new information.
+     */
+    void start_deployment_read(std::string_view window_id);
     void do_probe_instance(const model::command::command& cmd);
     void do_probe_all();
 
@@ -560,6 +570,15 @@ private:
      * whose application is stopping.
      */
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> probing_;
+
+    /**
+     * @brief The deployment reads in flight, by the session they serve.
+     *
+     * A read is short-lived and has no cancellation of its own, so a set of
+     * keys is all the state it needs: an entry means one read is out, and the
+     * snapshot event removes it whatever the read found.
+     */
+    std::unordered_set<std::string> deployment_reads_;
 
     /**
      * @brief The policy read, once it has been asked for.

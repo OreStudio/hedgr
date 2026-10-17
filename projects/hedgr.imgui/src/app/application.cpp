@@ -172,6 +172,9 @@ void application::run() {
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
         ui::render::open_instance_edit_for_capture(editing);
+    if (const char* screen = std::getenv("HEDGR_CAPTURE_COMMAND_CENTRE_SCREEN");
+        screen != nullptr && *screen != '\0')
+        ui::render::open_command_centre_screen_for_capture(screen);
 
     /*
      * The root's close control is a title bar button, which a scripted step

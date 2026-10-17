@@ -734,17 +734,12 @@ void accounts_window_actions(const render_input& input,
     input.commands.push(std::move(request));
 
     /*
-     * The workspace follows the session, so it is asked for now. The runtime
-     * binds it to the session that the connect command creates, and the frame
-     * loop draws it once the session is up rather than when the command was
-     * pushed.
+     * The landing window is not asked for here. Whether this account's session
+     * lands on a workspace or on the command centre is a fact about the tenant
+     * IAM resolves, and that is known only once the sign-in has been answered.
+     * The runtime opens the right one when it accepts the session, which also
+     * means a refused sign-in leaves no window behind.
      */
-    command open;
-    open.kind = command_kind::open_window;
-    open.instance_id = row->instance_id;
-    open.account_id = row->id;
-    open.new_window_kind = hedgr::model::domain::window_kind::workspace;
-    input.commands.push(std::move(open));
 }
 
 void render_accounts_window(hedgr::model::state::window_handle handle,

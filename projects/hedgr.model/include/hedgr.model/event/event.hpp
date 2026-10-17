@@ -20,6 +20,7 @@
 #ifndef HEDGR_MODEL_EVENT_EVENT_HPP
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
+#include "hedgr.model/domain/deployment.hpp"
 #include "hedgr.model/domain/password_policy.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
@@ -76,6 +77,14 @@ enum class event_kind : std::uint8_t {
      * never stated.
      */
     password_policy_fetched = 8,
+    /**
+     * @brief A deployment read finished, successfully or not.
+     *
+     * One kind for both outcomes because the snapshot carries its own failure,
+     * and a window that received the success kind alone would have no way to
+     * stop showing a read in flight.
+     */
+    deployment_snapshot = 9,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -114,6 +123,23 @@ struct event final {
 
     /** @brief Tenant IAM resolved, for session_authenticated. */
     std::string tenant_name;
+
+    /**
+     * @brief The context the session runs in, for session_authenticated.
+     *
+     * Derived from the tenant IAM resolved, at the boundary, so the rest of the
+     * process reads a decision rather than re-applying the deployment's rule.
+     */
+    domain::session_mode mode = domain::session_mode::application;
+
+    /**
+     * @brief The deployment read, for deployment_snapshot.
+     *
+     * Carried whole because the window draws every field of it in one frame,
+     * and a snapshot split into per-counter events could be drawn half old and
+     * half new.
+     */
+    domain::deployment_snapshot deployment;
 
     /** @brief Party IAM resolved, for session_authenticated. */
     std::string party_name;

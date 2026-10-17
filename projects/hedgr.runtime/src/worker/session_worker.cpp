@@ -208,6 +208,15 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 authenticated.party_name = account.party_name;
 
                 /*
+                 * The deployment's own rule, applied once here: the tenant IAM
+                 * resolved decides whether this session acts on the deployment
+                 * or inside it. Everything downstream reads the answer rather
+                 * than holding the rule.
+                 */
+                authenticated.mode =
+                    domain::session_mode_for(account.tenant_id);
+
+                /*
                  * The event has no principal field because the session key already
                  * names the account. What the instance answered with is still
                  * worth carrying, and payload is the one free-form field, so it

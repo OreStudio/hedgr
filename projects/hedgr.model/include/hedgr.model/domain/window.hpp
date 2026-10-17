@@ -53,10 +53,19 @@ enum class window_kind : std::uint8_t {
     accounts = 4,
     /** @brief The live session for one account on one instance. */
     workspace = 5,
+    /**
+     * @brief The deployment's own screens, for a super administrator.
+     *
+     * One window per session, opened when IAM resolves the session to the
+     * system tenant. It hosts a menu bar and a tab strip rather than showing
+     * one thing, because it is the surface an administrator works from rather
+     * than a read about one record.
+     */
+    command_centre = 6,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 6;
+inline constexpr std::size_t window_kind_count = 7;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -127,9 +136,24 @@ struct workspace_state final {
     std::string account_id;
 };
 
+/**
+ * @brief State of a command centre window.
+ *
+ * The only fact it carries is which deployment it is about, and it is stored
+ * for the same reason the accounts window stores its instance: the title and
+ * the session-loss card have to name the deployment when there is no live
+ * session to ask. The tabs and the selection are the window's scratch, not
+ * state the runtime owns, so they live in the interface beside every other
+ * window's scratch.
+ */
+struct command_centre_state final {
+    /** @brief Key of the instance whose deployment is shown. */
+    std::string instance_id;
+};
+
 /** @brief The kind-specific state of a window. */
 using window_state = std::variant<chart_state, grid_state, notice_state,
-    accounts_state, workspace_state>;
+    accounts_state, workspace_state, command_centre_state>;
 
 /**
  * @brief The persisted description of a window.

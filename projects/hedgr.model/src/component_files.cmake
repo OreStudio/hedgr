@@ -51,6 +51,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/session.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/shortcut.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/store_lock.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/deployment.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/window_json_io.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/event/event.hpp"

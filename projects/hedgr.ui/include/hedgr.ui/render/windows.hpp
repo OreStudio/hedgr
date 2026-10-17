@@ -132,6 +132,28 @@ HEDGR_UI_EXPORT void render_workspace_window(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
+/**
+ * @brief The deployment's own screens, for a super administrator.
+ *
+ * A menu bar for the areas and a tab strip for the screens that are open. The
+ * Overview is pinned and always first; every other screen is opened from a menu
+ * and closed from its own tab. The window is one per session, so a wall may
+ * hold several, each showing a different deployment.
+ */
+HEDGR_UI_EXPORT void render_command_centre_window(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
+/**
+ * @brief Opens a command centre screen, for a capture.
+ *
+ * A capture has no pointer, so it cannot work a menu. This writes the scratch
+ * the menu writes, and the next command centre drawn consumes it.
+ */
+HEDGR_UI_EXPORT void open_command_centre_screen_for_capture(
+    std::string_view screen);
+
 }
 
 #endif

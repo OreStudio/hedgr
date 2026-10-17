@@ -90,6 +90,12 @@ std::string window_title(domain::window_kind kind,
                 instance_name(input, accounts->instance_id));
         }
     }
+    if (const auto* centre = std::get_if<domain::command_centre_state>(&state)) {
+        if (kind == domain::window_kind::command_centre) {
+            return std::format("Command centre: {}",
+                instance_name(input, centre->instance_id));
+        }
+    }
     if (const auto* session = std::get_if<domain::workspace_state>(&state)) {
         if (kind == domain::window_kind::workspace) {
             /*
@@ -116,6 +122,8 @@ std::string window_title(domain::window_kind kind,
         return "Accounts";
     case domain::window_kind::workspace:
         return "Workspace";
+    case domain::window_kind::command_centre:
+        return "Command centre";
     }
     return "Window";
 }
@@ -153,6 +161,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
+    case domain::window_kind::command_centre:
         return false;
     }
     return false;

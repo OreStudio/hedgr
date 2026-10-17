@@ -26,6 +26,7 @@
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
@@ -56,6 +57,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -121,6 +123,8 @@ namespace transport = hedgr::session::transport;
         return std::format("accounts:{}", instance_id);
     case domain::window_kind::workspace:
         return std::format("workspace:{}:{}", instance_id, account_id);
+    case domain::window_kind::command_centre:
+        return std::format("command-centre:{}:{}", instance_id, account_id);
     case domain::window_kind::chart:
     case domain::window_kind::grid:
     case domain::window_kind::notice:
@@ -606,6 +610,11 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         domain::workspace_state session;
         session.account_id = std::string{account_id};
         return session;
+    }
+    case domain::window_kind::command_centre: {
+        domain::command_centre_state centre;
+        centre.instance_id = std::string{instance_id};
+        return centre;
     }
     case domain::window_kind::grid: {
         domain::grid_state grid;
@@ -2626,6 +2635,15 @@ void instance_manager::do_open_window(const command::command& cmd) {
                           : key;
     spec.kind = cmd.new_window_kind;
 
+    /*
+     * A command centre reads a deployment, not a frame: six list calls on a
+     * second connection. The one second default is the placeholder's cadence
+     * and would put six requests a second on the broker for a screen whose
+     * numbers move over hours.
+     */
+    if (cmd.new_window_kind == domain::window_kind::command_centre)
+        spec.cadence = std::chrono::seconds{30};
+
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
@@ -2683,6 +2701,15 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     windows_.set_next_refresh_ns(*handle, due.count());
 
     /*
+     * A command centre's refresh is a deployment read on its own connection.
+     * Every other kind still takes the placeholder below.
+     */
+    if (spec.kind == domain::window_kind::command_centre) {
+        start_deployment_read(cmd.window_id);
+        return;
+    }
+
+    /*
      * Placeholder. A refresh has nothing real to ask for yet, so the request is
      * turned into an event carrying the window id and nothing else, which is
      * enough to exercise the path from a command through the event channel and
@@ -2692,6 +2719,60 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     fact.kind = event::event_kind::window_data;
     fact.payload = cmd.window_id;
     events_.push(std::move(fact));
+}
+
+void instance_manager::start_deployment_read(std::string_view window_id) {
+    if (!database_) {
+        last_error_ = "cannot read the deployment: the store is not open";
+        return;
+    }
+
+    const auto window = windows_.find(window_id);
+    if (!window)
+        return;
+
+    const auto session = windows_.session_of(*window);
+    if (!session)
+        return;
+
+    /*
+     * Only a signed-in session has a token to present, and a window that
+     * outlived its session has nothing to read with. The window draws its
+     * session-loss state instead.
+     */
+    if (sessions_.status(*session)
+        != domain::session_status::authenticated) {
+        return;
+    }
+
+    const auto token = std::string{sessions_.token(*session)};
+    if (token.empty())
+        return;
+
+    const auto instance_id = std::string{sessions_.instance_id(*session)};
+    const auto account_id = std::string{sessions_.account_id(*session)};
+
+    const auto instance = instances_.find(instance_id);
+    if (!instance)
+        return;
+
+    const auto key = running_key(instance_id, account_id);
+    if (deployment_reads_.contains(key))
+        return;
+
+    const auto account = accounts_.find(account_id);
+    const std::string principal = account
+        ? accounts_.get(*account)->principal : std::string{};
+
+    worker::deployment_job job;
+    job.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.key = domain::session_key{instance_id, account_id};
+    job.token = token;
+    job.principal = principal;
+
+    deployment_reads_.insert(key);
+    worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::do_probe_instance(const command::command& cmd) {
@@ -3081,6 +3162,7 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.token);
+        sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
 
         /*
@@ -3091,6 +3173,29 @@ void instance_manager::apply(const event::event& ev) {
          * of the connection it is actually looking at.
          */
         sessions_.set_opened_at_ns(*handle, steady_now_ns());
+
+        /*
+         * The landing surface is decided by the fact and not by the click that
+         * asked for it: a super administrator's session belongs to the system
+         * tenant, and that is known only once IAM has answered. Opening it here
+         * also means a refused sign-in leaves no window behind.
+         */
+        {
+            command::command open;
+            open.kind = command::command_kind::open_window;
+            open.instance_id = ev.instance_id;
+            open.account_id = ev.account_id;
+            open.new_window_kind =
+                sessions_.mode(*handle) == domain::session_mode::system_administration
+                ? domain::window_kind::command_centre
+                : domain::window_kind::workspace;
+            do_open_window(open);
+        }
+        break;
+    case event::event_kind::deployment_snapshot:
+        deployment_reads_.erase(
+            running_key(ev.instance_id, ev.account_id));
+        sessions_.set_deployment(*handle, ev.deployment);
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);
