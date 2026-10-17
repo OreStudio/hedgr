@@ -850,3 +850,34 @@ TEST_CASE("the market table keeps a catalogue per session and points per chart",
     REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
     REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
 }
+
+TEST_CASE("a restored window keeps the session it was saved against",
+    "[window]") {
+    using hedgr::model::domain::chart_state;
+    using hedgr::model::domain::session_key;
+    using hedgr::model::domain::window_kind;
+    using hedgr::model::domain::window_spec;
+    using hedgr::model::state::session_table;
+    using hedgr::model::state::window_table;
+
+    window_table windows;
+    session_table sessions;
+
+    window_spec spec;
+    spec.id = "chart:inst-1:acct-1:s-1";
+    spec.kind = window_kind::chart;
+    spec.session = session_key{"inst-1", "acct-1"};
+    spec.state = chart_state{.label = "FX GBP/USD", .series_id = "s-1"};
+    const auto handle = windows.insert(spec);
+
+    /*
+     * A window wall is restored before any session exists, so the row is
+     * unbound. The pair it was saved against is still reported, which is what
+     * lets the sign-in that owns it bind the window later.
+     */
+    REQUIRE_FALSE(windows.session_of(handle).has_value());
+    const auto stored = windows.spec(handle, sessions);
+    REQUIRE(stored.session.has_value());
+    REQUIRE(stored.session->instance_id == "inst-1");
+    REQUIRE(stored.session->account_id == "acct-1");
+}

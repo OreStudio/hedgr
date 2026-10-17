@@ -314,6 +314,17 @@ private:
      */
     void start_deployment_read(std::string_view window_id);
 
+    /**
+     * @brief Binds every restored window saved against one session pair.
+     *
+     * A window wall is restored before any session exists, so its windows are
+     * unbound. The sign-in that creates the pair is the moment they can be
+     * bound, and the refresh deadlines move to now so each reads its data
+     * immediately rather than waiting a cadence.
+     */
+    void rebind_restored_windows(std::string_view instance_id,
+        std::string_view account_id, model::state::session_handle session);
+
     /** @brief Asks for the market series catalogue, on the window's session. */
     void start_market_catalogue_read(std::string_view window_id);
 

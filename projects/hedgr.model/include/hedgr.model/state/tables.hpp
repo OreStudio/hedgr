@@ -550,6 +550,15 @@ struct window_columns final {
     std::vector<std::string> id;
     std::vector<std::int64_t> cadence_ms;
     std::vector<domain::window_state> state;
+
+    /*
+     * The session the window was saved against, kept even while no session
+     * exists. A restored window is unbound until its session signs in again,
+     * and the pair it was saved against is what tells the runtime which sign-in
+     * makes it live.
+     */
+    std::vector<std::string> session_instance;
+    std::vector<std::string> session_account;
 };
 
 /**
