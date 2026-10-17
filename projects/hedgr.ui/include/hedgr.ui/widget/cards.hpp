@@ -68,6 +68,20 @@ struct card_spec final {
      * is a list and stops being a wall.
      */
     bool full_width = false;
+
+    /**
+     * @brief Whether the value wraps onto more than one line.
+     *
+     * A card's value is one line by default, because a card is a line of text
+     * and a value longer than its box scrolls rather than growing the box. The
+     * failure sentence is the exception, and it is already written as more than
+     * one line, so a single line field would show the headline and hide the
+     * cause on the line beneath it. A wrapping card is measured and given the
+     * height its text needs, so the whole sentence is read at once. It implies
+     * a full width card, because a wrapped sentence in a column would make one
+     * row of the wall taller than the rest for no gain.
+     */
+    bool wrap = false;
 };
 
 /** @brief One topic of a pane: a heading and the cards under it. */

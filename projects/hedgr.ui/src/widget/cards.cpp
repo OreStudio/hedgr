@@ -97,7 +97,23 @@ void card_title(const char* glyph, std::string_view title, ImU32 colour) {
 }
 
 void draw_card(const card_spec& card, float width, float height) {
-    const bool open = begin_card(card.id, width, height, false);
+    /*
+     * A wrapping value is measured before the card is opened, because a child is
+     * given its height when it is created and a taller box cannot be asked for
+     * afterwards. The width the text wraps at is the card's interior less the
+     * bar the input keeps, which is the width the input itself will use once the
+     * card is open.
+     */
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float interior = width - style.WindowPadding.x * 2.0f;
+    const float wrap_width = std::max(interior - style.ScrollbarSize, 1.0f);
+    const bool wrapped = card.wrap && !card.value.empty();
+    const float draw_height = wrapped
+        ? height - ImGui::GetFrameHeight()
+            + text_value_height(card.value, wrap_width)
+        : height;
+
+    const bool open = begin_card(card.id, width, draw_height, false);
     if (open) {
         card_title(
             card.glyph, card.title, ImGui::GetColorU32(theme::dim_text()));
@@ -106,7 +122,10 @@ void draw_card(const card_spec& card, float width, float height) {
             card.colour != 0 ? card.colour : ImGui::GetColorU32(ImGuiCol_Text);
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::ColorConvertU32ToFloat4(colour));
-        text_line(card.id, card.value, -FLT_MIN);
+        if (wrapped)
+            text_value(card.id, card.value, wrap_width);
+        else
+            text_line(card.id, card.value, -FLT_MIN);
         ImGui::PopStyleColor();
 
         if (!card.caption.empty()) {

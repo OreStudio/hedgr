@@ -1520,108 +1520,113 @@ void draw_edit_controls(const render_input& input, window_ui_state& window) {
 }
 
 /**
- * @brief The pane's head: the instance's picture, its name, its state and the
- * controls the pane offers.
+ * @brief The pane's head: the instance's labels and its picture.
  *
- * The picture is drawn here rather than in a card because it is a square and a
- * card is a line of text; a picture squeezed into a card's body would be a
- * postage stamp. The name, the state word and the labels sit beside it so a
- * reader knows what the wall below is about before reading any of it. The
- * labels are here rather than in a card because they are the operator's own
- * words for the instance and read as its tags, not as one more field of its
- * record.
+ * The head is what the wall below is about. It carries the labels the operator
+ * gave the instance and the picture the instance names, and nothing else. The
+ * name and the state word that used to sit here are each already on a card, the
+ * name in Identity and the state in the Probe state card, and a fact told twice
+ * in one pane reads as two facts. The picture is drawn here rather than in a
+ * card because it is a square and a card is a line of text, and it takes a
+ * card's height so the head reads as the first thing in the wall.
  *
- * The pane carries no control of its own any more. The shortcut toggle that
- * used to sit at its top right lives in the toolbar, so what is left here is
- * the instance's own report. Save and Reset join the head only while the pane
- * is editable, which is what keeps the pair of them on one line at the pane's
- * head instead of floating over the wall.
+ * The labels sit to the left of the picture, centred against it, because they
+ * are the operator's own words for the instance and belong beside the thing
+ * they name rather than in a card. The row ends where it ends. SameLine is
+ * called only when an item follows it, so the cursor is left below the head and
+ * the Identity heading that follows opens on a line of its own. A head that
+ * left the cursor on its own line was what drew the name and the state word
+ * over the Identity heading.
+ *
+ * An instance that names no picture gets no picture space at all, so the
+ * laboratory instance's head is its labels alone and the wall begins directly
+ * under them. An instance with neither a picture nor a label has no head and
+ * the wall begins at the pane's top.
+ *
+ * The pane carries no control of its own. The shortcut toggle that used to sit
+ * at its top right lives in the toolbar, so what is left here is the instance's
+ * own report. Save and Reset join the head only while the pane is editable,
+ * pushed against the pane's right edge.
  */
 void draw_pane_header(const render_input& input, window_ui_state& window,
-    const instance& row, const instance_status& status, bool editing) {
+    const instance& row, bool editing) {
     const std::string directory = input.instance_icons != nullptr
         ? input.instance_icons->directory : std::string{};
     const std::string picture_path =
         widget::instance_picture_path(directory, row.icon_key);
     const std::uint64_t picture = instance_icon_texture(input, row.id);
+    /*
+     * A key whose asset is not installed says so rather than drawing nothing.
+     * Nothing drawn is what an instance with no picture looks like, and a
+     * choice the install cannot satisfy is a different fact, so the missing
+     * key keeps a place in the head.
+     */
+    const bool missing_picture = picture == 0 && !row.icon_key.empty();
+    const bool has_picture = picture != 0 || missing_picture;
+    const auto attached = labels_of(input, labelling_owner::instance, row.id);
 
-    if (picture != 0) {
-        const float side = ImGui::GetFrameHeight() * 2.0f;
-        ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
-        ImGui::SetItemTooltip("%s", picture_path.c_str());
-        ImGui::SameLine();
-    } else if (!row.icon_key.empty()) {
-        /*
-         * A key whose asset is not installed says so rather than drawing
-         * nothing. Nothing drawn is what an instance with no picture looks
-         * like, and a choice the install cannot satisfy is a different fact.
-         */
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
-        ImGui::TextUnformatted(icon::warning);
-        ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("%s No picture is installed for the key \"%s\".",
-            icon::warning, row.icon_key.c_str());
-        ImGui::SameLine();
+    if (attached.empty() && !has_picture && !editing)
+        return;
+
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float icon_width = ImGui::GetFrameHeight();
+    const float controls = editing
+        ? icon_width * 2.0f + style.ItemSpacing.x
+        : 0.0f;
+    /*
+     * The picture is as tall as a card, which is what makes it sit in the wall
+     * rather than above it. The labels are given the room left once the picture
+     * and any controls have taken theirs, so a long set of them is counted
+     * rather than drawn under either.
+     */
+    const float side = widget::card_height();
+    const float pane_room = ImGui::GetContentRegionAvail().x;
+    const float gap = style.ItemSpacing.x;
+    const float controls_room = controls > 0.0f ? controls + gap : 0.0f;
+    const float picture_room = has_picture ? side + gap : 0.0f;
+    const float pill_room = pane_room - controls_room - picture_room;
+
+    /*
+     * The labels are the first item of the row. They claim the picture's height
+     * as their band, so a short pill is centred against the tall square beside
+     * it instead of sitting at its top. SameLine is asked for only when
+     * something follows, so a head that ends in a pill row still leaves the
+     * cursor below the row.
+     */
+    if (!attached.empty() && pill_room > 0.0f) {
+        static_cast<void>(widget::label_pill_row(widget::pills_for(attached),
+            pill_room, has_picture ? side : 0.0f));
+        if (has_picture || editing)
+            ImGui::SameLine();
     }
 
-    ImGui::TextUnformatted(row.name.c_str());
-    ImGui::SameLine();
-    ImGui::PushStyleColor(ImGuiCol_Text,
-        ImGui::ColorConvertU32ToFloat4(
-            theme::probe_state_colour(status.result, status.observed)));
-    ImGui::TextUnformatted(
-        theme::probe_state_word(status.result, status.observed));
-    ImGui::PopStyleColor();
+    if (has_picture) {
+        if (picture != 0) {
+            ImGui::Image(static_cast<ImTextureID>(picture), ImVec2(side, side));
+            ImGui::SetItemTooltip("%s", picture_path.c_str());
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text,
+                ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
+            ImGui::TextUnformatted(icon::warning);
+            ImGui::PopStyleColor();
+            ImGui::SetItemTooltip(
+                "%s No picture is installed for the key \"%s\".", icon::warning,
+                row.icon_key.c_str());
+        }
+        if (editing)
+            ImGui::SameLine();
+    }
 
     /*
      * Save and Reset are pushed against the pane's right edge while the pane is
      * editable, measured from the room left on the line rather than from the
-     * pane's own width, so the pair lands there whatever the picture and the
-     * name took. With no controls there is nothing to push, so the cursor is
-     * left where the head finished.
+     * pane's own width, so the pair lands there whatever the labels and the
+     * picture took.
      */
-    const float icon_width = ImGui::GetFrameHeight();
-    const float controls = editing
-        ? icon_width * 2.0f + ImGui::GetStyle().ItemSpacing.x
-        : 0.0f;
-    /*
-     * The room is read after SameLine rather than before it. A text item leaves
-     * the cursor at the start of the next line, so the available region read
-     * there is the pane's whole width and adding it to the cursor would put the
-     * controls past the pane's edge, where ImGui culls them. SameLine puts the
-     * cursor back on the line first, and what is left from there is the room
-     * the controls have to fit in.
-     */
-    ImGui::SameLine();
-    const float room = ImGui::GetContentRegionAvail().x;
-
-    /*
-     * The labels sit at the head beside the picture rather than in a card of
-     * their own, because a label is the operator's own word for the instance
-     * and reads as one of its tags rather than as a field of its record. They
-     * are the same pills the list draws, so one label is one colour wherever it
-     * appears. The row is given the room left after the controls, so a long set
-     * of them is counted rather than drawn under the buttons.
-     */
-    const auto attached = labels_of(input, labelling_owner::instance, row.id);
-    const float pill_room = room - controls - ImGui::GetStyle().ItemSpacing.x;
-    if (!attached.empty() && pill_room > 0.0f) {
-        /*
-         * A zero width is the pill row's own "draw everything", so a pane with
-         * no room for a pill at all draws none rather than drawing them over
-         * the controls. The count pill makes the same choice for a row too
-         * narrow for its first label.
-         */
-        static_cast<void>(
-            widget::label_pill_row(widget::pills_for(attached), pill_room));
-        ImGui::SameLine();
-    }
-
     if (editing) {
-        const float controls_room = ImGui::GetContentRegionAvail().x;
+        const float room = ImGui::GetContentRegionAvail().x;
         ImGui::SetCursorPosX(
-            ImGui::GetCursorPosX() + std::max(controls_room - controls, 0.0f));
+            ImGui::GetCursorPosX() + std::max(room - controls, 0.0f));
         draw_edit_controls(input, window);
     }
 }
@@ -1763,30 +1768,36 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
  * The probe's answers are the last topic, because they are a measurement of the
  * deployment rather than a property of the record, and a reader looking for why
  * a row is red starts at the bottom. The probe's own sentence leads that topic,
- * because the state word is already on the pane's head and on the status bar
- * and the foot of the wall is what gives when it does not fit.
+ * because the state word is already on the Probe state card below and at the
+ * right end of the status foot, and the foot of the wall is what gives when it
+ * does not fit.
  */
 void draw_read_only_topics(const render_input& input, const instance& row,
     const instance_status& status, float pane_width, float width, float height,
     int columns) {
     const auto address = widget::split_host_port(row.nats_url);
 
+    /*
+     * A card is a line of text by default. The failure sentence is the one
+     * value here written as more than one line, so it asks for the wrapping
+     * form and the card grows to whatever the wrapped text needs.
+     */
     const auto text_card = [](const char* id, const char* glyph,
                                const char* title, std::string value,
                                const char* caption, std::uint32_t colour = 0,
-                               bool full_width = false) {
+                               bool full_width = false, bool wrap = false) {
         return widget::card_spec{id, glyph, title, std::move(value), caption,
-            colour, full_width};
+            colour, full_width, wrap};
     };
     const auto add = [&](widget::topic_spec& topic, const char* id,
                          const char* glyph,
                          const char* title, std::string value,
                          const char* caption, std::uint32_t colour = 0,
-                         bool full_width = false) {
+                         bool full_width = false, bool wrap = false) {
         if (value.empty())
             return;
-        topic.cards.push_back(text_card(
-            id, glyph, title, std::move(value), caption, colour, full_width));
+        topic.cards.push_back(text_card(id, glyph, title, std::move(value),
+            caption, colour, full_width, wrap));
     };
 
     std::vector<widget::topic_spec> topics;
@@ -1835,11 +1846,13 @@ void draw_read_only_topics(const render_input& input, const instance& row,
     diagnostics.title = "Diagnostics";
     /*
      * The probe's own sentence comes first in this topic, ahead of the state it
-     * explains. The state word already sits at the pane's head and on the
-     * status bar, so the row a reader has to work down the wall for is the
-     * cause rather than the answer they have been given twice. The path cards
-     * take a line each, so this topic is the tallest of the wall and a reader
-     * reaches its foot by scrolling the pane.
+     * explains. The state word still sits on the Probe state card below and at
+     * the right end of the status foot, so the row a reader has to work down
+     * the wall for is the cause rather than the answer they have been given
+     * twice. The sentence is written as more than one line, so the card takes
+     * the height the whole of it needs instead of showing only the headline.
+     * The path cards take a line each, so this topic is the tallest of the wall
+     * and a reader reaches its foot by scrolling the pane.
      */
     if (!status.detail.empty()) {
         const bool failing = status.result.reach == reachability::unreachable
@@ -1847,7 +1860,8 @@ void draw_read_only_topics(const render_input& input, const instance& row,
         add(diagnostics, "detail", nullptr,
             status.result.bootstrap ? "IAM message" : "Detail",
             status.detail, "what the probe reported",
-            failing ? theme::probe_state_colour(status.result, true) : 0, true);
+            failing ? theme::probe_state_colour(status.result, true) : 0, true,
+            true);
     }
     diagnostics.cards.push_back(
         text_card("probe-state", icon::probe, "Probe state",
@@ -1943,7 +1957,7 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
     const float width = widget::card_width(pane_width, columns);
     const float height = widget::card_height();
 
-    draw_pane_header(input, window, row, status, editing);
+    draw_pane_header(input, window, row, editing);
 
     if (editing)
         draw_edit_topics(

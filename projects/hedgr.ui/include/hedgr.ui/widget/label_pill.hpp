@@ -149,10 +149,15 @@ struct label_pill final {
  * @param pills The pills, in draw order.
  * @param available The width to lay them out in; a value of zero or less means
  * every pill fits, which is what a caller outside a table asks for.
+ * @param band_height The height the row claims; the pills are centred in it. A
+ * value of zero or less means the row's own height, which is what a row beside
+ * text asks for. A head that puts its labels beside a card height picture
+ * passes that picture's height instead, so the pills sit against its middle.
  * @return The width the row occupied.
  */
 [[nodiscard]] HEDGR_UI_EXPORT float label_pill_row(
-    const std::vector<label_pill>& pills, float available);
+    const std::vector<label_pill>& pills, float available,
+    float band_height = 0.0f);
 
 /**
  * @brief Draws one pill and advances the cursor past it.
@@ -164,9 +169,12 @@ struct label_pill final {
  * @param text The label's name.
  * @param background The fill, as a 32-bit ARGB value.
  * @param tooltip The text shown on hover, empty for none.
+ * @param band_height The height to centre the pill in, or zero for the row's
+ * own height.
  */
 HEDGR_UI_EXPORT void label_pill_draw(std::string_view text,
-    std::uint32_t background, std::string_view tooltip);
+    std::uint32_t background, std::string_view tooltip,
+    float band_height = 0.0f);
 
 }
 
