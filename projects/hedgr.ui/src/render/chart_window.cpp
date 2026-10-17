@@ -236,21 +236,22 @@ struct candle_plan final {
 /** @brief The series as flags and its name, the header's left end. */
 void draw_series_name(std::string_view label) {
     const auto pair = widget::currencies_of(label);
-    const float flag_h = widget::flag_height;
+    constexpr float flag_scale = 2.0f;
+    const float flag_w = widget::flag_width * flag_scale;
+    const float flag_h = widget::flag_height * flag_scale;
     const float text_h = ImGui::GetTextLineHeight();
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const float text_w = ImGui::CalcTextSize(label.data(), label.data()
             + label.size()).x;
     auto* draw = ImGui::GetWindowDrawList();
     float x = origin.x;
-    const float flag_y = origin.y + (flag_h - widget::flag_height) * 0.5f;
     if (!pair.base.empty()) {
-        widget::draw_flag(draw, ImVec2(x, flag_y), pair.base);
-        x += widget::flag_width + 3.0f;
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.base, flag_scale);
+        x += flag_w + 3.0f;
     }
     if (!pair.quote.empty()) {
-        widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote);
-        x += widget::flag_width + 3.0f;
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote, flag_scale);
+        x += flag_w + 3.0f;
     }
     if (x == origin.x) {
         ImGui::TextUnformatted(label.data(), label.data() + label.size());
