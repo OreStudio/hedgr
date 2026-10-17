@@ -731,14 +731,35 @@ void accounts_window_actions(const render_input& input,
         ? input.accounts.find(state.browser.selected_leaf)
         : std::optional<hedgr::model::state::account_handle>{};
 
+    /*
+     * A sign-in in flight owns the account for as long as it takes. A second
+     * click during that window would start another worker and stop the first,
+     * and although the runtime now drops the replaced worker's facts, there is
+     * no reason to ask it to. The control is disabled and says why.
+     */
+    bool connecting = false;
+    if (selected) {
+        const auto* row = input.accounts.get(*selected);
+        if (const auto session =
+                input.sessions.find(row->instance_id, row->id)) {
+            connecting = input.sessions.status(*session)
+                == session_status::connecting;
+        }
+    }
+    const bool can_act = have_selection && !connecting;
+
     const bool sign_in = widget::rail_button("sign-in", icon::sign_in,
-        "Sign in", "Sign in with the selected account and open the command "
-                   "centre or a workspace",
-        have_selection);
+        "Sign in",
+        connecting ? "A sign-in is already in progress"
+                   : "Sign in with the selected account and open the command "
+                     "centre or a workspace",
+        can_act);
     const bool set_password = widget::rail_button("set-password",
         icon::lock_open, "Password",
-        "Set or change the stored password for the selected account",
-        have_selection);
+        connecting ? "A sign-in is already in progress"
+                   : "Set or change the stored password for the selected "
+                     "account",
+        can_act);
 
     if (set_password && selected) {
         /*
