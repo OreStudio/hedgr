@@ -38,6 +38,7 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
@@ -535,6 +536,47 @@ ores::nats::service::subscription session_client::subscribe(
     std::string_view subject,
     ores::nats::message_handler handler) const {
     return client().transport().subscribe(subject, std::move(handler));
+}
+
+result<session_client::image_content>
+session_client::image_by_code(std::string_view code) const {
+    if (!is_connected())
+        return fail(session_errc::closed,
+            "an image read needs an open connection to the instance");
+    if (!is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "an image read needs a signed-in session");
+
+    using ores::assets::messaging::get_image_request;
+    using ores::assets::messaging::get_image_response;
+
+    try {
+        get_image_request request{};
+        request.key.code = std::string{code};
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_image_response>(client(),
+                get_image_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the image answer could not be decoded");
+        if (answer->result.outcome != ores::utility::domain::outcome::ok)
+            return fail(session_errc::protocol_error,
+                answer->result.message.empty()
+                    ? std::string("the deployment refused the image")
+                    : answer->result.message);
+        if (!answer->image)
+            return fail(session_errc::protocol_error,
+                "the deployment holds no image with that code");
+        return image_content{
+            .mime_type = answer->image->mime_type,
+            .data = answer->image->data};
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
 }
 
 result<void> session_client::select_party(std::string_view party_id) {

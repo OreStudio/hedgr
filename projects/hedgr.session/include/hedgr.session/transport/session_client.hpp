@@ -454,6 +454,19 @@ public:
     subscribe(std::string_view subject,
         ores::nats::message_handler handler) const;
 
+    /**
+     * @brief One image of the tenant, by its code, as the assets service has it.
+     *
+     * Flags are images whose code is the lower-case ISO code of the currency.
+     * @return the bytes and media type, or why it could not be read.
+     */
+    struct image_content final {
+        std::string mime_type;
+        std::vector<std::uint8_t> data;
+    };
+    [[nodiscard]] result<image_content>
+    image_by_code(std::string_view code) const;
+
     /** @brief Who this session is, empty until the instance says. */
     [[nodiscard]] const session_account& account() const noexcept;
 
