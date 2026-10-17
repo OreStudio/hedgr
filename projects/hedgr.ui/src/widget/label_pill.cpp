@@ -162,7 +162,7 @@ std::vector<label_pill> pills_for(
 }
 
 void label_pill_draw(std::string_view text, std::uint32_t background,
-    std::string_view tooltip) {
+    std::string_view tooltip, float band_height) {
     const pill_style style = pill_style_for_current_font();
     const float width = pill_width(text, style);
     const float height = style.text_height + 2.0f * style.padding_y;
@@ -183,12 +183,16 @@ void label_pill_draw(std::string_view text, std::uint32_t background,
     ImDrawList* const draw = ImGui::GetWindowDrawList();
 
     /*
-     * The badge is centred in a row's worth of space rather than being given
-     * the row's height: a pill as tall as the text it sits beside has stopped
-     * being a badge. The row is claimed at the body's height below, so the
-     * shorter pill does not shorten the rows around it.
+     * The band is the row the caller is laying the pills out in, which is the
+     * row's own height unless a host names a taller one. A head that puts its
+     * labels beside a card height picture names that height, so the badge sits
+     * against the middle of the picture instead of at its top. The pill itself
+     * stays shorter than the band, because a pill as tall as the space it sits
+     * in has stopped being a badge.
      */
-    const float row_height = ImGui::GetTextLineHeight();
+    const float row_height = band_height > 0.0f
+        ? band_height
+        : ImGui::GetTextLineHeight();
     const float top = origin.y + std::max(0.0f, (row_height - height) * 0.5f);
 
     const ImVec2 top_left(origin.x, top);
@@ -219,7 +223,8 @@ void label_pill_draw(std::string_view text, std::uint32_t background,
             tooltip.data());
 }
 
-float label_pill_row(const std::vector<label_pill>& pills, float available) {
+float label_pill_row(const std::vector<label_pill>& pills, float available,
+    float band_height) {
     if (pills.empty())
         return 0.0f;
 
@@ -258,7 +263,7 @@ float label_pill_row(const std::vector<label_pill>& pills, float available) {
             ImGui::SameLine(0.0f, 0.0f);
             x += style.gap;
         }
-        label_pill_draw(text, background, tooltip);
+        label_pill_draw(text, background, tooltip, band_height);
         x += pill_width(text, style);
     };
 

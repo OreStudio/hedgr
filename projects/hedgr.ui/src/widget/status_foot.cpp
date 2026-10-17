@@ -170,33 +170,29 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const bool has_state = !state.word.empty();
-    const float state_width = !has_state
-        ? 0.0f
-        : ImGui::CalcTextSize(state.name.c_str()).x
-            + ImGui::CalcTextSize(state.word.c_str()).x + style.ItemSpacing.x;
+    const float gap = style.ItemSpacing.x;
 
     /*
-     * The dot, at the left end and ahead of the message. It is drawn into the
-     * window's draw list rather than submitted as an item, because a disc is
-     * not a widget; the SameLine after it is what leaves the message the room
-     * beside it. The colour is the one the state word uses, so the two ends of
-     * the foot say the same thing in the two ways this interface reads a
-     * state, as a colour and as a word.
+     * The disc is the state's colour and belongs with the state's word, so both
+     * live at the right end of the foot rather than one at each end. Its
+     * diameter is one text line, twice the half line it was, which is large
+     * enough to read at a glance and still inside the foot: the foot reserves
+     * two text rows and the disc is centred on the first of them, so it spans
+     * that row exactly and is never clipped.
      */
-    const float dot_side = ImGui::GetTextLineHeight() * 0.5f;
-    if (has_state) {
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const float centre_y = origin.y + ImGui::GetTextLineHeight() * 0.5f;
-        ImGui::GetWindowDrawList()->AddCircleFilled(
-            ImVec2(origin.x + dot_side * 0.5f, centre_y), dot_side * 0.5f,
-            state.colour, 16);
-        ImGui::SameLine(dot_side + style.ItemSpacing.x);
-    }
+    const float dot_side = ImGui::GetTextLineHeight();
+    const float state_width = !has_state
+        ? 0.0f
+        : dot_side + gap
+            + ImGui::CalcTextSize(state.name.c_str()).x + gap
+            + ImGui::CalcTextSize(state.word.c_str()).x;
 
     /*
      * The state is put against the foot's right edge, and the message is
      * wrapped short of the room it takes, so the two share the bar without
-     * either being written over.
+     * either being written over. The disc and its gap are counted in that room
+     * as well, so the message stops before the colour as it stops before the
+     * words.
      */
     const float state_y = ImGui::GetCursorPosY();
     const float state_x = ImGui::GetCursorPosX()
@@ -206,6 +202,13 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
 
     if (has_state) {
         ImGui::SetCursorPos(ImVec2(state_x, state_y));
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const float centre_y = origin.y + ImGui::GetTextLineHeight() * 0.5f;
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(origin.x + dot_side * 0.5f, centre_y), dot_side * 0.5f,
+            state.colour, 32);
+
+        ImGui::SetCursorPosX(state_x + dot_side + gap);
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::TextUnformatted(state.name.c_str());

@@ -663,7 +663,8 @@ void account_details(const tree_leaf& leaf, const render_input& input,
             .colour = sign_in.status == session_status::failed
                 ? theme::failure_colour
                 : 0,
-            .full_width = true});
+            .full_width = true,
+            .wrap = true});
     }
     topics.push_back(std::move(session));
 
