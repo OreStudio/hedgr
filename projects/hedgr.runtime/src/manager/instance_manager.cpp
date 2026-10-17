@@ -2787,6 +2787,27 @@ void instance_manager::do_open_window(const command::command& cmd) {
     if (!key.empty()) {
         if (const auto existing = windows_.find(key)) {
             windows_.set_open(*existing, true);
+
+            /*
+             * A window restored from the store is open and unbound: the
+             * session it was saved against does not exist at start. A sign-in
+             * that asks for that window again is the moment the binding can be
+             * made, and without it the window draws the session-loss state
+             * forever while its session is live beside it.
+             */
+            if (const auto session =
+                    sessions_.find(cmd.instance_id, cmd.account_id)) {
+                windows_.bind_session(*existing, *session);
+
+                /*
+                 * The restored window's first refresh ran while it had no
+                 * session, so its deadline has already moved a cadence out.
+                 * Binding makes the read possible, and asking for it now is
+                 * what makes the window show the deployment rather than sit on
+                 * "reading" until the next tick.
+                 */
+                windows_.set_next_refresh_ns(*existing, 0);
+            }
             return;
         }
     }
