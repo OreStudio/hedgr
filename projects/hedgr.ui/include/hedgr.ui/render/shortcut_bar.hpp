@@ -22,8 +22,35 @@
 
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
+#include <string>
+#include <string_view>
 
 namespace hedgr::ui::render {
+
+/**
+ * @brief What the bar remembers from one frame to the next.
+ *
+ * The tick exists to follow the pointer from one entry to another, and that is
+ * a change, so it cannot be decided from a single frame. The one thing worth
+ * keeping is the entry the pointer was on at the end of the last draw; every
+ * other question about hover is answered by ImGui in the frame itself.
+ */
+struct shortcut_bar_state final {
+    /** @brief The entry the pointer was on at the end of the last draw. */
+    std::string hovered_id;
+};
+
+/**
+ * @brief Whether @p hovered is an entry the tick should announce.
+ *
+ * A stationary pointer keeps naming the same entry and must stay silent, and a
+ * pointer that has left the bar names nothing and must stay silent too. An
+ * empty @p hovered therefore never fires, which is what stops the tick firing
+ * every time the pointer leaves. The change from one entry to another is the
+ * only change that does fire.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool hover_is_new_entry(
+    std::string_view previous, std::string_view hovered) noexcept;
 
 /**
  * @brief What the bar asked the frame to do, if any of it can only be done
@@ -59,9 +86,10 @@ struct shortcut_bar_result final {
  *
  * @param input Everything the bar may read, including the entries themselves.
  * @param result Filled with whatever the frame has to do after the draw.
+ * @param state The bar's own memory of the last hovered entry.
  */
 HEDGR_UI_EXPORT void draw_shortcut_bar(const render_input& input,
-    shortcut_bar_result& result);
+    shortcut_bar_result& result, shortcut_bar_state& state);
 
 }
 

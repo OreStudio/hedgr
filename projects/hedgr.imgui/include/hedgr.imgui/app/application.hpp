@@ -22,6 +22,7 @@
 
 #include "hedgr.imgui/config/options.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
+#include "hedgr.ui/render/splash.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/sound/player.hpp"
 #include <filesystem>
@@ -75,6 +76,7 @@ private:
     void load_background_texture();
     void load_instance_icon_textures();
     void release_instance_icon_textures();
+    void load_splash_texture();
     void render_loop(GLFWwindow* window);
     void toggle_fullscreen(GLFWwindow* window);
     void capture_frame(GLFWwindow* window);
@@ -106,6 +108,15 @@ private:
      * as a lookup, so no image is ever decoded on the path that draws a frame.
      */
     ui::render::instance_icon_textures instance_icons_;
+    /*
+     * The splash artwork, decoded and uploaded once like the background. The
+     * timing is a value so the policy lives in hedgr.ui and the application
+     * only says how long the run has been going and whether the store is open.
+     */
+    unsigned int splash_texture_ = 0;
+    int splash_width_ = 0;
+    int splash_height_ = 0;
+    ui::render::splash_timing splash_;
     int windowed_x_ = 0;
     int windowed_y_ = 0;
     int windowed_width_ = 1280;

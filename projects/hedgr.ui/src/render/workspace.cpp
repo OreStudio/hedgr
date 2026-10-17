@@ -19,6 +19,8 @@
  */
 #include "hedgr.ui/render/workspace.hpp"
 
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -377,6 +379,19 @@ void workspace::render(const render_input& input) {
             request.kind = hedgr::model::command::command_kind::close_window;
             request.window_id = std::string{input.windows.id(handle)};
             input.commands.push(std::move(request));
+
+            /*
+             * The close is announced here, where the operator's click becomes a
+             * command, rather than where the runtime later removes the row. The
+             * sound belongs to the action, and the runtime's bookkeeping is not
+             * a thing the operator did. See ADR 8 for why this is a name on the
+             * bus rather than a call to the player.
+             */
+            hedgr::model::signal::signal closed;
+            closed.name = std::string(hedgr::model::signal::names::window_closed);
+            closed.detail = std::format("{} closed", title);
+            closed.at_ns = input.now_ns;
+            hedgr::model::signal::bus().raise(std::move(closed));
         }
 
         const auto key = std::string{input.windows.id(handle)};
@@ -414,7 +429,7 @@ void workspace::render(const render_input& input) {
      * because the window it concerns has already been submitted by now.
      */
     shortcut_bar_result bar;
-    draw_shortcut_bar(input, bar);
+    draw_shortcut_bar(input, bar, shortcut_bar_);
     if (bar.focus_instances)
         focus_instances_ = true;
 

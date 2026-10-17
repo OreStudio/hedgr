@@ -242,7 +242,10 @@ struct icon_source final {
     X(page_next, 0xE02B, arrow_clockwise_20)                                   \
     /* Jump to the last page. The catalogue has no paging concept, so this is  \
      * the same advance as Next; there is no distinct jump-to-end artwork. */  \
-    X(page_last, 0xE02C, arrow_clockwise_20)
+    X(page_last, 0xE02C, arrow_clockwise_20)                                   \
+    /* A label attached to a record. The catalogue entry is Tag, used there     \
+     * for badge definitions and version labels. */                            \
+    X(label, 0xE02D, tag_20)
 
 #define HEDGR_UI_ICON_DECLARE(name, codepoint, concept)                        \
     inline constexpr const char* name =                                        \
