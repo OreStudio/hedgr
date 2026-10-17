@@ -592,6 +592,17 @@ private:
     std::unordered_set<std::string> deployment_reads_;
 
     /**
+     * @brief The attempt each pair is on, by the pair's running key.
+     *
+     * A replacement worker is started while the old one is still winding down.
+     * Every fact carries the attempt that produced it, and a fact from an
+     * older attempt is dropped, so the old worker's disconnect cannot overwrite
+     * the new worker's sign-in.
+     */
+    std::unordered_map<std::string, std::uint64_t> attempts_;
+    std::uint64_t next_attempt_ = 0;
+
+    /**
      * @brief The policy read, once it has been asked for.
      *
      * Held apart from the sessions' cancellations because it is not one: it

@@ -27,6 +27,7 @@
 #include "hedgr.runtime/export.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <stop_token>
 
@@ -72,6 +73,14 @@ struct session_job final {
 
     /** @brief How long to wait between refresh round trips once authenticated. */
     std::chrono::milliseconds refresh_interval{2000};
+
+    /**
+     * @brief Which attempt at this pair this worker is.
+     *
+     * Every fact it posts carries this number, so the frame loop can tell a
+     * stopped worker's last words from the worker that replaced it.
+     */
+    std::uint64_t attempt = 0;
 };
 
 /**

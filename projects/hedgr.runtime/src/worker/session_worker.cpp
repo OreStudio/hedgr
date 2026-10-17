@@ -63,16 +63,18 @@ using hedgr::model::command::event_queue;
  * Every event a worker sends is about one session, so the tagging is done once
  * here rather than repeated at each push site.
  */
-[[nodiscard]] event::event for_key(const domain::session_key& key) {
+[[nodiscard]] event::event for_key(const domain::session_key& key,
+    std::uint64_t attempt) {
     event::event result;
     result.instance_id = key.instance_id;
     result.account_id = key.account_id;
+    result.attempt = attempt;
     return result;
 }
 
 void push_status(event_queue& events, const domain::session_key& key,
-                 domain::session_status status) {
-    auto fact = for_key(key);
+                 std::uint64_t attempt, domain::session_status status) {
+    auto fact = for_key(key, attempt);
     fact.kind = event::event_kind::session_status_changed;
     fact.status = status;
     events.push(std::move(fact));
@@ -86,8 +88,8 @@ void push_status(event_queue& events, const domain::session_key& key,
  * which is why they travel in separate fields.
  */
 void push_failure(event_queue& events, const domain::session_key& key,
-                  const transport::session_error& error) {
-    auto fact = for_key(key);
+                  std::uint64_t attempt, const transport::session_error& error) {
+    auto fact = for_key(key, attempt);
     fact.kind = event::event_kind::session_failed;
     fact.code = std::string(transport::to_string(error.code));
     fact.message = error.message;
@@ -113,7 +115,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
     transport::session_client client(job.options);
     auto status = domain::session_status::connecting;
 
-    push_status(events, key, status);
+    push_status(events, key, job.attempt, status);
 
     /*
      * The spawn that reaches this coroutine may have come from the frame loop,
@@ -139,7 +141,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Session '" << key.instance_id << "' / '" << key.account_id
             << "' could not connect: " << connected.error().message;
-        push_failure(events, key, connected.error());
+        push_failure(events, key, job.attempt, connected.error());
         status = domain::session_status::failed;
     } else {
         /*
@@ -187,7 +189,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 BOOST_LOG_SEV(lg(), ores::logging::error)
                     << "The stored credential for '" << key.account_id
                     << "' could not be opened";
-                push_failure(events, key, transport::session_error{
+                push_failure(events, key, job.attempt, transport::session_error{
                     .code = transport::session_errc::authentication_rejected,
                     .message = "the stored credential could not be opened",
                     .detail = std::format("secret_box: {}",
@@ -220,11 +222,11 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                     << key.instance_id << "' failed: "
                     << answer.error().message << " ["
                     << transport::to_string(answer.error().code) << "]";
-                push_failure(events, key, answer.error());
+                push_failure(events, key, job.attempt, answer.error());
                 status = domain::session_status::failed;
             } else {
                 const auto& account = answer.value();
-                auto authenticated = for_key(key);
+                auto authenticated = for_key(key, job.attempt);
                 authenticated.kind = event::event_kind::session_authenticated;
                 authenticated.token = account.token;
                 authenticated.tenant_name = account.tenant_name;
@@ -252,7 +254,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 BOOST_LOG_SEV(lg(), ores::logging::info)
                     << "Session '" << key.instance_id << "' / '"
                     << key.account_id << "' is authenticated";
-                push_status(events, key, status);
+                push_status(events, key, job.attempt, status);
 
                 boost::asio::steady_timer timer(
                     co_await boost::asio::this_coro::executor);
@@ -289,7 +291,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                      * subject, a note saying what it is, and the elapsed wait as
                      * the latency, which is the one honest measurement available.
                      */
-                    auto tick = for_key(key);
+                    auto tick = for_key(key, job.attempt);
                     tick.kind = event::event_kind::session_data;
                     tick.subject = std::string(placeholder_subject);
                     tick.payload = "refresh tick; no live data path is wired up yet";
@@ -313,7 +315,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         << key.account_id << "' with status " << domain::to_string(status);
 
     if (status != domain::session_status::failed)
-        push_status(events, key, domain::session_status::disconnected);
+        push_status(events, key, job.attempt, domain::session_status::disconnected);
 }
 
 }

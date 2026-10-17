@@ -109,6 +109,17 @@ struct event final {
     /** @brief Account the fact belongs to. */
     std::string account_id;
 
+    /**
+     * @brief Which sign-in attempt this fact belongs to, zero for no attempt.
+     *
+     * A pair can have two workers for a moment: a second sign-in asks the
+     * first to stop, and the first may still post its own outcome before it
+     * ends. The attempt is what lets the frame loop keep the newer worker's
+     * facts and drop the older one's, so a stopped worker cannot report a
+     * disconnect over a session that has just signed in again.
+     */
+    std::uint64_t attempt = 0;
+
     /** @brief New status, for session_status_changed. */
     domain::session_status status = domain::session_status::disconnected;
 
