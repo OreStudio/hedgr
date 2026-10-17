@@ -127,6 +127,8 @@ std::string window_title(domain::window_kind kind,
         return "Workspace";
     case domain::window_kind::command_centre:
         return "Command centre";
+    case domain::window_kind::series_browser:
+        return "Market data";
     }
     return "Window";
 }
@@ -271,6 +273,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
     case domain::window_kind::command_centre:
+    case domain::window_kind::series_browser:
         return false;
     }
     return false;

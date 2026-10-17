@@ -140,6 +140,18 @@ HEDGR_UI_EXPORT void render_workspace_window(
  * and closed from its own tab. The window is one per session, so a wall may
  * hold several, each showing a different deployment.
  */
+/**
+ * @brief The market series a session may plot, as a chooser.
+ *
+ * One list, filtered by what the person types, and a double click on a row
+ * opens that series' chart. The window stays open, so several plots are opened
+ * from the same list without going back to the menu each time.
+ */
+HEDGR_UI_EXPORT void render_series_browser(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 HEDGR_UI_EXPORT void render_command_centre_window(
     hedgr::model::state::window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,

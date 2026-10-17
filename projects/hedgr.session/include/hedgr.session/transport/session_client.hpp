@@ -157,6 +157,47 @@ struct deployment_read final {
 };
 
 /**
+ * @brief One market series as the deployment names it.
+ *
+ * The URI is the identity every request carries. The label is the interface's
+ * reading of it, made once here so a screen does not parse URIs.
+ */
+struct market_series_summary final {
+    /** @brief The series' own key, as the deployment spells it. */
+    std::string id;
+
+    /** @brief The canonical oresmd URI, which is the series' identity. */
+    std::string oresmd_uri;
+
+    /** @brief A person's name for the series, derived from the URI. */
+    std::string label;
+
+    /** @brief The asset class, upper-cased. */
+    std::string asset_class;
+
+    /** @brief Who produced the series, for example SYNTHETIC. */
+    std::string producer_kind;
+
+    /** @brief The party that owns the series. */
+    std::string party_id;
+};
+
+/** @brief One observation: when the market was observed and what it was. */
+struct market_point final {
+    /** @brief The observation time, in nanoseconds since the Unix epoch. */
+    std::int64_t at_ns = 0;
+
+    /** @brief The observed value, parsed from the deployment's decimal text. */
+    double value = 0.0;
+};
+
+/** @brief One series' observations, oldest first. */
+struct market_series_read final {
+    /** @brief The points, in time order. */
+    std::vector<market_point> points;
+};
+
+/**
  * @brief One blocking connection from one account to one instance.
  *
  * Every call here blocks until the instance answers or the request times
@@ -358,6 +399,35 @@ public:
      * @return the deployment, or why it could not be read.
      */
     [[nodiscard]] result<deployment_read> deployment() const;
+
+    /**
+     * @brief Reads the market series this session may see.
+     *
+     * The deployment scopes the read by the session's tenant and party, so the
+     * result is what this login may plot and nothing else. The label is derived
+     * from each series' canonical URI, which is the only name the deployment
+     * gives it.
+     *
+     * @param limit the most rows to ask for.
+     * @return the series, or why they could not be read.
+     */
+    [[nodiscard]] result<std::vector<market_series_summary>>
+    market_series(std::uint32_t limit = 500) const;
+
+    /**
+     * @brief Reads one series' most recent observations, oldest first.
+     *
+     * The read asks for the newest @p limit points and reverses them, because a
+     * plot runs left to right in time and the deployment orders newest first.
+     *
+     * @pre the session is authenticated.
+     * @param series_id the series' key.
+     * @param limit the most points to ask for.
+     * @return the points, or why they could not be read.
+     */
+    [[nodiscard]] result<market_series_read>
+    market_series_points(std::string_view series_id,
+        std::uint32_t limit = 600) const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

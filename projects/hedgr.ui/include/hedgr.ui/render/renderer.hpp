@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
@@ -267,6 +268,12 @@ struct window_ui_state final {
 
     /** @brief This window's tabs, if it is a command centre. */
     command_centre_ui_state command_centre;
+
+    /** @brief Whether the series chooser lists only synthetic series. */
+    bool market_synthetic_only = true;
+
+    /** @brief Whether the series chooser lists only the session's party. */
+    bool market_own_party_only = true;
 };
 
 /**
@@ -295,6 +302,9 @@ struct render_input final {
 
     /** @brief The live sessions. */
     const hedgr::model::state::session_table& sessions;
+
+    /** @brief The market series and the points each chart holds. */
+    const hedgr::model::state::market_table& market;
 
     /**
      * @brief The probes' last results and next deadlines.

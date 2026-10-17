@@ -103,6 +103,31 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         workspace != nullptr ? workspace->account_id : std::string{};
 
     ImGui::PushID("workspace");
+
+    /*
+     * The tenant's own menu. It is the way into the market data screens; every
+     * entry names the session's own instance and account, so a screen opened
+     * here reads the deployment this workspace is signed in to.
+     */
+    if (ImGui::BeginMenuBar()) {
+        if (ImGui::BeginMenu("Market data")) {
+            if (ImGui::MenuItem("Synthetic series...", nullptr, false,
+                    session.has_value())) {
+                command request;
+                request.kind = command_kind::open_window;
+                request.instance_id =
+                    std::string{input.sessions.instance_id(*session)};
+                request.account_id =
+                    std::string{input.sessions.account_id(*session)};
+                request.new_window_kind =
+                    hedgr::model::domain::window_kind::series_browser;
+                input.commands.push(std::move(request));
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::EndMenuBar();
+    }
+
     hedgr::ui::render::draw_identity_bar(
         hedgr::ui::render::identity_of(input, handle));
 

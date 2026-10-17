@@ -177,6 +177,12 @@ struct command final {
      */
     bool remember = false;
 
+    /** @brief Market series a chart window plots, for open_window. */
+    std::string series_id;
+
+    /** @brief Human label of that series, for the window's title. */
+    std::string series_label;
+
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;
 };

@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
+#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
@@ -162,6 +163,11 @@ public:
 
     [[nodiscard]] const model::state::window_table& windows() const noexcept {
         return windows_;
+    }
+
+    /** @brief The market series and the points each chart holds. */
+    [[nodiscard]] const model::state::market_table& market() const noexcept {
+        return market_;
     }
 
     /**
@@ -307,6 +313,23 @@ private:
      * would queue behind the first for no new information.
      */
     void start_deployment_read(std::string_view window_id);
+
+    /** @brief Asks for the market series catalogue, on the window's session. */
+    void start_market_catalogue_read(std::string_view window_id);
+
+    /**
+     * @brief Asks for one market read on the window's session.
+     *
+     * An empty @p series_id is the catalogue; anything else is that series'
+     * points. One path because the connection, token and in-flight rules are
+     * the same for both.
+     */
+    void start_market_read(std::string_view window_id,
+        std::string_view series_id);
+
+    /** @brief Asks for one series' points, on the window's session. */
+    void start_market_points_read(std::string_view window_id,
+        std::string_view series_id);
     void do_probe_instance(const model::command::command& cmd);
     void do_probe_all();
 
@@ -590,6 +613,15 @@ private:
      * snapshot event removes it whatever the read found.
      */
     std::unordered_set<std::string> deployment_reads_;
+
+    /** @brief The market series and the points each chart holds. */
+    model::state::market_table market_;
+
+    /** @brief Whether the catalogue read is out. */
+    bool catalogue_reading_ = false;
+
+    /** @brief The series whose points read is out. */
+    std::unordered_set<std::string> points_reading_;
 
     /**
      * @brief The attempt each pair is on, by the pair's running key.

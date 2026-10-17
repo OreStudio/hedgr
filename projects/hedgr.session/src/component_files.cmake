@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "market/series_label.cpp"
     "transport/session_client.cpp"
     "transport/session_error.cpp"
 )

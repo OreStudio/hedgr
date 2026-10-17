@@ -18,16 +18,23 @@
  *
  */
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.ui/icon/icons.hpp"
-#include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <cstddef>
+#include <ctime>
 #include <string>
 #include <vector>
 
 namespace {
+
+namespace domain = hedgr::model::domain;
+namespace icon = hedgr::ui::icon;
+namespace theme = hedgr::ui::theme;
 
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
@@ -35,21 +42,25 @@ using hedgr::model::state::window_handle;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
+}
+
+namespace {
+
 /**
- * @brief A stand-in series, so the plot is visibly a plot before data arrives.
+ * @brief A time tick, from the epoch seconds the plot's X axis carries.
  *
- * The runtime owns the series; until it delivers one, a window that drew
- * nothing at all would be indistinguishable from a window that is broken.
+ * This ImPlot has no time axis of its own, so the ticks are formatted here.
+ * The shape names the day and the minute, which reads for an intraday series
+ * and still separates days for a series that spans years.
  */
-std::vector<double> placeholder_series() {
-    constexpr std::size_t points = 240;
-    std::vector<double> values;
-    values.reserve(points);
-    for (std::size_t i = 0; i < points; ++i) {
-        values.push_back(100.0 + 6.0 * (static_cast<double>(i % 32) / 32.0)
-            + 2.0 * static_cast<double>(i % 7));
-    }
-    return values;
+int format_time(double value, char* buffer, int size, void* data) {
+    const auto* pattern = static_cast<const char*>(data);
+    const auto seconds = static_cast<std::time_t>(value);
+    std::tm utc{};
+    gmtime_r(&seconds, &utc);
+    const auto written = std::strftime(buffer,
+        static_cast<std::size_t>(size), pattern, &utc);
+    return static_cast<int>(written);
 }
 
 }
@@ -57,85 +68,105 @@ std::vector<double> placeholder_series() {
 namespace hedgr::ui::render {
 
 /**
- * @brief A chart window: one numeric series against time.
+ * @brief One market series against time.
  *
- * The plot is drawn inside a child sized to the window's remaining area, so
- * the plot's own layout is not confused by toolbars or status lines that
- * arrive later.
+ * The points are read on a cadence by the runtime and handed over as one
+ * snapshot, so the plot is a reading of one moment rather than a series of
+ * appends that could interleave with the frame. A failed read keeps the last
+ * points and says the read failed: a blank plot would look like a market with
+ * no prices rather than like a connection problem.
  */
 void render_chart(window_handle handle, const render_input& input,
     window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
     static_cast<void>(lock);
+    static_cast<void>(state);
+    static_cast<void>(status);
     using hedgr::model::domain::chart_state;
 
-    const auto& chart = std::get<chart_state>(input.windows.state(handle));
+    ImGui::PushID("chart");
+    draw_identity_bar(identity_of(input, handle));
 
-    const bool refresh_clicked = ImGui::Button(hedgr::ui::icon::refresh);
-    ImGui::SetItemTooltip("Refresh now");
-    if (refresh_clicked) {
-        command request;
-        request.kind = command_kind::refresh_window;
-        request.window_id = std::string{input.windows.id(handle)};
-        input.commands.push(std::move(request));
+    const auto& shape = input.windows.state(handle);
+    const auto* chart = std::get_if<chart_state>(&shape);
+    if (chart == nullptr) {
+        ImGui::TextWrapped("%s", "This window is not a chart.");
+        ImGui::PopID();
+        return;
     }
 
-    ImGui::SameLine();
-    ImGui::TextUnformatted(chart.series_subject.empty()
-            ? "(no subject)"
-            : chart.series_subject.c_str());
+    if (ImGui::Button(icon::refresh))
+        input.commands.push(command{
+            .kind = command_kind::refresh_window,
+            .window_id = std::string{input.windows.id(handle)}});
+    ImGui::SetItemTooltip("Read the series again");
 
     ImGui::SameLine();
-    ImGui::Checkbox("Stats", &state.show_detail);
-    ImGui::SetItemTooltip("Show the series summary alongside the plot");
+    ImGui::TextUnformatted(chart->label.c_str());
 
-    /*
-     * There is no series yet: say so where the plot would be, rather than
-     * drawing an empty axis a reader would take for a flat line at zero.
-     */
-    if (chart.series_subject.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted("Waiting for data.");
-        ImGui::PopStyleColor();
+    const auto* snapshot = input.market.points(chart->series_id);
+    if (snapshot == nullptr || (!snapshot->is_read()
+            && snapshot->failure.empty())) {
+        ImGui::TextDisabled("Reading the series...");
+        ImGui::PopID();
+        return;
+    }
+
+    if (!snapshot->failure.empty()) {
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
+            "%s", snapshot->failure.c_str());
+    }
+
+    if (!snapshot->points.empty()) {
+        const auto& last = snapshot->points.back();
+        ImGui::SameLine();
+        ImGui::TextDisabled("%.6g  (%zu points)", last.value,
+            snapshot->points.size());
     }
 
     const ImVec2 available = ImGui::GetContentRegionAvail();
     if (ImGui::BeginChild("##plot-area", available, ImGuiChildFlags_Borders)) {
-        const auto values = placeholder_series();
-        std::vector<double> xs(values.size());
-        for (std::size_t i = 0; i < xs.size(); ++i)
-            xs[i] = static_cast<double>(i);
+        if (snapshot->points.empty()) {
+            ImGui::TextDisabled("No observations for this series yet.");
+            ImGui::EndChild();
+            ImGui::PopID();
+            return;
+        }
+
+        std::vector<double> xs;
+        std::vector<double> ys;
+        xs.reserve(snapshot->points.size());
+        ys.reserve(snapshot->points.size());
+        for (const auto& point : snapshot->points) {
+            xs.push_back(static_cast<double>(point.at_ns) / 1.0e9);
+            ys.push_back(point.value);
+        }
 
         constexpr ImPlotFlags plot_flags = ImPlotFlags_None;
         constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_AutoFit;
         constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_AutoFit;
 
         if (ImPlot::BeginPlot("##series", ImVec2(-1.0f, -1.0f), plot_flags)) {
-            ImPlot::SetupAxes("t", "value", x_flags, y_flags);
-            ImPlot::PlotLine("series", xs.data(), values.data(),
-                static_cast<int>(values.size()));
+            ImPlot::SetupAxes("Time", "Value", x_flags, y_flags);
+            /*
+             * A series that spans years needs the year in its ticks; an
+             * intraday one needs the minute. The span decides, because the
+             * formatter sees one tick and not the axis.
+             */
+            const bool wide = xs.size() > 1
+                && (xs.back() - xs.front()) > 90.0 * 24.0 * 3600.0;
+            const char* pattern = wide ? "%d %b %Y" : "%d %b %H:%M";
+            ImPlot::SetupAxisFormat(ImAxis_X1, format_time,
+                const_cast<char*>(pattern));
+            ImPlot::PlotLine(chart->label.c_str(), xs.data(), ys.data(),
+                static_cast<int>(xs.size()));
             ImPlot::EndPlot();
-        }
-
-        /*
-         * The summary reads the same buffer the plot just drew, so it cannot
-         * disagree with the picture beside it once real data replaces the
-         * placeholder.
-         */
-        if (state.show_detail) {
-            double lowest = values.front();
-            double highest = values.front();
-            for (const auto value : values) {
-                lowest = value < lowest ? value : lowest;
-                highest = value > highest ? value : highest;
-            }
-            ImGui::Text("%zu points, last %.2f, min %.2f, max %.2f",
-                values.size(), values.back(), lowest, highest);
         }
     }
     ImGui::EndChild();
+    ImGui::PopID();
 }
 
 }

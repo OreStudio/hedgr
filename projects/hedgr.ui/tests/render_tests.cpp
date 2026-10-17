@@ -185,6 +185,7 @@ using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
 using hedgr::model::state::label_table;
 using hedgr::model::state::labelling_table;
+using hedgr::model::state::market_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
@@ -201,6 +202,7 @@ struct empty_state final {
     label_table labels;
     labelling_table labellings;
     session_table sessions;
+    market_table market;
     probe_table probes;
     password_policy_state password_policy;
     window_table windows;
@@ -217,6 +219,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .labels = state.labels,
         .labellings = state.labellings,
         .sessions = state.sessions,
+        .market = state.market,
         .probes = state.probes,
         .password_policy = state.password_policy,
         .windows = state.windows,

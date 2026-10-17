@@ -43,6 +43,10 @@ std::string_view to_string(event_kind value) noexcept {
         return "password_policy_fetched";
     case event_kind::deployment_snapshot:
         return "deployment_snapshot";
+    case event_kind::series_catalogue:
+        return "series_catalogue";
+    case event_kind::series_points:
+        return "series_points";
     }
     return "unknown";
 }

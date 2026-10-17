@@ -375,6 +375,7 @@ void workspace::render(const render_input& input) {
          */
         const ImGuiWindowFlags window_flags =
             kind == hedgr::model::domain::window_kind::command_centre
+                || kind == hedgr::model::domain::window_kind::workspace
             ? ImGuiWindowFlags_MenuBar
             : ImGuiWindowFlags_None;
         if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr,

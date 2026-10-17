@@ -13,6 +13,7 @@ set(files
     "manager/instance_manager.cpp"
     "worker/policy_worker.cpp"
     "worker/deployment_worker.cpp"
+    "worker/market_worker.cpp"
     "worker/probe_worker.cpp"
     "worker/session_worker.cpp"
 )
@@ -30,5 +31,6 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/policy_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/probe_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/deployment_worker.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/market_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
 )

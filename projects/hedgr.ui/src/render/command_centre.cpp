@@ -465,8 +465,15 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Market data")) {
-            ImGui::MenuItem("Series", nullptr, false, false);
-            ImGui::TextDisabled("Not built yet");
+            if (ImGui::MenuItem("Synthetic series...")) {
+                command request;
+                request.kind = command_kind::open_window;
+                request.instance_id = instance_id;
+                request.account_id =
+                    std::string{input.sessions.account_id(*session)};
+                request.new_window_kind = domain::window_kind::series_browser;
+                input.commands.push(std::move(request));
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Reference data")) {
