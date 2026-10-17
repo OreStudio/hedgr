@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
@@ -947,6 +948,46 @@ TEST_CASE("the bucket ring keeps order and drops when full", "[ring]") {
     REQUIRE(ring.drain(out) == 3);
     REQUIRE(out.front().point.at_ns == 0);
     REQUIRE(out.back().point.at_ns == 2);
+}
+
+TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
+    using hedgr::model::domain::market_level;
+    using hedgr::model::state::bucket_aggregator;
+    using hedgr::model::state::bucket_ring;
+    using hedgr::model::state::market_bucket;
+
+    bucket_ring ring;
+    bucket_aggregator aggregator{"s-1", ring};
+    std::vector<market_bucket> out;
+
+    aggregator.on_tick(200'000'000, 1.0);
+    aggregator.on_tick(800'000'000, 2.0);
+    REQUIRE(ring.drain(out) == 0);
+
+    aggregator.on_tick(1'200'000'000, 3.0);
+    REQUIRE(ring.drain(out) == 1);
+    REQUIRE(out.front().level == market_level::fine);
+    REQUIRE(out.front().point.at_ns == 800'000'000);
+    REQUIRE(out.front().point.value == 2.0);
+
+    aggregator.on_tick(61'200'000'000, 4.0);
+    REQUIRE(ring.drain(out) == 2);
+    REQUIRE(out[0].level == market_level::fine);
+    REQUIRE(out[0].point.value == 3.0);
+    REQUIRE(out[1].level == market_level::medium);
+    REQUIRE(out[1].point.at_ns == 1'200'000'000);
+
+    /* A late tick is dropped by every level, not written out of order. */
+    aggregator.on_tick(500'000'000, 9.0);
+    REQUIRE(ring.drain(out) == 0);
+
+    aggregator.on_tick(122'400'000'000, 5.0);
+    REQUIRE(ring.drain(out) == 2);
+    REQUIRE(out[0].level == market_level::fine);
+    REQUIRE(out[0].point.value == 4.0);
+    REQUIRE(out[1].level == market_level::medium);
+    REQUIRE(out[1].point.value == 4.0);
+    REQUIRE(aggregator.ticks() == 6);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",

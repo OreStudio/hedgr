@@ -101,6 +101,19 @@ bool market_tick_stream::connected() const {
 }
 
 void market_tick_stream::disconnect() {
+    /*
+     * Draining waits for the callbacks already in flight. The ring and the
+     * series state they write to are owned by the caller, and a callback that
+     * outlived its owner would write into freed memory.
+     */
+    for (auto& [series_id, subscription] : subscriptions_) {
+        static_cast<void>(series_id);
+        try {
+            subscription.drain();
+        } catch (const std::exception&) {
+            /* A subscription already gone has nothing left to drain. */
+        }
+    }
     subscriptions_.clear();
     client_.disconnect();
 }

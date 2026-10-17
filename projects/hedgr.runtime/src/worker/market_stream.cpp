@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.logging/make_logger.hpp"
 #include <array>
@@ -31,11 +32,6 @@ namespace {
     return instance;
 }
 
-constexpr std::array<hedgr::model::domain::market_level, 3> levels{
-    hedgr::model::domain::market_level::fine,
-    hedgr::model::domain::market_level::medium,
-    hedgr::model::domain::market_level::coarse};
-
 }
 
 namespace hedgr::runtime::worker {
@@ -44,52 +40,27 @@ namespace hedgr::runtime::worker {
  * @brief One watched series' current buckets.
  *
  * Shared with the subscription's callback so a watch that is removed while a
- * tick is in flight keeps its state alive until the callback returns. Only the
- * callback thread writes the buckets, under the mutex.
+ * tick is in flight keeps its state alive until the callback returns. The
+ * mutex serialises the aggregator, which is the only lock on the tick path.
  */
 struct market_stream::series_state final {
     series_state(std::string id, model::state::bucket_ring& ring,
         std::atomic<std::size_t>& ticks)
         : series_id(std::move(id))
-        , ring(ring)
+        , aggregator(series_id, ring)
         , ticks(ticks) {
     }
 
     void on_tick(const session::market::tick& tick) {
         std::lock_guard lock(mu);
-        for (std::size_t i = 0; i < levels.size(); ++i) {
-            const auto level = levels[i];
-            const auto interval = model::domain::market_level_ns(level);
-            const auto bucket = tick.at_ns / interval;
-            /*
-             * A tick older than what this level already holds is late, and a
-             * ring runs forward in time. It is counted and dropped rather than
-             * rewriting a bucket the frame loop may already have drawn.
-             */
-            if (current[i].at_ns != 0 && tick.at_ns < current[i].at_ns)
-                continue;
-            if (bucket != bucket_start[i]) {
-                if (current[i].at_ns != 0) {
-                    ring.try_push(model::state::market_bucket{
-                        .series_id = series_id,
-                        .level = level,
-                        .point = current[i]});
-                }
-                bucket_start[i] = bucket;
-            }
-            current[i] = model::domain::market_point{
-                .at_ns = tick.at_ns, .value = tick.value};
-        }
+        aggregator.on_tick(tick.at_ns, tick.value);
         ticks.fetch_add(1, std::memory_order_relaxed);
     }
 
     std::string series_id;
-    model::state::bucket_ring& ring;
+    model::state::bucket_aggregator aggregator;
     std::atomic<std::size_t>& ticks;
-
     std::mutex mu;
-    std::array<std::int64_t, 3> bucket_start{-1, -1, -1};
-    std::array<model::domain::market_point, 3> current{};
 };
 
 market_stream::market_stream(market_stream_options options)

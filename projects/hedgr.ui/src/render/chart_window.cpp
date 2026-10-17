@@ -128,6 +128,17 @@ constexpr std::array<chart_span, 6> chart_spans{{
 constexpr std::int64_t live_threshold_ns =
     std::int64_t{10} * 60 * 1'000'000'000;
 
+/** @brief The history level a span reads from. */
+[[nodiscard]] domain::market_level level_for(std::int64_t span_ns) {
+    if (span_ns == 0)
+        return domain::market_level::coarse;
+    if (span_ns <= 2 * domain::market_coarse_ns)
+        return domain::market_level::fine;
+    if (span_ns <= 2 * 24 * domain::market_coarse_ns)
+        return domain::market_level::medium;
+    return domain::market_level::coarse;
+}
+
 /** @brief The date of one instant, in the same zone as the axis ticks. */
 [[nodiscard]] std::string format_date(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
@@ -221,88 +232,93 @@ void render_chart(window_handle handle, const render_input& input,
     draw_series_name(chart->label);
 
     if (snapshot != nullptr) {
-        const auto& points = snapshot->level(
-            state.market_chart_span_ns == 0
-                ? domain::market_level::coarse
-                : state.market_chart_span_ns <= 2 * domain::market_coarse_ns
-                ? domain::market_level::fine
-                : state.market_chart_span_ns <= 2 * 24 * domain::market_coarse_ns
-                ? domain::market_level::medium
-                : domain::market_level::coarse);
+        const auto& points =
+            snapshot->level(level_for(state.market_chart_span_ns));
         if (!points.empty()) {
-        const bool live = snapshot->observed_at_ns != 0
-            && input.now_ns >= snapshot->observed_at_ns
-            && input.now_ns - snapshot->observed_at_ns <= live_threshold_ns;
-        const std::size_t start = live_window_start(points,
-            live ? state.market_chart_span_ns : 0);
-        const double first = points[start].value;
-        const double last = points.back().value;
-        const double change = last - first;
-        const double percent = first != 0.0 ? change / first * 100.0 : 0.0;
-        const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
-        const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
+            const bool live = snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns
+                && input.now_ns - snapshot->observed_at_ns
+                        <= live_threshold_ns;
+            const std::size_t start = live_window_start(points,
+                live ? state.market_chart_span_ns : 0);
+            const double first = points[start].value;
+            const double last = points.back().value;
+            const double change = last - first;
+            const double percent =
+                first != 0.0 ? change / first * 100.0 : 0.0;
+            const ImU32 colour =
+                change < 0.0 ? theme::failure_colour : up_colour;
+            const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
 
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextColored(tint, "%s", format_price(last).c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(tint, "%+.2f%%", percent);
-        ImGui::PopFont();
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            ImGui::PushFont(icon::numeric_font());
+            ImGui::TextColored(tint, "%s", format_price(last).c_str());
+            ImGui::SameLine();
+            ImGui::TextColored(tint, "%+.2f%%", percent);
+            ImGui::PopFont();
 
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        if (!live) {
-            ImGui::TextDisabled("All points");
-            ImGui::SetItemTooltip("%s",
-                "The newest point is older than ten minutes, so the series is "
-                "history and is plotted whole");
-        } else {
-            for (const auto& span : chart_spans) {
-                const bool selected = span.ns == state.market_chart_span_ns;
-                if (selected) {
-                    ImGui::PushStyleColor(ImGuiCol_Button,
-                        ImGui::ColorConvertU32ToFloat4(
-                            theme::rail_selection_bar));
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            if (!live) {
+                ImGui::TextDisabled("All points");
+                ImGui::SetItemTooltip("%s",
+                    "The newest point is older than ten minutes, so the series "
+                    "is history and is plotted whole");
+            } else {
+                for (const auto& span : chart_spans) {
+                    const bool selected =
+                        span.ns == state.market_chart_span_ns;
+                    if (selected) {
+                        ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::ColorConvertU32ToFloat4(
+                                theme::rail_selection_bar));
+                    }
+                    if (ImGui::SmallButton(span.label))
+                        state.market_chart_span_ns = span.ns;
+                    if (selected)
+                        ImGui::PopStyleColor();
+                    if (span.ns == 0) {
+                        ImGui::SetItemTooltip("%s", "Plot the whole series");
+                    } else {
+                        ImGui::SetItemTooltip("Plot the last %s", span.label);
+                    }
+                    ImGui::SameLine();
                 }
-                if (ImGui::SmallButton(span.label))
-                    state.market_chart_span_ns = span.ns;
-                if (selected)
-                    ImGui::PopStyleColor();
-                if (span.ns == 0) {
-                    ImGui::SetItemTooltip("%s", "Plot the whole series");
-                } else {
-                    ImGui::SetItemTooltip("Plot the last %s", span.label);
-                }
-                ImGui::SameLine();
             }
-        }
-        ImGui::NewLine();
+            ImGui::NewLine();
 
-        /*
-         * The date once, rather than in every tick, and the freshness beside
-         * it. The ticks themselves carry only the time of day.
-         */
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
-        ImGui::PopFont();
-        ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
+            /*
+             * The date once, rather than in every tick, and the freshness
+             * beside it. The ticks themselves carry only the time of day.
+             */
+            ImGui::PushFont(icon::numeric_font());
+            ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
+            ImGui::PopFont();
+            ImGui::SameLine();
+            ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
 
-        if (snapshot->observed_at_ns != 0
-            && input.now_ns >= snapshot->observed_at_ns) {
-            const auto age_s = static_cast<double>(
-                input.now_ns - snapshot->observed_at_ns) / 1.0e9;
-            const ImU32 poll_colour = age_s > 10.0
-                ? theme::readiness_colour(domain::readiness::bootstrapping)
-                : ImGui::GetColorU32(ImGuiCol_TextDisabled);
-            ImGui::SameLine();
-            ImGui::TextDisabled("\u00b7");
-            ImGui::SameLine();
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(poll_colour),
-                age_s < 3.0 ? "live" : "stale %.0f s", age_s);
-            ImGui::SetItemTooltip("%s",
-                "Ticks arrive on the session's market subscription; this is "
-                "when the last one landed");
-        }
+            if (snapshot->observed_at_ns != 0
+                && input.now_ns >= snapshot->observed_at_ns) {
+                const auto age_s = static_cast<double>(
+                    input.now_ns - snapshot->observed_at_ns) / 1.0e9;
+                const ImU32 poll_colour = age_s > 10.0
+                    ? theme::readiness_colour(
+                          domain::readiness::bootstrapping)
+                    : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+                ImGui::SameLine();
+                ImGui::TextDisabled("\u00b7");
+                ImGui::SameLine();
+                if (age_s < 3.0) {
+                    ImGui::TextColored(
+                        ImGui::ColorConvertU32ToFloat4(poll_colour), "live");
+                } else {
+                    ImGui::TextColored(
+                        ImGui::ColorConvertU32ToFloat4(poll_colour),
+                        "stale %.0f s", age_s);
+                }
+                ImGui::SetItemTooltip("%s",
+                    "Ticks arrive on the session's market subscription; this "
+                    "is when the last one landed");
+            }
         }
     }
 
@@ -326,15 +342,8 @@ void render_chart(window_handle handle, const render_input& input,
             && snapshot->coarse.empty()) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
-            const auto& points = snapshot->level(
-                state.market_chart_span_ns == 0
-                    ? domain::market_level::coarse
-                    : state.market_chart_span_ns <= 2 * domain::market_coarse_ns
-                    ? domain::market_level::fine
-                    : state.market_chart_span_ns
-                            <= 2 * 24 * domain::market_coarse_ns
-                    ? domain::market_level::medium
-                    : domain::market_level::coarse);
+            const auto& points =
+                snapshot->level(level_for(state.market_chart_span_ns));
             const bool live = snapshot->observed_at_ns != 0
                 && input.now_ns >= snapshot->observed_at_ns
                 && input.now_ns - snapshot->observed_at_ns
