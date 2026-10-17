@@ -28,6 +28,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
 #include <cstdint>
@@ -48,6 +49,14 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/** @brief This window's logger. Gates and screen changes are reported once. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance =
+        make_logger("hedgr.ui.render.command_centre");
+    return instance;
+}
 
 /**
  * @brief The screens this window can host, in the order a menu offers them.
@@ -97,6 +106,8 @@ void open_screen(hedgr::ui::render::command_centre_ui_state& state,
         state.screens.emplace_back(id);
     state.active = std::string{id};
     state.select_next = true;
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Command centre screen '" << id << "' opened";
 }
 
 /** @brief Opens a screen from a menu item, which is the click path. */
@@ -401,6 +412,12 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * have no way to tell.
      */
     if (!live) {
+        if (!scratch.session_loss_reported) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Command centre for '" << instance_name
+                << "' has no signed-in session";
+            scratch.session_loss_reported = true;
+        }
         ImGui::TextWrapped("%s",
             "This command centre is not signed in. Sign in from the Accounts "
             "window to read this deployment.");
@@ -408,6 +425,8 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         ImGui::PopID();
         return;
     }
+
+    scratch.session_loss_reported = false;
 
     const auto* probe = instance ? input.probes.get(*instance) : nullptr;
     const auto* bootstrap = instance ? bootstrap_of(input, *instance) : nullptr;
@@ -418,11 +437,18 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * against a deployment that cannot answer for itself.
      */
     if (bootstrap != nullptr && bootstrap->in_bootstrap_mode) {
+        if (!scratch.bootstrap_reported) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Command centre for '" << instance_name
+                << "' is showing the bootstrap card";
+            scratch.bootstrap_reported = true;
+        }
         draw_bootstrap_card(input, *instance, instance_id, instance_name);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
+    scratch.bootstrap_reported = false;
 
     if (ImGui::BeginMenuBar()) {
         if (ImGui::BeginMenu("Deployment")) {

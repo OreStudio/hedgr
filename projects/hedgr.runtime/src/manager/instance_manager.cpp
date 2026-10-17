@@ -209,8 +209,10 @@ live_indices(const model_state::slab& layout) {
 /** @brief A store failure as one sentence naming the operation that failed. */
 [[nodiscard]] std::string store_failure(std::string_view what,
     const sqlite::store_error& error) {
-    return std::format("{}: {} ({})", what, error.message,
+    const auto message = std::format("{}: {} ({})", what, error.message,
         sqlite::to_string(error.code));
+    BOOST_LOG_SEV(lg(), ores::logging::error) << "Store failure: " << message;
+    return message;
 }
 
 /**
@@ -651,6 +653,11 @@ instance_manager::~instance_manager() {
 }
 
 void instance_manager::stop() noexcept {
+    if (!started_ && running_.empty() && probing_.empty())
+        return;
+
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Stopping the runtime";
+
     for (auto& [key, source] : running_) {
         if (source)
             source->request_stop();
@@ -708,6 +715,8 @@ instance_manager::start(const std::filesystem::path& database_path,
         return std::unexpected(last_error_);
     }
     database_ = std::make_unique<sqlite::database>(std::move(opened).value());
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Opened the store at " << database_path.string();
 
     if (auto applied = database_->apply_schema(); !applied) {
         last_error_ = store_failure("cannot bring the store up to date",
@@ -919,6 +928,9 @@ instance_manager::start(const std::filesystem::path& database_path,
     }
 
     started_ = true;
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Runtime ready with " << instances_.size() << " instances and "
+        << accounts_.size() << " accounts";
     return {};
 }
 
@@ -1402,6 +1414,15 @@ void instance_manager::handle(command::command& cmd) {
      */
     last_error_.clear();
 
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Command: " << hedgr::model::command::to_string(cmd.kind)
+        << (cmd.instance_id.empty() ? std::string{}
+                                    : std::format(" instance '{}'", cmd.instance_id))
+        << (cmd.account_id.empty() ? std::string{}
+                                   : std::format(" account '{}'", cmd.account_id))
+        << (cmd.window_id.empty() ? std::string{}
+                                  : std::format(" window '{}'", cmd.window_id));
+
     switch (cmd.kind) {
     case command::command_kind::save_instance:
         do_save_instance(cmd);
@@ -1511,6 +1532,7 @@ void instance_manager::handle(command::command& cmd) {
 }
 
 void instance_manager::do_save_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save instance " << cmd.instance_row.name << "";
     if (!instance_repo_) {
         last_error_ = "cannot save an instance: the store is not open";
         return;
@@ -1563,6 +1585,7 @@ void instance_manager::do_save_instance(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove instance " << cmd.instance_id << "";
     /*
      * The interface names the row by id and the row itself also carries one, so
      * either is accepted rather than dropping a removal that named the
@@ -1692,6 +1715,7 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
 }
 
 void instance_manager::do_save_account(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save account " << cmd.account_row.principal << "";
     if (!account_repo_) {
         last_error_ = "cannot save an account: the store is not open";
         return;
@@ -1732,6 +1756,7 @@ void instance_manager::do_save_account(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_account(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove account " << cmd.account_id << "";
     const std::string id = cmd.account_id.empty() ? cmd.account_row.id
                                                   : cmd.account_id;
     if (id.empty()) {
@@ -1780,6 +1805,7 @@ void instance_manager::do_remove_account(const command::command& cmd) {
 }
 
 void instance_manager::do_save_folder(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save folder " << cmd.folder_row.name << "";
     if (!folder_repo_) {
         last_error_ = "cannot save a folder: the store is not open";
         return;
@@ -1861,6 +1887,7 @@ void instance_manager::do_save_folder(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_folder(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove folder " << cmd.folder_row.id << "";
     if (!folder_repo_) {
         last_error_ = "cannot remove a folder: the store is not open";
         return;
@@ -2007,6 +2034,7 @@ void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids)
 }
 
 void instance_manager::do_save_label(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save label " << cmd.label_row.name << "";
     if (!label_repo_) {
         last_error_ = "cannot save a label: the store is not open";
         return;
@@ -2041,6 +2069,7 @@ void instance_manager::do_save_label(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_label(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove label " << cmd.label_row.id << "";
     if (!label_repo_) {
         last_error_ = "cannot remove a label: the store is not open";
         return;
@@ -2149,6 +2178,7 @@ void instance_manager::do_detach_label(const command::command& cmd) {
 }
 
 void instance_manager::do_save_shortcut(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
         last_error_ = "cannot save a shortcut: the store is not open";
         return;
@@ -2187,6 +2217,7 @@ void instance_manager::do_save_shortcut(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_shortcut(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
         last_error_ = "cannot remove a shortcut: the store is not open";
         return;
@@ -2230,6 +2261,10 @@ void instance_manager::drop_target_shortcuts(domain::window_kind kind,
 }
 
 void instance_manager::do_connect_session(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Sign-in requested for '" << cmd.account_id << "' on '"
+        << cmd.instance_id << "'";
+
     /*
      * Both ids arrive as text from the interface, so both are resolved here:
      * the instance's row is read for the connection settings, and the account
@@ -2286,6 +2321,10 @@ void instance_manager::do_connect_session(const command::command& cmd) {
             "cannot connect to {}: the account has no stored credential and "
             "no password was supplied",
             instance_row->name);
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Cannot sign in to '" << instance_row->name
+            << "': account '" << cmd.account_id
+            << "' has no stored credential and no password was supplied";
         return;
     }
 
@@ -2689,9 +2728,15 @@ void instance_manager::do_open_window(const command::command& cmd) {
         last_error_ = store_failure(
             std::format("cannot save window {}", spec.id), saved.error());
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Opened window '" << spec.id << "' of kind '"
+        << domain::to_string(spec.kind) << "'";
 }
 
 void instance_manager::do_close_window(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Closing window '" << cmd.window_id << "'";
     const auto handle = windows_.find(cmd.window_id);
     if (!handle) {
         last_error_ = std::format("cannot close: no window {}", cmd.window_id);
@@ -2797,10 +2842,15 @@ void instance_manager::start_deployment_read(std::string_view window_id) {
     job.principal = principal;
 
     deployment_reads_.insert(key);
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Starting a deployment read for '" << instance_id << "' / '"
+        << account_id << "'";
     worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::do_probe_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Probe requested for '" << cmd.instance_id << "'";
     /*
      * Forcing a probe moves the deadline rather than starting the probe here:
      * the schedule is then the one place that decides whether an instance is
@@ -3221,6 +3271,9 @@ void instance_manager::apply(const event::event& ev) {
         deployment_reads_.erase(
             running_key(ev.instance_id, ev.account_id));
         sessions_.set_deployment(*handle, ev.deployment);
+        BOOST_LOG_SEV(lg(), ores::logging::debug)
+            << "Applied a deployment snapshot for '" << ev.instance_id
+            << "' / '" << ev.account_id << "'";
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);

@@ -176,6 +176,16 @@ struct command_centre_ui_state final {
      * tabs by hand again.
      */
     bool select_next = false;
+
+    /**
+     * @brief Whether the window has already reported a gate it is showing.
+     *
+     * The renderer runs every frame, so a sentence written on each of them
+     * would bury the log. One report per transition is what an operator
+     * reading it afterwards is looking for.
+     */
+    bool bootstrap_reported = false;
+    bool session_loss_reported = false;
 };
 
 struct window_ui_state final {

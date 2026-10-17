@@ -33,6 +33,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
 #include <cfloat>
@@ -60,6 +61,13 @@ using hedgr::model::domain::session_status;
 using hedgr::model::domain::store_lock;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/** @brief This window's logger. It names a decision, never a password. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.accounts_window");
+    return instance;
+}
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_leaf;
 
@@ -725,9 +733,17 @@ void accounts_window_actions(const render_input& input,
      */
     if (hedgr::ui::render::sign_in_needs_password(input.store_lock,
             row->has_credential)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Asking for a password for '" << row->principal << "' on '"
+            << row->instance_id
+            << "' (no stored credential or the store is closed)";
         state.browser.sign_in_open = true;
         return;
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Signing in '" << row->principal << "' on '" << row->instance_id
+        << "' with the stored credential";
 
     command request;
     request.kind = command_kind::connect_session;

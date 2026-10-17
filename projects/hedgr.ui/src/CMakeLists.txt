@@ -49,6 +49,7 @@ target_include_directories(${lib_target_name} PRIVATE
 target_link_libraries(${lib_target_name}
     PUBLIC
         hedgr.model.lib
+        ores::logging
         imgui::imgui
         implot::implot
     PRIVATE

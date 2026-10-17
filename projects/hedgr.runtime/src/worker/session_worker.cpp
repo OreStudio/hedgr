@@ -22,6 +22,7 @@
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -48,6 +49,13 @@ namespace event = hedgr::model::event;
 namespace transport = hedgr::session::transport;
 
 using hedgr::model::command::event_queue;
+
+/** @brief This worker's logger. No credential or token is ever written. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.runtime.worker.session_worker");
+    return instance;
+}
 
 /**
  * @brief A fact ready to be tagged with the pair it belongs to.
@@ -116,6 +124,10 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
         boost::asio::use_awaitable);
 
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Session worker starting for '" << key.instance_id << "' / '"
+        << key.account_id << "'";
+
     if (const auto connected = client.connect(); !connected) {
         /*
          * No retry. A connect failure is a broker that is not answering, a
@@ -124,6 +136,9 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
          * next, and a retry loop would only hide the decision behind a storm
          * of identical failures.
          */
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Session '" << key.instance_id << "' / '" << key.account_id
+            << "' could not connect: " << connected.error().message;
         push_failure(events, key, connected.error());
         status = domain::session_status::failed;
     } else {
@@ -169,6 +184,9 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                  * from a broken crypto step without either reaching a log as a
                  * secret.
                  */
+                BOOST_LOG_SEV(lg(), ores::logging::error)
+                    << "The stored credential for '" << key.account_id
+                    << "' could not be opened";
                 push_failure(events, key, transport::session_error{
                     .code = transport::session_errc::authentication_rejected,
                     .message = "the stored credential could not be opened",
@@ -197,6 +215,11 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
             job.credential.password.shrink_to_fit();
 
             if (!answer) {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "Sign-in for '" << key.account_id << "' on '"
+                    << key.instance_id << "' failed: "
+                    << answer.error().message << " ["
+                    << transport::to_string(answer.error().code) << "]";
                 push_failure(events, key, answer.error());
                 status = domain::session_status::failed;
             } else {
@@ -226,6 +249,9 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 events.push(std::move(authenticated));
 
                 status = domain::session_status::authenticated;
+                BOOST_LOG_SEV(lg(), ores::logging::info)
+                    << "Session '" << key.instance_id << "' / '"
+                    << key.account_id << "' is authenticated";
                 push_status(events, key, status);
 
                 boost::asio::steady_timer timer(
@@ -238,6 +264,11 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                  * one refresh interval of latency on a disconnect is not worth a
                  * cross-thread cancellation protocol.
                  */
+                BOOST_LOG_SEV(lg(), ores::logging::debug)
+                    << "Session '" << key.instance_id << "' / '"
+                    << key.account_id << "' refreshes every "
+                    << job.refresh_interval.count() << " ms";
+
                 while (!stop->stop_requested()) {
                     timer.expires_after(job.refresh_interval);
                     const auto started = std::chrono::steady_clock::now();
@@ -277,6 +308,10 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
      * overwriting that with "disconnected" would erase the sentence the
      * operator needs.
      */
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Session worker finishing for '" << key.instance_id << "' / '"
+        << key.account_id << "' with status " << domain::to_string(status);
+
     if (status != domain::session_status::failed)
         push_status(events, key, domain::session_status::disconnected);
 }

@@ -20,6 +20,8 @@
 #include "hedgr.imgui/app/host.hpp"
 
 #include <cstdlib>
+#include <filesystem>
+#include <system_error>
 #include <boost/exception/diagnostic_information.hpp>
 #include "ores.logging/lifecycle_manager.hpp"
 #include "ores.utility/streaming/std_vector.hpp" // IWYU pragma: keep.
@@ -53,11 +55,32 @@ int host::execute(const std::vector<std::string>& args,
      * logging subsystem.
      */
     const auto& cfg(*ocfg);
-    lifecycle_manager lm(cfg.logging);
+
+    /*
+     * The file sink does not create its directory, so the directory is made
+     * here. A host where it cannot be made still runs, with the console as its
+     * only sink, rather than failing to start over a log file.
+     */
+    auto logging = cfg.logging;
+    if (logging && !logging->output_directory.empty()) {
+        std::error_code ignored;
+        std::filesystem::create_directories(logging->output_directory, ignored);
+        if (ignored) {
+            logging->filename.clear();
+            logging->output_directory.clear();
+            logging->output_to_console = true;
+        }
+    }
+    lifecycle_manager lm(logging);
 
     /*
      * Log the configuration and command line arguments.
      */
+    if (logging && !logging->filename.empty()) {
+        BOOST_LOG_SEV(lg(), info) << "Logging to "
+                                  << (logging->output_directory
+                                         / logging->filename);
+    }
     BOOST_LOG_SEV(lg(), info) << "Command line arguments: " << args;
     BOOST_LOG_SEV(lg(), debug) << "Configuration: " << cfg;
 

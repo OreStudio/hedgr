@@ -171,6 +171,28 @@ std::filesystem::path default_database_path() {
 }
 
 /**
+ * @brief Where the client writes its log.
+ *
+ * Beside the store, because the two are the same kind of artifact: state this
+ * process produced on this host, which an operator looking for either will look
+ * for in the same place. A desktop client has no console to read, so the log is
+ * not optional here even though the shared logging component makes it opt-in.
+ */
+std::filesystem::path default_log_directory() {
+    return default_database_path().parent_path() / "logs";
+}
+
+/**
+ * @brief The log level asked for, or the framework's own default.
+ */
+std::string requested_log_level(const variables_map& vm) {
+    const auto found = vm.find("log-level");
+    if (found == vm.end() || found->second.empty())
+        return "info";
+    return found->second.as<std::string>();
+}
+
+/**
  * @brief Parses the arguments supplied in the command line and converts them
  * into a configuration object.
  */
@@ -211,6 +233,26 @@ parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
 
     options r;
     r.logging = logging_configuration::read_options(vm);
+
+    /*
+     * A desktop client is launched from an icon, so its stdout goes nowhere an
+     * operator can read. The shared logging component makes file logging
+     * opt-in; this client opts in on every launch and puts the file beside the
+     * store, where the next person looking for it will look. A filename or
+     * directory given on the command line still wins.
+     */
+    if (!r.logging) {
+        ores::logging::logging_options defaults;
+        defaults.severity = requested_log_level(vm);
+        defaults.filename = "hedgr.imgui.log";
+        defaults.output_directory = default_log_directory();
+        defaults.output_to_console = false;
+        r.logging = std::move(defaults);
+    } else if (r.logging->filename.empty()) {
+        r.logging->filename = "hedgr.imgui.log";
+        if (r.logging->output_directory.empty())
+            r.logging->output_directory = default_log_directory();
+    }
 
     r.connection = read_connection_configuration(vm);
     r.database_path = default_database_path();

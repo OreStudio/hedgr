@@ -36,6 +36,7 @@
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
 #include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include <boost/uuid/uuid_io.hpp>
@@ -43,6 +44,19 @@
 namespace {
 
 using hedgr::session::transport::fail;
+
+/**
+ * @brief This client's logger.
+ *
+ * The transport is where a sign-in either works or does not, so this is the
+ * place a failure has to leave a trace. Nothing secret is ever written: a
+ * principal is named, a password and a token are not.
+ */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.session.transport.session_client");
+    return instance;
+}
 using hedgr::session::transport::session_errc;
 using hedgr::session::transport::session_error;
 using hedgr::session::transport::session_options;
@@ -228,6 +242,9 @@ result<void> session_client::connect() {
          * the deployment decodes json answers every request with a decode
          * failure, which reads as the instance being broken.
          */
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Refusing to connect: wire format '" << options_.wire_format
+            << "' is not understood";
         return fail(session_errc::protocol_error,
             std::format("the wire format '{}' is not one this client understands",
                 options_.wire_format));
@@ -243,8 +260,12 @@ result<void> session_client::connect() {
          * nothing is reported as the path it is rather than as a broker that
          * did not answer.
          */
-        if (auto unreadable = unreadable_tls_file(options_))
+        if (auto unreadable = unreadable_tls_file(options_)) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Refusing to connect to " << options_.nats_url
+                << ": " << unreadable->message;
             return std::unexpected(std::move(*unreadable));
+        }
 
         opts.tls_ca_cert = options_.tls_ca;
         opts.tls_client_cert = options_.tls_cert;
@@ -255,17 +276,33 @@ result<void> session_client::connect() {
      * connect_timeout has no counterpart in the wrapped client's options, so
      * it is recorded for the caller and not yet honoured on the wire.
      */
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Connecting to " << options_.nats_url << " (prefix '"
+        << options_.subject_prefix << "', wire " << options_.wire_format
+        << ", tls " << (options_.uses_tls() ? "yes" : "no") << ")";
+
     try {
         nats_.connect(std::move(opts));
     } catch (const std::exception& e) {
         connected_ = false;
-        return connect_failure(e);
+        auto failure = connect_failure(e);
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Could not connect to " << options_.nats_url << ": "
+            << failure.error().message << " ["
+            << to_string(failure.error().code) << "]";
+        return failure;
     } catch (...) {
         connected_ = false;
-        return connect_failure();
+        auto failure = connect_failure();
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Could not connect to " << options_.nats_url
+            << " for an unnamed reason";
+        return failure;
     }
 
     connected_ = true;
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Connected to " << options_.nats_url;
     return {};
 }
 
@@ -274,6 +311,8 @@ void session_client::disconnect() {
      * The credential goes first: a connection dropped while a token is still
      * held is a session that could be resumed by accident.
      */
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Disconnecting from " << options_.nats_url;
     try {
         nats_.clear_auth();
         nats_.disconnect();
@@ -303,6 +342,10 @@ result<session_account> session_client::authenticate(std::string_view principal,
             "the session must be connected before signing in");
     }
 
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Signing in as '" << principal << "' on '"
+        << options_.subject_prefix << "'";
+
     using ores::iam::messaging::login_request;
     using ores::iam::messaging::login_response;
 
@@ -327,6 +370,13 @@ result<session_account> session_client::authenticate(std::string_view principal,
              */
             const std::string message = answer.message.empty()
                 ? answer.error_message : answer.message;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Sign-in refused for '" << principal << "' on '"
+                << options_.subject_prefix << "': "
+                << (message.empty() ? std::string{"no reason given"} : message)
+                << " [" << (answer.error_code.empty()
+                        ? std::string{"no code"} : answer.error_code)
+                << "]";
             return std::unexpected(session_error{
                 .code = session_errc::authentication_rejected,
                 .message = message.empty()
@@ -356,10 +406,19 @@ result<session_account> session_client::authenticate(std::string_view principal,
             .principal = answer.username.empty()
                 ? std::string(principal) : answer.username};
 
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Signed in as '" << account_.principal << "' on '"
+            << options_.subject_prefix << "' as tenant '"
+            << account_.tenant_name << "' (" << account_.tenant_id << ")";
         return account_;
     } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Sign-in for '" << principal << "' failed in the transport: "
+            << e.what();
         return transport_failure(e);
     } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Sign-in for '" << principal << "' failed for an unnamed reason";
         return transport_failure();
     }
 }
@@ -369,6 +428,10 @@ result<void> session_client::select_party(std::string_view party_id) {
         return fail(session_errc::not_authenticated,
             "a party can only be chosen by a signed-in session");
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Selecting party '" << party_id << "' on '"
+        << options_.subject_prefix << "'";
 
     using ores::iam::messaging::select_party_request;
     using ores::iam::messaging::select_party_response;
@@ -431,6 +494,9 @@ result<void> session_client::logout() {
         account_ = session_account{};
         return {};
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Signing out of '" << options_.subject_prefix << "'";
 
     using ores::iam::messaging::logout_request;
     using ores::iam::messaging::logout_response;
@@ -589,6 +655,10 @@ result<void> session_client::resume(std::string_view token,
             "a session cannot resume with an empty token");
     }
 
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Resuming a session on '" << options_.subject_prefix
+        << "' as '" << principal << "'";
+
     ores::nats::service::nats_client::login_info info;
     info.jwt = std::string(token);
     info.username = std::string(principal);
@@ -614,6 +684,9 @@ result<deployment_read> session_client::deployment() const {
     using ores::iam::messaging::list_tenants_request;
     using ores::iam::messaging::list_tenants_response;
     using ores::iam::messaging::tenants_filter;
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Reading the deployment on '" << options_.subject_prefix << "'";
 
     try {
         /*
@@ -744,10 +817,22 @@ result<deployment_read> session_client::deployment() const {
                 .status = row.status,
                 .type = row.type});
         }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Deployment '" << options_.subject_prefix
+            << "': " << read.tenant_total << " tenants (" << read.in_service
+            << " in service, " << read.on_evaluation << " on evaluation, "
+            << read.setting_up << " setting up, " << read.needing_attention
+            << " needing attention)";
         return read;
     } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Reading the deployment on '" << options_.subject_prefix
+            << "' failed: " << e.what();
         return transport_failure(e);
     } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Reading the deployment on '" << options_.subject_prefix
+            << "' failed for an unnamed reason";
         return transport_failure();
     }
 }

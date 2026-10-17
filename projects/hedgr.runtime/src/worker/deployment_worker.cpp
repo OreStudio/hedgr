@@ -20,6 +20,7 @@
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -41,6 +42,14 @@ namespace event = hedgr::model::event;
 namespace transport = hedgr::session::transport;
 
 using hedgr::model::command::event_queue;
+
+/** @brief This read's logger. Counts are logged; secrets are not. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance =
+        make_logger("hedgr.runtime.worker.deployment_worker");
+    return instance;
+}
 
 /**
  * @brief The failure sentence a person reads, from the transport's answer.
@@ -68,6 +77,10 @@ boost::asio::awaitable<void> run_deployment(deployment_job job,
 
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
         boost::asio::use_awaitable);
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Reading the deployment for '" << key.instance_id << "' / '"
+        << key.account_id << "'";
 
     domain::deployment_snapshot snapshot;
 
@@ -97,6 +110,17 @@ boost::asio::awaitable<void> run_deployment(deployment_job job,
                 .status = row.status,
                 .type = row.type});
         }
+    }
+
+    if (!snapshot.failure.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The deployment read for '" << key.instance_id
+            << "' failed while " << snapshot.failing_read << ": "
+            << snapshot.failure;
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Deployment read for '" << key.instance_id << "' returned "
+            << snapshot.tenant_total << " tenants";
     }
 
     std::fill(job.token.begin(), job.token.end(), '\0');

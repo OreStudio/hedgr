@@ -21,6 +21,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_error.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -70,6 +71,13 @@ namespace transport = hedgr::session::transport;
 
 using hedgr::model::command::event_queue;
 
+/** @brief This worker's logger. A healthy probe is debug; a fault is warn. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.runtime.worker.probe_worker");
+    return instance;
+}
+
 /** @brief How long the attempt has taken so far, in microseconds. */
 [[nodiscard]] std::int64_t elapsed_us(
     std::chrono::steady_clock::time_point started) {
@@ -102,6 +110,30 @@ void push_result(event_queue& events, const domain::instance& instance,
     domain::reachability reach, domain::readiness ready,
     std::int64_t latency_us, std::string detail,
     std::optional<domain::bootstrap_status> bootstrap = std::nullopt) {
+    /*
+     * The level is the finding. A healthy deployment probed every few seconds
+     * is noise and belongs at debug; an unreachable broker, a missing IAM or a
+     * deployment still waiting for its first administrator is something the
+     * operator will want in the log after the fact.
+     */
+    if (reach == domain::reachability::unreachable) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Probe of '" << instance.name << "' (" << instance.nats_url
+            << ") could not reach the broker: " << detail;
+    } else if (ready == domain::readiness::service_missing) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Probe of '" << instance.name << "' (" << instance.nats_url
+            << ") reached the broker but IAM did not answer: " << detail;
+    } else if (ready == domain::readiness::bootstrapping) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Probe of '" << instance.name << "' found the deployment in "
+               "bootstrap mode";
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::debug)
+            << "Probe of '" << instance.name << "' (" << instance.nats_url
+            << ") is ready in " << latency_us << " us";
+    }
+
     event::event fact;
     fact.kind = event::event_kind::probe_result;
     fact.instance_id = instance.id;
