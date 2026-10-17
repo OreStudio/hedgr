@@ -264,7 +264,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp
         | ImGuiTableFlags_ScrollY;
 
-    const float height = -ImGui::GetFrameHeightWithSpacing();
+    const float height = std::max(ImGui::GetContentRegionAvail().y
+            - widget::status_foot_height(status)
+            - ImGui::GetFrameHeightWithSpacing(),
+        120.0f);
     if (ImGui::BeginTable("##series", 3, flags, ImVec2(0.0f, height))) {
         ImGui::TableSetupColumn("Series", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthFixed,

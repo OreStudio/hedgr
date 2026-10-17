@@ -107,12 +107,20 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 constexpr std::int64_t live_window_ns =
     std::int64_t{5} * 60 * 1'000'000'000;
 
-/** @brief The first index of the points that fall in the live window. */
+/**
+ * @brief The first index of the points that fall in the live window.
+ *
+ * A series whose newest point is older than the window is history, not a live
+ * feed, and history is plotted whole: the imported vendor series end years ago
+ * and cropping them to five minutes would leave two points and a lie.
+ */
 [[nodiscard]] std::size_t live_window_start(
-    const std::vector<domain::market_point>& points) {
-    if (points.size() < 2)
+    const std::vector<domain::market_point>& points, std::int64_t now_ns) {
+    if (points.size() < 2 || now_ns <= 0)
         return 0;
     const auto newest = points.back().at_ns;
+    if (newest <= 0 || now_ns - newest > live_window_ns)
+        return 0;
     const auto cutoff = newest - live_window_ns;
     std::size_t first = 0;
     while (first + 1 < points.size() && points[first].at_ns < cutoff)
@@ -191,7 +199,7 @@ void render_chart(window_handle handle, const render_input& input,
 
     if (snapshot != nullptr && !snapshot->points.empty()) {
         const auto& points = snapshot->points;
-        const std::size_t start = live_window_start(points);
+        const std::size_t start = live_window_start(points, input.now_ns);
         const double first = points[start].value;
         const double last = points.back().value;
         const double change = last - first;
@@ -233,9 +241,13 @@ void render_chart(window_handle handle, const render_input& input,
             "%s", snapshot->failure.c_str());
     }
 
+    const float foot_height = widget::status_foot_height(status);
     const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float plot_height = std::max(
+        available.y - foot_height - ImGui::GetStyle().ItemSpacing.y, 80.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    if (ImGui::BeginChild("##plot-area", available, ImGuiChildFlags_None)) {
+    if (ImGui::BeginChild("##plot-area", ImVec2(available.x, plot_height),
+            ImGuiChildFlags_None)) {
         if (snapshot == nullptr
             || (!snapshot->is_read() && snapshot->failure.empty())) {
             ImGui::TextDisabled("Reading the series...");
@@ -243,7 +255,7 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
             const auto& points = snapshot->points;
-            const std::size_t start = live_window_start(points);
+            const std::size_t start = live_window_start(points, input.now_ns);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
