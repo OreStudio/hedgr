@@ -93,7 +93,19 @@ struct recording_sink final {
  * under it.
  */
 TEST_CASE("every registered name maps to its own short sound", "[sound]") {
-    REQUIRE(registrations().size() == 6);
+    REQUIRE(registrations().size() == 9);
+
+    const auto started = sound_for(names::application_started);
+    REQUIRE(started.has_value());
+    CHECK(*started == "bong_001.wav");
+
+    const auto hovered = sound_for(names::shortcut_hovered);
+    REQUIRE(hovered.has_value());
+    CHECK(*hovered == "click1.wav");
+
+    const auto closed = sound_for(names::window_closed);
+    REQUIRE(closed.has_value());
+    CHECK(*closed == "bong_001.wav");
 
     const auto degraded = sound_for(names::instance_readiness_degraded);
     REQUIRE(degraded.has_value());
@@ -120,8 +132,41 @@ TEST_CASE("every registered name maps to its own short sound", "[sound]") {
     CHECK(*clicked == "click1.wav");
 }
 
-TEST_CASE("a name nobody registered maps to nothing", "[sound]") {
-    CHECK_FALSE(sound_for("instance.readiness.unknown").has_value());
+TEST_CASE("the startup signal raised on the bus reaches the player as a file",
+    "[sound][player]") {
+    /*
+     * The launch raises a name rather than calling the player, so the proof
+     * that the startup sound happens is the whole path: the name goes on the
+     * bus, the drain the frame loop performs hands it to the player, and the
+     * mapping turns it into a file. The sink is the player's own, so what
+     * arrives here is what the audio thread would decode. Nothing about this
+     * asserts that a speaker was audible.
+     */
+    auto recorder = std::make_shared<recording_sink>();
+    player subject([recorder](std::string_view file) { recorder->push(file); });
+    subject.start();
+    REQUIRE(subject.started());
+
+    (void)hedgr::model::signal::bus().drain();
+
+    signal started;
+    started.name = std::string(names::application_started);
+    started.detail = "Hedgr started";
+    started.at_ns = 1;
+    hedgr::model::signal::bus().raise(std::move(started));
+
+    const auto drained = hedgr::model::signal::bus().drain();
+    REQUIRE(drained.size() == 1);
+    CHECK(subject.submit(drained) == 1);
+
+    REQUIRE(recorder->wait_for(1, std::chrono::seconds(5)));
+    CHECK(recorder->files.at(0) == "bong_001.wav");
+    CHECK(recorder->threads.at(0) != std::this_thread::get_id());
+
+    subject.stop();
+}
+
+TEST_CASE("a name nobody registered maps to nothing", "[sound]") {    CHECK_FALSE(sound_for("instance.readiness.unknown").has_value());
     CHECK_FALSE(sound_for("shortcut").has_value());
     CHECK_FALSE(sound_for("").has_value());
 

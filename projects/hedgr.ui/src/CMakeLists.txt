@@ -108,6 +108,22 @@ add_custom_command(TARGET ${lib_target_name} POST_BUILD
 
 install(FILES ${instance_icons} DESTINATION share/hedgr.ui/instances)
 
+# Copy the splash artwork to the publish directory, for the same reason the icon
+# sheet and the instance pictures go there: the deployed host has no checkout
+# beside it, and a splash whose image is missing draws as an empty box. It lives
+# in a branding subdirectory so a reader can tell it apart from the sheet and
+# the per-environment illustrations.
+set(splash_image "${CMAKE_SOURCE_DIR}/assets/branding/ore-studio-splash.png")
+add_custom_command(TARGET ${lib_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/branding"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${splash_image}"
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/branding/ore-studio-splash.png"
+    COMMENT "Copying the splash image to publish/share/hedgr.ui/branding/")
+
+install(FILES "${splash_image}" DESTINATION share/hedgr.ui/branding)
+
 # Copy the curated sound pack to the publish directory, for the same reason the
 # icon sheet goes there: a deployed bundle resolves it through the
 # <exe>/../share/<component> rule with no checkout beside it. The list is

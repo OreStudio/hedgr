@@ -58,6 +58,34 @@ inline constexpr std::string_view instance_reachability_restored =
 /** @brief An entry on the shortcuts bar was clicked. */
 inline constexpr std::string_view shortcut_activated = "shortcut.activated";
 
+/**
+ * @brief The pointer moved onto a different entry on the shortcuts bar.
+ *
+ * Raised only on a change between two entries, because the tick exists to
+ * follow the pointer along the bar rather than to report that a pointer is
+ * somewhere. It is not raised when the pointer leaves the bar.
+ */
+inline constexpr std::string_view shortcut_hovered = "shortcut.hovered";
+
+/**
+ * @brief The operator asked for a window to close.
+ *
+ * Raised where the close command is pushed rather than where the window
+ * disappears, so the sound belongs to the click and not to the runtime's later
+ * bookkeeping.
+ */
+inline constexpr std::string_view window_closed = "window.closed";
+
+/**
+ * @brief The application has started and is about to draw its first frame.
+ *
+ * Raised on every ordinary run rather than only in a development build,
+ * because its first purpose is to let the operator hear that the audio path
+ * works at all, and a check that only fires in one build proves nothing about
+ * the other.
+ */
+inline constexpr std::string_view application_started = "application.started";
+
 }
 
 #endif

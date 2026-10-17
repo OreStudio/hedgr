@@ -148,6 +148,23 @@ void raise_activation(const render_input& input, const domain::shortcut& row) {
 }
 
 /**
+ * @brief Raises the signal that says the pointer moved onto another entry.
+ *
+ * The hover is decided in the same place as the click and raised through the
+ * same bus, because a tick is a fact about the bar and not a thing the bar
+ * plays. The caller only gets here when the entry differs from the one the
+ * pointer was on last frame, so a pointer resting on an entry raises nothing
+ * and a pointer leaving the bar raises nothing either.
+ */
+void raise_hover(const render_input& input, const domain::shortcut& row) {
+    signal::signal value;
+    value.name = std::string(signal::names::shortcut_hovered);
+    value.detail = entry_tooltip(input, row);
+    value.at_ns = input.now_ns;
+    signal::bus().raise(std::move(value));
+}
+
+/**
  * @brief Does what an entry means, for the kinds that mean something yet.
  *
  * The accounts case goes through the same request the Instances window's own
@@ -183,7 +200,22 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
 }
 
 /**
- * @brief Draws one entry and reports whether it was clicked.
+ * @brief What one entry's invisible button reported this frame.
+ *
+ * A pair rather than two calls into ImGui at the call site, because both
+ * answers are read from the same last item and reading one after the other
+ * entry has been submitted would be reading the wrong item.
+ */
+struct entry_interaction final {
+    /** @brief Whether the entry was pressed this frame. */
+    bool clicked = false;
+
+    /** @brief Whether the pointer is on the entry now. */
+    bool hovered = false;
+};
+
+/**
+ * @brief Draws one entry and reports whether it was clicked or hovered.
  *
  * The picture fills the entry's rectangle, and an entry with no picture draws
  * a tile of the theme's own surface colour with the window kind's glyph in it
@@ -198,7 +230,7 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
  * The button is invisible and exactly covers the entry, so the click is caught
  * while the drawing stays the library's business.
  */
-[[nodiscard]] bool draw_entry(const render_input& input,
+[[nodiscard]] entry_interaction draw_entry(const render_input& input,
     const domain::shortcut& row, float size, const char* id) {
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     const ImVec2 corner(origin.x + size, origin.y + size);
@@ -248,7 +280,10 @@ void activate_entry(const render_input& input, const domain::shortcut& row,
     element.label_min_x = item_min.x;
     widget::observe_capture_element(row.id, element);
 
-    return ImGui::IsItemClicked();
+    return entry_interaction{
+        .clicked = ImGui::IsItemClicked(),
+        .hovered = ImGui::IsItemHovered(),
+    };
 }
 
 /**
@@ -285,7 +320,13 @@ void raise_bar_to_front() {
 
 namespace hedgr::ui::render {
 
-void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result) {
+bool hover_is_new_entry(std::string_view previous,
+    std::string_view hovered) noexcept {
+    return !hovered.empty() && hovered != previous;
+}
+
+void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result,
+    shortcut_bar_state& state) {
     /*
      * An empty bar draws nothing, and so does one whose store is shut: the
      * entries are catalogue and the catalogue is what the master password
@@ -316,6 +357,13 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result) {
      */
     raise_bar_to_front();
 
+    /*
+     * The one entry the pointer is on, remembered until the walk ends so the
+     * tick is decided from a single answer rather than from whichever entry
+     * happened to be visited last.
+     */
+    const domain::shortcut* hovered_row = nullptr;
+
     for (const auto& row : input.shortcuts.rows()) {
         /*
          * An item that fails to submit has nothing to draw into, which the
@@ -332,13 +380,29 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result) {
         const float size = ImGui::GetCoolBarItemWidth();
 
         ImGui::PushID(row.id.c_str());
-        const bool clicked = draw_entry(input, row, size, "entry");
+        const entry_interaction interaction = draw_entry(input, row, size,
+            "entry");
         ImGui::SetItemTooltip("%s", entry_tooltip(input, row).c_str());
         ImGui::PopID();
 
-        if (clicked)
+        if (interaction.hovered)
+            hovered_row = &row;
+
+        if (interaction.clicked)
             activate_entry(input, row, result);
     }
+
+    /*
+     * The tick is decided after the walk, from the one entry the pointer is on
+     * and the one it was on last frame. No hovered entry is the pointer having
+     * left the bar: that raises nothing, but the memory is cleared so coming
+     * back onto the same entry later is a fresh approach rather than a
+     * continuation of the last one.
+     */
+    if (hovered_row != nullptr
+        && hover_is_new_entry(state.hovered_id, hovered_row->id))
+        raise_hover(input, *hovered_row);
+    state.hovered_id = hovered_row != nullptr ? hovered_row->id : std::string{};
 
     ImGui::EndCoolBar();
 }

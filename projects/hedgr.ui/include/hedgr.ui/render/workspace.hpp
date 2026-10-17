@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
 #include <string>
@@ -254,6 +255,15 @@ private:
      * across the boundary. It is scratch, like everything else in this class.
      */
     lock_control lock_control_;
+
+    /**
+     * @brief The shortcuts bar's own memory of the last hovered entry.
+     *
+     * The bar is drawn by the frame, so its cross-frame state lives here with
+     * the rest of the frame's scratch. A tick announces a change, and a change
+     * needs the previous frame's answer to know there was one.
+     */
+    shortcut_bar_state shortcut_bar_;
 
     /*
      * There is deliberately no "I have submitted a password" flag here. The

@@ -1553,7 +1553,7 @@ void draw_head_cards(const instance& row,
     const bool open = widget::begin_card("labels", width, height, false);
     if (open) {
         widget::card_title(
-            nullptr, "Labels", ImGui::GetColorU32(theme::dim_text()));
+            icon::label, "Labels", ImGui::GetColorU32(theme::dim_text()));
         const float interior =
             width - ImGui::GetStyle().WindowPadding.x * 2.0f;
         static_cast<void>(widget::label_pill_row(pills, interior));
@@ -1718,7 +1718,7 @@ void draw_edit_topics(const render_input& input, window_ui_state& window,
         });
 
     widget::card_slot(column, columns);
-    edit_card("edit-labels", nullptr, "Labels",
+    edit_card("edit-labels", icon::label, "Labels",
         buffer_text(edit.labels)
             != joined_labels(input, labelling_owner::instance, row.id),
         width, height, [&] {
