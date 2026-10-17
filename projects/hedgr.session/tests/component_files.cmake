@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "market_tests.cpp"
     "transport_tests.cpp"
 )
 

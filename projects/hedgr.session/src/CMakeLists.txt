@@ -39,6 +39,7 @@ target_link_libraries(${lib_target_name}
         ores::nats
         ores::iam.client
         ores::iam.api
+        ores::marketdata.api
         ores::logging
         ores::utility
 )

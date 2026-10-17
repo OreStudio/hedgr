@@ -231,6 +231,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 authenticated.token = account.token;
                 authenticated.tenant_name = account.tenant_name;
                 authenticated.party_name = account.party_name;
+                authenticated.party_id = account.party_id;
 
                 /*
                  * The deployment's own rule, applied once here: the tenant IAM

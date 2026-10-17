@@ -27,6 +27,7 @@
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
+#include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
@@ -115,7 +116,8 @@ namespace transport = hedgr::session::transport;
  * window, because two charts of two series are two windows.
  */
 [[nodiscard]] std::string window_key_for(domain::window_kind kind,
-    std::string_view instance_id, std::string_view account_id) {
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view series_id = {}) {
     switch (kind) {
     case domain::window_kind::instance_manager:
         return "instance-manager";
@@ -125,7 +127,15 @@ namespace transport = hedgr::session::transport;
         return std::format("workspace:{}:{}", instance_id, account_id);
     case domain::window_kind::command_centre:
         return std::format("command-centre:{}:{}", instance_id, account_id);
+    case domain::window_kind::series_browser:
+        return std::format("series-browser:{}:{}", instance_id, account_id);
     case domain::window_kind::chart:
+        /*
+         * One chart per series, so opening GBP/USD twice focuses the plot
+         * already drawn rather than stacking a second one on top of it.
+         */
+        return series_id.empty() ? std::string{}
+                                 : std::format("chart:{}", series_id);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -596,13 +606,19 @@ constexpr std::size_t probe_thread_count = 2;
  */
 [[nodiscard]] domain::window_state
 default_state_for(domain::window_kind kind, std::string_view last_error,
-    std::string_view instance_id, std::string_view account_id) {
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view series_id = {},
+    std::string_view series_label = {}) {
     switch (kind) {
     case domain::window_kind::chart: {
         domain::chart_state chart;
-        chart.label = "Series";
+        chart.label = series_label.empty() ? "Series"
+                                          : std::string{series_label};
+        chart.series_id = std::string{series_id};
         return chart;
     }
+    case domain::window_kind::series_browser:
+        return domain::series_browser_state{};
     case domain::window_kind::accounts: {
         domain::accounts_state accounts;
         accounts.instance_id = std::string{instance_id};
@@ -664,6 +680,9 @@ void instance_manager::stop() noexcept {
     }
     running_.clear();
     attempts_.clear();
+    market_.clear();
+    catalogue_reading_ = false;
+    points_reading_.clear();
 
     /*
      * The probes are cancelled before the pools are stopped, so a probe
@@ -1397,7 +1416,7 @@ std::string instance_manager::open_accounts_window(const std::string& instance_i
      * answers whether the window exists.
      */
     const std::string wanted = window_key_for(domain::window_kind::accounts,
-        instance_id, {});
+        instance_id, {}, {});
     if (const auto existing = windows_.find(wanted)) {
         windows_.set_open(*existing, true);
         return wanted;
@@ -2789,7 +2808,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * functions rather than serials.
      */
     const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
-        cmd.account_id);
+        cmd.account_id, cmd.series_id);
     if (!key.empty()) {
         if (const auto existing = windows_.find(key)) {
             windows_.set_open(*existing, true);
@@ -2831,12 +2850,16 @@ void instance_manager::do_open_window(const command::command& cmd) {
      */
     if (cmd.new_window_kind == domain::window_kind::command_centre)
         spec.cadence = std::chrono::seconds{30};
+    if (cmd.new_window_kind == domain::window_kind::series_browser)
+        spec.cadence = std::chrono::seconds{60};
+    if (cmd.new_window_kind == domain::window_kind::chart)
+        spec.cadence = std::chrono::seconds{5};
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
     spec.state = default_state_for(cmd.new_window_kind, last_error,
-        cmd.instance_id, cmd.account_id);
+        cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
 
     const auto handle = windows_.insert(spec);
 
@@ -2900,6 +2923,20 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
      */
     if (spec.kind == domain::window_kind::command_centre) {
         start_deployment_read(cmd.window_id);
+        return;
+    }
+
+    if (spec.kind == domain::window_kind::series_browser) {
+        start_market_catalogue_read(cmd.window_id);
+        return;
+    }
+
+    if (spec.kind == domain::window_kind::chart) {
+        if (const auto* chart = std::get_if<domain::chart_state>(
+                &windows_.state(*handle));
+            chart != nullptr && !chart->series_id.empty()) {
+            start_market_points_read(cmd.window_id, chart->series_id);
+        }
         return;
     }
 
@@ -2970,6 +3007,79 @@ void instance_manager::start_deployment_read(std::string_view window_id) {
         << "Starting a deployment read for '" << instance_id << "' / '"
         << account_id << "'";
     worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::start_market_catalogue_read(
+    std::string_view window_id) {
+    start_market_read(window_id, {});
+}
+
+void instance_manager::start_market_points_read(std::string_view window_id,
+    std::string_view series_id) {
+    start_market_read(window_id, series_id);
+}
+
+void instance_manager::start_market_read(std::string_view window_id,
+    std::string_view series_id) {
+    if (!database_) {
+        last_error_ = "cannot read the market: the store is not open";
+        return;
+    }
+
+    const auto window = windows_.find(window_id);
+    if (!window)
+        return;
+
+    const auto session = windows_.session_of(*window);
+    if (!session)
+        return;
+
+    if (sessions_.status(*session) != domain::session_status::authenticated)
+        return;
+
+    const auto token = std::string{sessions_.token(*session)};
+    if (token.empty())
+        return;
+
+    const auto instance_id = std::string{sessions_.instance_id(*session)};
+    const auto account_id = std::string{sessions_.account_id(*session)};
+
+    const auto instance = instances_.find(instance_id);
+    if (!instance)
+        return;
+
+    const bool catalogue = series_id.empty();
+    if (catalogue) {
+        if (catalogue_reading_)
+            return;
+    } else if (points_reading_.contains(std::string{series_id})) {
+        return;
+    }
+
+    const auto account = accounts_.find(account_id);
+    const std::string principal = account
+        ? accounts_.get(*account)->principal : std::string{};
+
+    worker::market_job job;
+    job.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.key = domain::session_key{instance_id, account_id};
+    job.token = token;
+    job.principal = principal;
+    job.catalogue = catalogue;
+    job.series_id = std::string{series_id};
+
+    if (catalogue)
+        catalogue_reading_ = true;
+    else
+        points_reading_.insert(job.series_id);
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Starting a market " << (catalogue ? "catalogue" : "points")
+        << " read for '" << instance_id << "' / '" << account_id << "'"
+        << (catalogue ? std::string{}
+                      : std::format(" series '{}'", series_id));
+    worker::spawn_market_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::do_probe_instance(const command::command& cmd) {
@@ -3371,9 +3481,24 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_status_changed:
         sessions_.set_status(*handle, ev.status);
         break;
+    case event::event_kind::series_catalogue:
+        catalogue_reading_ = false;
+        if (ev.message.empty())
+            market_.set_catalogue(ev.series);
+        else
+            market_.fail_catalogue(ev.message);
+        break;
+    case event::event_kind::series_points:
+        points_reading_.erase(ev.series_id);
+        if (ev.message.empty()) {
+            market_.set_points(ev.series_id, ev.points, ev.observed_at_ns);
+        } else {
+            market_.fail_points(ev.series_id, ev.message, ev.observed_at_ns);
+        }
+        break;
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
-            ev.token);
+            ev.party_id, ev.token);
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
 

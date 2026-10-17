@@ -19,7 +19,9 @@
  */
 #include "hedgr.session/transport/session_client.hpp"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -33,12 +35,16 @@
 #include "ores.iam.api/messaging/password_policy_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
+#include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
+#include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
+#include "hedgr.session/market/series_label.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
 #include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
+#include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 
 namespace {
@@ -925,6 +931,188 @@ result<deployment_read> session_client::deployment() const {
     } catch (...) {
         BOOST_LOG_SEV(lg(), ores::logging::error)
             << "Reading the deployment on '" << options_.subject_prefix
+            << "' failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
+result<std::vector<market_series_summary>>
+session_client::market_series(std::uint32_t limit) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "a market series read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "a market series read needs a signed-in session");
+    }
+
+    using ores::marketdata::messaging::list_market_series_request;
+    using ores::marketdata::messaging::list_market_series_response;
+
+    try {
+        list_market_series_request request{};
+        request.limit = limit;
+        /*
+         * The deployment states which fields a list may be ordered by, and the
+         * series URI is not one of them. The read is sorted here instead, so
+         * the order a screen shows does not depend on the wire's vocabulary.
+         */
+
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                list_market_series_response>(client(),
+                list_market_series_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer) {
+            return fail(session_errc::protocol_error,
+                "the market series answer could not be decoded");
+        }
+        if (answer->result.outcome != ores::utility::domain::outcome::ok) {
+            return fail(session_errc::protocol_error,
+                answer->result.message.empty()
+                    ? std::string("the deployment refused the market series")
+                    : answer->result.message);
+        }
+
+        std::vector<market_series_summary> rows;
+        rows.reserve(answer->market_series.size());
+        for (const auto& row : answer->market_series) {
+            rows.push_back(market_series_summary{
+                .id = boost::uuids::to_string(row.id),
+                .oresmd_uri = row.oresmd_uri,
+                .label = market::series_label(row.oresmd_uri),
+                .asset_class = market::series_asset_class(row.oresmd_uri),
+                .producer_kind = row.producer_kind,
+                .party_id = boost::uuids::to_string(row.party_id)});
+        }
+        std::sort(rows.begin(), rows.end(),
+            [](const market_series_summary& a, const market_series_summary& b) {
+                return std::tie(a.asset_class, a.label)
+                    < std::tie(b.asset_class, b.label);
+            });
+
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read " << rows.size() << " market series on '"
+            << options_.subject_prefix << "'";
+        return rows;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The market series read failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The market series read failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
+result<market_series_read>
+session_client::market_series_points(std::string_view series_id,
+    std::uint32_t limit) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "an observation read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "an observation read needs a signed-in session");
+    }
+
+    boost::uuids::uuid id{};
+    try {
+        id = boost::lexical_cast<boost::uuids::uuid>(series_id);
+    } catch (const std::exception&) {
+        return fail(session_errc::protocol_error,
+            std::format("'{}' is not a series key", series_id));
+    }
+
+    using ores::marketdata::messaging::list_market_observations_request;
+    using ores::marketdata::messaging::list_market_observations_response;
+    using ores::marketdata::messaging::market_observations_filter;
+
+    try {
+        const auto fetch = [&](std::uint32_t offset) {
+            list_market_observations_request request{};
+            request.offset = offset;
+            request.limit = limit;
+            market_observations_filter filter{};
+            filter.series_id = id;
+            request.filter = filter;
+            return ores::nats::service::authenticated_request_and_decode<
+                list_market_observations_response>(client(),
+                list_market_observations_request::nats_subject, request,
+                options_.request_timeout);
+        };
+
+        const auto first = fetch(0);
+        if (!first) {
+            return fail(session_errc::protocol_error,
+                "the observation answer could not be decoded");
+        }
+        if (first->result.outcome != ores::utility::domain::outcome::ok) {
+            return fail(session_errc::protocol_error,
+                first->result.message.empty()
+                    ? std::string("the deployment refused the observations")
+                    : first->result.message);
+        }
+
+        auto rows = first->market_observations;
+        /*
+         * The deployment's default order is oldest first and it does not let a
+         * caller order observations by time. A plot wants the newest window, so
+         * a series longer than the page is read from its tail.
+         */
+        if (first->total > limit) {
+            const auto offset = static_cast<std::uint32_t>(
+                first->total - limit);
+            const auto tail = fetch(offset);
+            if (!tail) {
+                return fail(session_errc::protocol_error,
+                    "the observation answer could not be decoded");
+            }
+            if (tail->result.outcome != ores::utility::domain::outcome::ok) {
+                return fail(session_errc::protocol_error,
+                    tail->result.message.empty()
+                        ? std::string("the deployment refused the observations")
+                        : tail->result.message);
+            }
+            rows = tail->market_observations;
+        }
+
+        market_series_read read;
+        read.points.reserve(rows.size());
+        for (const auto& row : rows) {
+            double value = 0.0;
+            try {
+                value = std::stod(row.value);
+            } catch (const std::exception&) {
+                continue;
+            }
+            const auto at_ns = std::chrono::duration_cast<
+                std::chrono::nanoseconds>(
+                row.observation_datetime.time_since_epoch())
+                                   .count();
+            read.points.push_back(market_point{.at_ns = at_ns, .value = value});
+        }
+
+        std::sort(read.points.begin(), read.points.end(),
+            [](const market_point& a, const market_point& b) {
+                return a.at_ns < b.at_ns;
+            });
+
+        BOOST_LOG_SEV(lg(), ores::logging::debug)
+            << "Read " << read.points.size() << " points for series '"
+            << series_id << "'";
+        return read;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The observation read for series '" << series_id
+            << "' failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The observation read for series '" << series_id
             << "' failed for an unnamed reason";
         return transport_failure();
     }

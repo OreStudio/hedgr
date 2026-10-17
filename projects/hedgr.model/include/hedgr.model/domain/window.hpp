@@ -62,10 +62,12 @@ enum class window_kind : std::uint8_t {
      * than a read about one record.
      */
     command_centre = 6,
+    /** @brief The market series a session may plot, as a chooser list. */
+    series_browser = 7,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 7;
+inline constexpr std::size_t window_kind_count = 8;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -80,8 +82,8 @@ struct chart_state final {
     /** @brief Human label of the series, shown in the title. */
     std::string label;
 
-    /** @brief Subject the series arrives on, relative to the instance prefix. */
-    std::string series_subject;
+    /** @brief Key of the market series this window plots. */
+    std::string series_id;
 
     /** @brief Ring capacity of the plotted series. */
     std::uint32_t max_points = 600;
@@ -136,6 +138,9 @@ struct workspace_state final {
     std::string account_id;
 };
 
+/** @brief State of the market series chooser. */
+struct series_browser_state final {};
+
 /**
  * @brief State of a command centre window.
  *
@@ -153,7 +158,8 @@ struct command_centre_state final {
 
 /** @brief The kind-specific state of a window. */
 using window_state = std::variant<chart_state, grid_state, notice_state,
-    accounts_state, workspace_state, command_centre_state>;
+    accounts_state, workspace_state, command_centre_state,
+    series_browser_state>;
 
 /**
  * @brief The persisted description of a window.

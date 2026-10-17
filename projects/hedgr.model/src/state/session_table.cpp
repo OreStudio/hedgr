@@ -45,6 +45,7 @@ void grow(session_columns& columns, std::size_t count) {
     columns.last_error.resize(count);
     columns.tenant_name.resize(count);
     columns.party_name.resize(count);
+    columns.party_id.resize(count);
     columns.token.resize(count);
     columns.deployment.resize(count);
 }
@@ -67,6 +68,7 @@ session_table::insert(std::string instance_id, std::string account_id) {
     columns_.last_error[index].clear();
     columns_.tenant_name[index].clear();
     columns_.party_name[index].clear();
+    columns_.party_id[index].clear();
     columns_.token[index].clear();
     columns_.deployment[index] = domain::deployment_snapshot{};
 
@@ -88,6 +90,7 @@ void session_table::remove(session_handle h) {
     columns_.last_error[h.index].clear();
     columns_.tenant_name[h.index].clear();
     columns_.party_name[h.index].clear();
+    columns_.party_id[h.index].clear();
     columns_.instance_id[h.index].clear();
     columns_.account_id[h.index].clear();
 
@@ -135,9 +138,11 @@ void session_table::set_last_error(session_handle h, std::string value) {
 }
 
 void session_table::set_account_result(session_handle h, std::string tenant_name,
-                                        std::string party_name, std::string token) {
+                                        std::string party_name,
+                                        std::string party_id, std::string token) {
     columns_.tenant_name[h.index] = std::move(tenant_name);
     columns_.party_name[h.index] = std::move(party_name);
+    columns_.party_id[h.index] = std::move(party_id);
     columns_.token[h.index] = std::move(token);
 }
 
@@ -177,6 +182,10 @@ std::string_view session_table::tenant_name(session_handle h) const {
 
 std::string_view session_table::party_name(session_handle h) const {
     return columns_.party_name[h.index];
+}
+
+std::string_view session_table::party_id(session_handle h) const {
+    return columns_.party_id[h.index];
 }
 
 void session_table::clear() noexcept {

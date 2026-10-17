@@ -541,6 +541,8 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
         return icon::session;
     case hedgr::model::domain::window_kind::command_centre:
         return icon::dashboard;
+    case hedgr::model::domain::window_kind::series_browser:
+        return icon::grid;
     }
     return icon::information;
 }

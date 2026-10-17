@@ -420,6 +420,7 @@ struct session_columns final {
     std::vector<std::string> last_error;
     std::vector<std::string> tenant_name;
     std::vector<std::string> party_name;
+    std::vector<std::string> party_id;
     std::vector<std::string> token;
     std::vector<domain::deployment_snapshot> deployment;
 };
@@ -462,7 +463,8 @@ public:
 
     /** @brief Records what IAM returned once the account was accepted. */
     void set_account_result(session_handle h, std::string tenant_name,
-                             std::string party_name, std::string token);
+                             std::string party_name, std::string party_id,
+                             std::string token);
 
     /** @brief The context this session runs in, decided from its tenant. */
     [[nodiscard]] domain::session_mode mode(session_handle h) const;
@@ -502,6 +504,9 @@ public:
     [[nodiscard]] std::string_view account_id(session_handle h) const;
     [[nodiscard]] std::string_view tenant_name(session_handle h) const;
     [[nodiscard]] std::string_view party_name(session_handle h) const;
+
+    /** @brief Key of the party the session is scoped to, or empty. */
+    [[nodiscard]] std::string_view party_id(session_handle h) const;
 
     /** @brief Aliveness and generations, for a handle-walking loop. */
     [[nodiscard]] const slab& layout() const noexcept { return layout_; }

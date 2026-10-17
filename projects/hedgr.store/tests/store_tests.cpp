@@ -419,7 +419,7 @@ TEST_CASE("a window bound to a session round-trips", "[store]") {
     spec.kind = window_kind::chart;
     spec.session = session_key{"inst-1", "id-1"};
     spec.cadence = std::chrono::milliseconds(250);
-    spec.state = chart_state{.label = "Trades", .series_subject = "trades",
+    spec.state = chart_state{.label = "Trades", .series_id = "trades",
                              .max_points = 600};
     REQUIRE(windows.save(spec).has_value());
 
@@ -458,7 +458,7 @@ TEST_CASE("a chart window's state payload round-trips", "[store]") {
     spec.id = "win-chart";
     spec.kind = window_kind::chart;
     spec.state = chart_state{.label = "Latency",
-                             .series_subject = "metrics.latency",
+                             .series_id = "metrics.latency",
                              .max_points = 450};
     REQUIRE(windows.save(spec).has_value());
 
@@ -471,7 +471,7 @@ TEST_CASE("a chart window's state payload round-trips", "[store]") {
     const auto* chart = std::get_if<chart_state>(&stored.state);
     REQUIRE(chart != nullptr);
     REQUIRE(chart->label == "Latency");
-    REQUIRE(chart->series_subject == "metrics.latency");
+    REQUIRE(chart->series_id == "metrics.latency");
     REQUIRE(chart->max_points == 450);
 }
 

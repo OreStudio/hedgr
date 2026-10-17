@@ -144,6 +144,7 @@ set(_ores_libraries
     nats
     iam.client
     iam.api
+    marketdata.api
     eventing.api
     platform
     security

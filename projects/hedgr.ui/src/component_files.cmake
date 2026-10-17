@@ -17,6 +17,7 @@ set(files
     "render/notice_window.cpp"
     "render/panels.cpp"
     "render/renderer.cpp"
+    "render/series_browser.cpp"
     "render/shortcut_bar.cpp"
     "render/splash.cpp"
     "render/workspace.cpp"

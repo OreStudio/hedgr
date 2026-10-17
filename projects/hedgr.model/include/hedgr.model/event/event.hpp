@@ -21,6 +21,7 @@
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
 #include "hedgr.model/domain/deployment.hpp"
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/password_policy.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/session.hpp"
@@ -28,6 +29,7 @@
 #include "hedgr.model/export.hpp"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace hedgr::model::event {
 
@@ -85,6 +87,10 @@ enum class event_kind : std::uint8_t {
      * stop showing a read in flight.
      */
     deployment_snapshot = 9,
+    /** @brief The market series catalogue was read. */
+    series_catalogue = 10,
+    /** @brief One series' observations were read. */
+    series_points = 11,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -152,8 +158,23 @@ struct event final {
      */
     domain::deployment_snapshot deployment;
 
+    /** @brief The series catalogue, for series_catalogue. */
+    std::vector<domain::market_series_row> series;
+
+    /** @brief The series a points event is about, for series_points. */
+    std::string series_id;
+
+    /** @brief The points, for series_points. */
+    std::vector<domain::market_point> points;
+
+    /** @brief When the read finished, on the monotonic clock, for market events. */
+    std::int64_t observed_at_ns = 0;
+
     /** @brief Party IAM resolved, for session_authenticated. */
     std::string party_name;
+
+    /** @brief Key of the party IAM resolved, for session_authenticated. */
+    std::string party_id;
 
     /** @brief Bearer token, for session_authenticated. */
     std::string token;
