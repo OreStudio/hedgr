@@ -21,6 +21,7 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 
 #include <cstdint>
@@ -172,16 +173,22 @@ identity_bar_state identity_of(const render_input& input,
 
 void draw_identity_bar(const identity_bar_state& state) {
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float height = ImGui::GetFrameHeight();
+    const float height = ImGui::GetFrameHeight() + style.WindowPadding.y;
 
     ImGui::PushID("identity-bar");
+    /*
+     * The bar is a strip, not a line of text: the title names the deployment
+     * and this is the other half of the answer, so it has to be seen without
+     * being looked for. The surface is the one the menu bar uses, which makes
+     * the two read as the window's chrome rather than as content.
+     */
+    ImGui::PushStyleColor(ImGuiCol_ChildBg,
+        ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
     ImGui::BeginChild("##line", ImVec2(0.0f, height), false,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 
     if (!state.signed_in) {
-        ImGui::TextDisabled("%s", icon::account);
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", "Not signed in");
+        ImGui::TextDisabled("%s  %s", icon::account, "Not signed in");
     } else {
         ImGui::TextUnformatted(icon::account);
         ImGui::SameLine();
@@ -191,18 +198,17 @@ void draw_identity_bar(const identity_bar_state& state) {
             ImGui::SameLine();
             ImGui::TextDisabled("@");
             ImGui::SameLine();
-            ImGui::TextDisabled("%s", state.tenant.c_str());
+            ImGui::TextUnformatted(state.tenant.c_str());
         }
 
-        ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
-        ImGui::TextDisabled("%s", icon::party);
-        ImGui::SameLine();
-        ImGui::TextDisabled("Party");
-        ImGui::SameLine();
-        if (state.party.empty())
-            ImGui::TextDisabled("%s", "none");
-        else
-            ImGui::TextUnformatted(state.party.c_str());
+        ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+        if (state.party.empty()) {
+            ImGui::TextDisabled("%s [no party]", icon::party);
+        } else {
+            ImGui::TextColored(
+                ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar),
+                "%s [%s]", icon::party, state.party.c_str());
+        }
     }
 
     /*
@@ -225,6 +231,7 @@ void draw_identity_bar(const identity_bar_state& state) {
     }
 
     ImGui::EndChild();
+    ImGui::PopStyleColor();
     ImGui::PopID();
     ImGui::Separator();
 }
