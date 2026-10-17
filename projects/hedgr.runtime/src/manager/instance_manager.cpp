@@ -1277,10 +1277,6 @@ void instance_manager::seed_accounts_for_instance(
      * match. An instance that names no prefix falls back to its id, so the
      * principal never shrinks to a bare role with nothing after the at sign.
      */
-    const std::string realm = instance.subject_prefix.empty()
-        ? instance.id
-        : instance.subject_prefix;
-
     /*
      * Both logins sit in the instance's Privileged folder rather than at the
      * accounts root, so the deployment's own logins are somewhere an operator
@@ -1295,9 +1291,15 @@ void instance_manager::seed_accounts_for_instance(
         std::string_view name;
         std::string_view role;
     };
+    /*
+     * The deployment's own system administrator is 'super_admin', which is the
+     * name the ORE bootstrap creates and the one IAM will accept. The tenant
+     * administrator's name is the tenant's, so the second row is a starting
+     * point an operator edits rather than a name this client can know.
+     */
     constexpr seeded_login logins[] = {
-        { "super admin", "super-admin" },
-        { "tenant admin", "tenant-admin" },
+        { "super admin", "super_admin" },
+        { "tenant admin", "tenant_admin" },
     };
 
     /*
@@ -1308,12 +1310,23 @@ void instance_manager::seed_accounts_for_instance(
      * themselves.
      */
     for (const auto& login : logins) {
+        const auto id = std::format("acct:{}:{}", instance.id, login.name);
+
+        /*
+         * Seed once and never again. The rows are the operator's after the
+         * first start: a principal corrected here, or a folder they moved the
+         * login into, must survive the next launch. Overwriting them is how a
+         * corrected principal silently became the seeded guess again.
+         */
+        if (accounts_.find(id))
+            continue;
+
         domain::account row;
-        row.id = std::format("acct:{}:{}", instance.id, login.name);
+        row.id = id;
         row.instance_id = instance.id;
         row.name = std::string{login.name};
         row.folder_id = folder_id;
-        row.principal = std::format("{}@{}", login.role, realm);
+        row.principal = std::string{login.role};
 
         static_cast<void>(accounts_.upsert(row));
 
@@ -1463,6 +1476,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::connect_session:
         do_connect_session(cmd);
         break;
+    case command::command_kind::store_credential:
+        do_store_credential(cmd);
+        break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
         break;
@@ -1529,6 +1545,16 @@ void instance_manager::handle(command::command& cmd) {
     std::fill(cmd.password.begin(), cmd.password.end(), '\0');
     cmd.password.clear();
     cmd.password.shrink_to_fit();
+
+    /*
+     * The sealed credential is ciphertext, and it is still not left in a buffer
+     * that outlives the frame. The store has its own copy now.
+     */
+    if (cmd.kind == command::command_kind::store_credential) {
+        std::fill(cmd.payload.begin(), cmd.payload.end(), '\0');
+        cmd.payload.clear();
+        cmd.payload.shrink_to_fit();
+    }
 }
 
 void instance_manager::do_save_instance(const command::command& cmd) {
@@ -2292,6 +2318,14 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * a lie.
      */
     if (!cmd.password.empty()) {
+        if (cmd.remember && store_lock_ == domain::store_lock::unlocked) {
+            start_credential_store(cmd.account_id, cmd.password,
+                master_password_);
+        } else if (cmd.remember) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Not remembering the password for '" << cmd.account_id
+                << "': the store is not unlocked";
+        }
         start_session_for(cmd, domain::credential{cmd.principal, cmd.password});
         return;
     }
@@ -2478,6 +2512,69 @@ void instance_manager::report_store_failure(const std::string& instance_id,
     fact.lock = store_lock_;
     fact.message = std::move(message);
     events_.push(std::move(fact));
+}
+
+void instance_manager::do_store_credential(const command::command& cmd) {
+    if (!account_repo_) {
+        last_error_ = "cannot store a password: the store is not open";
+        return;
+    }
+    if (cmd.payload.empty()) {
+        last_error_ = "cannot store an empty credential";
+        return;
+    }
+
+    if (auto saved = account_repo_->set_credential(cmd.account_id, cmd.payload);
+        !saved) {
+        last_error_ = store_failure(
+            std::format("cannot store the password for account {}",
+                cmd.account_id),
+            saved.error());
+        return;
+    }
+
+    if (const auto handle = accounts_.find(cmd.account_id)) {
+        auto row = *accounts_.get(*handle);
+        row.has_credential = true;
+        static_cast<void>(accounts_.upsert(row));
+    }
+
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Stored a password for account '" << cmd.account_id << "'";
+}
+
+void instance_manager::start_credential_store(std::string account_id,
+    std::string password, domain::secret_string master_password) {
+    boost::asio::co_spawn(pool_.context(),
+        [this, account_id = std::move(account_id),
+            password = std::move(password),
+            master_password = std::move(master_password)]() mutable
+        -> boost::asio::awaitable<void> {
+            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+                boost::asio::use_awaitable);
+
+            auto sealed =
+                store_crypto::secret_box::seal(master_password.view(), password);
+
+            std::fill(password.begin(), password.end(), '\0');
+            password.clear();
+            password.shrink_to_fit();
+            master_password.clear();
+
+            if (!sealed) {
+                BOOST_LOG_SEV(lg(), ores::logging::error)
+                    << "Could not seal the password for account '"
+                    << account_id << "'";
+                co_return;
+            }
+
+            command::command store;
+            store.kind = command::command_kind::store_credential;
+            store.account_id = account_id;
+            store.payload = std::move(sealed).value();
+            commands_.push(std::move(store));
+        },
+        boost::asio::detached);
 }
 
 void instance_manager::do_set_master_password(const command::command& cmd) {

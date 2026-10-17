@@ -55,6 +55,7 @@ namespace hedgr::ui::widget {
     const bool pressed = ImGui::Button(glyph, ImVec2(height, height));
     if (!enabled)
         ImGui::EndDisabled();
+
     ImGui::PopID();
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed && enabled;
@@ -142,6 +143,23 @@ namespace hedgr::ui::widget {
 
     if (!enabled)
         ImGui::EndDisabled();
+
+    /*
+     * A rail row is a control a capture has to be able to press: the strip is
+     * the only way to reach the sign-in prompt, and a still frame of the prompt
+     * cannot be produced by a script that cannot click the button which opens
+     * it. The label is the row's own word, which is what a person reads.
+     */
+    capture_element element;
+    element.target = label;
+    element.label = "button";
+    element.min_x = min.x;
+    element.min_y = min.y;
+    element.max_x = max.x;
+    element.max_y = max.y;
+    element.label_min_x = min.x;
+    observe_capture_element(label, element);
+
     ImGui::PopID();
     ImGui::SetItemTooltip("%s", tooltip);
     return pressed && enabled;

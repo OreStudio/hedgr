@@ -280,6 +280,17 @@ private:
     void do_save_shortcut(const model::command::command& cmd);
     void do_remove_shortcut(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
+    void do_store_credential(const model::command::command& cmd);
+
+    /**
+     * @brief Seals a password and sends it back to be stored.
+     *
+     * The key derivation is deliberate work, so it runs on the pool and the
+     * sealed value returns as a command the frame loop applies. Both secrets
+     * are wiped when the coroutine ends.
+     */
+    void start_credential_store(std::string account_id, std::string password,
+        model::domain::secret_string master_password);
     void do_disconnect_session(const model::command::command& cmd);
     void do_set_master_password(const model::command::command& cmd);
     void do_unlock_store(const model::command::command& cmd);

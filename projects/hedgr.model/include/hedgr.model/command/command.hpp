@@ -98,6 +98,14 @@ enum class command_kind : std::uint8_t {
     save_shortcut = 21,
     /** @brief Remove a shortcuts bar entry. */
     remove_shortcut = 22,
+    /**
+     * @brief Store a credential that was just sealed for an account.
+     *
+     * The sealing is the slow part and happens on a pool thread. This command
+     * carries the sealed value back to the frame loop, which is the only thread
+     * that writes the store.
+     */
+    store_credential = 23,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -157,6 +165,17 @@ struct command final {
 
     /** @brief Secret for connect_session. Never persisted, never logged. */
     std::string password;
+
+    /**
+     * @brief Whether a typed password should also be remembered.
+     *
+     * For connect_session. The credential is sealed under the master password
+     * and written on a pool thread, so the next sign-in can use it without
+     * asking. It is stored whether or not the deployment accepts it, because
+     * the operator typed it as the account's password and checking it is what
+     * the sign-in attempt is for.
+     */
+    bool remember = false;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;

@@ -342,6 +342,10 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
             "for this sign-in.",
             std::string{hedgr::model::domain::to_string(input.store_lock)}
                 .c_str());
+    } else if (row != nullptr && row->has_credential) {
+        ImGui::TextWrapped(
+            "A password is remembered for %s. Type a new one to replace it.",
+            row->principal.c_str());
     } else {
         ImGui::TextWrapped(
             "No password is remembered for %s. Type one for this sign-in.",
@@ -358,6 +362,18 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
             browser.password_visible ? icon::eye_off : icon::eye,
             browser.password_visible ? "Hide password" : "Show password"))
         browser.password_visible = !browser.password_visible;
+
+    if (input.store_lock != store_lock::unlocked)
+        ImGui::BeginDisabled();
+    ImGui::Checkbox("Remember this password", &browser.remember);
+    ImGui::SetItemTooltip("%s",
+        input.store_lock == store_lock::unlocked
+            ? "Seal the password under the master password, so the next sign-in "
+              "does not ask for it"
+            : "The store is closed, so there is no master password to seal it "
+              "under");
+    if (input.store_lock != store_lock::unlocked)
+        ImGui::EndDisabled();
 
     const bool complete = browser.credential[0] != '\0' && row != nullptr;
 
@@ -390,6 +406,7 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
         request.account_id = row->id;
         request.principal = row->principal;
         request.password = browser.credential.data();
+        request.remember = browser.remember;
         input.commands.push(std::move(request));
 
         std::fill(browser.credential.begin(), browser.credential.end(), '\0');
@@ -715,8 +732,28 @@ void accounts_window_actions(const render_input& input,
         : std::optional<hedgr::model::state::account_handle>{};
 
     const bool sign_in = widget::rail_button("sign-in", icon::sign_in,
-        "Sign in", "Sign in with the selected account and open a workspace",
+        "Sign in", "Sign in with the selected account and open the command "
+                   "centre or a workspace",
         have_selection);
+    const bool set_password = widget::rail_button("set-password",
+        icon::lock_open, "Password",
+        "Set or change the stored password for the selected account",
+        have_selection);
+
+    if (set_password && selected) {
+        /*
+         * The prompt opens whatever the account has stored, because this is
+         * the path for replacing a password rather than for using one. The
+         * submit signs in with it, which is also the only way to find out
+         * whether the new password is right.
+         */
+        std::fill(state.browser.credential.begin(),
+            state.browser.credential.end(), '\0');
+        state.browser.password_visible = false;
+        state.browser.remember = true;
+        state.browser.sign_in_open = true;
+        return;
+    }
 
     if (!sign_in || !selected)
         return;

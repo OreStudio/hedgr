@@ -126,6 +126,15 @@ struct browser_state final {
     bool sign_in_open = false;
 
     /**
+     * @brief Whether a password typed into the form should be remembered.
+     *
+     * On by default, because the reason to type one for an account with
+     * nothing remembered is usually that it should not have to be typed
+     * again. A sign-in from a shared machine turns it off.
+     */
+    bool remember = true;
+
+    /**
      * @brief The instance an accounts browser belongs to.
      *
      * Set by the host at the top of its draw, so that a callback which was
