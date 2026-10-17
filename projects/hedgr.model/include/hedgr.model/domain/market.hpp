@@ -21,6 +21,7 @@
 #define HEDGR_MODEL_DOMAIN_MARKET_HPP
 
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,59 @@ struct market_series_row final {
     std::string party_id;
 };
 
+/** @brief The three resolutions a live series keeps. */
+enum class market_level : std::uint8_t {
+    fine = 0,
+    medium = 1,
+    coarse = 2,
+};
+
+/** @brief The interval one fine bucket covers. */
+inline constexpr std::int64_t market_fine_ns = 1'000'000'000;
+
+/** @brief The interval one medium bucket covers. */
+inline constexpr std::int64_t market_medium_ns = 60 * market_fine_ns;
+
+/** @brief The interval one coarse bucket covers. */
+inline constexpr std::int64_t market_coarse_ns = 60 * market_medium_ns;
+
+/** @brief How many fine buckets a series keeps, two hours at one second. */
+inline constexpr std::size_t market_fine_capacity = 7200;
+
+/** @brief How many medium buckets a series keeps, two days at one minute. */
+inline constexpr std::size_t market_medium_capacity = 2880;
+
+/** @brief How many coarse buckets a series keeps, thirty days at one hour. */
+inline constexpr std::size_t market_coarse_capacity = 720;
+
+/** @brief The interval a level aggregates over. */
+[[nodiscard]] inline constexpr std::int64_t
+market_level_ns(market_level level) noexcept {
+    switch (level) {
+    case market_level::fine:
+        return market_fine_ns;
+    case market_level::medium:
+        return market_medium_ns;
+    case market_level::coarse:
+        return market_coarse_ns;
+    }
+    return market_fine_ns;
+}
+
+/** @brief The number of buckets a level keeps. */
+[[nodiscard]] inline constexpr std::size_t
+market_level_capacity(market_level level) noexcept {
+    switch (level) {
+    case market_level::fine:
+        return market_fine_capacity;
+    case market_level::medium:
+        return market_medium_capacity;
+    case market_level::coarse:
+        return market_coarse_capacity;
+    }
+    return market_fine_capacity;
+}
+
 /** @brief One observation, in the deployment's own time and value. */
 struct market_point final {
     /** @brief The observation time, in nanoseconds since the Unix epoch. */
@@ -69,16 +123,36 @@ struct market_point final {
  * current, and a read that succeeded must clear the last failure.
  */
 struct market_series_snapshot final {
-    /** @brief The points, oldest first. */
-    std::vector<market_point> points;
+    /** @brief One second buckets, two hours. */
+    std::deque<market_point> fine;
 
-    /** @brief When the read finished, or zero when none has. */
+    /** @brief One minute buckets, two days. */
+    std::deque<market_point> medium;
+
+    /** @brief One hour buckets, thirty days. */
+    std::deque<market_point> coarse;
+
+    /** @brief When the last read or tick arrived, on the monotonic clock. */
     std::int64_t observed_at_ns = 0;
 
     /** @brief Why the last read failed, or empty. */
     std::string failure;
 
-    /** @brief Whether this snapshot holds a completed read. */
+    /** @brief The buckets of one level, oldest first. */
+    [[nodiscard]] const std::deque<market_point>&
+    level(market_level which) const noexcept {
+        switch (which) {
+        case market_level::fine:
+            return fine;
+        case market_level::medium:
+            return medium;
+        case market_level::coarse:
+            return coarse;
+        }
+        return fine;
+    }
+
+    /** @brief Whether this snapshot holds a completed read or a tick. */
     [[nodiscard]] bool is_read() const noexcept {
         return observed_at_ns != 0 && failure.empty();
     }

@@ -848,23 +848,62 @@ TEST_CASE("the market table keeps a catalogue per session and points per chart",
 
     REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
     market.set_points("i-1", "a-1", "s-1",
-        std::vector<market_point>{{.at_ns = 2, .value = 1.2},
-            {.at_ns = 1, .value = 1.1}},
+        std::vector<market_point>{{.at_ns = 2'000'000'000, .value = 1.2},
+            {.at_ns = 1'000'000'000, .value = 1.1}},
         10);
     const auto* points = market.points("i-1", "a-1", "s-1");
     REQUIRE(points != nullptr);
     REQUIRE(points->is_read());
-    REQUIRE(points->points.size() == 2);
+    REQUIRE(points->fine.size() == 2);
 
     /* A failed read keeps the points and says the read failed. */
     market.fail_points("i-1", "a-1", "s-1", "no responder", 20);
     REQUIRE_FALSE(points->is_read());
-    REQUIRE(points->points.size() == 2);
+    REQUIRE(points->fine.size() == 2);
     REQUIRE(points->failure == "no responder");
 
     market.clear();
     REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
     REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
+}
+
+TEST_CASE("a backfill fills all three levels and live points win",
+    "[market]") {
+    using hedgr::model::domain::market_level;
+    using hedgr::model::domain::market_point;
+    using hedgr::model::state::market_table;
+
+    market_table market;
+    market.set_points("i-1", "a-1", "s-1",
+        std::vector<market_point>{
+            {.at_ns = 1'000'000'000, .value = 1.0},
+            {.at_ns = 1'500'000'000, .value = 2.0},
+            {.at_ns = 2'000'000'000, .value = 3.0},
+            {.at_ns = 61'000'000'000, .value = 4.0}},
+        10);
+
+    const auto* snapshot = market.points("i-1", "a-1", "s-1");
+    REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->fine.size() == 3);
+    REQUIRE(snapshot->fine.back().value == 4.0);
+    REQUIRE(snapshot->medium.size() == 2);
+    REQUIRE(snapshot->coarse.size() == 1);
+
+    market.append_point("i-1", "a-1", "s-1", market_level::fine,
+        market_point{.at_ns = 62'000'000'000, .value = 5.0}, 20);
+    REQUIRE(snapshot->fine.back().value == 5.0);
+
+    /* A point older than the newest bucket is dropped, not rewritten. */
+    market.append_point("i-1", "a-1", "s-1", market_level::fine,
+        market_point{.at_ns = 500'000'000, .value = 9.0}, 21);
+    REQUIRE(snapshot->fine.back().value == 5.0);
+
+    /* The backfill saw 4.0 where the subscription already has 5.0. */
+    market.set_points("i-1", "a-1", "s-1",
+        std::vector<market_point>{
+            {.at_ns = 62'000'000'000, .value = 4.0}},
+        22);
+    REQUIRE(snapshot->fine.back().value == 5.0);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",
