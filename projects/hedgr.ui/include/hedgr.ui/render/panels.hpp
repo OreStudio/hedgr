@@ -128,14 +128,16 @@ identity_of(const render_input& input,
     hedgr::model::state::window_handle handle);
 
 /**
- * @brief Draws the identity bar and the rule beneath it.
+ * @brief The identity as one line, "principal @ tenant [party]".
  *
- * One line, and it never wraps or scrolls: a bar that grew would move the
- * content under it as a session changed. The deployment sits at the right
- * edge, where the eye goes for "where", and the login, tenant and party run
- * from the left.
+ * The windows put this on their status foot rather than in a bar of its own.
+ * Who you are and where you are is a fact a reader checks occasionally and a
+ * line they look past the rest of the time, and a strip across the top of every
+ * window is a lot of chrome for occasional. At the foot, in the disabled
+ * colour, it answers the question without competing with the work.
  */
-HEDGR_UI_EXPORT void draw_identity_bar(const identity_bar_state& state);
+[[nodiscard]] HEDGR_UI_EXPORT std::string
+identity_text(const identity_bar_state& state);
 
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;

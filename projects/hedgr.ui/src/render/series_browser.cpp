@@ -24,6 +24,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include <cctype>
 #include <algorithm>
@@ -85,11 +86,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
-    static_cast<void>(status);
     static_cast<void>(lock);
 
     ImGui::PushID("series-browser");
-    draw_identity_bar(identity_of(input, handle));
+    widget::foot_state foot;
+    foot.identity = identity_text(identity_of(input, handle));
 
     const auto session = input.windows.session_of(handle);
     if (!session
@@ -98,6 +99,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TextWrapped(
             "This window is not signed in. Sign in from the Accounts window "
             "to read the market series.");
+        widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
@@ -247,6 +249,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     ImGui::TextDisabled(
         "Double-click a series to plot it. Each plot keeps its own window.");
+    widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();
 }
 

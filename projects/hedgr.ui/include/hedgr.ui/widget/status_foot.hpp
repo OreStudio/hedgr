@@ -47,6 +47,15 @@ struct foot_state final {
 
     /** @brief The state's colour, for the word and for the dot. */
     ImU32 colour = 0;
+
+    /**
+     * @brief Who the window's session is and where it is, or empty.
+     *
+     * Drawn at the left in the disabled colour, and only while there is no
+     * message to draw. A message is news and the identity is not, so the news
+     * takes the line when it comes.
+     */
+    std::string identity;
 };
 
 /**

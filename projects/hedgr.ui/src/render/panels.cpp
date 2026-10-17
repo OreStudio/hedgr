@@ -173,69 +173,15 @@ identity_bar_state identity_of(const render_input& input,
     return result;
 }
 
-void draw_identity_bar(const identity_bar_state& state) {
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float height = ImGui::GetFrameHeight() + style.WindowPadding.y;
+std::string identity_text(const identity_bar_state& state) {
+    if (!state.signed_in)
+        return "Not signed in";
 
-    ImGui::PushID("identity-bar");
-    /*
-     * The bar is a strip, not a line of text: the title names the deployment
-     * and this is the other half of the answer, so it has to be seen without
-     * being looked for. The surface is the one the menu bar uses, which makes
-     * the two read as the window's chrome rather than as content.
-     */
-    ImGui::PushStyleColor(ImGuiCol_ChildBg,
-        ImGui::GetStyleColorVec4(ImGuiCol_MenuBarBg));
-    ImGui::BeginChild("##line", ImVec2(0.0f, height), false,
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-
-    if (!state.signed_in) {
-        ImGui::TextDisabled("%s  %s", icon::account, "Not signed in");
-    } else {
-        ImGui::TextUnformatted(icon::account);
-        ImGui::SameLine();
-        ImGui::TextUnformatted(state.principal.c_str());
-
-        if (!state.tenant.empty()) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("@");
-            ImGui::SameLine();
-            ImGui::TextUnformatted(state.tenant.c_str());
-        }
-
-        ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
-        if (state.party.empty()) {
-            ImGui::TextDisabled("%s [no party]", icon::party);
-        } else {
-            ImGui::TextColored(
-                ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar),
-                "%s [%s]", icon::party, state.party.c_str());
-        }
-    }
-
-    /*
-     * The deployment is right-aligned and measured rather than pushed with a
-     * table, because the bar is one line and a table would reserve columns the
-     * window does not need.
-     */
-    if (!state.instance.empty()) {
-        const float width = ImGui::CalcTextSize(icon::instance).x
-            + style.ItemInnerSpacing.x
-            + ImGui::CalcTextSize(state.instance.c_str()).x;
-        const float right = ImGui::GetContentRegionMax().x - width;
-        if (right > ImGui::GetCursorPosX())
-            ImGui::SameLine(right);
-        else
-            ImGui::SameLine();
-        ImGui::TextDisabled("%s", icon::instance);
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", state.instance.c_str());
-    }
-
-    ImGui::EndChild();
-    ImGui::PopStyleColor();
-    ImGui::PopID();
-    ImGui::Separator();
+    std::string text = state.principal;
+    if (!state.tenant.empty())
+        text += " @ " + state.tenant;
+    text += state.party.empty() ? " [no party]" : " [" + state.party + "]";
+    return text;
 }
 
 bool sign_in_needs_password(domain::store_lock lock,
