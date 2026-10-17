@@ -531,6 +531,12 @@ result<session_account> session_client::authenticate(std::string_view principal,
     }
 }
 
+ores::nats::service::subscription session_client::subscribe(
+    std::string_view subject,
+    ores::nats::message_handler handler) const {
+    return client().transport().subscribe(subject, std::move(handler));
+}
+
 result<void> session_client::select_party(std::string_view party_id) {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,

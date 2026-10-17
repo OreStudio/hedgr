@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
@@ -904,6 +905,48 @@ TEST_CASE("a backfill fills all three levels and live points win",
             {.at_ns = 62'000'000'000, .value = 4.0}},
         22);
     REQUIRE(snapshot->fine.back().value == 5.0);
+}
+
+TEST_CASE("the bucket ring keeps order and drops when full", "[ring]") {
+    using hedgr::model::domain::market_level;
+    using hedgr::model::domain::market_point;
+    using hedgr::model::state::bucket_ring;
+    using hedgr::model::state::market_bucket;
+
+    bucket_ring ring;
+    std::vector<market_bucket> out;
+
+    for (int i = 0; i < 10; ++i) {
+        REQUIRE(ring.try_push(market_bucket{.series_id = "s-1",
+            .level = market_level::fine,
+            .point = market_point{.at_ns = i, .value = static_cast<double>(i)}}));
+    }
+    REQUIRE(ring.drain(out) == 10);
+    REQUIRE(out.size() == 10);
+    REQUIRE(out.front().point.at_ns == 0);
+    REQUIRE(out.back().point.at_ns == 9);
+    REQUIRE(ring.high_water() == 10);
+
+    for (std::size_t i = 0; i < bucket_ring::capacity + 5; ++i) {
+        ring.try_push(market_bucket{.series_id = "s-2",
+            .level = market_level::medium,
+            .point = market_point{.at_ns = static_cast<std::int64_t>(i),
+                .value = 1.0}});
+    }
+    REQUIRE(ring.dropped() == 5);
+    REQUIRE(ring.drain(out) == bucket_ring::capacity);
+    REQUIRE(out.back().point.at_ns
+        == static_cast<std::int64_t>(bucket_ring::capacity - 1));
+
+    /* The ring wraps: the indices are taken modulo the capacity. */
+    for (std::int64_t i = 0; i < 3; ++i) {
+        ring.try_push(market_bucket{.series_id = "s-3",
+            .level = market_level::coarse,
+            .point = market_point{.at_ns = i, .value = 2.0}});
+    }
+    REQUIRE(ring.drain(out) == 3);
+    REQUIRE(out.front().point.at_ns == 0);
+    REQUIRE(out.back().point.at_ns == 2);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",
