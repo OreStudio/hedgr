@@ -47,6 +47,7 @@
             ]
         },
         "sqlgen",
-        "catch2"
+        "catch2",
+        "lunasvg"
     ]
 }

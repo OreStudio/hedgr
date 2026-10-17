@@ -17,6 +17,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/component_files.cmake)
 # dependencies. The vcpkg port ships the header and no CMake config, so it is
 # found by path rather than by find_package, and only this component sees it.
 find_path(HEDGR_MINIAUDIO_INCLUDE_DIR miniaudio.h REQUIRED)
+find_package(lunasvg CONFIG REQUIRED)
 
 # A component with no sources yet must still configure.
 if(NOT files)
@@ -58,6 +59,7 @@ target_link_libraries(${lib_target_name}
         # rather than a link against ALSA or PulseAudio.
         ${CMAKE_DL_LIBS}
         Threads::Threads
+        lunasvg::lunasvg
         $<$<PLATFORM_ID:Linux>:m>
 )
 
