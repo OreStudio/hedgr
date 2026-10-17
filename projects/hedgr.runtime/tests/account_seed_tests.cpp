@@ -205,17 +205,18 @@ TEST_CASE("a started store holds the two seeded accounts of its instance",
     REQUIRE(super->name == "super admin");
     REQUIRE(super->instance_id == instance_id);
     /*
-     * The principal is the instance's own subject prefix with the role in
-     * front, which is the name IAM is asked to recognise.
+     * The deployment's own system administrator. The name is IAM's rather than
+     * this client's: the ORE bootstrap creates super_admin, and a principal
+     * invented from the instance's prefix is a name IAM has never heard of.
      */
-    REQUIRE(super->principal == "super-admin@ores.dev.brave_hopper");
+    REQUIRE(super->principal == "super_admin");
 
     const auto* tenant = find_account(manager,
         seeded_account_id(instance_id, "tenant admin"));
     REQUIRE(tenant != nullptr);
     REQUIRE(tenant->name == "tenant admin");
     REQUIRE(tenant->instance_id == instance_id);
-    REQUIRE(tenant->principal == "tenant-admin@ores.dev.brave_hopper");
+    REQUIRE(tenant->principal == "tenant_admin");
 
     /*
      * Both sit in a Privileged folder of the instance's accounts tree, and
@@ -241,6 +242,48 @@ TEST_CASE("a started store holds the two seeded accounts of its instance",
         manager.folders().get(*accounts_root)->id);
 
     manager.stop();
+}
+
+TEST_CASE("a seeded account is the operator's after the first start",
+    "[seed]") {
+    pin_no_checkouts();
+    const temporary_database database;
+    std::string instance_id;
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        instance_id = manager.instances().rows()[0].id;
+
+        /*
+         * The principal was seeded as super_admin. IAM's answer for a real
+         * deployment is what the operator corrects it to, and that correction
+         * is the point of the row being editable. A second start used to write
+         * the seeded guess over it, which is how a working login became a
+         * broken one after a restart.
+         */
+        const auto* seeded = find_account(manager,
+            seeded_account_id(instance_id, "super admin"));
+        REQUIRE(seeded != nullptr);
+
+        command save;
+        save.kind = command_kind::save_account;
+        save.account_id = seeded->id;
+        save.account_row = *seeded;
+        save.account_row.principal = "the-real-principal";
+        push_command(manager, save);
+
+        manager.stop();
+    }
+
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    const auto* kept = find_account(reopened,
+        seeded_account_id(instance_id, "super admin"));
+    REQUIRE(kept != nullptr);
+    REQUIRE(kept->principal == "the-real-principal");
+    REQUIRE(reopened.accounts().size() == 2);
+    reopened.stop();
 }
 
 TEST_CASE("an instance already in the store is seeded on the next start",
@@ -290,7 +333,7 @@ TEST_CASE("an instance already in the store is seeded on the next start",
     const auto* super = find_account(reopened,
         seeded_account_id(late, "super admin"));
     REQUIRE(super != nullptr);
-    REQUIRE(super->principal == "super-admin@ores.staging.late");
+    REQUIRE(super->principal == "super_admin");
     const auto* tenant = find_account(reopened,
         seeded_account_id(late, "tenant admin"));
     REQUIRE(tenant != nullptr);

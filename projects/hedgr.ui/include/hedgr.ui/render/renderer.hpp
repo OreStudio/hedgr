@@ -154,6 +154,40 @@ struct instance_edit_state final {
  * handed straight to ImGui::InputText, which edits a caller-owned buffer in
  * place and needs a bound to write within.
  */
+/**
+ * @brief The interface's scratch for one command centre.
+ *
+ * Keyed by window, not by screen: two command centres for two deployments each
+ * keep their own tabs and their own selection, which is why this lives in the
+ * window's state rather than in a table beside the screens.
+ */
+struct command_centre_ui_state final {
+    /** @brief The open screens, in the order the tab strip shows them. */
+    std::vector<std::string> screens{"overview"};
+
+    /** @brief The screen a request asked for, empty when none did. */
+    std::string active{"overview"};
+
+    /**
+     * @brief Whether the next frame should select @c active.
+     *
+     * ImGui owns which tab is showing. Opening a screen from a menu has to
+     * override that once, and only once, or the operator could never switch
+     * tabs by hand again.
+     */
+    bool select_next = false;
+
+    /**
+     * @brief Whether the window has already reported a gate it is showing.
+     *
+     * The renderer runs every frame, so a sentence written on each of them
+     * would bury the log. One report per transition is what an operator
+     * reading it afterwards is looking for.
+     */
+    bool bootstrap_reported = false;
+    bool session_loss_reported = false;
+};
+
 struct window_ui_state final {
     /** @brief Filter text, as typed. */
     std::array<char, 128> filter{};
@@ -230,6 +264,9 @@ struct window_ui_state final {
      * A window that does not host the Instances pane simply never reads it.
      */
     instance_edit_state instance_edit;
+
+    /** @brief This window's tabs, if it is a command centre. */
+    command_centre_ui_state command_centre;
 };
 
 /**

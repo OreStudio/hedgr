@@ -11,6 +11,7 @@ set(files
     "icon/fonts.cpp"
     "render/accounts_window.cpp"
     "render/chart_window.cpp"
+    "render/command_centre.cpp"
     "render/grid_window.cpp"
     "render/instances_window.cpp"
     "render/notice_window.cpp"

@@ -709,6 +709,7 @@ TEST_CASE("a catalogue window is culled while the store is locked", "[lock]") {
 
 TEST_CASE("the new window kinds have renderers and titles", "[renderer]") {
     using hedgr::model::domain::accounts_state;
+    using hedgr::model::domain::command_centre_state;
     using hedgr::model::domain::workspace_state;
     using hedgr::model::domain::window_state;
 
@@ -730,6 +731,48 @@ TEST_CASE("the new window kinds have renderers and titles", "[renderer]") {
     const window_state session = workspace_state{ "acct-gone" };
     REQUIRE(hedgr::ui::render::window_title(window_kind::workspace, session, input)
         == "acct-gone");
+
+    /*
+     * A command centre names its deployment, because a wall holds one per
+     * deployment and the title is what tells them apart.
+     */
+    const window_state centre = command_centre_state{ "inst-gone" };
+    REQUIRE(hedgr::ui::render::window_title(window_kind::command_centre, centre,
+                input)
+        == "Command centre: inst-gone");
+}
+
+TEST_CASE("sign in asks for a password for the two reasons it can", "[renderer]") {
+    using hedgr::ui::render::sign_in_needs_password;
+
+    /*
+     * A closed store cannot be read, so a remembered password is out of reach.
+     * An account with nothing remembered has nothing to read even when the
+     * store is open. Opening a password prompt for any other pair would make
+     * the prompt the default rather than the exception.
+     */
+    REQUIRE(sign_in_needs_password(store_lock::locked, true));
+    REQUIRE(sign_in_needs_password(store_lock::absent, true));
+    REQUIRE(sign_in_needs_password(store_lock::failed, true));
+    REQUIRE(sign_in_needs_password(store_lock::unlocked, false));
+
+    REQUIRE_FALSE(sign_in_needs_password(store_lock::unlocked, true));
+}
+
+TEST_CASE("a command centre is hidden while the store is locked", "[renderer]") {
+    /*
+     * The command centre is a live surface, like a workspace, but its title and
+     * its deployment name are read from the catalogue. While the store is shut
+     * it is not drawn, for the same reason a workspace is not.
+     */
+    empty_state state;
+    auto locked = input_with(state, store_lock::locked);
+    REQUIRE_FALSE(hedgr::ui::render::shows_window(window_kind::command_centre,
+        locked, "command-centre:inst:acct"));
+
+    auto unlocked = input_with(state, store_lock::unlocked);
+    REQUIRE(hedgr::ui::render::shows_window(window_kind::command_centre,
+        unlocked, "command-centre:inst:acct"));
 }
 
 TEST_CASE("every window kind has an icon and a distinct spelling", "[renderer]") {

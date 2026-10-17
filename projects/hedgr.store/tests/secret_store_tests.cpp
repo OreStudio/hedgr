@@ -325,6 +325,28 @@ TEST_CASE("an account credential round-trips and can be cleared", "[credential]"
     REQUIRE(accounts.credential_of("acct-1").value() == std::nullopt);
 }
 
+TEST_CASE("the accounts with a credential are named without it", "[credential]") {
+    auto db = fresh_store();
+    instance_repository instances(db);
+    account_repository accounts(db);
+    REQUIRE(instances.save(sample_instance()).has_value());
+    REQUIRE(accounts.save(sample_account()).has_value());
+
+    /* Nothing stored yet, so nothing is named. */
+    REQUIRE(accounts.ids_with_credential().value().empty());
+
+    const auto sealed = secret_box::seal("a-master-password", "hunter2");
+    REQUIRE(sealed.has_value());
+    REQUIRE(accounts.set_credential("acct-1", sealed.value()).has_value());
+
+    const auto ids = accounts.ids_with_credential();
+    REQUIRE(ids.has_value());
+    REQUIRE(ids.value() == std::vector<std::string>{"acct-1"});
+
+    REQUIRE(accounts.clear_credential("acct-1").has_value());
+    REQUIRE(accounts.ids_with_credential().value().empty());
+}
+
 TEST_CASE("a list of accounts carries no credential", "[credential]") {
     auto db = fresh_store();
     instance_repository instances(db);

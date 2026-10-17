@@ -120,9 +120,9 @@ else
     # the environment that session has, which is where the compositor and the
     # sound server both expect a client to be.
     systemd-run --user --unit=hedgr --collect \
-        --property=StandardOutput="append:${HOME}/hedgr/hedgr.log" \
-        --property=StandardError="append:${HOME}/hedgr/hedgr.log" \
-        "${PWD}/current/bin/hedgr.imgui" >/dev/null 2>&1 || \
+        "${PWD}/current/bin/hedgr.imgui" \
+        --log-enabled --log-filename hedgr.imgui.log \
+        --log-directory "${HOME}" >/dev/null 2>&1 || \
         echo "could not start the client as a user unit" >&2
 
     sleep 3
@@ -130,7 +130,7 @@ else
     if pgrep -x hedgr.imgui >/dev/null 2>&1; then
         echo "restarted the client in the desktop session"
     else
-        echo "the client did not come up, see ~/hedgr/hedgr.log" >&2
+        echo "the client did not come up, see ~/hedgr.imgui.log" >&2
     fi
 fi
 

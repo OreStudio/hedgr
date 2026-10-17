@@ -153,6 +153,28 @@ account_repository::clear_credential(std::string_view account_id) {
     return done(query(db_->connection()));
 }
 
+sqlite::result<std::vector<std::string>>
+account_repository::ids_with_credential() const {
+    /*
+     * The column is selected and the rows are filtered here rather than in SQL,
+     * because sqlgen's null comparison is not part of the vocabulary these
+     * repositories use. Only the id is kept, so the sealed values are read by
+     * the driver and dropped with the row that carried them.
+     */
+    const auto query =
+        sqlgen::read<std::vector<account_credential_entity>>;
+    auto rows = rows_of(query(db_->connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
+
+    std::vector<std::string> ids;
+    for (const auto& row : rows.value()) {
+        if (row.credential)
+            ids.push_back(row.id.get());
+    }
+    return ids;
+}
+
 sqlite::result<std::optional<std::string>>
 account_repository::credential_of(std::string_view account_id) const {
     const auto query = sqlgen::read<std::vector<account_credential_entity>> |

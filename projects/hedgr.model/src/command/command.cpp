@@ -69,6 +69,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "save_shortcut";
     case command_kind::remove_shortcut:
         return "remove_shortcut";
+    case command_kind::store_credential:
+        return "store_credential";
     }
     return "unknown";
 }

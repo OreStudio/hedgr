@@ -54,6 +54,16 @@ struct account final {
 
     /** @brief The principal as IAM sees it, for example user@host. */
     std::string principal;
+
+    /**
+     * @brief Whether the local store holds a credential for this account.
+     *
+     * A fact about the local store rather than about the deployment, and it is
+     * not persisted: the store answers it when the accounts are loaded, and a
+     * save never writes it. The interface reads it to decide whether Sign in
+     * can use a remembered password or has to ask for one.
+     */
+    bool has_credential = false;
 };
 
 }

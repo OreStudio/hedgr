@@ -20,6 +20,7 @@
 #include "hedgr.ui/icon/fonts.hpp"
 
 #include "hedgr.ui/icon/icons.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <cstdint>
 #include <cstdlib>
@@ -186,6 +187,17 @@ std::vector<std::uint8_t> read_icon_sheet(const std::filesystem::path& path) {
 
 }
 
+namespace {
+
+/** @brief This loader's logger. A missing asset is reported, not fatal. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.icon.fonts");
+    return instance;
+}
+
+}
+
 namespace hedgr::ui::icon {
 
 void load_ui_fonts(float base_size_px) {
@@ -201,10 +213,15 @@ void load_ui_fonts(float base_size_px) {
     io.Fonts->TexMinHeight = 1024;
 
     const auto base = base_font_path();
-    if (base.empty())
+    if (base.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "No interface font found; using ImGui's built-in font";
         io.Fonts->AddFontDefaultVector();
-    else
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Loaded the interface font from " << base.string();
         io.Fonts->AddFontFromFileTTF(base.string().c_str(), base_size_px);
+    }
 
     /*
      * The icons are registered as glyphs of the base font rather than as a
@@ -221,6 +238,10 @@ void load_ui_fonts(float base_size_px) {
     constexpr std::size_t cell = static_cast<std::size_t>(glyph_pixel_size);
     const std::size_t sheet_width = icon_count * cell;
     if (sheet.size() != sheet_width * cell) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The icon sheet is missing or the wrong size (expected "
+            << sheet_width * cell << " bytes, read " << sheet.size()
+            << "); icons will draw as missing glyphs";
         /*
          * Without a usable sheet the base font is already loaded and the
          * interface is merely uglier. Adding nothing keeps the atlas valid, and a caller

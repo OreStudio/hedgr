@@ -29,6 +29,7 @@
 
 #include "hedgr.ui/sound/pack.hpp"
 #include "hedgr.ui/sound/player.hpp"
+#include "ores.logging/make_logger.hpp"
 
 #include <condition_variable>
 #include <cstddef>
@@ -42,6 +43,13 @@
 #include <vector>
 
 namespace {
+
+/** @brief This player's logger. A silent host is a warning, not an error. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.sound.player");
+    return instance;
+}
 
 /**
  * @brief The directory holding the running executable.
@@ -118,9 +126,14 @@ public:
         if (ready_)
             return true;
         ma_engine_config config = ma_engine_config_init();
-        if (ma_engine_init(&config, &engine_) != MA_SUCCESS)
+        if (ma_engine_init(&config, &engine_) != MA_SUCCESS) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "No audio output device; sounds will be silent";
             return false;
+        }
         ready_ = true;
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Audio output opened";
         return true;
     }
 
@@ -135,7 +148,12 @@ public:
         if (!ready_)
             return;
         const std::string text = file.string();
-        ma_engine_play_sound(&engine_, text.c_str(), nullptr);
+        BOOST_LOG_SEV(lg(), ores::logging::debug) << "Playing " << text;
+        if (ma_engine_play_sound(&engine_, text.c_str(), nullptr)
+            != MA_SUCCESS) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Could not play " << text;
+        }
     }
 
 private:

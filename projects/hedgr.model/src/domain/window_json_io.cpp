@@ -65,6 +65,8 @@ window_state_to_json(window_kind kind, const window_state& state) {
         return write_shape<accounts_state>(state);
     case window_kind::workspace:
         return write_shape<workspace_state>(state);
+    case window_kind::command_centre:
+        return write_shape<command_centre_state>(state);
     }
     return std::unexpected("unknown window kind");
 }
@@ -83,6 +85,8 @@ window_state_from_json(window_kind kind, std::string_view json) {
         return read_shape<accounts_state>(json);
     case window_kind::workspace:
         return read_shape<workspace_state>(json);
+    case window_kind::command_centre:
+        return read_shape<command_centre_state>(json);
     }
     return std::unexpected("unknown window kind");
 }

@@ -26,6 +26,7 @@
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
@@ -56,6 +57,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -121,6 +123,8 @@ namespace transport = hedgr::session::transport;
         return std::format("accounts:{}", instance_id);
     case domain::window_kind::workspace:
         return std::format("workspace:{}:{}", instance_id, account_id);
+    case domain::window_kind::command_centre:
+        return std::format("command-centre:{}:{}", instance_id, account_id);
     case domain::window_kind::chart:
     case domain::window_kind::grid:
     case domain::window_kind::notice:
@@ -205,8 +209,10 @@ live_indices(const model_state::slab& layout) {
 /** @brief A store failure as one sentence naming the operation that failed. */
 [[nodiscard]] std::string store_failure(std::string_view what,
     const sqlite::store_error& error) {
-    return std::format("{}: {} ({})", what, error.message,
+    const auto message = std::format("{}: {} ({})", what, error.message,
         sqlite::to_string(error.code));
+    BOOST_LOG_SEV(lg(), ores::logging::error) << "Store failure: " << message;
+    return message;
 }
 
 /**
@@ -607,6 +613,11 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         session.account_id = std::string{account_id};
         return session;
     }
+    case domain::window_kind::command_centre: {
+        domain::command_centre_state centre;
+        centre.instance_id = std::string{instance_id};
+        return centre;
+    }
     case domain::window_kind::grid: {
         domain::grid_state grid;
         grid.resource = "trades";
@@ -642,6 +653,11 @@ instance_manager::~instance_manager() {
 }
 
 void instance_manager::stop() noexcept {
+    if (!started_ && running_.empty() && probing_.empty())
+        return;
+
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Stopping the runtime";
+
     for (auto& [key, source] : running_) {
         if (source)
             source->request_stop();
@@ -699,6 +715,8 @@ instance_manager::start(const std::filesystem::path& database_path,
         return std::unexpected(last_error_);
     }
     database_ = std::make_unique<sqlite::database>(std::move(opened).value());
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Opened the store at " << database_path.string();
 
     if (auto applied = database_->apply_schema(); !applied) {
         last_error_ = store_failure("cannot bring the store up to date",
@@ -779,8 +797,26 @@ instance_manager::start(const std::filesystem::path& database_path,
         return std::unexpected(last_error_);
     }
     accounts_.clear();
-    for (const auto& row : accounts.value())
-        static_cast<void>(accounts_.upsert(row));
+
+    /*
+     * Whether each account can sign in without a prompt is a fact about the
+     * local store, read once here as a list of ids. The credentials themselves
+     * are not read: the interface only has to know which accounts have one.
+     */
+    const auto with_credentials = account_repo_->ids_with_credential();
+    if (!with_credentials) {
+        last_error_ = store_failure("cannot read the stored credentials",
+            with_credentials.error());
+        startup_failure_ = last_error_;
+        return std::unexpected(last_error_);
+    }
+    const std::unordered_set<std::string> credential_ids(
+        with_credentials->begin(), with_credentials->end());
+    for (const auto& row : accounts.value()) {
+        auto copy = row;
+        copy.has_credential = credential_ids.contains(row.id);
+        static_cast<void>(accounts_.upsert(copy));
+    }
 
     auto folders = folder_repo_->list();
     if (!folders) {
@@ -892,6 +928,9 @@ instance_manager::start(const std::filesystem::path& database_path,
     }
 
     started_ = true;
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Runtime ready with " << instances_.size() << " instances and "
+        << accounts_.size() << " accounts";
     return {};
 }
 
@@ -1238,10 +1277,6 @@ void instance_manager::seed_accounts_for_instance(
      * match. An instance that names no prefix falls back to its id, so the
      * principal never shrinks to a bare role with nothing after the at sign.
      */
-    const std::string realm = instance.subject_prefix.empty()
-        ? instance.id
-        : instance.subject_prefix;
-
     /*
      * Both logins sit in the instance's Privileged folder rather than at the
      * accounts root, so the deployment's own logins are somewhere an operator
@@ -1256,9 +1291,15 @@ void instance_manager::seed_accounts_for_instance(
         std::string_view name;
         std::string_view role;
     };
+    /*
+     * The deployment's own system administrator is 'super_admin', which is the
+     * name the ORE bootstrap creates and the one IAM will accept. The tenant
+     * administrator's name is the tenant's, so the second row is a starting
+     * point an operator edits rather than a name this client can know.
+     */
     constexpr seeded_login logins[] = {
-        { "super admin", "super-admin" },
-        { "tenant admin", "tenant-admin" },
+        { "super admin", "super_admin" },
+        { "tenant admin", "tenant_admin" },
     };
 
     /*
@@ -1269,12 +1310,23 @@ void instance_manager::seed_accounts_for_instance(
      * themselves.
      */
     for (const auto& login : logins) {
+        const auto id = std::format("acct:{}:{}", instance.id, login.name);
+
+        /*
+         * Seed once and never again. The rows are the operator's after the
+         * first start: a principal corrected here, or a folder they moved the
+         * login into, must survive the next launch. Overwriting them is how a
+         * corrected principal silently became the seeded guess again.
+         */
+        if (accounts_.find(id))
+            continue;
+
         domain::account row;
-        row.id = std::format("acct:{}:{}", instance.id, login.name);
+        row.id = id;
         row.instance_id = instance.id;
         row.name = std::string{login.name};
         row.folder_id = folder_id;
-        row.principal = std::format("{}@{}", login.role, realm);
+        row.principal = std::string{login.role};
 
         static_cast<void>(accounts_.upsert(row));
 
@@ -1375,6 +1427,15 @@ void instance_manager::handle(command::command& cmd) {
      */
     last_error_.clear();
 
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Command: " << hedgr::model::command::to_string(cmd.kind)
+        << (cmd.instance_id.empty() ? std::string{}
+                                    : std::format(" instance '{}'", cmd.instance_id))
+        << (cmd.account_id.empty() ? std::string{}
+                                   : std::format(" account '{}'", cmd.account_id))
+        << (cmd.window_id.empty() ? std::string{}
+                                  : std::format(" window '{}'", cmd.window_id));
+
     switch (cmd.kind) {
     case command::command_kind::save_instance:
         do_save_instance(cmd);
@@ -1414,6 +1475,9 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::connect_session:
         do_connect_session(cmd);
+        break;
+    case command::command_kind::store_credential:
+        do_store_credential(cmd);
         break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
@@ -1481,9 +1545,20 @@ void instance_manager::handle(command::command& cmd) {
     std::fill(cmd.password.begin(), cmd.password.end(), '\0');
     cmd.password.clear();
     cmd.password.shrink_to_fit();
+
+    /*
+     * The sealed credential is ciphertext, and it is still not left in a buffer
+     * that outlives the frame. The store has its own copy now.
+     */
+    if (cmd.kind == command::command_kind::store_credential) {
+        std::fill(cmd.payload.begin(), cmd.payload.end(), '\0');
+        cmd.payload.clear();
+        cmd.payload.shrink_to_fit();
+    }
 }
 
 void instance_manager::do_save_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save instance " << cmd.instance_row.name << "";
     if (!instance_repo_) {
         last_error_ = "cannot save an instance: the store is not open";
         return;
@@ -1536,6 +1611,7 @@ void instance_manager::do_save_instance(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove instance " << cmd.instance_id << "";
     /*
      * The interface names the row by id and the row itself also carries one, so
      * either is accepted rather than dropping a removal that named the
@@ -1665,6 +1741,7 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
 }
 
 void instance_manager::do_save_account(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save account " << cmd.account_row.principal << "";
     if (!account_repo_) {
         last_error_ = "cannot save an account: the store is not open";
         return;
@@ -1682,6 +1759,13 @@ void instance_manager::do_save_account(const command::command& cmd) {
      * save that races the root's creation still has somewhere to put the row.
      */
     domain::account row = cmd.account_row;
+    /*
+     * The flag is not part of a saved row, so an edit that built its value from
+     * the form would clear it and make the next sign-in ask for a password the
+     * store already holds.
+     */
+    if (previous)
+        row.has_credential = previous->has_credential;
     if (row.folder_id.empty())
         row.folder_id = domain::accounts_root_id_for(row.instance_id);
 
@@ -1698,6 +1782,7 @@ void instance_manager::do_save_account(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_account(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove account " << cmd.account_id << "";
     const std::string id = cmd.account_id.empty() ? cmd.account_row.id
                                                   : cmd.account_id;
     if (id.empty()) {
@@ -1746,6 +1831,7 @@ void instance_manager::do_remove_account(const command::command& cmd) {
 }
 
 void instance_manager::do_save_folder(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save folder " << cmd.folder_row.name << "";
     if (!folder_repo_) {
         last_error_ = "cannot save a folder: the store is not open";
         return;
@@ -1827,6 +1913,7 @@ void instance_manager::do_save_folder(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_folder(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove folder " << cmd.folder_row.id << "";
     if (!folder_repo_) {
         last_error_ = "cannot remove a folder: the store is not open";
         return;
@@ -1973,6 +2060,7 @@ void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids)
 }
 
 void instance_manager::do_save_label(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save label " << cmd.label_row.name << "";
     if (!label_repo_) {
         last_error_ = "cannot save a label: the store is not open";
         return;
@@ -2007,6 +2095,7 @@ void instance_manager::do_save_label(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_label(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove label " << cmd.label_row.id << "";
     if (!label_repo_) {
         last_error_ = "cannot remove a label: the store is not open";
         return;
@@ -2115,6 +2204,7 @@ void instance_manager::do_detach_label(const command::command& cmd) {
 }
 
 void instance_manager::do_save_shortcut(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Save shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
         last_error_ = "cannot save a shortcut: the store is not open";
         return;
@@ -2153,6 +2243,7 @@ void instance_manager::do_save_shortcut(const command::command& cmd) {
 }
 
 void instance_manager::do_remove_shortcut(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
         last_error_ = "cannot remove a shortcut: the store is not open";
         return;
@@ -2196,6 +2287,10 @@ void instance_manager::drop_target_shortcuts(domain::window_kind kind,
 }
 
 void instance_manager::do_connect_session(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Sign-in requested for '" << cmd.account_id << "' on '"
+        << cmd.instance_id << "'";
+
     /*
      * Both ids arrive as text from the interface, so both are resolved here:
      * the instance's row is read for the connection settings, and the account
@@ -2223,6 +2318,14 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * a lie.
      */
     if (!cmd.password.empty()) {
+        if (cmd.remember && store_lock_ == domain::store_lock::unlocked) {
+            start_credential_store(cmd.account_id, cmd.password,
+                master_password_);
+        } else if (cmd.remember) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Not remembering the password for '" << cmd.account_id
+                << "': the store is not unlocked";
+        }
         start_session_for(cmd, domain::credential{cmd.principal, cmd.password});
         return;
     }
@@ -2252,6 +2355,10 @@ void instance_manager::do_connect_session(const command::command& cmd) {
             "cannot connect to {}: the account has no stored credential and "
             "no password was supplied",
             instance_row->name);
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Cannot sign in to '" << instance_row->name
+            << "': account '" << cmd.account_id
+            << "' has no stored credential and no password was supplied";
         return;
     }
 
@@ -2405,6 +2512,69 @@ void instance_manager::report_store_failure(const std::string& instance_id,
     fact.lock = store_lock_;
     fact.message = std::move(message);
     events_.push(std::move(fact));
+}
+
+void instance_manager::do_store_credential(const command::command& cmd) {
+    if (!account_repo_) {
+        last_error_ = "cannot store a password: the store is not open";
+        return;
+    }
+    if (cmd.payload.empty()) {
+        last_error_ = "cannot store an empty credential";
+        return;
+    }
+
+    if (auto saved = account_repo_->set_credential(cmd.account_id, cmd.payload);
+        !saved) {
+        last_error_ = store_failure(
+            std::format("cannot store the password for account {}",
+                cmd.account_id),
+            saved.error());
+        return;
+    }
+
+    if (const auto handle = accounts_.find(cmd.account_id)) {
+        auto row = *accounts_.get(*handle);
+        row.has_credential = true;
+        static_cast<void>(accounts_.upsert(row));
+    }
+
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Stored a password for account '" << cmd.account_id << "'";
+}
+
+void instance_manager::start_credential_store(std::string account_id,
+    std::string password, domain::secret_string master_password) {
+    boost::asio::co_spawn(pool_.context(),
+        [this, account_id = std::move(account_id),
+            password = std::move(password),
+            master_password = std::move(master_password)]() mutable
+        -> boost::asio::awaitable<void> {
+            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+                boost::asio::use_awaitable);
+
+            auto sealed =
+                store_crypto::secret_box::seal(master_password.view(), password);
+
+            std::fill(password.begin(), password.end(), '\0');
+            password.clear();
+            password.shrink_to_fit();
+            master_password.clear();
+
+            if (!sealed) {
+                BOOST_LOG_SEV(lg(), ores::logging::error)
+                    << "Could not seal the password for account '"
+                    << account_id << "'";
+                co_return;
+            }
+
+            command::command store;
+            store.kind = command::command_kind::store_credential;
+            store.account_id = account_id;
+            store.payload = std::move(sealed).value();
+            commands_.push(std::move(store));
+        },
+        boost::asio::detached);
 }
 
 void instance_manager::do_set_master_password(const command::command& cmd) {
@@ -2626,6 +2796,15 @@ void instance_manager::do_open_window(const command::command& cmd) {
                           : key;
     spec.kind = cmd.new_window_kind;
 
+    /*
+     * A command centre reads a deployment, not a frame: six list calls on a
+     * second connection. The one second default is the placeholder's cadence
+     * and would put six requests a second on the broker for a screen whose
+     * numbers move over hours.
+     */
+    if (cmd.new_window_kind == domain::window_kind::command_centre)
+        spec.cadence = std::chrono::seconds{30};
+
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
@@ -2646,9 +2825,15 @@ void instance_manager::do_open_window(const command::command& cmd) {
         last_error_ = store_failure(
             std::format("cannot save window {}", spec.id), saved.error());
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Opened window '" << spec.id << "' of kind '"
+        << domain::to_string(spec.kind) << "'";
 }
 
 void instance_manager::do_close_window(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Closing window '" << cmd.window_id << "'";
     const auto handle = windows_.find(cmd.window_id);
     if (!handle) {
         last_error_ = std::format("cannot close: no window {}", cmd.window_id);
@@ -2683,6 +2868,15 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     windows_.set_next_refresh_ns(*handle, due.count());
 
     /*
+     * A command centre's refresh is a deployment read on its own connection.
+     * Every other kind still takes the placeholder below.
+     */
+    if (spec.kind == domain::window_kind::command_centre) {
+        start_deployment_read(cmd.window_id);
+        return;
+    }
+
+    /*
      * Placeholder. A refresh has nothing real to ask for yet, so the request is
      * turned into an event carrying the window id and nothing else, which is
      * enough to exercise the path from a command through the event channel and
@@ -2694,7 +2888,66 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     events_.push(std::move(fact));
 }
 
+void instance_manager::start_deployment_read(std::string_view window_id) {
+    if (!database_) {
+        last_error_ = "cannot read the deployment: the store is not open";
+        return;
+    }
+
+    const auto window = windows_.find(window_id);
+    if (!window)
+        return;
+
+    const auto session = windows_.session_of(*window);
+    if (!session)
+        return;
+
+    /*
+     * Only a signed-in session has a token to present, and a window that
+     * outlived its session has nothing to read with. The window draws its
+     * session-loss state instead.
+     */
+    if (sessions_.status(*session)
+        != domain::session_status::authenticated) {
+        return;
+    }
+
+    const auto token = std::string{sessions_.token(*session)};
+    if (token.empty())
+        return;
+
+    const auto instance_id = std::string{sessions_.instance_id(*session)};
+    const auto account_id = std::string{sessions_.account_id(*session)};
+
+    const auto instance = instances_.find(instance_id);
+    if (!instance)
+        return;
+
+    const auto key = running_key(instance_id, account_id);
+    if (deployment_reads_.contains(key))
+        return;
+
+    const auto account = accounts_.find(account_id);
+    const std::string principal = account
+        ? accounts_.get(*account)->principal : std::string{};
+
+    worker::deployment_job job;
+    job.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.key = domain::session_key{instance_id, account_id};
+    job.token = token;
+    job.principal = principal;
+
+    deployment_reads_.insert(key);
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Starting a deployment read for '" << instance_id << "' / '"
+        << account_id << "'";
+    worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
+}
+
 void instance_manager::do_probe_instance(const command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Probe requested for '" << cmd.instance_id << "'";
     /*
      * Forcing a probe moves the deadline rather than starting the probe here:
      * the schedule is then the one place that decides whether an instance is
@@ -3081,6 +3334,7 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.token);
+        sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
 
         /*
@@ -3091,6 +3345,32 @@ void instance_manager::apply(const event::event& ev) {
          * of the connection it is actually looking at.
          */
         sessions_.set_opened_at_ns(*handle, steady_now_ns());
+
+        /*
+         * The landing surface is decided by the fact and not by the click that
+         * asked for it: a super administrator's session belongs to the system
+         * tenant, and that is known only once IAM has answered. Opening it here
+         * also means a refused sign-in leaves no window behind.
+         */
+        {
+            command::command open;
+            open.kind = command::command_kind::open_window;
+            open.instance_id = ev.instance_id;
+            open.account_id = ev.account_id;
+            open.new_window_kind =
+                sessions_.mode(*handle) == domain::session_mode::system_administration
+                ? domain::window_kind::command_centre
+                : domain::window_kind::workspace;
+            do_open_window(open);
+        }
+        break;
+    case event::event_kind::deployment_snapshot:
+        deployment_reads_.erase(
+            running_key(ev.instance_id, ev.account_id));
+        sessions_.set_deployment(*handle, ev.deployment);
+        BOOST_LOG_SEV(lg(), ores::logging::debug)
+            << "Applied a deployment snapshot for '" << ev.instance_id
+            << "' / '" << ev.account_id << "'";
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);

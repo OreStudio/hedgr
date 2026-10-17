@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
 #include "hedgr.model/command/command.hpp"
@@ -32,6 +33,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
 #include <cfloat>
@@ -59,6 +61,13 @@ using hedgr::model::domain::session_status;
 using hedgr::model::domain::store_lock;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/** @brief This window's logger. It names a decision, never a password. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.accounts_window");
+    return instance;
+}
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_leaf;
 
@@ -333,6 +342,10 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
             "for this sign-in.",
             std::string{hedgr::model::domain::to_string(input.store_lock)}
                 .c_str());
+    } else if (row != nullptr && row->has_credential) {
+        ImGui::TextWrapped(
+            "A password is remembered for %s. Type a new one to replace it.",
+            row->principal.c_str());
     } else {
         ImGui::TextWrapped(
             "No password is remembered for %s. Type one for this sign-in.",
@@ -349,6 +362,18 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
             browser.password_visible ? icon::eye_off : icon::eye,
             browser.password_visible ? "Hide password" : "Show password"))
         browser.password_visible = !browser.password_visible;
+
+    if (input.store_lock != store_lock::unlocked)
+        ImGui::BeginDisabled();
+    ImGui::Checkbox("Remember this password", &browser.remember);
+    ImGui::SetItemTooltip("%s",
+        input.store_lock == store_lock::unlocked
+            ? "Seal the password under the master password, so the next sign-in "
+              "does not ask for it"
+            : "The store is closed, so there is no master password to seal it "
+              "under");
+    if (input.store_lock != store_lock::unlocked)
+        ImGui::EndDisabled();
 
     const bool complete = browser.credential[0] != '\0' && row != nullptr;
 
@@ -381,6 +406,7 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
         request.account_id = row->id;
         request.principal = row->principal;
         request.password = browser.credential.data();
+        request.remember = browser.remember;
         input.commands.push(std::move(request));
 
         std::fill(browser.credential.begin(), browser.credential.end(), '\0');
@@ -706,8 +732,28 @@ void accounts_window_actions(const render_input& input,
         : std::optional<hedgr::model::state::account_handle>{};
 
     const bool sign_in = widget::rail_button("sign-in", icon::sign_in,
-        "Sign in", "Sign in with the selected account and open a workspace",
+        "Sign in", "Sign in with the selected account and open the command "
+                   "centre or a workspace",
         have_selection);
+    const bool set_password = widget::rail_button("set-password",
+        icon::lock_open, "Password",
+        "Set or change the stored password for the selected account",
+        have_selection);
+
+    if (set_password && selected) {
+        /*
+         * The prompt opens whatever the account has stored, because this is
+         * the path for replacing a password rather than for using one. The
+         * submit signs in with it, which is also the only way to find out
+         * whether the new password is right.
+         */
+        std::fill(state.browser.credential.begin(),
+            state.browser.credential.end(), '\0');
+        state.browser.password_visible = false;
+        state.browser.remember = true;
+        state.browser.sign_in_open = true;
+        return;
+    }
 
     if (!sign_in || !selected)
         return;
@@ -716,15 +762,25 @@ void accounts_window_actions(const render_input& input,
 
     /*
      * A stored credential is used when there is one and the store is open;
-     * otherwise a password is asked for. Whether one is stored is not something
-     * this side can see -- the sealed blob never leaves the store -- so the
-     * closed-lock case is the one that can be decided here, and the runtime's
-     * refusal is what raises the prompt in every other case.
+     * otherwise a password is asked for. Both halves are known before the
+     * attempt: the lock says whether the store can be read, and the account
+     * says whether there is anything to read. Asking the runtime instead would
+     * mean the click did nothing until the refusal came back, which reads as a
+     * button that is broken rather than as a password that is missing.
      */
-    if (input.store_lock != store_lock::unlocked) {
+    if (hedgr::ui::render::sign_in_needs_password(input.store_lock,
+            row->has_credential)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Asking for a password for '" << row->principal << "' on '"
+            << row->instance_id
+            << "' (no stored credential or the store is closed)";
         state.browser.sign_in_open = true;
         return;
     }
+
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Signing in '" << row->principal << "' on '" << row->instance_id
+        << "' with the stored credential";
 
     command request;
     request.kind = command_kind::connect_session;
@@ -734,17 +790,12 @@ void accounts_window_actions(const render_input& input,
     input.commands.push(std::move(request));
 
     /*
-     * The workspace follows the session, so it is asked for now. The runtime
-     * binds it to the session that the connect command creates, and the frame
-     * loop draws it once the session is up rather than when the command was
-     * pushed.
+     * The landing window is not asked for here. Whether this account's session
+     * lands on a workspace or on the command centre is a fact about the tenant
+     * IAM resolves, and that is known only once the sign-in has been answered.
+     * The runtime opens the right one when it accepts the session, which also
+     * means a refused sign-in leaves no window behind.
      */
-    command open;
-    open.kind = command_kind::open_window;
-    open.instance_id = row->instance_id;
-    open.account_id = row->id;
-    open.new_window_kind = hedgr::model::domain::window_kind::workspace;
-    input.commands.push(std::move(open));
 }
 
 void render_accounts_window(hedgr::model::state::window_handle handle,
@@ -776,6 +827,8 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     }
 
     ImGui::PushID("accounts");
+    hedgr::ui::render::draw_identity_bar(
+        hedgr::ui::render::identity_of(input, handle));
 
     const auto root = input.folders.root(folder_tree::accounts, instance_id);
     const std::string root_id = root ? input.folders.get(*root)->id : std::string{};

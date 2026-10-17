@@ -99,6 +99,17 @@ public:
     [[nodiscard]] result<void> clear_credential(std::string_view account_id);
 
     /**
+     * @brief The ids of the accounts that have a stored credential.
+     *
+     * The ids and nothing else. The interface has to know whether pressing Sign
+     * in can use a remembered password or has to ask for one, and that is a
+     * fact about the row rather than the secret in it. Asking per account with
+     * @c credential_of would put every sealed value in memory to answer a
+     * question the column itself answers.
+     */
+    [[nodiscard]] result<std::vector<std::string>> ids_with_credential() const;
+
+    /**
      * @brief The account's sealed credential, or nothing when it has none.
      *
      * Deliberately not part of @c list or @c list_for_instance. A list is for

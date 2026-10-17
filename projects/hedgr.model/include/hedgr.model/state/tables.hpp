@@ -27,6 +27,7 @@
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/shortcut.hpp"
+#include "hedgr.model/domain/deployment.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include "hedgr.model/state/handle.hpp"
@@ -412,6 +413,7 @@ struct session_columns final {
     // Warm: read when a session row is drawn.
     std::vector<std::string> instance_id;
     std::vector<std::string> account_id;
+    std::vector<std::uint8_t> mode;
 
     // Cold: read only when a detail surface opens.
     std::vector<std::int64_t> opened_at_ns;
@@ -419,6 +421,7 @@ struct session_columns final {
     std::vector<std::string> tenant_name;
     std::vector<std::string> party_name;
     std::vector<std::string> token;
+    std::vector<domain::deployment_snapshot> deployment;
 };
 
 /**
@@ -460,6 +463,29 @@ public:
     /** @brief Records what IAM returned once the account was accepted. */
     void set_account_result(session_handle h, std::string tenant_name,
                              std::string party_name, std::string token);
+
+    /** @brief The context this session runs in, decided from its tenant. */
+    [[nodiscard]] domain::session_mode mode(session_handle h) const;
+    void set_mode(session_handle h, domain::session_mode value);
+
+    /**
+     * @brief The token IAM issued, for a read on this session's behalf.
+     *
+     * Empty until the session is authenticated. A caller that opens a second
+     * connection to read something without disturbing this session's own
+     * transport needs it, and it is the only accessor that hands a secret out.
+     */
+    [[nodiscard]] std::string_view token(session_handle h) const;
+
+    /**
+     * @brief The last deployment read for this session, if any.
+     *
+     * A snapshot rather than the counters alone, because the counts and the
+     * roster have to be about the same moment. Empty before the first read.
+     */
+    [[nodiscard]] const domain::deployment_snapshot&
+    deployment(session_handle h) const;
+    void set_deployment(session_handle h, domain::deployment_snapshot value);
 
     /**
      * @brief When this session was established, on the monotonic clock.

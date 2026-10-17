@@ -245,7 +245,12 @@ struct icon_source final {
     X(page_last, 0xE02C, arrow_clockwise_20)                                   \
     /* A label attached to a record. The catalogue entry is Tag, used there     \
      * for badge definitions and version labels. */                            \
-    X(label, 0xE02D, tag_20)
+    X(label, 0xE02D, tag_20)                                                   \
+    /* The tenant a session acts inside. The catalogue entry is Organization. */\
+    X(tenant, 0xE02E, organization_20)                                         \
+    /* A party inside a tenant. The catalogue entry is Building, the artwork  \
+     * the web client uses for a legal entity. */                              \
+    X(party, 0xE02F, building_20)
 
 #define HEDGR_UI_ICON_DECLARE(name, codepoint, concept)                        \
     inline constexpr const char* name =                                        \

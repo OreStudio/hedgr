@@ -20,6 +20,8 @@
 #include "hedgr.ui/render/panels.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.ui/icon/icons.hpp"
+#include "imgui.h"
 
 #include <cstdint>
 #include <format>
@@ -90,6 +92,12 @@ std::string window_title(domain::window_kind kind,
                 instance_name(input, accounts->instance_id));
         }
     }
+    if (const auto* centre = std::get_if<domain::command_centre_state>(&state)) {
+        if (kind == domain::window_kind::command_centre) {
+            return std::format("Command centre: {}",
+                instance_name(input, centre->instance_id));
+        }
+    }
     if (const auto* session = std::get_if<domain::workspace_state>(&state)) {
         if (kind == domain::window_kind::workspace) {
             /*
@@ -116,12 +124,114 @@ std::string window_title(domain::window_kind kind,
         return "Accounts";
     case domain::window_kind::workspace:
         return "Workspace";
+    case domain::window_kind::command_centre:
+        return "Command centre";
     }
     return "Window";
 }
 
 bool shows_instances(const render_input& input) noexcept {
     return input.store_lock == domain::store_lock::unlocked;
+}
+
+identity_bar_state identity_of(const render_input& input,
+    hedgr::model::state::window_handle handle) {
+    identity_bar_state result;
+
+    if (const auto session = input.windows.session_of(handle)) {
+        result.signed_in = input.sessions.status(*session)
+                == domain::session_status::authenticated
+            && !input.sessions.token(*session).empty();
+        result.tenant = std::string{input.sessions.tenant_name(*session)};
+        result.party = std::string{input.sessions.party_name(*session)};
+        result.instance =
+            instance_name(input, input.sessions.instance_id(*session));
+        if (const auto account =
+                input.accounts.find(input.sessions.account_id(*session))) {
+            result.principal = input.accounts.get(*account)->principal;
+        }
+    } else {
+        /*
+         * A window that is not bound to a session still names the deployment
+         * it belongs to: the accounts window and the command centre both carry
+         * it in their state precisely so a bar can say "where" without a live
+         * session to ask.
+         */
+        const auto& state = input.windows.state(handle);
+        if (const auto* accounts =
+                std::get_if<domain::accounts_state>(&state)) {
+            result.instance = instance_name(input, accounts->instance_id);
+        } else if (const auto* centre =
+                       std::get_if<domain::command_centre_state>(&state)) {
+            result.instance = instance_name(input, centre->instance_id);
+        }
+    }
+
+    return result;
+}
+
+void draw_identity_bar(const identity_bar_state& state) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float height = ImGui::GetFrameHeight();
+
+    ImGui::PushID("identity-bar");
+    ImGui::BeginChild("##line", ImVec2(0.0f, height), false,
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+    if (!state.signed_in) {
+        ImGui::TextDisabled("%s", icon::account);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", "Not signed in");
+    } else {
+        ImGui::TextUnformatted(icon::account);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(state.principal.c_str());
+
+        if (!state.tenant.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("@");
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", state.tenant.c_str());
+        }
+
+        ImGui::SameLine(0.0f, style.ItemSpacing.x * 3.0f);
+        ImGui::TextDisabled("%s", icon::party);
+        ImGui::SameLine();
+        ImGui::TextDisabled("Party");
+        ImGui::SameLine();
+        if (state.party.empty())
+            ImGui::TextDisabled("%s", "none");
+        else
+            ImGui::TextUnformatted(state.party.c_str());
+    }
+
+    /*
+     * The deployment is right-aligned and measured rather than pushed with a
+     * table, because the bar is one line and a table would reserve columns the
+     * window does not need.
+     */
+    if (!state.instance.empty()) {
+        const float width = ImGui::CalcTextSize(icon::instance).x
+            + style.ItemInnerSpacing.x
+            + ImGui::CalcTextSize(state.instance.c_str()).x;
+        const float right = ImGui::GetContentRegionMax().x - width;
+        if (right > ImGui::GetCursorPosX())
+            ImGui::SameLine(right);
+        else
+            ImGui::SameLine();
+        ImGui::TextDisabled("%s", icon::instance);
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", state.instance.c_str());
+    }
+
+    ImGui::EndChild();
+    ImGui::PopID();
+    ImGui::Separator();
+}
+
+bool sign_in_needs_password(domain::store_lock lock,
+    bool has_credential) noexcept {
+    return lock != domain::store_lock::unlocked || !has_credential;
 }
 
 bool shows_window(domain::window_kind kind, const render_input& input,
@@ -153,6 +263,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
+    case domain::window_kind::command_centre:
         return false;
     }
     return false;

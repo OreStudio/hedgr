@@ -35,4 +35,19 @@ std::string_view to_string(session_status value) noexcept {
     return "unknown";
 }
 
+std::string_view to_string(session_mode value) noexcept {
+    switch (value) {
+    case session_mode::application:
+        return "application";
+    case session_mode::system_administration:
+        return "system_administration";
+    }
+    return "unknown";
+}
+
+session_mode session_mode_for(std::string_view tenant_id) noexcept {
+    return tenant_id == system_tenant_id ? session_mode::system_administration
+                                         : session_mode::application;
+}
+
 }

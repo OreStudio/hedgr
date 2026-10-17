@@ -254,11 +254,25 @@ void apply_theme() {
     colors[ImGuiCol_ResizeGrip] = colour(0x3e424380);
     colors[ImGuiCol_ResizeGripHovered] = accent_hover;
     colors[ImGuiCol_ResizeGripActive] = accent_active;
-    colors[ImGuiCol_Tab] = bg_title;
-    colors[ImGuiCol_TabHovered] = accent_hover;
-    colors[ImGuiCol_TabSelected] = accent_active;
+    /*
+     * A selected tab is a raised surface with a green rule under it, not a
+     * block of the accent. The accent is the colour of a state a reader looks
+     * for; a tab is a place, and a tab strip painted in the state colour turns
+     * the whole working set into an alarm.
+     */
+    colors[ImGuiCol_Tab] = bg_base;
+    colors[ImGuiCol_TabHovered] = bg_title;
+    colors[ImGuiCol_TabSelected] = bg_panel;
+    colors[ImGuiCol_TabSelectedOverline] = accent;
     colors[ImGuiCol_TabDimmed] = bg_base;
     colors[ImGuiCol_TabDimmedSelected] = bg_title;
+    colors[ImGuiCol_TabDimmedSelectedOverline] = border;
+    /*
+     * The menu bar is a strip of its own above the tabs, in the title bar's
+     * surface, so the two navigation levels read as two levels rather than as
+     * one band of text.
+     */
+    colors[ImGuiCol_MenuBarBg] = bg_title;
     colors[ImGuiCol_PlotLines] = accent;
     colors[ImGuiCol_PlotLinesHovered] = accent_hover;
     colors[ImGuiCol_PlotHistogram] = accent;
@@ -520,11 +534,13 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     case hedgr::model::domain::window_kind::notice:
         return icon::notice;
     case hedgr::model::domain::window_kind::instance_manager:
-        return icon::dashboard;
+        return icon::instance;
     case hedgr::model::domain::window_kind::accounts:
         return icon::account;
     case hedgr::model::domain::window_kind::workspace:
         return icon::session;
+    case hedgr::model::domain::window_kind::command_centre:
+        return icon::dashboard;
     }
     return icon::information;
 }

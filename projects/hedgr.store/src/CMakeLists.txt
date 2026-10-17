@@ -43,6 +43,7 @@ target_link_libraries(${lib_target_name}
         # this component's surface rather than an implementation detail.
         sqlgen::sqlgen
         reflectcpp::reflectcpp
+        ores::logging
     PRIVATE
         # The sealed credentials. Private because secret_box.hpp names nothing
         # from OpenSSL: every call to it is inside one translation unit, which

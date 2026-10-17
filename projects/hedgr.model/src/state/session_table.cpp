@@ -40,11 +40,13 @@ void grow(session_columns& columns, std::size_t count) {
     columns.latency_us.resize(count);
     columns.instance_id.resize(count);
     columns.account_id.resize(count);
+    columns.mode.resize(count);
     columns.opened_at_ns.resize(count);
     columns.last_error.resize(count);
     columns.tenant_name.resize(count);
     columns.party_name.resize(count);
     columns.token.resize(count);
+    columns.deployment.resize(count);
 }
 
 }
@@ -60,10 +62,13 @@ session_table::insert(std::string instance_id, std::string account_id) {
     columns_.opened_at_ns[index] = 0;
     columns_.instance_id[index] = std::move(instance_id);
     columns_.account_id[index] = std::move(account_id);
+    columns_.mode[index] =
+        static_cast<std::uint8_t>(domain::session_mode::application);
     columns_.last_error[index].clear();
     columns_.tenant_name[index].clear();
     columns_.party_name[index].clear();
     columns_.token[index].clear();
+    columns_.deployment[index] = domain::deployment_snapshot{};
 
     const session_handle h{index, layout_.generation[index]};
     by_key_.emplace(join_key(columns_.instance_id[index], columns_.account_id[index]), h);
@@ -77,6 +82,9 @@ void session_table::remove(session_handle h) {
 
     // The token is a secret: drop it now rather than leave it in a free slot.
     columns_.token[h.index].clear();
+    columns_.deployment[h.index] = domain::deployment_snapshot{};
+    columns_.mode[h.index] =
+        static_cast<std::uint8_t>(domain::session_mode::application);
     columns_.last_error[h.index].clear();
     columns_.tenant_name[h.index].clear();
     columns_.party_name[h.index].clear();
@@ -131,6 +139,28 @@ void session_table::set_account_result(session_handle h, std::string tenant_name
     columns_.tenant_name[h.index] = std::move(tenant_name);
     columns_.party_name[h.index] = std::move(party_name);
     columns_.token[h.index] = std::move(token);
+}
+
+domain::session_mode session_table::mode(session_handle h) const {
+    return static_cast<domain::session_mode>(columns_.mode[h.index]);
+}
+
+void session_table::set_mode(session_handle h, domain::session_mode value) {
+    columns_.mode[h.index] = static_cast<std::uint8_t>(value);
+}
+
+std::string_view session_table::token(session_handle h) const {
+    return columns_.token[h.index];
+}
+
+const domain::deployment_snapshot&
+session_table::deployment(session_handle h) const {
+    return columns_.deployment[h.index];
+}
+
+void session_table::set_deployment(session_handle h,
+    domain::deployment_snapshot value) {
+    columns_.deployment[h.index] = std::move(value);
 }
 
 std::string_view session_table::instance_id(session_handle h) const {

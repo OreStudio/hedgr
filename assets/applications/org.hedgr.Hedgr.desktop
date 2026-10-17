@@ -6,7 +6,7 @@ Comment=Multi-instance OreStudio client
 # The ten files under assets/instances are illustrations of OreStudio
 # environments, so pressing one into service as the application icon would
 # name the client after an environment it merely connects to.
-Exec=hedgr.imgui
+Exec=hedgr.imgui --log-enabled --log-filename hedgr.imgui.log
 Terminal=false
 StartupWMClass=org.hedgr.Hedgr
 Categories=Development;

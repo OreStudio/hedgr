@@ -114,6 +114,8 @@ void application::run() {
         seed.tls_key = cfg_.connection->tls_client_key;
     }
 
+    BOOST_LOG_SEV(lg(), info)
+        << "Store: " << cfg_.database_path.string();
     if (auto started = manager_.start(cfg_.database_path, seed); !started) {
         BOOST_LOG_SEV(lg(), error)
             << "Could not open the store: " << started.error();
@@ -152,8 +154,14 @@ void application::run() {
      * Armed before the first frame, so an unattended launch unlocks on the
      * frame the prompt is first drawn rather than after a visible pause.
      */
-    if (!cfg_.master_password.empty())
+    if (!cfg_.master_password.empty()) {
+        BOOST_LOG_SEV(lg(), info)
+            << "A master password was supplied in the environment";
         workspace_.unlock_with(cfg_.master_password);
+    } else {
+        BOOST_LOG_SEV(lg(), info)
+            << "No master password was supplied; the store starts locked";
+    }
 
     /*
      * A capture can ask for pieces of interface scratch to be set, because some
@@ -172,6 +180,9 @@ void application::run() {
     if (const char* editing = std::getenv("HEDGR_CAPTURE_EDIT_INSTANCE");
         editing != nullptr && *editing != '\0')
         ui::render::open_instance_edit_for_capture(editing);
+    if (const char* screen = std::getenv("HEDGR_CAPTURE_COMMAND_CENTRE_SCREEN");
+        screen != nullptr && *screen != '\0')
+        ui::render::open_command_centre_screen_for_capture(screen);
 
     /*
      * The root's close control is a title bar button, which a scripted step
@@ -201,6 +212,12 @@ void application::run() {
      * a capture that cannot interact has only ever been able to inspect what
      * the first frame happens to contain, which is how a broken tree shipped.
      */
+    if (!capture_path_.empty()) {
+        BOOST_LOG_SEV(lg(), debug)
+            << "Capture requested: " << capture_path_.string() << " at frame "
+            << capture_frame_;
+    }
+
     ui::widget::start_capture_run();
     auto* window = initialise_graphics();
     if (window == nullptr) {
@@ -223,7 +240,9 @@ void application::run() {
      * uploading textures.
      */
     splash_.started_ns = now_ns();
+    BOOST_LOG_SEV(lg(), debug) << "Entering the frame loop";
     render_loop(window);
+    BOOST_LOG_SEV(lg(), debug) << "Left the frame loop";
 
     if (auto saved = manager_.save_windows(); !saved)
         BOOST_LOG_SEV(lg(), warn)

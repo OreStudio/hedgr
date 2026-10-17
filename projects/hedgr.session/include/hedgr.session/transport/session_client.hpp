@@ -24,9 +24,11 @@
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include <cstdint>
 #include <expected>
 #include <string>
 #include <string_view>
+#include <vector>
 #include "ores.nats/service/nats_client.hpp"
 
 namespace hedgr::session::transport {
@@ -106,6 +108,55 @@ struct password_policy final {
 };
 
 /**
+ * @brief One tenant, as the command centre lists it.
+ *
+ * The deployment's own words, copied rather than translated. A status code the
+ * deployment later renames is then renamed everywhere at once instead of being
+ * mapped to a sentence this client would have to keep in step.
+ */
+struct tenant_summary final {
+    /** @brief The tenant's own key, as the deployment spells it. */
+    std::string id;
+
+    /** @brief The tenant's display name. */
+    std::string name;
+
+    /** @brief The deployment's lifecycle status. */
+    std::string status;
+
+    /** @brief The deployment's tenant type. */
+    std::string type;
+};
+
+/**
+ * @brief One deployment, as the command centre's first screen reads it.
+ *
+ * The counts and the roster are one value because they are one moment. Drawing
+ * them from separate reads would let the screen show a total that disagrees
+ * with the rows beneath it, and a reader would have no way to tell which half
+ * was stale.
+ */
+struct deployment_read final {
+    /** @brief Every tenant the caller may see, the system tenant aside. */
+    std::uint64_t tenant_total = 0;
+
+    /** @brief Tenants whose lifecycle status is active. */
+    std::uint64_t in_service = 0;
+
+    /** @brief Tenants whose type is evaluation. */
+    std::uint64_t on_evaluation = 0;
+
+    /** @brief Tenants whose lifecycle status is bootstrapping. */
+    std::uint64_t setting_up = 0;
+
+    /** @brief Tenants whose lifecycle status is suspended. */
+    std::uint64_t needing_attention = 0;
+
+    /** @brief The first page of the roster. */
+    std::vector<tenant_summary> tenants;
+};
+
+/**
  * @brief One blocking connection from one account to one instance.
  *
  * Every call here blocks until the instance answers or the request times
@@ -162,6 +213,23 @@ public:
 
     /** @brief Whether this session holds a credential the instance issued. */
     [[nodiscard]] bool is_authenticated() const noexcept;
+
+    /**
+     * @brief Opens a connection that presents a token issued elsewhere.
+     *
+     * For the reads that must not disturb the session that owns them. A
+     * command centre's counts are read on a second connection so a slow
+     * deployment cannot stall the session's own refresh loop, and that second
+     * connection carries the token the first one was issued.
+     *
+     * @pre the session is connected.
+     * @pre @p token is not empty.
+     * @param token the bearer token a sign-in produced.
+     * @param principal the name the token was issued to, for the transport's
+     *        own record; it is never sent as an identity claim.
+     */
+    [[nodiscard]] result<void>
+    resume(std::string_view token, std::string_view principal);
 
     /**
      * @brief Signs in, and holds the token the instance issues.
@@ -272,6 +340,24 @@ public:
      * deployment answering rather than failing to.
      */
     [[nodiscard]] result<password_policy> password_policy() const;
+
+    /**
+     * @brief Reads one deployment's tenants, as the command centre shows them.
+     *
+     * Four counts and one page, each count a list read that asks for its total
+     * and no rows. The counts leave out the system tenant and the automation
+     * tenant, which are the deployment's own machinery rather than tenants a
+     * person set up, and the set of types that remain is read from the
+     * deployment rather than assumed here.
+     *
+     * All or nothing: a read that fails returns the failure rather than a
+     * partially filled value, because a screen that drew three counts and a
+     * gap would be reporting a deployment state nobody measured.
+     *
+     * @pre the session is authenticated.
+     * @return the deployment, or why it could not be read.
+     */
+    [[nodiscard]] result<deployment_read> deployment() const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

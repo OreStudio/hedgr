@@ -342,8 +342,11 @@ void workspace::render(const render_input& input) {
          * applied while the window is young, so a size an operator has chosen
          * is never overridden on a later frame.
          */
-        const ImVec2 default_size = kind == hedgr::model::domain::window_kind::accounts
+        const ImVec2 default_size =
+            kind == hedgr::model::domain::window_kind::accounts
             ? ImVec2(1180.0f, 820.0f)
+            : kind == hedgr::model::domain::window_kind::command_centre
+            ? ImVec2(1120.0f, 760.0f)
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
@@ -364,7 +367,18 @@ void workspace::render(const render_input& input) {
             kind != hedgr::model::domain::window_kind::instance_manager
             || shows_instances(input);
         bool keep_open = true;
-        if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr)) {
+        /*
+         * Only the command centre carries a menu bar, and ImGui refuses to draw
+         * one unless the window was created with the flag. It is set here
+         * because this loop owns the Begin call and a renderer only fills the
+         * body.
+         */
+        const ImGuiWindowFlags window_flags =
+            kind == hedgr::model::domain::window_kind::command_centre
+            ? ImGuiWindowFlags_MenuBar
+            : ImGuiWindowFlags_None;
+        if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr,
+                window_flags)) {
             /*
              * Collapsed or fully clipped: ImGui still wants its End, and
              * nothing inside the window is submitted. This is the content

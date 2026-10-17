@@ -21,6 +21,7 @@
 #include "hedgr.store/repository/ddl.hpp"
 #include "hedgr.store/repository/entity.hpp"
 #include "hedgr.store/sqlite/database.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <format>
@@ -34,6 +35,14 @@
 namespace hedgr::store::repository {
 
 namespace {
+
+/** @brief This store's logger. The schema and its version are what it names. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.store.repository.schema");
+    return instance;
+}
+
 
 /**
  * @brief The schema version written and expected by this component.
@@ -243,10 +252,27 @@ result<void> apply(sqlite::database& db) {
     if (!stored)
         return std::unexpected(stored.error());
 
+    if (!stored.value()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Creating a new store at " << db.path().string()
+            << " at schema version " << current_version;
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Store at " << db.path().string() << " is at schema version "
+            << stored.value().value() << ", expected " << current_version;
+    }
+
     if (stored.value() && stored.value().value() != current_version) {
-        if (stored.value().value() != migrated_from_version)
+        if (stored.value().value() != migrated_from_version) {
+            BOOST_LOG_SEV(lg(), ores::logging::error)
+                << "Refusing a store at version " << stored.value().value()
+                << ": this build expects version " << current_version;
             return std::unexpected(
                 version_mismatch(db.path(), stored.value().value()));
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Migrating the store from version " << migrated_from_version
+            << " to " << current_version;
         if (auto migrated = migrate_seven_to_eight(db); !migrated)
             return std::unexpected(migrated.error());
     }

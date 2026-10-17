@@ -88,6 +88,58 @@ shows_instances(const render_input& input) noexcept;
  * they are about to use. It is drawn, and its renderer blanks its own rows
  * from @c shows_instances.
  */
+/**
+ * @brief Whether pressing Sign in has to ask for a password first.
+ *
+ * Two reasons and only two. A closed store cannot be read, so a remembered
+ * password is out of reach. An account with no remembered password has nothing
+ * to read even when the store is open. The rule lives here so it can be tested
+ * without a window, and so the button and the prompt cannot disagree about it.
+ */
+/**
+ * @brief Who a window's session is and where it is, as one line.
+ *
+ * Every window opened from an instance has to answer three questions at a
+ * glance: which deployment, which principal, and which tenant and party the
+ * session acts as. The title carries the deployment; this bar carries the
+ * rest, so a wall of windows over several deployments never leaves a reader
+ * guessing which login they are looking at.
+ */
+struct identity_bar_state final {
+    /** @brief The deployment, by the name a person gave it. */
+    std::string instance;
+
+    /** @brief The principal IAM accepted. Empty when nobody is signed in. */
+    std::string principal;
+
+    /** @brief The tenant IAM resolved. */
+    std::string tenant;
+
+    /** @brief The party the session is scoped to, empty for none. */
+    std::string party;
+
+    /** @brief Whether the window's session is signed in. */
+    bool signed_in = false;
+};
+
+/** @brief Resolves the bar for one window, from its session or its state. */
+[[nodiscard]] HEDGR_UI_EXPORT identity_bar_state
+identity_of(const render_input& input,
+    hedgr::model::state::window_handle handle);
+
+/**
+ * @brief Draws the identity bar and the rule beneath it.
+ *
+ * One line, and it never wraps or scrolls: a bar that grew would move the
+ * content under it as a session changed. The deployment sits at the right
+ * edge, where the eye goes for "where", and the login, tenant and party run
+ * from the left.
+ */
+HEDGR_UI_EXPORT void draw_identity_bar(const identity_bar_state& state);
+
+[[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
+    hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
+
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept;

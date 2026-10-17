@@ -58,6 +58,11 @@ int host::execute(const std::vector<std::string>& args,
     /*
      * Log the configuration and command line arguments.
      */
+    if (cfg.logging && !cfg.logging->filename.empty()) {
+        BOOST_LOG_SEV(lg(), info) << "Logging to "
+                                  << (cfg.logging->output_directory
+                                         / cfg.logging->filename);
+    }
     BOOST_LOG_SEV(lg(), info) << "Command line arguments: " << args;
     BOOST_LOG_SEV(lg(), debug) << "Configuration: " << cfg;
 
