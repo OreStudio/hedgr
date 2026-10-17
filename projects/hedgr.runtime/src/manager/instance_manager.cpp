@@ -663,6 +663,7 @@ void instance_manager::stop() noexcept {
             source->request_stop();
     }
     running_.clear();
+    attempts_.clear();
 
     /*
      * The probes are cancelled before the pools are stopped, so a probe
@@ -2395,6 +2396,11 @@ void instance_manager::start_session_for(const command::command& cmd,
     job.key = domain::session_key{cmd.instance_id, cmd.account_id};
     job.credential = std::move(credential);
 
+    const auto attempt_key = running_key(cmd.instance_id, cmd.account_id);
+    const auto attempt = ++next_attempt_;
+    attempts_[attempt_key] = attempt;
+    job.attempt = attempt;
+
     /*
      * A stored credential travels sealed, with the password that opens it, and
      * the worker opens it on its own thread. The password is copied out of the
@@ -3336,6 +3342,19 @@ void instance_manager::apply(const event::event& ev) {
         if (const auto handle = sessions_.find(ev.instance_id, ev.account_id))
             sessions_.set_last_error(*handle, ev.message);
         return;
+    }
+
+    /*
+     * A fact from a sign-in attempt that has since been replaced is not news
+     * about the session that is live now. The stopped worker may still be
+     * finishing, and its disconnect would otherwise land on top of the newer
+     * worker's authenticated state.
+     */
+    if (ev.attempt != 0) {
+        const auto current = attempts_.find(
+            running_key(ev.instance_id, ev.account_id));
+        if (current == attempts_.end() || current->second != ev.attempt)
+            return;
     }
 
     const auto handle = sessions_.find(ev.instance_id, ev.account_id);
