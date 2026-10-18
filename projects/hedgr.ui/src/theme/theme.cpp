@@ -58,7 +58,7 @@ constexpr ImVec4 with_alpha(ImVec4 base, float alpha) {
     return base;
 }
 
-constexpr float window_alpha = 0.72f; // the window's own body
+constexpr float window_alpha = 1.00f; // the window's own body; opaque so windows do not read through each other
 constexpr float panel_alpha = 0.82f; // a child pane and a card upon it
 constexpr float chrome_alpha = 0.85f; // title bar, status foot, buttons
 constexpr float field_alpha = 0.90f; // a text box or a combo, inside a card
