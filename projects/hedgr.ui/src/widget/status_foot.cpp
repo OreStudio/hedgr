@@ -38,7 +38,7 @@ namespace {
  * that is worth announcing is worth announcing in full. The second row costs
  * nothing when the sentence fits on one.
  */
-constexpr int status_row_lines = 2;
+constexpr int status_row_lines = 1;
 
 /**
  * @brief The rows an error gets, which is one more than a remark gets.
@@ -51,7 +51,7 @@ constexpr int status_row_lines = 2;
  * whatever fits. The extra row is reserved only while an error is on the bar,
  * so a window showing a remark is exactly the height it always was.
  */
-constexpr int status_error_row_lines = 3;
+constexpr int status_error_row_lines = 1;
 
 /**
  * @brief Draws the window's status line: the last thing that happened.
@@ -138,9 +138,8 @@ float status_foot_height(const status_bar& status) {
      * Taking it from the style is what keeps the message clear of the separator
      * the foot draws above it when the font changes size.
      */
-    const ImGuiStyle& style = ImGui::GetStyle();
-    return ImGui::GetTextLineHeight() * static_cast<float>(rows)
-        + style.WindowPadding.y * 2.0f;
+    /* One text row and a hair of air: the foot is chrome, not content. */
+    return ImGui::GetTextLineHeight() * static_cast<float>(rows) + 2.0f;
 }
 
 void draw_status_foot(status_bar& status, std::int64_t now_ns,
@@ -179,8 +178,7 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
      * reserved, because all of that air falls below the text.
      */
     ImGui::BeginChild("##hedgr-status-line", ImVec2(0.0f, height),
-        ImGuiChildFlags_AlwaysUseWindowPadding,
-        ImGuiWindowFlags_NoScrollbar);
+        ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const bool has_state = !state.word.empty();

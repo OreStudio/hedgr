@@ -116,6 +116,9 @@ HEDGR_UI_EXPORT void apply_theme();
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
+/** @brief The live data-health badge. */
+inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
+
 /*
  * Term-structure history. The newest curve is the accent green the web
  * simulator uses; earlier curves are a grey-blue that fades with age, so a

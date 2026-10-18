@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/ema.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
@@ -271,6 +272,37 @@ void draw_series_name(std::string_view label, ImTextureID base_texture,
 
 }
 
+/** @brief A coloured word for the plot's data health. */
+void draw_health_badge(const hedgr::ui::render::data_health_state& health) {
+    using hedgr::ui::render::data_health;
+    std::string text;
+    ImU32 colour = 0;
+    switch (health.state) {
+    case data_health::live:
+        text = "\u25cf LIVE";
+        colour = theme::health_live_colour;
+        break;
+    case data_health::delayed:
+        text = std::format("\u25cf DELAYED {}",
+            hedgr::ui::render::age_text(health.age_ns));
+        colour = theme::readiness_colour(domain::readiness::bootstrapping);
+        break;
+    case data_health::stale:
+        text = std::format("\u25cf STALE {}",
+            hedgr::ui::render::age_text(health.age_ns));
+        colour = theme::failure_colour;
+        break;
+    case data_health::unavailable:
+        text = "\u25cf NO DATA";
+        colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        break;
+    }
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::ColorConvertU32ToFloat4(colour));
+    ImGui::TextUnformatted(text.c_str());
+    ImGui::PopStyleColor();
+}
+
 void render_chart(window_handle handle, const render_input& input,
     window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
@@ -299,6 +331,16 @@ void render_chart(window_handle handle, const render_input& input,
         ? input.market.points(input.sessions.instance_id(*session),
             input.sessions.account_id(*session), chart->series_id)
         : nullptr;
+
+    auto health = hedgr::ui::render::data_health_state{};
+    if (snapshot != nullptr) {
+        health = hedgr::ui::render::assess_data_health(
+            snapshot->observed_at_ns, input.now_ns);
+    }
+    const bool health_stale =
+        health.state == hedgr::ui::render::data_health::stale;
+    const bool health_delayed =
+        health.state == hedgr::ui::render::data_health::delayed;
 
     /*
      * Two rows of chrome above the plot and no more. The first is the series,
@@ -335,7 +377,13 @@ void render_chart(window_handle handle, const render_input& input,
                 first != 0.0 ? change / first * 100.0 : 0.0;
             const ImU32 colour =
                 change < 0.0 ? theme::failure_colour : up_colour;
-            const ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
+            ImVec4 tint = ImGui::ColorConvertU32ToFloat4(colour);
+            if (health_stale) {
+                tint = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+            } else if (health_delayed) {
+                tint = ImGui::ColorConvertU32ToFloat4(
+                    theme::readiness_colour(domain::readiness::bootstrapping));
+            }
 
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
             ImGui::PushFont(icon::numeric_font());
@@ -343,6 +391,8 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::SameLine();
             ImGui::TextColored(tint, "%+.2f%%", percent);
             ImGui::PopFont();
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            draw_health_badge(health);
 
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
             if (!live) {
@@ -422,30 +472,6 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::PopFont();
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
-
-            if (snapshot->observed_at_ns != 0
-                && input.now_ns >= snapshot->observed_at_ns) {
-                const auto age_s = static_cast<double>(
-                    input.now_ns - snapshot->observed_at_ns) / 1.0e9;
-                const ImU32 poll_colour = age_s > 10.0
-                    ? theme::readiness_colour(
-                          domain::readiness::bootstrapping)
-                    : ImGui::GetColorU32(ImGuiCol_TextDisabled);
-                ImGui::SameLine();
-                ImGui::TextDisabled("\u00b7");
-                ImGui::SameLine();
-                if (age_s < 3.0) {
-                    ImGui::TextColored(
-                        ImGui::ColorConvertU32ToFloat4(poll_colour), "live");
-                } else {
-                    ImGui::TextColored(
-                        ImGui::ColorConvertU32ToFloat4(poll_colour),
-                        "stale %.0f s", age_s);
-                }
-                ImGui::SetItemTooltip("%s",
-                    "Ticks arrive on the session's market subscription; this "
-                    "is when the last one landed");
-            }
         }
     }
 
@@ -453,6 +479,22 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
             "%s", snapshot->failure.c_str());
+    }
+
+    if (health_stale) {
+        ImGui::PushStyleColor(ImGuiCol_ChildBg,
+            ImVec4(0.32f, 0.06f, 0.09f, 0.95f));
+        ImGui::BeginChild("##stale-banner",
+            ImVec2(0.0f, ImGui::GetTextLineHeight() + 6.0f),
+            ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour), "%s",
+            std::format("STALE \u00b7 last update {} \u00b7 {} ago",
+                format_timestamp(snapshot != nullptr
+                        ? snapshot->observed_at_ns : 0),
+                hedgr::ui::render::age_text(health.age_ns)).c_str());
+        ImGui::EndChild();
+        ImGui::PopStyleColor();
     }
 
     const float foot_height = widget::status_foot_height(status);
@@ -523,15 +565,18 @@ void render_chart(window_handle handle, const render_input& input,
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
                 | ImPlotFlags_NoMenus;
-            const ImPlotAxisFlags x_flags = use_candles
-                ? ImPlotAxisFlags_None
-                : ImPlotAxisFlags_AutoFit;
+            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_None;
             constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
-            ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+            ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize,
+                health_stale ? 2.0f : 0.0f);
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
                 ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
+            if (health_stale) {
+                ImPlot::PushStyleColor(ImPlotCol_PlotBorder,
+                    ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
+            }
             ImGui::PushFont(icon::numeric_font());
             if (ImPlot::BeginPlot("##series", ImVec2(-1.0f, -1.0f),
                     plot_flags)) {
@@ -550,6 +595,14 @@ void render_chart(window_handle handle, const render_input& input,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
                 if (!use_candles) {
+                    const double x_span = xs.size() > 1
+                        ? xs.back() - xs.front() : 0.0;
+                    const double x_pad = x_span > 0.0
+                        ? x_span * 0.010
+                        : 30.0;
+                    ImPlot::SetupAxisLimits(ImAxis_X1,
+                        xs.front() - x_pad * 0.2, xs.back() + x_pad,
+                        ImPlotCond_Always);
                     ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
                         high + span * 0.08, ImPlotCond_Always);
                 }
@@ -623,8 +676,16 @@ void render_chart(window_handle handle, const render_input& input,
                  * axis, which is how a trading screen states it. The tag reads
                  * the same number as the header.
                  */
+                ImVec4 tag_colour = line_colour;
+                if (health_stale) {
+                    tag_colour = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+                } else if (health_delayed) {
+                    tag_colour = ImGui::ColorConvertU32ToFloat4(
+                        theme::readiness_colour(
+                            domain::readiness::bootstrapping));
+                }
                 ImPlotSpec last_line;
-                last_line.LineColor = line_colour;
+                last_line.LineColor = tag_colour;
                 last_line.LineWeight = 1.0f;
                 last_line.Flags = static_cast<ImPlotItemFlags>(
                     static_cast<int>(ImPlotItemFlags_NoLegend)
@@ -649,11 +710,40 @@ void render_chart(window_handle handle, const render_input& input,
                         static_cast<int>(ema.size()), average);
                 }
 
-                ImPlot::TagY(last, line_colour, "%s",
+                if (!xs.empty()) {
+                    const auto point = ImPlot::PlotToPixels(xs.back(),
+                        ys.back());
+                    auto* plot_draw = ImPlot::GetPlotDrawList();
+                    ImPlot::PushPlotClipRect();
+                    if (health.state
+                        == hedgr::ui::render::data_health::live) {
+                        const auto phase = static_cast<float>(
+                            (input.now_ns % 1'000'000'000) / 1.0e9);
+                        const float pulse = 0.5f
+                            + 0.5f * std::sin(phase * 6.2831853f);
+                        const float radius = 2.5f + pulse * 3.5f;
+                        const ImVec4 glow(line_colour.x, line_colour.y,
+                            line_colour.z, 0.18f + pulse * 0.45f);
+                        plot_draw->AddCircleFilled(point, radius,
+                            ImGui::ColorConvertFloat4ToU32(glow), 24);
+                        plot_draw->AddCircleFilled(point, 2.0f,
+                            ImGui::ColorConvertFloat4ToU32(line_colour), 16);
+                    } else {
+                        const ImVec4 dot(tag_colour.x, tag_colour.y,
+                            tag_colour.z, 0.95f);
+                        plot_draw->AddCircleFilled(point, 3.0f,
+                            ImGui::ColorConvertFloat4ToU32(dot), 16);
+                    }
+                    ImPlot::PopPlotClipRect();
+                }
+
+                ImPlot::TagY(last, tag_colour, "%s",
                     format_price(last).c_str());
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();
+            if (health_stale)
+                ImPlot::PopStyleColor();
             ImPlot::PopStyleColor();
             ImPlot::PopStyleVar(2);
         }
