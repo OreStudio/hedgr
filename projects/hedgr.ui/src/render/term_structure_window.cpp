@@ -188,8 +188,16 @@ void render_term_structure(window_handle handle, const render_input& input,
         const auto age_ns = assess_data_health(
             newest_curve.at_ns, input.now_ns).age_ns;
         ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 as of %s ago",
-            age_text(age_ns).c_str());
+        if (age_ns > 15 * 60'000'000'000LL) {
+            ImGui::TextColored(
+                ImGui::ColorConvertU32ToFloat4(
+                    theme::readiness_colour(
+                        domain::readiness::bootstrapping)),
+                "\u00b7 as of %s ago", age_text(age_ns).c_str());
+        } else {
+            ImGui::TextDisabled("\u00b7 as of %s ago",
+                age_text(age_ns).c_str());
+        }
     } else if (curve != nullptr) {
         ImGui::TextDisabled("Reading the curve...");
     }

@@ -370,6 +370,8 @@ void render_chart(window_handle handle, const render_input& input,
     draw_series_name(chart->label,
         session ? image_texture(input, *session, pair.base) : 0,
         session ? image_texture(input, *session, pair.quote) : 0);
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    draw_health_badge(health);
 
     if (snapshot != nullptr) {
         const auto& points =
@@ -397,9 +399,6 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::SameLine();
             ImGui::TextColored(tint, "%+.2f%%", percent);
             ImGui::PopFont();
-            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-            draw_health_badge(health);
-
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
             if (!live) {
                 ImGui::TextDisabled("All points");

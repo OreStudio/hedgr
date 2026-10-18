@@ -105,6 +105,8 @@ void draw_status_line(status_bar& status, std::int64_t now_ns,
             - ImGui::GetStyle().ScrollbarSize,
         1.0f);
     text_value("status", status.message(), wrap_width);
+    if (!status.message().empty())
+        ImGui::SetItemTooltip("%s", status.message().c_str());
 
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
