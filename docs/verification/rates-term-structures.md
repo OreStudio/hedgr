@@ -10,8 +10,10 @@ curve whose observations carry `term` is one row of its own.
 Double-clicking a curve, or choosing it in the combo, opens a term-structure
 window like the FX chart window. It has the same chrome: a currency flag, the
 curve name, a refresh control, a term count and the update time with its age.
-The plot uses the FX plot flags, grid, padding and numeric font, with bright
-axis text and no legend; tenor is the categorical x-axis. Its refresh button reads the curve again. The read runs on a worker
+The metadata row above the plot matches FX: the observation date, the term
+count and a `live` or `stale N s` label. The plot uses the FX plot flags, grid,
+padding and numeric font, with bright axis text and no legend; tenor is the
+categorical x-axis. Its refresh button reads the curve again. The read runs on a worker
 and its own connection; the frame loop only draws the result.
 
 ## Data path

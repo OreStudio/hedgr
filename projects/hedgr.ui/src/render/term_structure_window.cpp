@@ -46,13 +46,13 @@ namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
 using hedgr::model::command::command;
 
-/** @brief The instant the curve was observed, in the reader's local zone. */
-[[nodiscard]] std::string format_updated(std::int64_t at_ns) {
+/** @brief The date the curve was observed, in the reader's local zone. */
+[[nodiscard]] std::string format_date(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
     std::tm local{};
     localtime_r(&seconds, &local);
-    char buffer[40]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &local);
+    char buffer[32]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y", &local);
     return buffer;
 }
 
@@ -145,24 +145,26 @@ void render_term_structure(window_handle handle, const render_input& input,
     if (!session.has_value()) {
         ImGui::TextDisabled("Sign in to read this curve.");
     } else if (curve != nullptr && curve->observed_at_ns > 0) {
-        ImGui::TextDisabled("Updated %s",
-            format_updated(curve->observed_at_ns).c_str());
+        ImGui::PushFont(icon::numeric_font());
+        ImGui::TextDisabled("%s", format_date(curve->observed_at_ns).c_str());
+        ImGui::PopFont();
         ImGui::SameLine();
-        if (input.now_ns >= curve->observed_at_ns) {
-            const auto age_s = static_cast<double>(
-                input.now_ns - curve->observed_at_ns) / 1.0e9;
-            const ImU32 colour = age_s > 10.0
-                ? theme::readiness_colour(domain::readiness::bootstrapping)
-                : ImGui::GetColorU32(ImGuiCol_TextDisabled);
-            ImGui::TextDisabled("\u00b7");
-            ImGui::SameLine();
-            if (age_s < 3.0) {
-                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-                    "live");
-            } else {
-                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-                    "stale %.0f s", age_s);
-            }
+        ImGui::TextDisabled("\u00b7 %zu points", curve->nodes.size());
+        const auto age_ns = input.now_ns - curve->observed_at_ns;
+        const auto age_s = age_ns > 0
+            ? static_cast<double>(age_ns) / 1.0e9 : 0.0;
+        const ImU32 colour = age_s > 10.0
+            ? theme::readiness_colour(domain::readiness::bootstrapping)
+            : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        ImGui::SameLine();
+        ImGui::TextDisabled("\u00b7");
+        ImGui::SameLine();
+        if (age_s < 3.0) {
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
+                "live");
+        } else {
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
+                "stale %.0f s", age_s);
         }
     } else if (curve != nullptr) {
         ImGui::TextDisabled("Reading the curve...");
