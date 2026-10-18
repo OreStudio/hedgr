@@ -43,6 +43,11 @@ namespace {
 namespace hedgr::session::market {
 
 std::string tick_uri_for_series(std::string_view series_uri) {
+    /*
+     * Only the type changes. A series URI already carries every coordinate its
+     * quote carries, so a forward keeps its term; a composite series that names
+     * no coordinate cannot be watched as one exact quote and is left as it is.
+     */
     std::string uri{series_uri};
     constexpr std::string_view series_type = "type=series";
     constexpr std::string_view quote_type = "type=quote";

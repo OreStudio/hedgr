@@ -49,6 +49,66 @@ namespace domain = hedgr::model::domain;
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
 
+/** @brief The share of the x range kept clear after the last point. */
+constexpr double chart_end_padding_share = 0.010;
+/** @brief The share kept before the first point. */
+constexpr double chart_start_padding_share = 0.20;
+/** @brief The padding for a chart holding one point, in seconds. */
+constexpr double chart_single_point_padding_s = 30.0;
+
+/** @brief A small button that reads as selected without losing its label. */
+[[nodiscard]] bool selected_small_button(const char* label, bool selected) {
+    if (selected) {
+        ImGui::PushStyleColor(ImGuiCol_Button,
+            ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::selection_text_colour);
+    }
+    const bool clicked = ImGui::SmallButton(label);
+    if (selected)
+        ImGui::PopStyleColor(2);
+    return clicked;
+}
+
+/** @brief Draws a dashed line over the plot, as the web chart draws its EMA. */
+void plot_dashed(const std::vector<double>& xs,
+    const std::vector<double>& ys, ImVec4 colour) {
+    if (xs.size() < 2 || xs.size() != ys.size())
+        return;
+    auto* draw = ImPlot::GetPlotDrawList();
+    ImPlot::PushPlotClipRect();
+    constexpr float dash = 6.0f;
+    constexpr float gap = 4.0f;
+    bool drawing = true;
+    float remaining = dash;
+    for (std::size_t i = 0; i + 1 < xs.size(); ++i) {
+        const auto a = ImPlot::PlotToPixels(xs[i], ys[i]);
+        const auto b = ImPlot::PlotToPixels(xs[i + 1], ys[i + 1]);
+        const float dx = b.x - a.x;
+        const float dy = b.y - a.y;
+        const float length = std::sqrt(dx * dx + dy * dy);
+        if (length <= 0.0f)
+            continue;
+        const float ux = dx / length;
+        const float uy = dy / length;
+        float at = 0.0f;
+        while (at < length) {
+            const float step = std::min(remaining, length - at);
+            if (drawing) {
+                draw->AddLine(ImVec2(a.x + ux * at, a.y + uy * at),
+                    ImVec2(a.x + ux * (at + step), a.y + uy * (at + step)),
+                    ImGui::ColorConvertFloat4ToU32(colour), 1.5f);
+            }
+            at += step;
+            remaining -= step;
+            if (remaining <= 0.0f) {
+                drawing = !drawing;
+                remaining = drawing ? dash : gap;
+            }
+        }
+    }
+    ImPlot::PopPlotClipRect();
+}
+
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::state::window_handle;
@@ -377,12 +437,12 @@ void render_chart(window_handle handle, const render_input& input,
         const auto& points =
             snapshot->level(level_for(state.market_chart_span_ns));
         if (!points.empty()) {
-            const bool live = snapshot->observed_at_ns != 0
+            const bool recent = snapshot->observed_at_ns != 0
                 && input.now_ns >= snapshot->observed_at_ns
                 && input.now_ns - snapshot->observed_at_ns
                         <= live_threshold_ns;
             const std::size_t start = live_window_start(points,
-                live ? state.market_chart_span_ns : 0);
+                recent ? state.market_chart_span_ns : 0);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
@@ -400,7 +460,7 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextColored(tint, "%+.2f%%", percent);
             ImGui::PopFont();
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-            if (!live) {
+            if (!recent) {
                 ImGui::TextDisabled("All points");
                 ImGui::SetItemTooltip("%s",
                     "The newest point is older than ten minutes, so the series "
@@ -409,17 +469,8 @@ void render_chart(window_handle handle, const render_input& input,
                 for (const auto& span : chart_spans) {
                     const bool selected =
                         span.ns == state.market_chart_span_ns;
-                    if (selected) {
-                        ImGui::PushStyleColor(ImGuiCol_Button,
-                            ImGui::ColorConvertU32ToFloat4(
-                                theme::rail_selection_bar));
-                        ImGui::PushStyleColor(ImGuiCol_Text,
-                            theme::selection_text_colour);
-                    }
-                    if (ImGui::SmallButton(span.label))
+                    if (selected_small_button(span.label, selected))
                         state.market_chart_span_ns = span.ns;
-                    if (selected)
-                        ImGui::PopStyleColor(2);
                     if (span.ns == 0) {
                         ImGui::SetItemTooltip("%s", "Plot the whole series");
                     } else {
@@ -429,41 +480,14 @@ void render_chart(window_handle handle, const render_input& input,
                 }
             }
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 1.5f);
-            const bool candles_selected = state.market_candles;
-            if (candles_selected) {
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    theme::selection_text_colour);
-            }
-            if (ImGui::SmallButton("Candles"))
+            if (selected_small_button("Candles", state.market_candles))
                 state.market_candles = true;
-            if (candles_selected)
-                ImGui::PopStyleColor(2);
             ImGui::SameLine();
-            const bool line_selected = !state.market_candles;
-            if (line_selected) {
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    theme::selection_text_colour);
-            }
-            if (ImGui::SmallButton("Line"))
+            if (selected_small_button("Line", !state.market_candles))
                 state.market_candles = false;
-            if (line_selected)
-                ImGui::PopStyleColor(2);
             ImGui::SameLine();
-            const bool ema_selected = state.market_ema;
-            if (ema_selected) {
-                ImGui::PushStyleColor(ImGuiCol_Button,
-                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                    theme::selection_text_colour);
-            }
-            if (ImGui::SmallButton("EMA 20"))
+            if (selected_small_button("EMA 20", state.market_ema))
                 state.market_ema = !state.market_ema;
-            if (ema_selected)
-                ImGui::PopStyleColor(2);
             ImGui::SetItemTooltip("%s",
                 "Overlay the exponential moving average of the visible window");
             ImGui::NewLine();
@@ -479,6 +503,9 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
         }
     }
+
+    if (snapshot == nullptr || snapshot->observed_at_ns == 0)
+        ImGui::TextDisabled("No update yet");
 
     if (snapshot != nullptr && !snapshot->failure.empty()) {
         ImGui::TextColored(
@@ -518,12 +545,12 @@ void render_chart(window_handle handle, const render_input& input,
         } else {
             const auto& points =
                 snapshot->level(level_for(state.market_chart_span_ns));
-            const bool live = snapshot->observed_at_ns != 0
+            const bool recent = snapshot->observed_at_ns != 0
                 && input.now_ns >= snapshot->observed_at_ns
                 && input.now_ns - snapshot->observed_at_ns
                         <= live_threshold_ns;
             const std::size_t start = live_window_start(points,
-                live ? state.market_chart_span_ns : 0);
+                recent ? state.market_chart_span_ns : 0);
             const double first = points[start].value;
             const double last = points.back().value;
             const double change = last - first;
@@ -535,7 +562,7 @@ void render_chart(window_handle handle, const render_input& input,
              * from the history it actually has rather than from a span button
              * that does not apply.
              */
-            const auto candle_span = live
+            const auto candle_span = recent
                 ? state.market_chart_span_ns
                 : points.back().at_ns - points[start].at_ns;
             const auto plan = candle_plan_for(candle_span);
@@ -603,10 +630,11 @@ void render_chart(window_handle handle, const render_input& input,
                     const double x_span = xs.size() > 1
                         ? xs.back() - xs.front() : 0.0;
                     const double x_pad = x_span > 0.0
-                        ? x_span * 0.010
-                        : 30.0;
+                        ? x_span * chart_end_padding_share
+                        : chart_single_point_padding_s;
                     ImPlot::SetupAxisLimits(ImAxis_X1,
-                        xs.front() - x_pad * 0.2, xs.back() + x_pad,
+                        xs.front() - x_pad * chart_start_padding_share,
+                        xs.back() + x_pad,
                         ImPlotCond_Always);
                     ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
                         high + span * 0.08, ImPlotCond_Always);
@@ -699,13 +727,9 @@ void render_chart(window_handle handle, const render_input& input,
                 }
 
                 if (!ema.empty() && ema.size() == xs.size()) {
-                    ImPlotSpec average;
-                    average.LineColor =
+                    plot_dashed(xs, ema,
                         ImGui::ColorConvertU32ToFloat4(
-                            theme::moving_average_colour);
-                    average.LineWeight = 1.5f;
-                    ImPlot::PlotLine("##ema", xs.data(), ema.data(),
-                        static_cast<int>(ema.size()), average);
+                            theme::moving_average_colour));
                 }
 
                         const auto point = ImPlot::PlotToPixels(xs.back(),
