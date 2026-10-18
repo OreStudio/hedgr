@@ -467,6 +467,20 @@ public:
     [[nodiscard]] result<image_content>
     image_by_code(std::string_view code) const;
 
+    /** @brief One currency's image identifier, empty when it has no image. */
+    struct currency_image final {
+        std::string currency;
+        std::string image_id;
+    };
+
+    /** @brief Every currency the tenant has an image for, by ISO code. */
+    [[nodiscard]] result<std::vector<currency_image>>
+    currency_images() const;
+
+    /** @brief One image of the tenant, by its identifier. */
+    [[nodiscard]] result<image_content>
+    image_by_id(std::string_view image_id) const;
+
     /** @brief Who this session is, empty until the instance says. */
     [[nodiscard]] const session_account& account() const noexcept;
 

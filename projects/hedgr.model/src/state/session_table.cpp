@@ -44,6 +44,7 @@ void grow(session_columns& columns, std::size_t count) {
     columns.opened_at_ns.resize(count);
     columns.last_error.resize(count);
     columns.tenant_name.resize(count);
+    columns.tenant_id.resize(count);
     columns.party_name.resize(count);
     columns.party_id.resize(count);
     columns.token.resize(count);
@@ -68,6 +69,7 @@ session_table::insert(std::string instance_id, std::string account_id) {
         static_cast<std::uint8_t>(domain::session_mode::application);
     columns_.last_error[index].clear();
     columns_.tenant_name[index].clear();
+    columns_.tenant_id[index].clear();
     columns_.party_name[index].clear();
     columns_.party_id[index].clear();
     columns_.token[index].clear();
@@ -92,6 +94,7 @@ void session_table::remove(session_handle h) {
         static_cast<std::uint8_t>(domain::session_mode::application);
     columns_.last_error[h.index].clear();
     columns_.tenant_name[h.index].clear();
+    columns_.tenant_id[h.index].clear();
     columns_.party_name[h.index].clear();
     columns_.party_id[h.index].clear();
     columns_.instance_id[h.index].clear();
@@ -185,6 +188,14 @@ std::string_view session_table::instance_id(session_handle h) const {
 
 std::string_view session_table::account_id(session_handle h) const {
     return columns_.account_id[h.index];
+}
+
+void session_table::set_tenant_id(session_handle h, std::string tenant_id) {
+    columns_.tenant_id[h.index] = std::move(tenant_id);
+}
+
+std::string_view session_table::tenant_id(session_handle h) const {
+    return columns_.tenant_id[h.index];
 }
 
 std::string_view session_table::tenant_name(session_handle h) const {

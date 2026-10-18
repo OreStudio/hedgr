@@ -26,11 +26,15 @@
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/flag_table.hpp"
+#include "hedgr.model/state/image_cache.hpp"
+#include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/flag_worker.hpp"
+#include "hedgr.runtime/worker/image_map_worker.hpp"
+#include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
@@ -176,6 +180,20 @@ public:
     /** @brief The currency flags each session has read. */
     [[nodiscard]] const model::state::flag_table& flags() const noexcept {
         return flags_;
+    }
+
+    /** @brief Which image each tenant currency names. */
+    [[nodiscard]] const model::state::tenant_image_map&
+    currency_images() const noexcept {
+        return currency_images_;
+    }
+
+    /** @brief The bounded cache of tenant images by identifier. */
+    [[nodiscard]] model::state::image_cache& images() noexcept {
+        return images_;
+    }
+    [[nodiscard]] const model::state::image_cache& images() const noexcept {
+        return images_;
     }
 
     /**
@@ -352,6 +370,12 @@ private:
 
     /** @brief Reads one currency flag image for a session. */
     void do_load_flag(const model::command::command& cmd);
+
+    /** @brief Reads a tenant's currency-to-image map. */
+    void start_currency_image_map(const model::event::event& ev);
+
+    /** @brief Reads one tenant image by identifier for a session. */
+    void do_load_image(const model::command::command& cmd);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
@@ -655,6 +679,18 @@ private:
 
     /** @brief The flags each session has read. */
     model::state::flag_table flags_;
+
+    /** @brief Which image each tenant currency names. */
+    model::state::tenant_image_map currency_images_;
+
+    /** @brief Tenants whose currency image map read is out. */
+    std::unordered_set<std::string> currency_images_reading_;
+
+    /** @brief The bounded cache of tenant images by identifier. */
+    model::state::image_cache images_;
+
+    /** @brief Tenant-and-image whose read is out. */
+    std::unordered_set<std::string> images_reading_;
 
     /** @brief The session-and-code whose flag read is out. */
     std::unordered_set<std::string> flags_reading_;

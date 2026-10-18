@@ -73,6 +73,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "store_credential";
     case command_kind::load_flag:
         return "load_flag";
+    case command_kind::load_image:
+        return "load_image";
     }
     return "unknown";
 }

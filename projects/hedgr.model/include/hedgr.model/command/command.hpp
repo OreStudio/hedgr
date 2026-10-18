@@ -108,6 +108,8 @@ enum class command_kind : std::uint8_t {
     store_credential = 23,
     /** @brief Read one currency flag image by its code. */
     load_flag = 24,
+    /** @brief Read one tenant image by its identifier. */
+    load_image = 25,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
