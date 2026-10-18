@@ -14,7 +14,8 @@ Against `eager_maxwell` on 2026-10-18, signed in as
 
 The header showed the server's Union Jack and United States flag, not the
 client's drawn approximations. A 1920x1080 capture was taken with
-`HEDGR_CAPTURE`, frame 700, with the chart focused.
+`HEDGR_CAPTURE`, frame 700, with the chart focused. The chart header from that
+capture is committed as [server-flags-eager.png](server-flags-eager.png).
 
 ## How the path fits together
 
