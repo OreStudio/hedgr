@@ -548,27 +548,34 @@ session_client::currency_images() const {
     using ores::refdata::messaging::list_currencies_request;
     using ores::refdata::messaging::list_currencies_response;
     try {
-        list_currencies_request request{};
-        request.limit = 500;
-        const auto answer =
-            ores::nats::service::authenticated_request_and_decode<
-                list_currencies_response>(client(),
-                list_currencies_request::nats_subject, request,
-                options_.request_timeout);
-        if (!answer)
-            return fail(session_errc::protocol_error,
-                "the currencies answer could not be decoded");
-        if (answer->result.outcome != ores::utility::domain::outcome::ok)
-            return fail(session_errc::protocol_error,
-                answer->result.message);
-
         std::vector<currency_image> result;
-        for (const auto& currency : answer->currencies) {
-            if (!currency.image_id)
-                continue;
-            result.push_back(currency_image{
-                .currency = currency.iso_code,
-                .image_id = boost::uuids::to_string(*currency.image_id)});
+        std::uint32_t offset = 0;
+        while (true) {
+            list_currencies_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_currencies_response>(client(),
+                    list_currencies_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the currencies answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+
+            for (const auto& currency : answer->currencies) {
+                if (!currency.image_id)
+                    continue;
+                result.push_back(currency_image{
+                    .currency = currency.iso_code,
+                    .image_id = boost::uuids::to_string(*currency.image_id)});
+            }
+            offset += static_cast<std::uint32_t>(answer->currencies.size());
+            if (answer->currencies.empty() || offset >= answer->total)
+                break;
         }
         return result;
     } catch (const std::exception& e) {

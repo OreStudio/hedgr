@@ -71,6 +71,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/market_table.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/bucket_ring.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/image_cache.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/tenant_key.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/tenant_image_map.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/bucket_aggregator.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/hedgr.model.state.hpp"

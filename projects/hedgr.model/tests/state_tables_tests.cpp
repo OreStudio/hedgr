@@ -1033,16 +1033,16 @@ TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
             .data = std::vector<std::uint8_t>(4, v)};
     };
 
-    cache.put("t-1", "i-1", make(1));
-    cache.put("t-1", "i-2", make(2));
-    cache.put("t-2", "i-1", make(3));
+    REQUIRE(cache.put("t-1", "i-1", make(1)));
+    REQUIRE(cache.put("t-1", "i-2", make(2)));
+    REQUIRE(cache.put("t-2", "i-1", make(3)));
     REQUIRE(cache.bytes() == 12);
     REQUIRE(cache.get("t-1", "i-1") != nullptr);
     REQUIRE(cache.get("t-2", "i-1")->data[0] == 3);
     REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
 
     /* i-1 is now the least recently used, so a fourth image evicts it. */
-    cache.put("t-1", "i-3", make(4));
+    REQUIRE(cache.put("t-1", "i-3", make(4)));
     REQUIRE_FALSE(cache.contains("t-1", "i-1"));
     REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
     REQUIRE(cache.evictions() == 1);
@@ -1050,7 +1050,7 @@ TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
     /* An image larger than the whole budget is not cached. */
     image_content big{.mime_type = "image/png",
         .data = std::vector<std::uint8_t>(13)};
-    cache.put("t-1", "big", std::move(big));
+    CHECK_FALSE(cache.put("t-1", "big", std::move(big)));
     REQUIRE_FALSE(cache.contains("t-1", "big"));
     REQUIRE(cache.get("t-1", "missing") == nullptr);
     REQUIRE(cache.misses() >= 1);

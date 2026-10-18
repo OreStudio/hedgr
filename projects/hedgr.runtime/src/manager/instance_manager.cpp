@@ -2972,6 +2972,26 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
             : due.count());
 
     /*
+     * A refresh is also the operator's chance to retry the currency image map
+     * when its first read failed; flags fall back to the drawn ones until it
+     * answers.
+     */
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
+        session && sessions_.status(*session)
+            == domain::session_status::authenticated) {
+        const auto tenant = std::string{sessions_.tenant_id(*session)};
+        const auto* map = currency_images_.get(tenant);
+        if (map == nullptr
+            || map->state == model::state::image_map_state::failed) {
+            model::event::event retry;
+            retry.instance_id = cmd.instance_id;
+            retry.account_id = cmd.account_id;
+            retry.tenant_id = tenant;
+            start_currency_image_map(retry);
+        }
+    }
+
+    /*
      * A command centre's refresh is a deployment read on its own connection.
      * Every other kind still takes the placeholder below.
      */
@@ -3207,6 +3227,11 @@ void instance_manager::do_probe_all() {
 
 void instance_manager::start_currency_image_map(const model::event::event& ev) {
     if (ev.tenant_id.empty() || !database_)
+        return;
+    if (const auto* existing = currency_images_.get(ev.tenant_id);
+        existing != nullptr
+        && (existing->state == model::state::image_map_state::ready
+            || existing->state == model::state::image_map_state::reading))
         return;
     if (currency_images_reading_.contains(ev.tenant_id))
         return;
@@ -3864,9 +3889,13 @@ void instance_manager::apply(const event::event& ev) {
             ev.image_id);
         images_reading_.erase(key);
         if (ev.message.empty()) {
-            images_.put(ev.tenant_id, ev.image_id, model::state::image_content{
-                .mime_type = ev.mime_type, .data = ev.bytes});
-            failed_images_.erase(key);
+            if (images_.put(ev.tenant_id, ev.image_id,
+                    model::state::image_content{.mime_type = ev.mime_type,
+                        .data = ev.bytes})) {
+                failed_images_.erase(key);
+            } else {
+                failed_images_.insert(key);
+            }
         } else {
             failed_images_.insert(key);
         }

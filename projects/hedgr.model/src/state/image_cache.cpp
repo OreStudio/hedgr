@@ -45,12 +45,13 @@ bool image_cache::contains(std::string_view tenant_id,
     return entries_.get<0>().contains(make_tenant_key(tenant_id, image_id));
 }
 
-void image_cache::put(std::string_view tenant_id, std::string_view image_id,
+bool image_cache::put(std::string_view tenant_id, std::string_view image_id,
     image_content image) {
     if (image.data.size() > max_bytes_) {
-        /* It left the cache as surely as an evicted entry did. */
+        /* It left the cache as surely as an evicted entry did, and the caller
+         * must not ask for it again. */
         ++evictions_;
-        return;
+        return false;
     }
 
     auto& by_key = entries_.get<0>();
@@ -72,6 +73,7 @@ void image_cache::put(std::string_view tenant_id, std::string_view image_id,
         by_recency.pop_back();
         ++evictions_;
     }
+    return true;
 }
 
 void image_cache::set_max_bytes(std::size_t max_bytes) {

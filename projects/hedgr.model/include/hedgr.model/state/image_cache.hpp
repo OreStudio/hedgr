@@ -71,9 +71,12 @@ public:
     [[nodiscard]] bool contains(std::string_view tenant_id,
         std::string_view image_id) const;
 
-    /** @brief Stores the image, replacing any previous entry and evicting LRU. */
-    void put(std::string_view tenant_id, std::string_view image_id,
-        image_content image);
+    /**
+     * @brief Stores the image, replacing any previous entry and evicting LRU.
+     * @return false when the image is larger than the whole budget.
+     */
+    [[nodiscard]] bool put(std::string_view tenant_id,
+        std::string_view image_id, image_content image);
 
     /**
      * @brief Visits every cached image without copying or allocating.

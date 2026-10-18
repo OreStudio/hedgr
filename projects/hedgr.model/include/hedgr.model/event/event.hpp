@@ -197,7 +197,9 @@ struct event final {
 
     /** @brief One currency and the image it names, for currency_image_map. */
     struct image_ref final {
+        /** @brief The currency's ISO code. */
         std::string currency;
+        /** @brief The image the currency names. */
         std::string image_id;
     };
 

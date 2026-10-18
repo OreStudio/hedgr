@@ -25,6 +25,7 @@ namespace hedgr::model::state {
 void tenant_image_map::begin(std::string_view tenant_id) {
     auto& entry = tenants_[std::string{tenant_id}];
     entry.state = image_map_state::reading;
+    entry.currencies.clear();
     entry.error.clear();
 }
 
