@@ -69,7 +69,7 @@ currencies_of(std::string_view label);
  * asks for twice it.
  */
 HEDGR_UI_EXPORT void draw_flag(ImDrawList* draw, ImVec2 top_left,
-    std::string_view currency, float scale = 1.0f);
+    std::string_view currency, float scale = 1.0f, ImTextureID texture = 0);
 
 }
 

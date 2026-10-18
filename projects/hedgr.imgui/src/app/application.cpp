@@ -20,6 +20,7 @@
 #include "hedgr.imgui/app/application.hpp"
 
 #include "hedgr.imgui/app/capture_input.hpp"
+#include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
@@ -410,6 +411,7 @@ GLFWwindow* application::initialise_graphics() {
     load_instance_icon_textures();
     load_splash_texture();
 
+
     BOOST_LOG_SEV(lg(), info) << "Graphics initialised successfully.";
     return window;
 }
@@ -499,13 +501,7 @@ void application::load_instance_icon_textures() {
             continue;
         }
 
-        unsigned int texture = 0;
-        glGenTextures(1, &texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-            GL_UNSIGNED_BYTE, data);
+        const auto texture = upload_rgba(data, width, height);
         stbi_image_free(data);
 
         instance_icons_.entries.push_back(
@@ -719,6 +715,11 @@ void application::render_loop(GLFWwindow* window) {
             .labellings = manager_.labellings(),
             .sessions = manager_.sessions(),
             .market = manager_.market(),
+            .currency_images = manager_.currency_images(),
+            .images = manager_.images(),
+            .failed_images = manager_.failed_images(),
+            .pending_images = manager_.pending_images(),
+            .textures = &textures_,
             .probes = manager_.probes(),
             .password_policy = manager_.password_policy(),
             .windows = manager_.windows(),
@@ -733,7 +734,9 @@ void application::render_loop(GLFWwindow* window) {
             .runtime_error = manager_.last_error(),
             .instance_icons = &instance_icons_,
         };
+        textures_.begin_frame();
         workspace_.render(input);
+        textures_.end_frame();
 
         /*
          * After the workspace, so the splash is the last thing submitted. It is
@@ -814,6 +817,7 @@ void application::shutdown_graphics(GLFWwindow* window) {
     if (splash_texture_ != 0)
         glDeleteTextures(1, &splash_texture_);
     release_instance_icon_textures();
+    textures_.clear();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

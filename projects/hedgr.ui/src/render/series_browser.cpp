@@ -101,7 +101,8 @@ struct party_entry final {
     return result;
 }
 
-void draw_series_row(std::string_view label, float extra_indent) {
+void draw_series_row(std::string_view label, float extra_indent,
+    ImTextureID base_texture, ImTextureID quote_texture) {
     const ImVec2 rect_min = ImGui::GetItemRectMin();
     const ImVec2 rect_size = ImGui::GetItemRectSize();
     const auto draw = ImGui::GetWindowDrawList();
@@ -109,11 +110,13 @@ void draw_series_row(std::string_view label, float extra_indent) {
     float x = rect_min.x + 4.0f + extra_indent;
     const float flag_y = rect_min.y + (rect_size.y - hedgr::ui::widget::flag_height) * 0.5f;
     if (!pair.base.empty()) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.base);
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.base, 1.0f,
+            base_texture);
         x += hedgr::ui::widget::flag_width + 2.0f;
     }
     if (!pair.quote.empty()) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote);
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote, 1.0f,
+            quote_texture);
         x += hedgr::ui::widget::flag_width + 4.0f;
     }
     if (x == rect_min.x + 4.0f + extra_indent)
@@ -303,7 +306,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 state.market_selected_series_label = row->label;
                 open_chart(input, *session, *row);
             }
-            draw_series_row(row->label, 0.0f);
+            request_flags(input, *session, row->label);
+            const auto pair = hedgr::ui::widget::currencies_of(row->label);
+            draw_series_row(row->label, 0.0f,
+                image_texture(input, *session, pair.base),
+                image_texture(input, *session, pair.quote));
             if (chosen)
                 ImGui::SetItemDefaultFocus();
             ImGui::PopID();
@@ -331,13 +338,17 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableHeadersRow();
 
         for (const auto* row : visible) {
+            request_flags(input, *session, row->label);
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
             ImGui::PushID(row->id.c_str());
             ImGui::Selectable("##row", false,
                 ImGuiSelectableFlags_SpanAllColumns
                     | ImGuiSelectableFlags_AllowDoubleClick);
-            draw_series_row(row->label, 0.0f);
+            const auto pair = hedgr::ui::widget::currencies_of(row->label);
+            draw_series_row(row->label, 0.0f,
+                image_texture(input, *session, pair.base),
+                image_texture(input, *session, pair.quote));
             if (ImGui::IsItemHovered()
                 && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 state.market_selected_series_id = row->id;

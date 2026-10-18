@@ -91,6 +91,10 @@ enum class event_kind : std::uint8_t {
     series_catalogue = 10,
     /** @brief One series' observations were read. */
     series_points = 11,
+    /** @brief A tenant's currency-to-image map was read. */
+    currency_image_map = 12,
+    /** @brief One tenant image was read by identifier, or could not be. */
+    image_loaded = 13,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -181,6 +185,26 @@ struct event final {
 
     /** @brief Bearer token, for session_authenticated. */
     std::string token;
+
+    /** @brief Media type of the image, for image_loaded. */
+    std::string mime_type;
+
+    /** @brief Image identifier, for image_loaded. */
+    std::string image_id;
+
+    /** @brief The image bytes, for image_loaded. */
+    std::vector<std::uint8_t> bytes;
+
+    /** @brief One currency and the image it names, for currency_image_map. */
+    struct image_ref final {
+        /** @brief The currency's ISO code. */
+        std::string currency;
+        /** @brief The image the currency names. */
+        std::string image_id;
+    };
+
+    /** @brief The tenant's currency-to-image map, for currency_image_map. */
+    std::vector<image_ref> image_refs;
 
     /**
      * @brief The parties the login may act as, for session_authenticated.

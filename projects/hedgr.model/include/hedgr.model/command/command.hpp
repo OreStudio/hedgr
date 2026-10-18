@@ -106,6 +106,8 @@ enum class command_kind : std::uint8_t {
      * that writes the store.
      */
     store_credential = 23,
+    /** @brief Read one tenant image by its identifier. */
+    load_image = 24,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -182,6 +184,9 @@ struct command final {
 
     /** @brief Human label of that series, for the window's title. */
     std::string series_label;
+
+    /** @brief Image identifier, for load_image. */
+    std::string image_id;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;

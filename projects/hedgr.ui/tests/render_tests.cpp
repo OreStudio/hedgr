@@ -185,6 +185,8 @@ using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
 using hedgr::model::state::label_table;
 using hedgr::model::state::labelling_table;
+using hedgr::model::state::image_cache;
+using hedgr::model::state::tenant_image_map;
 using hedgr::model::state::market_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
@@ -203,11 +205,15 @@ struct empty_state final {
     labelling_table labellings;
     session_table sessions;
     market_table market;
+    tenant_image_map currency_images;
+    image_cache images;
     probe_table probes;
     password_policy_state password_policy;
     window_table windows;
     shortcut_table shortcuts;
     command_queue commands;
+    std::unordered_set<std::string> failed_images;
+    std::unordered_set<std::string> pending_images;
 };
 
 /** @brief A render_input over empty tables, carrying @p lock. */
@@ -220,6 +226,11 @@ render_input input_with(empty_state& state, store_lock lock) {
         .labellings = state.labellings,
         .sessions = state.sessions,
         .market = state.market,
+        .currency_images = state.currency_images,
+        .images = state.images,
+        .failed_images = state.failed_images,
+        .pending_images = state.pending_images,
+        .textures = nullptr,
         .probes = state.probes,
         .password_policy = state.password_policy,
         .windows = state.windows,
@@ -1026,4 +1037,30 @@ TEST_CASE("the shortcut control sends the command its own state shows",
         window_kind::accounts, "inst-prod");
     REQUIRE(remove.kind == command_kind::remove_shortcut);
     REQUIRE(remove.shortcut_row.id == add.shortcut_row.id);
+}
+
+TEST_CASE("a flag request asks for the image the map names", "[flags]") {
+    using hedgr::model::command::command_kind;
+    using hedgr::model::state::make_tenant_key;
+    using hedgr::ui::render::request_flags;
+
+    empty_state state;
+    const auto session = state.sessions.insert("inst-1", "acct-1");
+    state.sessions.set_tenant_id(session, "tenant-1");
+    state.currency_images.set("tenant-1",
+        {{"GBP", "image-gbp"}, {"USD", "image-usd"}});
+    auto input = input_with(state, store_lock::unlocked);
+
+    request_flags(input, session, "FX GBP/USD");
+    auto queued = state.commands.drain();
+    REQUIRE(queued.size() == 2);
+    CHECK(queued[0].kind == command_kind::load_image);
+    CHECK(queued[0].image_id == "image-gbp");
+    CHECK(queued[1].kind == command_kind::load_image);
+    CHECK(queued[1].image_id == "image-usd");
+
+    state.pending_images.insert(make_tenant_key("tenant-1", "image-gbp"));
+    state.pending_images.insert(make_tenant_key("tenant-1", "image-usd"));
+    request_flags(input, session, "FX GBP/USD");
+    CHECK(state.commands.size() == 0);
 }

@@ -38,6 +38,8 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.assets.api/messaging/image_protocol.hpp"
+#include "ores.refdata.api/messaging/currency_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
@@ -535,6 +537,92 @@ ores::nats::service::subscription session_client::subscribe(
     std::string_view subject,
     ores::nats::message_handler handler) const {
     return client().transport().subscribe(subject, std::move(handler));
+}
+
+result<std::vector<session_client::currency_image>>
+session_client::currency_images() const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a currency image read needs a signed-in session");
+
+    using ores::refdata::messaging::list_currencies_request;
+    using ores::refdata::messaging::list_currencies_response;
+    try {
+        std::vector<currency_image> result;
+        std::uint32_t offset = 0;
+        while (true) {
+            list_currencies_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_currencies_response>(client(),
+                    list_currencies_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the currencies answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+
+            for (const auto& currency : answer->currencies) {
+                if (!currency.image_id)
+                    continue;
+                result.push_back(currency_image{
+                    .currency = currency.iso_code,
+                    .image_id = boost::uuids::to_string(*currency.image_id)});
+            }
+            offset += static_cast<std::uint32_t>(answer->currencies.size());
+            if (answer->currencies.empty() || offset >= answer->total)
+                break;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<session_client::image_content>
+session_client::image_by_id(std::string_view image_id) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "an image read needs a signed-in session");
+
+    using ores::assets::messaging::images_filter;
+    using ores::assets::messaging::list_images_request;
+    using ores::assets::messaging::list_images_response;
+    try {
+        list_images_request request{};
+        request.limit = 1;
+        request.filter = images_filter{};
+        request.filter->id_one_of = std::vector<boost::uuids::uuid>{
+            boost::lexical_cast<boost::uuids::uuid>(image_id)};
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                list_images_response>(client(),
+                list_images_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the image answer could not be decoded");
+        if (answer->result.outcome != ores::utility::domain::outcome::ok)
+            return fail(session_errc::protocol_error, answer->result.message);
+        if (answer->images.empty())
+            return fail(session_errc::protocol_error,
+                "the deployment holds no image with that identifier");
+        return image_content{.mime_type = answer->images.front().mime_type,
+            .data = answer->images.front().data};
+    } catch (const boost::bad_lexical_cast&) {
+        return fail(session_errc::protocol_error,
+            "the image identifier is not a UUID");
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
 }
 
 result<void> session_client::select_party(std::string_view party_id) {

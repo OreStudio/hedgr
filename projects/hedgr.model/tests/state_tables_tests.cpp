@@ -26,6 +26,9 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/tenant_image_map.hpp"
+#include <unordered_set>
+#include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
@@ -998,6 +1001,59 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     REQUIRE(out[1].level == market_level::medium);
     REQUIRE(out[1].point.value == 4.0);
     REQUIRE(aggregator.ticks() == 6);
+}
+
+TEST_CASE("a tenant image map answers by currency", "[images]") {
+    using hedgr::model::state::image_map_state;
+    using hedgr::model::state::tenant_image_map;
+
+    tenant_image_map images;
+    REQUIRE(images.image_for("t-1", "GBP") == nullptr);
+    images.begin("t-1");
+    REQUIRE(images.get("t-1")->state == image_map_state::reading);
+
+    images.set("t-1", {{"GBP", "id-gb"}, {"USD", "id-us"}});
+    REQUIRE(images.image_for("t-1", "GBP") != nullptr);
+    REQUIRE(*images.image_for("t-1", "GBP") == "id-gb");
+    REQUIRE(images.image_for("t-2", "GBP") == nullptr);
+
+    images.fail("t-2", "no currencies");
+    REQUIRE(images.get("t-2")->state == image_map_state::failed);
+    REQUIRE(images.get("t-2")->error == "no currencies");
+}
+
+TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
+    "[images]") {
+    using hedgr::model::state::image_cache;
+    using hedgr::model::state::image_content;
+
+    image_cache cache{12};
+    const auto make = [](std::uint8_t v) {
+        return image_content{.mime_type = "image/png",
+            .data = std::vector<std::uint8_t>(4, v)};
+    };
+
+    REQUIRE(cache.put("t-1", "i-1", make(1)));
+    REQUIRE(cache.put("t-1", "i-2", make(2)));
+    REQUIRE(cache.put("t-2", "i-1", make(3)));
+    REQUIRE(cache.bytes() == 12);
+    REQUIRE(cache.get("t-1", "i-1") != nullptr);
+    REQUIRE(cache.get("t-2", "i-1")->data[0] == 3);
+    REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
+
+    /* i-1 is now the least recently used, so a fourth image evicts it. */
+    REQUIRE(cache.put("t-1", "i-3", make(4)));
+    REQUIRE_FALSE(cache.contains("t-1", "i-1"));
+    REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
+    REQUIRE(cache.evictions() == 1);
+
+    /* An image larger than the whole budget is not cached. */
+    image_content big{.mime_type = "image/png",
+        .data = std::vector<std::uint8_t>(13)};
+    CHECK_FALSE(cache.put("t-1", "big", std::move(big)));
+    REQUIRE_FALSE(cache.contains("t-1", "big"));
+    REQUIRE(cache.get("t-1", "missing") == nullptr);
+    REQUIRE(cache.misses() >= 1);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",

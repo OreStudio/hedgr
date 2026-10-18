@@ -22,6 +22,8 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/flags.hpp"
+#include "hedgr.model/state/tenant_key.hpp"
 #include "imgui.h"
 
 #include <cstdint>
@@ -171,6 +173,57 @@ identity_bar_state identity_of(const render_input& input,
     }
 
     return result;
+}
+
+void request_flags(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view label) {
+    const auto tenant_id = input.sessions.tenant_id(session);
+    if (tenant_id.empty())
+        return;
+    const auto* images = input.currency_images.get(tenant_id);
+    if (images == nullptr
+        || images->state != hedgr::model::state::image_map_state::ready)
+        return;
+
+    const auto instance_id = input.sessions.instance_id(session);
+    const auto account_id = input.sessions.account_id(session);
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    for (const auto& code : {pair.base, pair.quote}) {
+        if (code.empty())
+            continue;
+        const auto* image_id =
+            input.currency_images.image_for(tenant_id, code);
+        if (image_id == nullptr || input.images.contains(tenant_id, *image_id))
+            continue;
+        const auto key =
+            hedgr::model::state::make_tenant_key(tenant_id, *image_id);
+        if (input.failed_images.contains(key)
+            || input.pending_images.contains(key))
+            continue;
+        hedgr::model::command::command request;
+        request.kind = hedgr::model::command::command_kind::load_image;
+        request.instance_id = std::string{instance_id};
+        request.account_id = std::string{account_id};
+        request.image_id = *image_id;
+        input.commands.push(std::move(request));
+    }
+}
+
+ImTextureID image_texture(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view currency) {
+    if (input.textures == nullptr)
+        return 0;
+    const auto tenant_id = input.sessions.tenant_id(session);
+    if (tenant_id.empty())
+        return 0;
+    const auto* image_id = input.currency_images.image_for(tenant_id, currency);
+    if (image_id == nullptr)
+        return 0;
+    const auto* image = input.images.get(tenant_id, *image_id);
+    if (image == nullptr)
+        return 0;
+    return input.textures->get(tenant_id, *image_id, image->mime_type,
+        image->data);
 }
 
 std::string identity_text(const identity_bar_state& state) {

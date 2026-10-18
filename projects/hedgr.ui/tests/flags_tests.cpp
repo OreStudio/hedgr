@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/image/svg_raster.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <string>
@@ -72,4 +73,25 @@ TEST_CASE("a window with no session says so rather than going blank", "[identity
     const hedgr::ui::render::identity_bar_state state;
 
     REQUIRE(hedgr::ui::render::identity_text(state) == "Not signed in");
+}
+
+TEST_CASE("an svg flag rasterises to opaque rgba", "[flags]") {
+    const auto image = hedgr::ui::image::rasterize_svg(
+        R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 11">)"
+        R"(<rect width="16" height="11" fill="#c8102e"/></svg>)",
+        32, 22);
+
+    REQUIRE(image.has_value());
+    REQUIRE(image->width == 32);
+    REQUIRE(image->height == 22);
+    REQUIRE(image->pixels.size() == 32u * 22u * 4u);
+    CHECK(image->pixels[0] == 0xc8);
+    CHECK(image->pixels[1] == 0x10);
+    CHECK(image->pixels[2] == 0x2e);
+    CHECK(image->pixels[3] == 0xff);
+}
+
+TEST_CASE("an unusable svg yields nothing", "[flags]") {
+    CHECK_FALSE(hedgr::ui::image::rasterize_svg("<svg", 16, 11).has_value());
+    CHECK_FALSE(hedgr::ui::image::rasterize_svg("", 16, 11).has_value());
 }

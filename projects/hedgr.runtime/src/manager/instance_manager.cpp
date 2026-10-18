@@ -27,6 +27,8 @@
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
+#include "hedgr.runtime/worker/image_map_worker.hpp"
+#include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
@@ -691,6 +693,11 @@ void instance_manager::stop() noexcept {
     }
     market_streams_.clear();
     market_.clear();
+    currency_images_.clear();
+    currency_images_reading_.clear();
+    images_.clear();
+    images_reading_.clear();
+    failed_images_.clear();
     catalogues_reading_.clear();
     points_reading_.clear();
 
@@ -1515,6 +1522,9 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::store_credential:
         do_store_credential(cmd);
+        break;
+    case command::command_kind::load_image:
+        do_load_image(cmd);
         break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
@@ -2962,6 +2972,26 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
             : due.count());
 
     /*
+     * A refresh is also the operator's chance to retry the currency image map
+     * when its first read failed; flags fall back to the drawn ones until it
+     * answers.
+     */
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
+        session && sessions_.status(*session)
+            == domain::session_status::authenticated) {
+        const auto tenant = std::string{sessions_.tenant_id(*session)};
+        const auto* map = currency_images_.get(tenant);
+        if (map == nullptr
+            || map->state == model::state::image_map_state::failed) {
+            model::event::event retry;
+            retry.instance_id = cmd.instance_id;
+            retry.account_id = cmd.account_id;
+            retry.tenant_id = tenant;
+            start_currency_image_map(retry);
+        }
+    }
+
+    /*
      * A command centre's refresh is a deployment read on its own connection.
      * Every other kind still takes the placeholder below.
      */
@@ -3193,6 +3223,75 @@ void instance_manager::do_probe_all() {
         probes_.set_next_probe_ns(
             model_state::instance_handle{index, layout.generation[index]}, 0);
     }
+}
+
+void instance_manager::start_currency_image_map(const model::event::event& ev) {
+    if (ev.tenant_id.empty() || !database_)
+        return;
+    if (const auto* existing = currency_images_.get(ev.tenant_id);
+        existing != nullptr
+        && (existing->state == model::state::image_map_state::ready
+            || existing->state == model::state::image_map_state::reading))
+        return;
+    if (currency_images_reading_.contains(ev.tenant_id))
+        return;
+    const auto session = sessions_.find(ev.instance_id, ev.account_id);
+    if (!session)
+        return;
+    const auto instance = instances_.find(ev.instance_id);
+    if (!instance)
+        return;
+    const auto token = std::string{sessions_.token(*session)};
+    if (token.empty())
+        return;
+
+    const auto account = accounts_.find(ev.account_id);
+    worker::image_map_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = ev.instance_id;
+    job.session.account_id = ev.account_id;
+    job.session.tenant_id = ev.tenant_id;
+    job.session.token = token;
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    currency_images_reading_.insert(ev.tenant_id);
+    currency_images_.begin(ev.tenant_id);
+    worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::do_load_image(const model::command::command& cmd) {
+    if (!database_)
+        return;
+    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto tenant = std::string{sessions_.tenant_id(*session)};
+    const auto token = std::string{sessions_.token(*session)};
+    if (tenant.empty() || token.empty() || cmd.image_id.empty())
+        return;
+    const auto key = model::state::make_tenant_key(tenant, cmd.image_id);
+    if (images_reading_.contains(key) || images_.contains(tenant, cmd.image_id)
+        || failed_images_.contains(key))
+        return;
+    const auto instance = instances_.find(cmd.instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(cmd.account_id);
+
+    worker::image_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = cmd.instance_id;
+    job.session.account_id = cmd.account_id;
+    job.session.tenant_id = tenant;
+    job.session.token = token;
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.image_id = cmd.image_id;
+    images_reading_.insert(key);
+    worker::spawn_image_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::start_market_backfill(std::string_view instance_id,
@@ -3785,6 +3884,36 @@ void instance_manager::apply(const event::event& ev) {
         }
         break;
     }
+    case event::event_kind::image_loaded: {
+        const auto key = model::state::make_tenant_key(ev.tenant_id,
+            ev.image_id);
+        images_reading_.erase(key);
+        if (ev.message.empty()) {
+            if (images_.put(ev.tenant_id, ev.image_id,
+                    model::state::image_content{.mime_type = ev.mime_type,
+                        .data = ev.bytes})) {
+                failed_images_.erase(key);
+            } else {
+                failed_images_.insert(key);
+            }
+        } else {
+            failed_images_.insert(key);
+        }
+        break;
+    }
+    case event::event_kind::currency_image_map: {
+        currency_images_reading_.erase(ev.tenant_id);
+        if (ev.message.empty()) {
+            std::vector<std::pair<std::string, std::string>> mapped;
+            for (const auto& image : ev.image_refs) {
+                mapped.emplace_back(image.currency, image.image_id);
+            }
+            currency_images_.set(ev.tenant_id, std::move(mapped));
+        } else {
+            currency_images_.fail(ev.tenant_id, ev.message);
+        }
+        break;
+    }
     case event::event_kind::series_points: {
         const auto key = std::format("{}\x1f{}", 
             running_key(ev.instance_id, ev.account_id), ev.series_id);
@@ -3801,10 +3930,12 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.party_id, ev.token);
+        sessions_.set_tenant_id(*handle, ev.tenant_id);
         sessions_.set_parties(*handle, ev.parties);
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
         start_market_stream(ev);
+        start_currency_image_map(ev);
 
         /*
          * Stamped here rather than by the worker, so the time says when the

@@ -24,6 +24,8 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/image_cache.hpp"
+#include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
@@ -32,11 +34,12 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
 #include "hedgr.ui/export.hpp"
+#include <imgui.h>
 #include <array>
-#include <cstdint>
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace hedgr::ui::render {
@@ -316,6 +319,38 @@ struct window_ui_state final {
  * it. That is what keeps rendering free of side effects and the state tables
  * owned by a single writer.
  */
+/**
+ * @brief The uploaded image textures a frame may draw.
+ *
+ * The interface library owns no graphics context. The application implements
+ * this over its texture cache, keyed by tenant and image identifier, so the
+ * same seam serves flags, logos and photographs.
+ */
+struct image_texture_source {
+    virtual ~image_texture_source() = default;
+
+    /**
+     * @brief The texture for an image, uploading it if needed.
+     *
+     * Marks the texture as used by this frame. The bytes travel here because
+     * only the caller holds the byte cache; the source owns the graphics
+     * context and nothing else.
+     */
+    [[nodiscard]] virtual ImTextureID get(std::string_view tenant_id,
+        std::string_view image_id, std::string_view mime_type,
+        const std::vector<std::uint8_t>& data) = 0;
+};
+
+/**
+ * @brief Everything a renderer is allowed to read, and the one thing it may do.
+ *
+ * The tables are const because the interface never mutates state: a renderer
+ * reacts to a click by pushing a command onto the queue and the runtime applies
+ * it. That is what keeps rendering free of side effects and the state tables
+ * owned by a single writer. The image cache is the deliberate exception: asking
+ * it for an image records the hit, which is a cache statistic and not model
+ * state.
+ */
 struct render_input final {
     /** @brief The instances known to this process. */
     const hedgr::model::state::instance_table& instances;
@@ -337,6 +372,21 @@ struct render_input final {
 
     /** @brief The market series and the points each chart holds. */
     const hedgr::model::state::market_table& market;
+
+    /** @brief Which image each tenant currency names. */
+    const hedgr::model::state::tenant_image_map& currency_images;
+
+    /** @brief The bounded cache of image bytes, by tenant and identifier. */
+    hedgr::model::state::image_cache& images;
+
+    /** @brief Images whose read failed, keyed by tenant and identifier. */
+    const std::unordered_set<std::string>& failed_images;
+
+    /** @brief Images whose read is in flight, keyed the same way. */
+    const std::unordered_set<std::string>& pending_images;
+
+    /** @brief The uploaded textures, or nullptr in a test. */
+    image_texture_source* textures = nullptr;
 
     /**
      * @brief The probes' last results and next deadlines.

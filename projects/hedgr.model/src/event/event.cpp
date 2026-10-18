@@ -47,6 +47,10 @@ std::string_view to_string(event_kind value) noexcept {
         return "series_catalogue";
     case event_kind::series_points:
         return "series_points";
+    case event_kind::currency_image_map:
+        return "currency_image_map";
+    case event_kind::image_loaded:
+        return "image_loaded";
     }
     return "unknown";
 }

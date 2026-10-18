@@ -25,10 +25,15 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
+#include "hedgr.model/state/image_cache.hpp"
+#include "hedgr.model/state/tenant_image_map.hpp"
+#include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/image_map_worker.hpp"
+#include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
@@ -169,6 +174,32 @@ public:
     /** @brief The market series and the points each chart holds. */
     [[nodiscard]] const model::state::market_table& market() const noexcept {
         return market_;
+    }
+
+    /** @brief Which image each tenant currency names. */
+    [[nodiscard]] const model::state::tenant_image_map&
+    currency_images() const noexcept {
+        return currency_images_;
+    }
+
+    /** @brief The bounded cache of tenant images by identifier. */
+    [[nodiscard]] model::state::image_cache& images() noexcept {
+        return images_;
+    }
+    [[nodiscard]] const model::state::image_cache& images() const noexcept {
+        return images_;
+    }
+
+    /** @brief Images whose reads failed, keyed as the cache keys them. */
+    [[nodiscard]] const std::unordered_set<std::string>&
+    failed_images() const noexcept {
+        return failed_images_;
+    }
+
+    /** @brief Images whose reads are in flight, keyed as the cache keys them. */
+    [[nodiscard]] const std::unordered_set<std::string>&
+    pending_images() const noexcept {
+        return images_reading_;
     }
 
     /**
@@ -342,6 +373,12 @@ private:
     /** @brief Asks for one series' points, on the window's session. */
     void start_market_points_read(std::string_view window_id,
         std::string_view series_id);
+
+    /** @brief Reads a tenant's currency-to-image map. */
+    void start_currency_image_map(const model::event::event& ev);
+
+    /** @brief Reads one tenant image by identifier for a session. */
+    void do_load_image(const model::command::command& cmd);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
@@ -642,6 +679,21 @@ private:
 
     /** @brief The market series and the points each chart holds. */
     model::state::market_table market_;
+
+    /** @brief Which image each tenant currency names. */
+    model::state::tenant_image_map currency_images_;
+
+    /** @brief Tenants whose currency image map read is out. */
+    std::unordered_set<std::string> currency_images_reading_;
+
+    /** @brief The bounded cache of tenant images by identifier. */
+    model::state::image_cache images_;
+
+    /** @brief Tenant-and-image whose read is out. */
+    std::unordered_set<std::string> images_reading_;
+
+    /** @brief Tenant-and-image whose read failed, so it is not asked again. */
+    std::unordered_set<std::string> failed_images_;
 
     /** @brief The sessions whose catalogue read is out, by running key. */
     std::unordered_set<std::string> catalogues_reading_;

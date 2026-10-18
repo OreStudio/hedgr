@@ -77,14 +77,18 @@ currency_pair currencies_of(std::string_view label) {
 }
 
 void draw_flag(ImDrawList* draw, ImVec2 p, std::string_view currency,
-    float scale) {
+    float scale, ImTextureID texture) {
+    const float width = flag_width * scale;
+    const float height = flag_height * scale;
+    if (texture != 0) {
+        draw->AddImage(texture, p, ImVec2(p.x + width, p.y + height));
+        return;
+    }
     /*
      * The artwork is written in a sixteen by eleven unit space and scaled to
      * whatever the widget asks for, so a larger flag is the same drawing and
      * not a differently proportioned one.
      */
-    const float width = flag_width * scale;
-    const float height = flag_height * scale;
     const float sx = width / 16.0f;
     const float sy = height / 11.0f;
     const float sr = std::min(sx, sy);

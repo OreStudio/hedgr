@@ -419,6 +419,7 @@ struct session_columns final {
     std::vector<std::int64_t> opened_at_ns;
     std::vector<std::string> last_error;
     std::vector<std::string> tenant_name;
+    std::vector<std::string> tenant_id;
     std::vector<std::string> party_name;
     std::vector<std::string> party_id;
     std::vector<std::string> token;
@@ -467,6 +468,9 @@ public:
                              std::string party_name, std::string party_id,
                              std::string token);
 
+    /** @brief Records the tenant's key, for reads scoped by tenant. */
+    void set_tenant_id(session_handle h, std::string tenant_id);
+
     /** @brief Records the parties the login may act as, serialised. */
     void set_parties(session_handle h, std::string parties);
 
@@ -510,6 +514,9 @@ public:
     [[nodiscard]] std::string_view instance_id(session_handle h) const;
     [[nodiscard]] std::string_view account_id(session_handle h) const;
     [[nodiscard]] std::string_view tenant_name(session_handle h) const;
+
+    /** @brief Key of the tenant the session belongs to, or empty. */
+    [[nodiscard]] std::string_view tenant_id(session_handle h) const;
     [[nodiscard]] std::string_view party_name(session_handle h) const;
 
     /** @brief Key of the party the session is scoped to, or empty. */
