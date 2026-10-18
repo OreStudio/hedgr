@@ -122,7 +122,6 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
  * reader can tell the live curve from the ones behind it at a glance.
  */
 inline constexpr ImU32 curve_latest_colour = IM_COL32(64, 156, 255, 255);
-inline constexpr ImU32 curve_history_colour = IM_COL32(132, 166, 214, 255);
 
 /**
  * @brief The colour of a field whose edited value differs from the stored one.

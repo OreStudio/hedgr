@@ -297,15 +297,27 @@ void render_term_structure(window_handle handle, const render_input& input,
                     }
 
                     const int age_index = c - first;
-                    const auto alpha = newest ? 1.0f
-                        : std::clamp(0.72f - 0.025f * age_index, 0.30f, 0.72f);
-                    const ImVec4 colour = newest
-                        ? newest_colour
-                        : ImGui::ColorConvertU32ToFloat4(
-                              theme::curve_history_colour);
+                    ImVec4 colour = newest_colour;
+                    if (!newest) {
+                        /*
+                         * Every historical curve is a distinct shade of blue:
+                         * the oldest is the darkest, and each step towards the
+                         * newest is lighter. Fading alpha alone made two
+                         * neighbouring curves read as one.
+                         */
+                        const float age = count > 1
+                            ? static_cast<float>(age_index)
+                                / static_cast<float>(count - 1)
+                            : 1.0f;
+                        float red = 0.0f;
+                        float green = 0.0f;
+                        float blue = 0.0f;
+                        ImGui::ColorConvertHSVtoRGB(0.60f - 0.04f * age, 0.75f,
+                            0.34f + 0.44f * age, red, green, blue);
+                        colour = ImVec4(red, green, blue, 1.0f);
+                    }
                     ImPlotSpec spec;
-                    spec.LineColor = ImVec4(colour.x, colour.y, colour.z,
-                        alpha);
+                    spec.LineColor = colour;
                     spec.LineWeight = newest ? 2.5f : 1.2f;
                     if (newest) {
                         spec.Marker = ImPlotMarker_Circle;

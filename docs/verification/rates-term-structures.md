@@ -17,8 +17,8 @@ line's colour, fading to the floor of the plot.
 
 The curve window overlays recent history, as the web simulator does: the
 History control selects up to twenty curves, the newest complete curve is bold
-green with the gradient fill, and earlier curves are grey-blue and fade with
-age. The worker groups observations by timestamp and tenor and keeps the last
+blue with the gradient fill, and each earlier curve is a distinct, darker shade
+of blue, oldest darkest. The worker groups observations by timestamp and tenor and keeps the last
 twenty curves, so a curve that arrives one pillar at a time does not replace a
 complete one with a partial snapshot. The plot uses the FX plot flags, grid,
 padding and numeric font, with bright axis text and no legend; tenor is the
