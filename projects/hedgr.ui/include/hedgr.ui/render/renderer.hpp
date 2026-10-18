@@ -233,6 +233,9 @@ struct window_ui_state final {
     /** @brief Every CRM name seen since the window opened. */
     std::set<std::string> crm_known_names;
 
+    /** @brief Every currency seen since the party was chosen. */
+    std::set<std::string> crm_currencies;
+
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;
 

@@ -163,6 +163,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 state.crm_name.clear();
                 state.crm_all_chosen = false;
                 state.crm_known_names.clear();
+                state.crm_currencies.clear();
                 configure_scope();
             }
             if (chosen)
@@ -186,6 +187,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         && !crm_names.empty()) {
         state.crm_name = crm_names.contains("majors")
             ? "majors" : *crm_names.begin();
+        state.crm_currencies.clear();
         configure_scope();
     }
 
@@ -198,6 +200,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         if (ImGui::Selectable("All CRMs", state.crm_name.empty())) {
             state.crm_name.clear();
             state.crm_all_chosen = true;
+            state.crm_currencies.clear();
             configure_scope();
         }
         for (const auto& name : crm_names) {
@@ -205,6 +208,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             if (ImGui::Selectable(name.c_str(), chosen)) {
                 state.crm_name = name;
                 state.crm_all_chosen = false;
+                state.crm_currencies.clear();
                 configure_scope();
             }
             if (chosen)
@@ -286,7 +290,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         return;
     }
 
-    std::set<std::string> currencies;
     std::map<std::pair<std::string, std::string>,
         const model::domain::crm_cell*> cells;
     for (const auto& cell : snapshot->cells) {
@@ -295,8 +298,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         if (!matches(cell.base_currency_code, filter)
             && !matches(cell.quote_currency_code, filter))
             continue;
-        currencies.insert(cell.base_currency_code);
-        currencies.insert(cell.quote_currency_code);
+        state.crm_currencies.insert(cell.base_currency_code);
+        state.crm_currencies.insert(cell.quote_currency_code);
         const auto key = std::make_pair(cell.base_currency_code,
             cell.quote_currency_code);
         const auto found = cells.find(key);
@@ -306,6 +309,10 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             cells[key] = &cell;
     }
 
+    std::set<std::string> currencies;
+    for (const auto& currency : state.crm_currencies)
+        if (matches(currency, filter))
+            currencies.insert(currency);
     if (currencies.size() < 2) {
         ImGui::TextDisabled("No pairs match the filter.");
         widget::draw_status_foot(status, input.now_ns, foot);
@@ -357,8 +364,20 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             ImGui::TextUnformatted(currency.c_str());
         }
 
+        /*
+         * A cell's second line is the delta and, in All mode, a third names
+         * the CRM. Both appear and disappear with the market, so the row is
+         * given a fixed minimum height: otherwise a row grows when a delta
+         * crosses the threshold and shrinks back on the next tick, moving the
+         * whole grid under the pointer. The line count is fixed for the mode,
+         * not for the data.
+         */
+        const float cell_line = ImGui::GetTextLineHeight();
+        const float row_height = cell_line
+                * (state.crm_name.empty() ? 3.0f : 2.0f)
+            + ImGui::GetStyle().CellPadding.y * 2.0f;
         for (const auto& base : currencies) {
-            ImGui::TableNextRow();
+            ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
             ImGui::TableNextColumn();
             const auto flag = image_texture(input, *session, base);
             if (flag != 0) {
