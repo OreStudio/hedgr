@@ -350,6 +350,8 @@ private:
     void do_close_window(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
 
+    void do_configure_crm(const model::command::command& cmd);
+
     /**
      * @brief Asks for one command centre's deployment read.
      *

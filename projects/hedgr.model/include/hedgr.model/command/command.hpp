@@ -110,6 +110,8 @@ enum class command_kind : std::uint8_t {
     load_image = 24,
     /** @brief Read the latest curve a set of tenors names. */
     load_term_structure = 25,
+    /** @brief Change a CRM window's party, CRM or reciprocal scope. */
+    configure_crm = 26,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -201,6 +203,15 @@ struct command final {
 
     /** @brief Member tenors, index for index with member_ids. */
     std::vector<std::string> member_tenors;
+
+    /** @brief Party whose CRM rates a window shows, for configure_crm. */
+    std::string party_id;
+
+    /** @brief CRM name for a window, for configure_crm; empty means all. */
+    std::string crm_name;
+
+    /** @brief Whether a CRM window asks for reciprocal backfill. */
+    bool crm_reciprocal = false;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;

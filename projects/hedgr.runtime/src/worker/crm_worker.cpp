@@ -7,14 +7,18 @@ namespace hedgr::runtime::worker {
 void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     model::command::event_queue& events) {
     const auto party = job.party_id;
+    const auto crm_name = job.crm_name;
+    const auto reciprocal = job.reciprocal;
     model::event::event fact;
     fact.kind = model::event::event_kind::crm_rates;
     fact.instance_id = job.session.instance_id;
     fact.account_id = job.session.account_id;
     fact.tenant_id = job.session.tenant_id;
-    auto work = [party](session::transport::session_client& client,
+    fact.party_id = party;
+    auto work = [party, crm_name, reciprocal](
+                    session::transport::session_client& client,
                     model::event::event& answer) {
-        const auto rates = client.crm_rates(party, "", false);
+        const auto rates = client.crm_rates(party, crm_name, reciprocal);
         if (!rates) {
             answer.message = rates.error().message;
             return;

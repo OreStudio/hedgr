@@ -374,6 +374,18 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::EndCombo();
     }
 
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    if (ImGui::Button("Cross rates")) {
+        model::command::command request;
+        request.kind = model::command::command_kind::open_window;
+        request.instance_id = std::string{input.sessions.instance_id(*session)};
+        request.account_id = std::string{input.sessions.account_id(*session)};
+        request.new_window_kind = model::domain::window_kind::crm_matrix;
+        input.commands.push(std::move(request));
+    }
+    ImGui::SetItemTooltip(
+        "Open the cross-rates matrix for this session's party.");
+
     if (state.market_asset_class == "IR") {
         std::vector<const domain::market_series_row*> filtered;
         for (const auto& row : rows) {

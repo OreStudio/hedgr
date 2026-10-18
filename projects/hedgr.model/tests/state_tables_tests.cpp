@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/bucket_aggregator.hpp"
+#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
@@ -58,6 +59,8 @@ using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
 using hedgr::model::state::account_table;
+using hedgr::model::state::crm_table;
+namespace model = hedgr::model;
 using hedgr::model::state::estate_history;
 using hedgr::model::state::estate_sample;
 using hedgr::model::state::folder_table;
@@ -1109,4 +1112,33 @@ TEST_CASE("a restored window keeps the session it was saved against",
     REQUIRE(stored.session.has_value());
     REQUIRE(stored.session->instance_id == "inst-1");
     REQUIRE(stored.session->account_id == "acct-1");
+}
+
+TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
+    crm_table table;
+    table.set("i", "a", "p1",
+        {model::domain::crm_cell{.crm_name = "majors",
+            .base_currency_code = "EUR", .quote_currency_code = "USD",
+            .rate = 1.1, .status = "fresh"}},
+        "2026-01-01T00:00:00Z");
+    table.set("i", "a", "p2", {}, "2026-01-01T00:00:01Z");
+    const auto* one = table.get("i", "a", "p1");
+    const auto* two = table.get("i", "a", "p2");
+    REQUIRE(one != nullptr);
+    REQUIRE(two != nullptr);
+    CHECK(one->cells.size() == 1);
+    CHECK(one->cells.front().rate == 1.1);
+    CHECK(one->observed_as_of == "2026-01-01T00:00:00Z");
+    CHECK(two->cells.empty());
+    CHECK(table.get("i", "a", "p3") == nullptr);
+}
+
+TEST_CASE("a failed CRM read keeps the error and drops the cells", "[crm]") {
+    crm_table table;
+    table.set("i", "a", "p", {model::domain::crm_cell{}}, "now");
+    table.fail("i", "a", "p", "refused");
+    const auto* snapshot = table.get("i", "a", "p");
+    REQUIRE(snapshot != nullptr);
+    CHECK(snapshot->cells.empty());
+    CHECK(snapshot->error == "refused");
 }

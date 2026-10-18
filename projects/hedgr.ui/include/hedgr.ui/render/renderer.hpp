@@ -208,6 +208,24 @@ struct window_ui_state final {
     /** @brief How many recent curves a term-structure window overlays. */
     int term_history = 5;
 
+    /** @brief The party whose CRM rates are shown. */
+    std::string crm_party_id;
+
+    /** @brief The CRM filter, or empty for every CRM. */
+    std::string crm_name;
+
+    /** @brief Whether to ask for reciprocal backfill. */
+    bool crm_reciprocal = false;
+
+    /** @brief The pair selected in the matrix, empty when none. */
+    std::string crm_pair;
+
+    /** @brief When the CRM window next polls, on the ImGui clock. */
+    double crm_next_poll = 0.0;
+
+    /** @brief Whether the CRM window has taken its scope from its state. */
+    bool crm_initialised = false;
+
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;
 

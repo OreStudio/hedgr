@@ -1560,6 +1560,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::refresh_window:
         do_refresh_window(cmd);
         break;
+    case command::command_kind::configure_crm:
+        do_configure_crm(cmd);
+        break;
     case command::command_kind::probe_instance:
         do_probe_instance(cmd);
         break;
@@ -2956,7 +2959,8 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * the end of time; a manual refresh still starts a read.
      */
     if (cmd.new_window_kind == domain::window_kind::chart
-        || cmd.new_window_kind == domain::window_kind::term_structure) {
+        || cmd.new_window_kind == domain::window_kind::term_structure
+        || cmd.new_window_kind == domain::window_kind::crm_matrix) {
         windows_.set_next_refresh_ns(handle,
             std::numeric_limits<std::int64_t>::max());
     }
@@ -2996,6 +3000,20 @@ void instance_manager::do_close_window(const command::command& cmd) {
     }
 }
 
+void instance_manager::do_configure_crm(const command::command& cmd) {
+    const auto handle = windows_.find(cmd.window_id);
+    if (!handle)
+        return;
+    auto* crm = std::get_if<domain::crm_matrix_state>(
+        &windows_.state(*handle));
+    if (crm == nullptr)
+        return;
+    crm->party_id = cmd.party_id;
+    crm->crm_name = cmd.crm_name;
+    crm->reciprocal = cmd.crm_reciprocal;
+    start_crm_read(*handle);
+}
+
 void instance_manager::do_refresh_window(const command::command& cmd) {
     const auto handle = windows_.find(cmd.window_id);
     if (!handle)
@@ -3018,6 +3036,7 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
      */
     windows_.set_next_refresh_ns(*handle,
         spec.kind == domain::window_kind::chart
+                || spec.kind == domain::window_kind::crm_matrix
             ? std::numeric_limits<std::int64_t>::max()
             : due.count());
 
