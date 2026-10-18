@@ -8,9 +8,10 @@ list from points to term structures. Leaf series that share a curve identity
 curve whose observations carry `term` is one row of its own.
 
 Double-clicking a curve, or choosing it in the combo, opens a term-structure
-window like the FX chart window. It draws tenor on the x-axis and rate on the
-y-axis, with the same plot flags, grid and numeric font as FX, no legend, and
-the observation time in the header. Its refresh button reads the curve again. The read runs on a worker
+window like the FX chart window. It has the same chrome: a currency flag, the
+curve name, a refresh control, a term count and the update time with its age.
+The plot uses the FX plot flags, grid, padding and numeric font, with bright
+axis text and no legend; tenor is the categorical x-axis. Its refresh button reads the curve again. The read runs on a worker
 and its own connection; the frame loop only draws the result.
 
 ## Data path

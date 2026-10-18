@@ -22,6 +22,8 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/widget/controls.hpp"
+#include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
@@ -41,6 +43,7 @@ namespace {
 
 namespace domain = hedgr::model::domain;
 namespace icon = hedgr::ui::icon;
+namespace theme = hedgr::ui::theme;
 using hedgr::model::command::command;
 
 /** @brief The instant the curve was observed, in the reader's local zone. */
@@ -118,69 +121,119 @@ void render_term_structure(window_handle handle, const render_input& input,
             .window_id = std::string{input.windows.id(handle)}});
     }
     ImGui::SameLine();
-    ImGui::TextUnformatted(terms->label.c_str());
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", terms->curve_key.c_str());
-    if (curve != nullptr && curve->observed_at_ns > 0) {
+
+    const auto currencies = widget::currencies_of(terms->label);
+    if (!currencies.base.empty()) {
+        auto* draw = ImGui::GetWindowDrawList();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        constexpr float flag_scale = 2.0f;
+        widget::draw_flag(draw, p, currencies.base, flag_scale,
+            session ? image_texture(input, *session, currencies.base) : 0);
+        ImGui::Dummy(ImVec2(widget::flag_width * flag_scale + 4.0f,
+            widget::flag_height * flag_scale));
         ImGui::SameLine();
-        ImGui::TextDisabled("Updated %s",
-            format_updated(curve->observed_at_ns).c_str());
     }
+    ImGui::TextUnformatted(terms->label.c_str());
+    ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
+
+    if (curve != nullptr && !curve->nodes.empty()) {
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        ImGui::TextDisabled("%zu terms", curve->nodes.size());
+    }
+    ImGui::NewLine();
 
     if (!session.has_value()) {
         ImGui::TextDisabled("Sign in to read this curve.");
-    } else if (curve == nullptr || (curve->nodes.empty()
-                   && curve->error.empty())) {
+    } else if (curve != nullptr && curve->observed_at_ns > 0) {
+        ImGui::TextDisabled("Updated %s",
+            format_updated(curve->observed_at_ns).c_str());
+        ImGui::SameLine();
+        if (input.now_ns >= curve->observed_at_ns) {
+            const auto age_s = static_cast<double>(
+                input.now_ns - curve->observed_at_ns) / 1.0e9;
+            const ImU32 colour = age_s > 10.0
+                ? theme::readiness_colour(domain::readiness::bootstrapping)
+                : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+            ImGui::TextDisabled("\u00b7");
+            ImGui::SameLine();
+            if (age_s < 3.0) {
+                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
+                    "live");
+            } else {
+                ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
+                    "stale %.0f s", age_s);
+            }
+        }
+    } else if (curve != nullptr) {
         ImGui::TextDisabled("Reading the curve...");
-    } else if (!curve->error.empty()) {
-        ImGui::TextWrapped("%s", curve->error.c_str());
-    } else {
-        auto nodes = curve->nodes;
-        std::sort(nodes.begin(), nodes.end(),
-            [](const auto& a, const auto& b) {
-                return tenor_rank(a.tenor) < tenor_rank(b.tenor);
-            });
-        std::vector<double> xs;
-        std::vector<double> ys;
-        std::vector<const char*> labels;
-        xs.reserve(nodes.size());
-        ys.reserve(nodes.size());
-        labels.reserve(nodes.size());
-        for (std::size_t i = 0; i < nodes.size(); ++i) {
-            xs.push_back(static_cast<double>(i));
-            ys.push_back(nodes[i].value);
-            labels.push_back(nodes[i].tenor.empty() ? "spot"
-                                                    : nodes[i].tenor.c_str());
-        }
-        constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
-            | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
-            | ImPlotFlags_NoMenus;
-
-        ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
-        ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
-        ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
-            ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
-        ImPlot::PushStyleColor(ImPlotCol_AxisText,
-            ImGui::GetStyleColorVec4(ImGuiCol_Text));
-        ImGui::PushFont(icon::numeric_font());
-        if (ImPlot::BeginPlot("##curve", ImVec2(-1.0f, -1.0f),
-                plot_flags)) {
-            ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
-                ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
-            ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
-                static_cast<int>(xs.size()), labels.data());
-            ImPlot::SetupAxisLimits(ImAxis_X1, -0.5,
-                static_cast<double>(xs.size()) - 0.5, ImGuiCond_Always);
-            ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
-            ImPlot::PlotLine("Rate", xs.data(), ys.data(),
-                static_cast<int>(xs.size()));
-            ImPlot::EndPlot();
-        }
-        ImGui::PopFont();
-        ImPlot::PopStyleColor(2);
-        ImPlot::PopStyleVar(2);
-        ImGui::TextDisabled("%zu terms from member series.", nodes.size());
     }
+    if (curve != nullptr && !curve->error.empty()) {
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
+            "%s", curve->error.c_str());
+    }
+
+    const float foot_height = widget::status_foot_height(status);
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    const float plot_height = std::max(
+        available.y - foot_height - ImGui::GetStyle().ItemSpacing.y, 80.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
+            ImGuiChildFlags_None)) {
+        if (curve == nullptr || (curve->nodes.empty() && curve->error.empty())) {
+            ImGui::TextDisabled("Reading the curve...");
+        } else if (!curve->error.empty()) {
+            ImGui::TextWrapped("%s", curve->error.c_str());
+        } else {
+            auto nodes = curve->nodes;
+            std::sort(nodes.begin(), nodes.end(),
+                [](const auto& a, const auto& b) {
+                    return tenor_rank(a.tenor) < tenor_rank(b.tenor);
+                });
+            std::vector<double> xs;
+            std::vector<double> ys;
+            std::vector<const char*> labels;
+            xs.reserve(nodes.size());
+            ys.reserve(nodes.size());
+            labels.reserve(nodes.size());
+            for (std::size_t i = 0; i < nodes.size(); ++i) {
+                xs.push_back(static_cast<double>(i));
+                ys.push_back(nodes[i].value);
+                labels.push_back(nodes[i].tenor.empty()
+                        ? "spot" : nodes[i].tenor.c_str());
+            }
+
+            constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
+                | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
+                | ImPlotFlags_NoMenus;
+            ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding,
+                ImVec2(2.0f, 2.0f));
+            ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+            ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
+                ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
+            ImPlot::PushStyleColor(ImPlotCol_AxisText,
+                ImGui::GetStyleColorVec4(ImGuiCol_Text));
+            ImGui::PushFont(icon::numeric_font());
+            if (ImPlot::BeginPlot("##curve", ImVec2(-1.0f, -1.0f),
+                    plot_flags)) {
+                ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
+                    ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
+                ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
+                    static_cast<int>(xs.size()), labels.data());
+                ImPlot::SetupAxisLimits(ImAxis_X1, -0.5,
+                    static_cast<double>(xs.size()) - 0.5, ImGuiCond_Always);
+                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
+                ImPlot::PlotLine("Rate", xs.data(), ys.data(),
+                    static_cast<int>(xs.size()));
+                ImPlot::EndPlot();
+            }
+            ImGui::PopFont();
+            ImPlot::PopStyleColor(2);
+            ImPlot::PopStyleVar(2);
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
 
     widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();
