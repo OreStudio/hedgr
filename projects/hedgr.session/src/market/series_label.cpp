@@ -112,4 +112,47 @@ std::string series_asset_class(std::string_view oresmd_uri) {
     return upper(parse(oresmd_uri).asset);
 }
 
+std::string series_term(std::string_view oresmd_uri) {
+    const auto uri = parse(oresmd_uri);
+    auto term = parameter(uri, "tenor");
+    if (term.empty())
+        term = parameter(uri, "term");
+    return term;
+}
+
+std::string series_curve_key(std::string_view oresmd_uri) {
+    const auto uri = parse(oresmd_uri);
+    if (uri.asset.empty() || uri.name.empty())
+        return {};
+    if (parameter(uri, "tenor").empty() && parameter(uri, "term").empty())
+        return {};
+
+    std::string key = "oresmd://" + uri.asset + "/" + uri.name + "?";
+    bool first = true;
+    for (const auto& [name, value] : uri.parameters) {
+        if (name == "tenor" || name == "term")
+            continue;
+        if (!first)
+            key.push_back('&');
+        key += name + "=" + value;
+        first = false;
+    }
+    return key;
+}
+
+std::string series_curve_label(std::string_view oresmd_uri) {
+    const auto uri = parse(oresmd_uri);
+    if (uri.asset.empty() || uri.name.empty())
+        return std::string{oresmd_uri};
+
+    auto label = upper(uri.asset) + " " + uri.name;
+    const auto instrument = parameter(uri, "instrument");
+    if (!instrument.empty())
+        label += " " + upper(instrument);
+    const auto curve = parameter(uri, "curve_id");
+    if (!curve.empty())
+        label += " " + curve;
+    return label;
+}
+
 }

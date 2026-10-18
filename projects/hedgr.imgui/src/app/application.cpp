@@ -715,6 +715,7 @@ void application::render_loop(GLFWwindow* window) {
             .labellings = manager_.labellings(),
             .sessions = manager_.sessions(),
             .market = manager_.market(),
+            .term_structures = manager_.term_structures(),
             .currency_images = manager_.currency_images(),
             .images = manager_.images(),
             .failed_images = manager_.failed_images(),

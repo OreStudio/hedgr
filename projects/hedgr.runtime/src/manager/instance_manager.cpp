@@ -31,6 +31,7 @@
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
+#include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
@@ -698,6 +699,7 @@ void instance_manager::stop() noexcept {
     images_.clear();
     images_reading_.clear();
     failed_images_.clear();
+    term_structures_.clear();
     catalogues_reading_.clear();
     points_reading_.clear();
 
@@ -1525,6 +1527,9 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::load_image:
         do_load_image(cmd);
+        break;
+    case command::command_kind::load_term_structure:
+        do_load_term_structure(cmd);
         break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
@@ -3260,6 +3265,40 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
 }
 
+void instance_manager::do_load_term_structure(
+    const model::command::command& cmd) {
+    if (!database_ || cmd.curve_key.empty()
+        || cmd.member_ids.size() != cmd.member_tenors.size()
+        || cmd.member_ids.empty())
+        return;
+    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto instance = instances_.find(cmd.instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(cmd.account_id);
+    const auto token = std::string{sessions_.token(*session)};
+
+    worker::term_structure_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = cmd.instance_id;
+    job.session.account_id = cmd.account_id;
+    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
+    job.session.token = token;
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.key = cmd.curve_key;
+    job.label = cmd.curve_label;
+    job.member_ids = cmd.member_ids;
+    job.member_tenors = cmd.member_tenors;
+    term_structures_.begin(cmd.instance_id, cmd.account_id, cmd.curve_key,
+        cmd.curve_label);
+    worker::spawn_term_structure_read(pool_.context(), std::move(job), events_);
+}
+
 void instance_manager::do_load_image(const model::command::command& cmd) {
     if (!database_)
         return;
@@ -3880,6 +3919,16 @@ void instance_manager::apply(const event::event& ev) {
                 ev.series);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
+                ev.message);
+        }
+        break;
+    }
+    case event::event_kind::term_structure: {
+        if (ev.message.empty()) {
+            term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
+                ev.curve_label, ev.term_nodes, ev.observed_at_ns);
+        } else {
+            term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
                 ev.message);
         }
         break;

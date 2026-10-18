@@ -51,6 +51,27 @@ struct market_series_row final {
 
     /** @brief The party that owns the series. */
     std::string party_id;
+
+    /** @brief The tenor or term the series carries, or empty. */
+    std::string tenor;
+
+    /** @brief The curve identity the series belongs to, or empty. */
+    std::string curve_key;
+
+    /** @brief The curve's name, from the URI without its term. */
+    std::string curve_label;
+};
+
+/** @brief One node of a term structure: a tenor and the rate at it. */
+struct term_node final {
+    /** @brief The tenor or term label, as the series URI spells it. */
+    std::string tenor;
+
+    /** @brief The rate at that tenor. */
+    double value = 0.0;
+
+    /** @brief The observation time of the value. */
+    std::int64_t at_ns = 0;
 };
 
 /** @brief The three resolutions a live series keeps. */
@@ -113,6 +134,14 @@ struct market_point final {
 
     /** @brief The observed value, and the close of a bucket. */
     double value = 0.0;
+
+    /**
+     * @brief The term this observation holds for a composite curve, or empty.
+     *
+     * A leaf series carries its tenor in its identity; a composite curve's
+     * observations name the term in their own URI.
+     */
+    std::string term;
 
     /**
      * @brief The bucket's first value.

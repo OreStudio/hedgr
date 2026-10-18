@@ -28,6 +28,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
+#include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -180,6 +181,12 @@ public:
     [[nodiscard]] const model::state::tenant_image_map&
     currency_images() const noexcept {
         return currency_images_;
+    }
+
+    /** @brief The latest curve each browser session read. */
+    [[nodiscard]] const model::state::term_structure_table&
+    term_structures() const noexcept {
+        return term_structures_;
     }
 
     /** @brief The bounded cache of tenant images by identifier. */
@@ -379,6 +386,9 @@ private:
 
     /** @brief Reads one tenant image by identifier for a session. */
     void do_load_image(const model::command::command& cmd);
+
+    /** @brief Reads the latest curve named by a set of tenor series. */
+    void do_load_term_structure(const model::command::command& cmd);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
@@ -688,6 +698,9 @@ private:
 
     /** @brief The bounded cache of tenant images by identifier. */
     model::state::image_cache images_;
+
+    /** @brief The latest curve each browser session read. */
+    model::state::term_structure_table term_structures_;
 
     /** @brief Tenant-and-image whose read is out. */
     std::unordered_set<std::string> images_reading_;
