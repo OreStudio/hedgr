@@ -490,7 +490,9 @@ void render_chart(window_handle handle, const render_input& input,
                 low = std::min(low, point.value);
                 high = std::max(high, point.value);
             }
-            const double span = high - low > 0.0 ? high - low : 1.0;
+            const double span = high - low > 0.0
+                ? high - low
+                : std::max(std::abs(high) * 0.005, 1e-6);
             const double floor = low - span * 0.08;
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
@@ -499,9 +501,7 @@ void render_chart(window_handle handle, const render_input& input,
             const ImPlotAxisFlags x_flags = use_candles
                 ? ImPlotAxisFlags_None
                 : ImPlotAxisFlags_AutoFit;
-            const ImPlotAxisFlags y_flags = use_candles
-                ? ImPlotAxisFlags_Opposite
-                : ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite;
+            constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
@@ -524,6 +524,10 @@ void render_chart(window_handle handle, const render_input& input,
                 ImPlot::SetupAxisFormat(ImAxis_X1, format_time,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
+                if (!use_candles) {
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
+                        high + span * 0.08, ImPlotCond_Always);
+                }
 
                 if (use_candles) {
                     double candle_low = candle_points.front().low;

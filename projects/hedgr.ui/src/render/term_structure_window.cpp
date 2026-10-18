@@ -199,12 +199,20 @@ void render_term_structure(window_handle handle, const render_input& input,
             xs.reserve(nodes.size());
             ys.reserve(nodes.size());
             labels.reserve(nodes.size());
+            double low = nodes.front().value;
+            double high = nodes.front().value;
             for (std::size_t i = 0; i < nodes.size(); ++i) {
                 xs.push_back(static_cast<double>(i));
                 ys.push_back(nodes[i].value);
                 labels.push_back(nodes[i].tenor.empty()
                         ? "spot" : nodes[i].tenor.c_str());
+                low = std::min(low, nodes[i].value);
+                high = std::max(high, nodes[i].value);
             }
+            const double span = high - low > 0.0
+                ? high - low
+                : std::max(std::abs(high) * 0.005, 1e-6);
+            const double pad = span * 0.08;
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
@@ -220,11 +228,13 @@ void render_term_structure(window_handle handle, const render_input& input,
             if (ImPlot::BeginPlot("##curve", ImVec2(-1.0f, -1.0f),
                     plot_flags)) {
                 ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
-                    ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
+                    ImPlotAxisFlags_Opposite);
                 ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
                     static_cast<int>(xs.size()), labels.data());
-                ImPlot::SetupAxisLimits(ImAxis_X1, -0.5,
-                    static_cast<double>(xs.size()) - 0.5, ImGuiCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_X1, -0.75,
+                    static_cast<double>(xs.size()) - 0.25, ImGuiCond_Always);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, low - pad, high + pad,
+                    ImGuiCond_Always);
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
                 const ImVec4 line_colour = ImPlot::GetColormapColor(0);
                 fill_gradient_under_curve(xs.data(), ys.data(),
