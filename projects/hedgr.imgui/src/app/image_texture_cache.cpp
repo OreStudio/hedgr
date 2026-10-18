@@ -104,7 +104,8 @@ void image_texture_cache::end_frame() {
     auto& by_recency = entries_.get<1>();
     while (bytes_ > max_bytes_ && !by_recency.empty()) {
         auto victim = by_recency.end();
-        for (auto it = by_recency.begin(); it != by_recency.end(); ++it) {
+        for (auto it = by_recency.end(); it != by_recency.begin();) {
+            --it;
             if (it->used_frame != frame_) {
                 victim = it;
                 break;
