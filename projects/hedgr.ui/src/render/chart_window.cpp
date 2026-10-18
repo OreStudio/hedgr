@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/render/ema.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -357,11 +358,13 @@ void render_chart(window_handle handle, const render_input& input,
                         ImGui::PushStyleColor(ImGuiCol_Button,
                             ImGui::ColorConvertU32ToFloat4(
                                 theme::rail_selection_bar));
+                        ImGui::PushStyleColor(ImGuiCol_Text,
+                            ImVec4(0.05f, 0.08f, 0.06f, 1.0f));
                     }
                     if (ImGui::SmallButton(span.label))
                         state.market_chart_span_ns = span.ns;
                     if (selected)
-                        ImGui::PopStyleColor();
+                        ImGui::PopStyleColor(2);
                     if (span.ns == 0) {
                         ImGui::SetItemTooltip("%s", "Plot the whole series");
                     } else {
@@ -375,21 +378,39 @@ void render_chart(window_handle handle, const render_input& input,
             if (candles_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    ImVec4(0.05f, 0.08f, 0.06f, 1.0f));
             }
             if (ImGui::SmallButton("Candles"))
                 state.market_candles = true;
             if (candles_selected)
-                ImGui::PopStyleColor();
+                ImGui::PopStyleColor(2);
             ImGui::SameLine();
             const bool line_selected = !state.market_candles;
             if (line_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    ImVec4(0.05f, 0.08f, 0.06f, 1.0f));
             }
             if (ImGui::SmallButton("Line"))
                 state.market_candles = false;
             if (line_selected)
-                ImGui::PopStyleColor();
+                ImGui::PopStyleColor(2);
+            ImGui::SameLine();
+            const bool ema_selected = state.market_ema;
+            if (ema_selected) {
+                ImGui::PushStyleColor(ImGuiCol_Button,
+                    ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
+                ImGui::PushStyleColor(ImGuiCol_Text,
+                    ImVec4(0.05f, 0.08f, 0.06f, 1.0f));
+            }
+            if (ImGui::SmallButton("EMA 20"))
+                state.market_ema = !state.market_ema;
+            if (ema_selected)
+                ImGui::PopStyleColor(2);
+            ImGui::SetItemTooltip("%s",
+                "Overlay the exponential moving average of the visible window");
             ImGui::NewLine();
 
             /*
@@ -494,6 +515,10 @@ void render_chart(window_handle handle, const render_input& input,
                 ? high - low
                 : std::max(std::abs(high) * 0.005, 1e-6);
             const double floor = low - span * 0.08;
+
+            std::vector<double> ema;
+            if (state.market_ema && ys.size() > 1)
+                ema = exponential_moving_average(ys);
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
@@ -612,6 +637,16 @@ void render_chart(window_handle handle, const render_input& input,
                     line.LineWeight = 1.5f;
                     ImPlot::PlotLine("##line", xs.data(), ys.data(),
                         static_cast<int>(xs.size()), line);
+                }
+
+                if (!ema.empty() && ema.size() == xs.size()) {
+                    ImPlotSpec average;
+                    average.LineColor =
+                        ImGui::ColorConvertU32ToFloat4(
+                            theme::moving_average_colour);
+                    average.LineWeight = 1.5f;
+                    ImPlot::PlotLine("##ema", xs.data(), ema.data(),
+                        static_cast<int>(ema.size()), average);
                 }
 
                 ImPlot::TagY(last, line_colour, "%s",

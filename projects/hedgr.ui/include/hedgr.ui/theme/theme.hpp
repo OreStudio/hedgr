@@ -123,6 +123,9 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
  */
 inline constexpr ImU32 curve_latest_colour = IM_COL32(64, 156, 255, 255);
 
+/** @brief The moving-average overlay, distinct from both price directions. */
+inline constexpr ImU32 moving_average_colour = IM_COL32(240, 180, 80, 255);
+
 /**
  * @brief The colour of a field whose edited value differs from the stored one.
  *
