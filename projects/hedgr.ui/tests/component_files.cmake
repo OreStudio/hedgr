@@ -10,6 +10,8 @@
 set(files
     "capture_tests.cpp"
     "controls_tests.cpp"
+    "data_health_tests.cpp"
+    "ema_tests.cpp"
     "flags_tests.cpp"
     "render_tests.cpp"
     "shortcut_bar_tests.cpp"

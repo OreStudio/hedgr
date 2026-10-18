@@ -318,6 +318,9 @@ struct window_ui_state final {
     /** @brief Whether a chart draws candles rather than a line. */
     bool market_candles = false;
 
+    /** @brief Whether a chart overlays its exponential moving average. */
+    bool market_ema = false;
+
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
     std::string market_selected_series_label;

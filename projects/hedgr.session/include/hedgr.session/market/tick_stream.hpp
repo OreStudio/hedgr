@@ -34,6 +34,17 @@
 
 namespace hedgr::session::market {
 
+/**
+ * @brief The URI a feed publishes a series' ticks under.
+ *
+ * The tick subject names the datum the feed observed, which is a quote, while
+ * the catalogue names the series. Subscribing to the series URI therefore
+ * listens to a subject nothing publishes on. The one difference is the type
+ * field.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::string
+tick_uri_for_series(std::string_view series_uri);
+
 /** @brief One observation as the live tick stream carries it. */
 struct tick final {
     /** @brief The observation time, nanoseconds since the Unix epoch. */

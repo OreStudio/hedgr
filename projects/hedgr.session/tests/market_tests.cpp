@@ -80,6 +80,14 @@ TEST_CASE("a series asset class is the URI's own word, upper-cased",
     REQUIRE(market::series_asset_class("not-a-uri").empty());
 }
 
+TEST_CASE("a series tick subscribes on its quote URI", "[tick]") {
+    using hedgr::session::market::tick_uri_for_series;
+    CHECK(tick_uri_for_series(
+              "oresmd://fx/AUD?type=series&instrument=fx_spot&quote=rate&ccy=USD")
+        == "oresmd://fx/AUD?type=quote&instrument=fx_spot&quote=rate&ccy=USD");
+    CHECK(tick_uri_for_series("not-a-uri") == "not-a-uri");
+}
+
 TEST_CASE("a tick payload decodes to its time and value", "[tick]") {
     using ores::marketdata::messaging::market_tick;
     using std::chrono::seconds;

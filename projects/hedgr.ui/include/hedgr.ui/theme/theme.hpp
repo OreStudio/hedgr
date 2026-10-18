@@ -116,12 +116,21 @@ HEDGR_UI_EXPORT void apply_theme();
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
+/** @brief The live data-health badge. */
+inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
+
+/** @brief Text on the accent fill of a selected toggle, dark enough to read. */
+inline const ImVec4 selection_text_colour(0.05f, 0.08f, 0.06f, 1.0f);
+
 /*
  * Term-structure history. The newest curve is the accent green the web
  * simulator uses; earlier curves are a grey-blue that fades with age, so a
  * reader can tell the live curve from the ones behind it at a glance.
  */
 inline constexpr ImU32 curve_latest_colour = IM_COL32(64, 156, 255, 255);
+
+/** @brief The moving-average overlay, distinct from both price directions. */
+inline constexpr ImU32 moving_average_colour = IM_COL32(240, 180, 80, 255);
 
 /**
  * @brief The colour of a field whose edited value differs from the stored one.

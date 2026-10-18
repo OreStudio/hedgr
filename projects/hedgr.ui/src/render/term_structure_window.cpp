@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -184,21 +185,18 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::PopFont();
         ImGui::SameLine();
         ImGui::TextDisabled("\u00b7 %zu terms", newest_curve.nodes.size());
-        const auto age_ns = input.now_ns - newest_curve.at_ns;
-        const auto age_s = age_ns > 0
-            ? static_cast<double>(age_ns) / 1.0e9 : 0.0;
-        const ImU32 colour = age_s > 10.0
-            ? theme::readiness_colour(domain::readiness::bootstrapping)
-            : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        const auto age_ns = assess_data_health(
+            newest_curve.at_ns, input.now_ns).age_ns;
         ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7");
-        ImGui::SameLine();
-        if (age_s < 3.0) {
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-                "live");
+        if (age_ns > 15 * 60'000'000'000LL) {
+            ImGui::TextColored(
+                ImGui::ColorConvertU32ToFloat4(
+                    theme::readiness_colour(
+                        domain::readiness::bootstrapping)),
+                "\u00b7 as of %s ago", age_text(age_ns).c_str());
         } else {
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-                "stale %.0f s", age_s);
+            ImGui::TextDisabled("\u00b7 as of %s ago",
+                age_text(age_ns).c_str());
         }
     } else if (curve != nullptr) {
         ImGui::TextDisabled("Reading the curve...");

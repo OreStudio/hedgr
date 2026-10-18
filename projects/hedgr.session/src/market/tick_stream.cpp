@@ -42,6 +42,21 @@ namespace {
 
 namespace hedgr::session::market {
 
+std::string tick_uri_for_series(std::string_view series_uri) {
+    /*
+     * Only the type changes. A series URI already carries every coordinate its
+     * quote carries, so a forward keeps its term; a composite series that names
+     * no coordinate cannot be watched as one exact quote and is left as it is.
+     */
+    std::string uri{series_uri};
+    constexpr std::string_view series_type = "type=series";
+    constexpr std::string_view quote_type = "type=quote";
+    const auto position = uri.find(series_type);
+    if (position != std::string::npos)
+        uri.replace(position, series_type.size(), quote_type);
+    return uri;
+}
+
 std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
     const auto decoded =
         ores::nats::default_wire_codec()
@@ -130,7 +145,7 @@ bool market_tick_stream::subscribe(std::string series_id,
 
     try {
         const auto subject = ores::marketdata::domain::market_tick_subject(
-            tenant_id_, party_id_, oresmd_uri);
+            tenant_id_, party_id_, tick_uri_for_series(oresmd_uri));
         auto warned = std::make_shared<std::atomic<bool>>(false);
         auto subscription = client_.subscribe(subject,
             [handler = std::move(handler), warned,
