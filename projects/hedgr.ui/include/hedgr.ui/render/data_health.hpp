@@ -40,8 +40,8 @@ enum class data_health : std::uint8_t {
 
 /** @brief The ages at which a feed moves from live to delayed to stale. */
 struct health_thresholds final {
-    std::int64_t live_ns = 5'000'000'000;
-    std::int64_t delayed_ns = 30'000'000'000;
+    std::int64_t live_ns;
+    std::int64_t delayed_ns;
 };
 
 /** @brief The thresholds for tick-driven FX series. */

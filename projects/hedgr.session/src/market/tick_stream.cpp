@@ -44,9 +44,11 @@ namespace hedgr::session::market {
 
 std::string tick_uri_for_series(std::string_view series_uri) {
     std::string uri{series_uri};
-    const auto type = uri.find("type=series");
-    if (type != std::string::npos)
-        uri.replace(type, std::string_view{"type=series"}.size(), "type=quote");
+    constexpr std::string_view series_type = "type=series";
+    constexpr std::string_view quote_type = "type=quote";
+    const auto position = uri.find(series_type);
+    if (position != std::string::npos)
+        uri.replace(position, series_type.size(), quote_type);
     return uri;
 }
 

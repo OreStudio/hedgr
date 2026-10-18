@@ -20,8 +20,8 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
-#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -185,11 +185,11 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::PopFont();
         ImGui::SameLine();
         ImGui::TextDisabled("\u00b7 %zu terms", newest_curve.nodes.size());
-        const auto age_ns = input.now_ns > newest_curve.at_ns
-            ? input.now_ns - newest_curve.at_ns : 0;
+        const auto age_ns = assess_data_health(
+            newest_curve.at_ns, input.now_ns).age_ns;
         ImGui::SameLine();
         ImGui::TextDisabled("\u00b7 as of %s ago",
-            hedgr::ui::render::age_text(age_ns).c_str());
+            age_text(age_ns).c_str());
     } else if (curve != nullptr) {
         ImGui::TextDisabled("Reading the curve...");
     }

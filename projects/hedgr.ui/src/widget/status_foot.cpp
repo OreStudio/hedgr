@@ -31,26 +31,12 @@ namespace {
 /**
  * @brief The status line's own metrics.
  *
- * Two text rows, measured from the current font rather than fixed, so a theme
- * that installs a larger face does not clip the message. Two and not one
- * because the messages are sentences and the window can be made narrow: a
- * single row would either clip the end of the sentence or be elided, and a fact
- * that is worth announcing is worth announcing in full. The second row costs
- * nothing when the sentence fits on one.
+ * One compact row, measured from the current font. The foot is chrome and must
+ * not eat the plot; a long message is clipped rather than given a second row.
  */
 constexpr int status_row_lines = 1;
 
-/**
- * @brief The rows an error gets, which is one more than a remark gets.
- *
- * The runtime's failures are whole sentences that name the record and the
- * reason -- "cannot remove folder instance-root: it is the root of the
- * instances tree" -- and the longest of them, the store's schema refusal,
- * names a path and two version numbers on top of that. Two rows elide it on a
- * narrow window, and an error that is elided is an error that will be read as
- * whatever fits. The extra row is reserved only while an error is on the bar,
- * so a window showing a remark is exactly the height it always was.
- */
+/** @brief An error gets the same single row; its glyph and colour carry it. */
 constexpr int status_error_row_lines = 1;
 
 /**
@@ -130,14 +116,6 @@ float status_foot_height(const status_bar& status) {
     const int rows = status.severity() == status_severity::error
         ? status_error_row_lines
         : status_row_lines;
-    /*
-     * The air above and below the rows is the status line child's own padding,
-     * counted here because the child is created with this height. A child
-     * without a border is given no padding unless it asks for it, and the child
-     * below asks, so the two have to be the same number or the text is clipped.
-     * Taking it from the style is what keeps the message clear of the separator
-     * the foot draws above it when the font changes size.
-     */
     /* One text row and a hair of air: the foot is chrome, not content. */
     return ImGui::GetTextLineHeight() * static_cast<float>(rows) + 2.0f;
 }

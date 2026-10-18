@@ -119,6 +119,9 @@ inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 /** @brief The live data-health badge. */
 inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
 
+/** @brief Text on the accent fill of a selected toggle, dark enough to read. */
+inline const ImVec4 selection_text_colour(0.05f, 0.08f, 0.06f, 1.0f);
+
 /*
  * Term-structure history. The newest curve is the accent green the web
  * simulator uses; earlier curves are a grey-blue that fades with age, so a

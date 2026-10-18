@@ -26,7 +26,6 @@ using hedgr::ui::render::data_health;
 
 TEST_CASE("data health moves from live to delayed to stale", "[health]") {
     constexpr auto now = 100s;
-    constexpr auto s = std::chrono::seconds{1};
     CHECK(assess_data_health((now - 1s).count() * 1'000'000'000,
               now.count() * 1'000'000'000)
               .state == data_health::live);
