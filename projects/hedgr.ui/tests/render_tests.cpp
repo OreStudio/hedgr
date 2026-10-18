@@ -185,7 +185,8 @@ using hedgr::model::state::folder_table;
 using hedgr::model::state::instance_table;
 using hedgr::model::state::label_table;
 using hedgr::model::state::labelling_table;
-using hedgr::model::state::flag_table;
+using hedgr::model::state::image_cache;
+using hedgr::model::state::tenant_image_map;
 using hedgr::model::state::market_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
@@ -204,12 +205,15 @@ struct empty_state final {
     labelling_table labellings;
     session_table sessions;
     market_table market;
-    flag_table flags;
+    tenant_image_map currency_images;
+    image_cache images;
     probe_table probes;
     password_policy_state password_policy;
     window_table windows;
     shortcut_table shortcuts;
     command_queue commands;
+    std::unordered_set<std::string> failed_images;
+    std::unordered_set<std::string> pending_images;
 };
 
 /** @brief A render_input over empty tables, carrying @p lock. */
@@ -222,7 +226,11 @@ render_input input_with(empty_state& state, store_lock lock) {
         .labellings = state.labellings,
         .sessions = state.sessions,
         .market = state.market,
-        .flags = state.flags,
+        .currency_images = state.currency_images,
+        .images = state.images,
+        .failed_images = state.failed_images,
+        .pending_images = state.pending_images,
+        .textures = nullptr,
         .probes = state.probes,
         .password_policy = state.password_policy,
         .windows = state.windows,

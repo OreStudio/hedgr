@@ -148,6 +148,11 @@ identity_text(const identity_bar_state& state);
 HEDGR_UI_EXPORT void request_flags(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view label);
 
+/** @brief The uploaded texture for a currency's flag, or zero. */
+[[nodiscard]] HEDGR_UI_EXPORT ImTextureID
+image_texture(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view currency);
+
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
 

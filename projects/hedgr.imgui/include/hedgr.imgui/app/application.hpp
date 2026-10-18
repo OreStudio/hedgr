@@ -21,6 +21,7 @@
 #define HEDGR_IMGUI_APP_APPLICATION_HPP
 
 #include "hedgr.imgui/config/options.hpp"
+#include "hedgr.imgui/app/image_texture_cache.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include <string_view>
 #include <unordered_map>
@@ -77,7 +78,7 @@ private:
     void shutdown_graphics(GLFWwindow* window);
     void load_background_texture();
     void load_instance_icon_textures();
-    void sync_flag_textures();
+    void sync_image_textures();
     unsigned int upload_rgba(const unsigned char* data, int width, int height);
     void release_instance_icon_textures();
     void load_splash_texture();
@@ -112,7 +113,7 @@ private:
      * as a lookup, so no image is ever decoded on the path that draws a frame.
      */
     ui::render::instance_icon_textures instance_icons_;
-    std::unordered_map<std::string, unsigned int> flag_textures_;
+    image_texture_cache textures_;
     /*
      * The splash artwork, decoded and uploaded once like the background. The
      * timing is a value so the policy lives in hedgr.ui and the application

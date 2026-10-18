@@ -234,7 +234,8 @@ struct candle_plan final {
 }
 
 /** @brief The series as flags and its name, the header's left end. */
-void draw_series_name(std::string_view label) {
+void draw_series_name(std::string_view label, ImTextureID base_texture,
+    ImTextureID quote_texture) {
     const auto pair = widget::currencies_of(label);
     constexpr float flag_scale = 2.0f;
     const float flag_w = widget::flag_width * flag_scale;
@@ -246,11 +247,13 @@ void draw_series_name(std::string_view label) {
     auto* draw = ImGui::GetWindowDrawList();
     float x = origin.x;
     if (!pair.base.empty()) {
-        widget::draw_flag(draw, ImVec2(x, origin.y), pair.base, flag_scale);
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.base, flag_scale,
+            base_texture);
         x += flag_w + 3.0f;
     }
     if (!pair.quote.empty()) {
-        widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote, flag_scale);
+        widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote, flag_scale,
+            quote_texture);
         x += flag_w + 3.0f;
     }
     if (x == origin.x) {
@@ -308,7 +311,10 @@ void render_chart(window_handle handle, const render_input& input,
             .window_id = std::string{input.windows.id(handle)}});
     }
     ImGui::SameLine();
-    draw_series_name(chart->label);
+    const auto pair = widget::currencies_of(chart->label);
+    draw_series_name(chart->label,
+        session ? image_texture(input, *session, pair.base) : 0,
+        session ? image_texture(input, *session, pair.quote) : 0);
 
     if (snapshot != nullptr) {
         const auto& points =

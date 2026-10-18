@@ -22,18 +22,10 @@
 
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
-#include <functional>
 #include <string>
 #include <string_view>
 
 namespace hedgr::ui::widget {
-
-/** @brief Looks up a currency's uploaded flag texture, or zero when none. */
-using flag_texture_resolver = std::function<ImTextureID(std::string_view)>;
-
-/** @brief Installs the texture lookup the drawing reads, once per process. */
-HEDGR_UI_EXPORT void
-set_flag_texture_resolver(flag_texture_resolver resolver);
 
 /** @brief The width of a flag at its natural height. */
 inline constexpr float flag_width = 16.0f;
@@ -77,7 +69,7 @@ currencies_of(std::string_view label);
  * asks for twice it.
  */
 HEDGR_UI_EXPORT void draw_flag(ImDrawList* draw, ImVec2 top_left,
-    std::string_view currency, float scale = 1.0f);
+    std::string_view currency, float scale = 1.0f, ImTextureID texture = 0);
 
 }
 

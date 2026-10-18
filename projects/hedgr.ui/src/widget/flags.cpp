@@ -28,16 +28,6 @@ namespace hedgr::ui::widget {
 
 namespace {
 
-flag_texture_resolver texture_resolver;
-
-}
-
-void set_flag_texture_resolver(flag_texture_resolver resolver) {
-    texture_resolver = std::move(resolver);
-}
-
-namespace {
-
 constexpr ImU32 red = IM_COL32(200, 16, 46, 255);
 constexpr ImU32 white = IM_COL32(255, 255, 255, 255);
 constexpr ImU32 blue = IM_COL32(0, 40, 104, 255);
@@ -87,14 +77,12 @@ currency_pair currencies_of(std::string_view label) {
 }
 
 void draw_flag(ImDrawList* draw, ImVec2 p, std::string_view currency,
-    float scale) {
+    float scale, ImTextureID texture) {
     const float width = flag_width * scale;
     const float height = flag_height * scale;
-    if (texture_resolver) {
-        if (const auto texture = texture_resolver(currency); texture != 0) {
-            draw->AddImage(texture, p, ImVec2(p.x + width, p.y + height));
-            return;
-        }
+    if (texture != 0) {
+        draw->AddImage(texture, p, ImVec2(p.x + width, p.y + height));
+        return;
     }
     /*
      * The artwork is written in a sixteen by eleven unit space and scaled to
