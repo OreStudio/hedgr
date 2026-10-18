@@ -227,14 +227,14 @@ struct window_ui_state final {
     /** @brief Whether the CRM window has taken its scope from its state. */
     bool crm_initialised = false;
 
-    /** @brief Whether the user deliberately chose All CRMs. */
-    bool crm_all_chosen = false;
-
-    /** @brief Every CRM name seen since the window opened. */
-    std::set<std::string> crm_known_names;
-
     /** @brief Every currency seen since the party was chosen. */
     std::set<std::string> crm_currencies;
+
+    /** @brief Whether the CRM picker popup is open. */
+    bool crm_picker_open = false;
+
+    /** @brief Whether this opening of the picker has asked for the names. */
+    bool crm_picker_requested = false;
 
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;

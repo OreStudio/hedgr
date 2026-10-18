@@ -40,7 +40,7 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
                     session::transport::session_client& client,
                     model::event::event& answer) {
         const auto started = std::chrono::steady_clock::now();
-        const auto rates = client.crm_rates(party, "", reciprocal);
+        const auto rates = client.crm_rates(party, crm_name, reciprocal);
         answer.crm_latency_ns =
             std::chrono::duration_cast<std::chrono::nanoseconds>(
                 std::chrono::steady_clock::now() - started)

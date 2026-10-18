@@ -131,8 +131,12 @@ std::string window_title(domain::window_kind kind,
         return "Command centre";
     case domain::window_kind::series_browser:
         return "Market data";
-    case domain::window_kind::crm_matrix:
+    case domain::window_kind::crm_matrix: {
+        if (const auto* crm = std::get_if<domain::crm_matrix_state>(&state))
+            if (!crm->crm_name.empty())
+                return std::format("Cross rates \u00b7 {}", crm->crm_name);
         return "Cross rates";
+    }
     case domain::window_kind::term_structure: {
         if (const auto* terms =
                 std::get_if<domain::term_structure_state>(&state)) {

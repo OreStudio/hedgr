@@ -69,11 +69,21 @@ public:
         std::string_view account_id, std::string_view party_id,
         std::string_view crm_name, bool reciprocal) const;
 
+    /** @brief Records the enabled CRM names a party has configured. */
+    void set_names(std::string_view instance_id, std::string_view account_id,
+        std::string_view party_id, std::vector<std::string> names);
+
+    /** @brief The CRM names last read for a session and party, or nullptr. */
+    [[nodiscard]] const std::vector<std::string>* names(
+        std::string_view instance_id, std::string_view account_id,
+        std::string_view party_id) const;
+
     /** @brief Drops every batch, for a session teardown. */
     void clear();
 
 private:
     std::unordered_map<std::string, crm_snapshot> snapshots_;
+    std::unordered_map<std::string, std::vector<std::string>> names_;
 };
 
 }

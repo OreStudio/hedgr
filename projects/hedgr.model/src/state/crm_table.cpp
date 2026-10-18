@@ -87,8 +87,24 @@ const crm_snapshot* crm_table::get(std::string_view instance_id,
     return found == snapshots_.end() ? nullptr : &found->second;
 }
 
+void crm_table::set_names(std::string_view instance_id,
+    std::string_view account_id, std::string_view party_id,
+    std::vector<std::string> names) {
+    names_[key_of(instance_id, account_id, party_id, "names", false)]
+        = std::move(names);
+}
+
+const std::vector<std::string>* crm_table::names(
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view party_id) const {
+    const auto found = names_.find(key_of(instance_id, account_id, party_id,
+        "names", false));
+    return found == names_.end() ? nullptr : &found->second;
+}
+
 void crm_table::clear() {
     snapshots_.clear();
+    names_.clear();
 }
 
 }

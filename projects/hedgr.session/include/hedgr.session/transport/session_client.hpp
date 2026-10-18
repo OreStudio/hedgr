@@ -494,6 +494,10 @@ public:
         double tick_size = 1.0;
     };
 
+    /** @brief The enabled CRM names a party has configured. */
+    [[nodiscard]] result<std::vector<std::string>> crm_names(
+        std::string_view party_id) const;
+
     /** @brief Every pair convention the deployment publishes. */
     [[nodiscard]] result<std::vector<pair_convention>>
     currency_pair_conventions() const;

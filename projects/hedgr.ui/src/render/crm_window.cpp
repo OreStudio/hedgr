@@ -41,32 +41,6 @@ using hedgr::model::state::window_handle;
 
 namespace {
 
-struct crm_party final {
-    std::string id;
-    std::string name;
-};
-
-[[nodiscard]] std::vector<crm_party> parse_parties(std::string_view text) {
-    std::vector<crm_party> result;
-    while (!text.empty()) {
-        const auto end = text.find('\x1e');
-        const auto record = text.substr(0, end);
-        const auto unit = record.find('\x1f');
-        if (unit != std::string_view::npos)
-            result.push_back(crm_party{
-                .id = std::string{record.substr(0, unit)},
-                .name = std::string{record.substr(unit + 1)}});
-        if (end == std::string_view::npos)
-            break;
-        text.remove_prefix(end + 1);
-    }
-    return result;
-}
-
-[[nodiscard]] bool matches(const std::string& text, const std::string& filter) {
-    return filter.empty() || text.find(filter) != std::string::npos;
-}
-
 [[nodiscard]] std::string pair_text(const std::string& base,
     const std::string& quote) {
     return base + "/" + quote;
@@ -110,10 +84,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     const auto instance_id = input.sessions.instance_id(*session);
     const auto account_id = input.sessions.account_id(*session);
     const std::string session_party{input.sessions.party_id(*session)};
-    auto parties = parse_parties(input.sessions.parties(*session));
-    if (parties.empty() && !session_party.empty())
-        parties.push_back(crm_party{.id = session_party,
-            .name = std::string{input.sessions.party_name(*session)}});
     if (!state.crm_initialised) {
         state.crm_party_id = !crm->party_id.empty()
             ? crm->party_id : session_party;
@@ -143,93 +113,19 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         input.commands.push(std::move(request));
     };
 
-    /*
-     * The controls sit in two rows: the scope first, then the pair filter and
-     * the refresh. A trading matrix is read left to right, so the scope is
-     * where the eye lands before the numbers.
-     */
-    ImGui::TextUnformatted("Party");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(260.0f);
-    std::string party_name = state.crm_party_id;
-    for (const auto& party : parties)
-        if (party.id == state.crm_party_id)
-            party_name = party.name;
-    if (ImGui::BeginCombo("##crm-party", party_name.c_str())) {
-        for (const auto& party : parties) {
-            const bool chosen = party.id == state.crm_party_id;
-            if (ImGui::Selectable(party.name.c_str(), chosen)) {
-                state.crm_party_id = party.id;
-                state.crm_name.clear();
-                state.crm_all_chosen = false;
-                state.crm_known_names.clear();
-                state.crm_currencies.clear();
-                configure_scope();
-            }
-            if (chosen)
-                ImGui::SetItemDefaultFocus();
-        }
-        ImGui::EndCombo();
-    }
-    ImGui::SameLine();
-
-    if (snapshot != nullptr)
-        for (const auto& cell : snapshot->cells)
-            state.crm_known_names.insert(cell.crm_name);
-    const auto& crm_names = state.crm_known_names;
-
-    /*
-     * A matrix opens on one CRM, because "all" mixes the same pair from several
-     * providers into one cell. The first configured name is the default; the
-     * All choice is explicit and survives until the user picks a name.
-     */
-    if (state.crm_name.empty() && !state.crm_all_chosen
-        && !crm_names.empty()) {
-        state.crm_name = crm_names.contains("majors")
-            ? "majors" : *crm_names.begin();
-        state.crm_currencies.clear();
-        configure_scope();
-    }
-
     ImGui::TextUnformatted("CRM");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(200.0f);
-    const std::string crm_preview = state.crm_name.empty()
-        ? "All CRMs" : state.crm_name;
-    if (ImGui::BeginCombo("##crm-name", crm_preview.c_str())) {
-        if (ImGui::Selectable("All CRMs", state.crm_name.empty())) {
-            state.crm_name.clear();
-            state.crm_all_chosen = true;
-            state.crm_currencies.clear();
-            configure_scope();
-        }
-        for (const auto& name : crm_names) {
-            const bool chosen = name == state.crm_name;
-            if (ImGui::Selectable(name.c_str(), chosen)) {
-                state.crm_name = name;
-                state.crm_all_chosen = false;
-                state.crm_currencies.clear();
-                configure_scope();
-            }
-            if (chosen)
-                ImGui::SetItemDefaultFocus();
-        }
-        ImGui::EndCombo();
-    }
-    ImGui::SameLine();
-
+    ImGui::TextUnformatted(state.crm_name.empty()
+            ? "No CRM" : state.crm_name.c_str());
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (ImGui::Checkbox("Reciprocal", &state.crm_reciprocal))
         configure_scope();
     ImGui::SetItemTooltip(
         "Fill a configured pair with 1/reverse when only the reverse has a "
         "direct quote.");
-    ImGui::NewLine();
+    ImGui::SameLine();
     if (ImGui::Button("Refresh"))
         request_refresh();
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(180.0f);
-    ImGui::InputTextWithHint("##crm-filter", "Filter currencies",
-        state.filter.data(), state.filter.size());
 
     /*
      * The window polls only while it is drawn. The server computes the batch
@@ -243,7 +139,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_next_poll = now + 5.0;
     }
 
-    const std::string filter{state.filter.data()};
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (snapshot == nullptr || snapshot->cells.empty()) {
         if (snapshot != nullptr && !snapshot->error.empty())
@@ -259,10 +154,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         std::set<std::pair<std::string, std::string>> stale;
         std::set<std::pair<std::string, std::string>> unavailable;
         for (const auto& cell : snapshot->cells) {
-            if (!state.crm_name.empty() && cell.crm_name != state.crm_name)
-                continue;
-            if (!matches(cell.base_currency_code, filter)
-                && !matches(cell.quote_currency_code, filter))
+            if (cell.crm_name != state.crm_name)
                 continue;
             const auto pair = std::make_pair(cell.base_currency_code,
                 cell.quote_currency_code);
@@ -293,10 +185,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     std::map<std::pair<std::string, std::string>,
         const model::domain::crm_cell*> cells;
     for (const auto& cell : snapshot->cells) {
-        if (!state.crm_name.empty() && cell.crm_name != state.crm_name)
-            continue;
-        if (!matches(cell.base_currency_code, filter)
-            && !matches(cell.quote_currency_code, filter))
+        if (cell.crm_name != state.crm_name)
             continue;
         state.crm_currencies.insert(cell.base_currency_code);
         state.crm_currencies.insert(cell.quote_currency_code);
@@ -311,8 +200,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     std::set<std::string> currencies;
     for (const auto& currency : state.crm_currencies)
-        if (matches(currency, filter))
-            currencies.insert(currency);
+        currencies.insert(currency);
     if (currencies.size() < 2) {
         ImGui::TextDisabled("No pairs match the filter.");
         widget::draw_status_foot(status, input.now_ns, foot);
@@ -373,8 +261,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          * not for the data.
          */
         const float cell_line = ImGui::GetTextLineHeight();
-        const float row_height = cell_line
-                * (state.crm_name.empty() ? 3.0f : 2.0f)
+        const float row_height = cell_line * 2.0f
             + ImGui::GetStyle().CellPadding.y * 2.0f;
         for (const auto& base : currencies) {
             ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
@@ -488,7 +375,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                     cell.crm_name.c_str(), cell.status.c_str(),
                     cell.reciprocal ? "reciprocal" : "direct",
                     cell.as_of.c_str());
-                if (cell.delta_pct && std::abs(delta) >= 0.005) {
+                if (cell.delta_pct) {
                     char delta_text[32];
                     std::snprintf(delta_text, sizeof(delta_text), "%+.2f%%",
                         delta);
@@ -496,20 +383,19 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         = ImGui::CalcTextSize(delta_text).x;
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX()
                         + ImGui::GetContentRegionAvail().x - delta_width);
-                    ImGui::TextColored(
-                        delta < 0.0
-                            ? ImGui::ColorConvertU32ToFloat4(
-                                  theme::failure_colour)
-                            : ImGui::ColorConvertU32ToFloat4(
-                                  theme::health_live_colour),
-                        "%s", delta_text);
-                }
-                if (state.crm_name.empty()) {
-                    const float name_width
-                        = ImGui::CalcTextSize(cell.crm_name.c_str()).x;
-                    ImGui::SetCursorPosX(ImGui::GetCursorPosX()
-                        + ImGui::GetContentRegionAvail().x - name_width);
-                    ImGui::TextDisabled("%s", cell.crm_name.c_str());
+                    if (std::abs(delta) < 0.0001) {
+                        ImGui::TextDisabled("0.00%%");
+                    } else {
+                        ImGui::TextColored(
+                            delta < 0.0
+                                ? ImGui::ColorConvertU32ToFloat4(
+                                      theme::failure_colour)
+                                : ImGui::ColorConvertU32ToFloat4(
+                                      theme::health_live_colour),
+                            "%s", delta_text);
+                    }
+                } else {
+                    ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
                 }
             }
         }

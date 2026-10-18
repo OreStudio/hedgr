@@ -112,6 +112,8 @@ enum class command_kind : std::uint8_t {
     load_term_structure = 25,
     /** @brief Change a CRM window's party, CRM or reciprocal scope. */
     configure_crm = 26,
+    /** @brief Read the enabled CRM names for a party. */
+    load_crm_names = 27,
 };
 
 /** @brief The canonical text of a command kind, for logs. */

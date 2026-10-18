@@ -55,6 +55,8 @@ std::string_view to_string(event_kind value) noexcept {
         return "term_structure";
     case event_kind::crm_rates:
         return "crm_rates";
+    case event_kind::crm_names:
+        return "crm_names";
     }
     return "unknown";
 }

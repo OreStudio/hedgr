@@ -352,6 +352,8 @@ private:
 
     void do_configure_crm(const model::command::command& cmd);
 
+    void do_load_crm_names(const model::command::command& cmd);
+
     /**
      * @brief Asks for one command centre's deployment read.
      *
@@ -403,6 +405,9 @@ private:
 
     /** @brief Reads the CRM batch a cross-rates window shows. */
     void start_crm_read(model::state::window_handle handle);
+
+    void start_crm_names_read(std::string_view instance_id,
+        std::string_view account_id, std::string_view party_id);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,

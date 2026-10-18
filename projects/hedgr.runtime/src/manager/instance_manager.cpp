@@ -24,6 +24,7 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
+#include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
@@ -122,7 +123,7 @@ namespace transport = hedgr::session::transport;
  */
 [[nodiscard]] std::string window_key_for(domain::window_kind kind,
     std::string_view instance_id, std::string_view account_id,
-    std::string_view series_id = {}) {
+    std::string_view series_id = {}, std::string_view crm_name = {}) {
     switch (kind) {
     case domain::window_kind::instance_manager:
         return "instance-manager";
@@ -149,7 +150,7 @@ namespace transport = hedgr::session::transport;
             ? std::string{}
             : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
     case domain::window_kind::crm_matrix:
-        return std::format("crm:{}:{}", instance_id, account_id);
+        return std::format("crm:{}:{}:{}", instance_id, account_id, crm_name);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -1563,6 +1564,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::configure_crm:
         do_configure_crm(cmd);
         break;
+    case command::command_kind::load_crm_names:
+        do_load_crm_names(cmd);
+        break;
     case command::command_kind::probe_instance:
         do_probe_instance(cmd);
         break;
@@ -2862,7 +2866,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * functions rather than serials.
      */
     const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
-        cmd.account_id, cmd.series_id);
+        cmd.account_id, cmd.series_id, cmd.crm_name);
     if (!key.empty()) {
         if (const auto existing = windows_.find(key)) {
             windows_.set_open(*existing, true);
@@ -2930,6 +2934,7 @@ void instance_manager::do_open_window(const command::command& cmd) {
         cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
     if (cmd.new_window_kind == domain::window_kind::crm_matrix) {
         auto& crm = std::get<domain::crm_matrix_state>(spec.state);
+        crm.crm_name = cmd.crm_name;
         if (!cmd.party_id.empty()) {
             crm.party_id = cmd.party_id;
         } else if (const auto session = sessions_.find(cmd.instance_id,
@@ -3002,6 +3007,10 @@ void instance_manager::do_close_window(const command::command& cmd) {
                 removed.error());
         }
     }
+}
+
+void instance_manager::do_load_crm_names(const command::command& cmd) {
+    start_crm_names_read(cmd.instance_id, cmd.account_id, cmd.party_id);
 }
 
 void instance_manager::do_configure_crm(const command::command& cmd) {
@@ -3342,6 +3351,31 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
     currency_images_reading_.insert(ev.tenant_id);
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::start_crm_names_read(std::string_view instance_id,
+    std::string_view account_id, std::string_view party_id) {
+    if (!database_)
+        return;
+    const auto session = sessions_.find(instance_id, account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto instance = instances_.find(instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(account_id);
+    worker::crm_names_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = std::string{instance_id};
+    job.session.account_id = std::string{account_id};
+    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
+    job.session.token = std::string{sessions_.token(*session)};
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.party_id = std::string{party_id};
+    worker::spawn_crm_names_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::start_crm_read(
@@ -4078,6 +4112,12 @@ void instance_manager::apply(const event::event& ev) {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);
         }
+        break;
+    }
+    case event::event_kind::crm_names: {
+        if (ev.message.empty())
+            crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
+                ev.crm_names);
         break;
     }
     case event::event_kind::crm_rates: {

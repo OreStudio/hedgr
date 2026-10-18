@@ -100,6 +100,8 @@ enum class event_kind : std::uint8_t {
     term_structure = 14,
     /** @brief A party's cross-rates batch was read. */
     crm_rates = 15,
+    /** @brief The enabled CRM names a party has configured. */
+    crm_names = 16,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -223,6 +225,9 @@ struct event final {
 
     /** @brief How long the batch read took, for the matrix's latency. */
     std::int64_t crm_latency_ns = 0;
+
+    /** @brief The enabled CRM names, for crm_names. */
+    std::vector<std::string> crm_names;
 
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;

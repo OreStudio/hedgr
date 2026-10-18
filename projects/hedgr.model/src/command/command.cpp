@@ -77,6 +77,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "load_term_structure";
     case command_kind::configure_crm:
         return "configure_crm";
+    case command_kind::load_crm_names:
+        return "load_crm_names";
     }
     return "unknown";
 }

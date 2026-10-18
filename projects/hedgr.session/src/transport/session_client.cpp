@@ -39,6 +39,7 @@
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_pair_convention_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_protocol.hpp"
@@ -581,6 +582,52 @@ session_client::crm_rates(std::string_view party_id,
                 .as_of = item.as_of,
                 .reciprocal = item.reciprocal,
                 .delta_pct = item.delta_pct});
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<std::string>>
+session_client::crm_names(std::string_view party_id) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a CRM name read needs a signed-in session");
+
+    using ores::refdata::messaging::list_crm_topology_configs_request;
+    using ores::refdata::messaging::list_crm_topology_configs_response;
+    try {
+        std::vector<std::string> result;
+        std::uint32_t offset = 0;
+        while (true) {
+            list_crm_topology_configs_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_crm_topology_configs_response>(client(),
+                    list_crm_topology_configs_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the CRM name answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+            for (const auto& config : answer->crm_topology_configs) {
+                if (!config.enabled
+                    || boost::uuids::to_string(config.party_id)
+                        != party_id)
+                    continue;
+                result.push_back(config.name);
+            }
+            offset += static_cast<std::uint32_t>(
+                answer->crm_topology_configs.size());
+            if (answer->crm_topology_configs.empty() || offset >= answer->total)
+                break;
         }
         return result;
     } catch (const std::exception& e) {
