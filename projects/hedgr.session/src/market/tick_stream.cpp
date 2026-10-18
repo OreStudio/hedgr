@@ -42,6 +42,14 @@ namespace {
 
 namespace hedgr::session::market {
 
+std::string tick_uri_for_series(std::string_view series_uri) {
+    std::string uri{series_uri};
+    const auto type = uri.find("type=series");
+    if (type != std::string::npos)
+        uri.replace(type, std::string_view{"type=series"}.size(), "type=quote");
+    return uri;
+}
+
 std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
     const auto decoded =
         ores::nats::default_wire_codec()
@@ -130,7 +138,7 @@ bool market_tick_stream::subscribe(std::string series_id,
 
     try {
         const auto subject = ores::marketdata::domain::market_tick_subject(
-            tenant_id_, party_id_, oresmd_uri);
+            tenant_id_, party_id_, tick_uri_for_series(oresmd_uri));
         auto warned = std::make_shared<std::atomic<bool>>(false);
         auto subscription = client_.subscribe(subject,
             [handler = std::move(handler), warned,
