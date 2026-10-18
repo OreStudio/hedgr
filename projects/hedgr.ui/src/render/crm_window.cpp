@@ -262,7 +262,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          */
         const float cell_line = ImGui::GetTextLineHeight();
         const float row_height = cell_line * 2.0f
-            + ImGui::GetStyle().CellPadding.y * 2.0f;
+            + ImGui::GetStyle().CellPadding.y * 2.0f + 4.0f;
         for (const auto& base : currencies) {
             ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
             ImGui::TableNextColumn();
