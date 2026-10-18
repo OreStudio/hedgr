@@ -225,9 +225,13 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     std::map<std::pair<std::string, std::string>,
         const model::domain::crm_convention*> conventions;
-    for (const auto& convention : snapshot->conventions)
-        conventions[{convention.pair_code.substr(0, 3),
-            convention.pair_code.substr(4)}] = &convention;
+    for (const auto& convention : snapshot->conventions) {
+        const auto slash = convention.pair_code.find('/');
+        if (slash == std::string::npos)
+            continue;
+        conventions[{convention.pair_code.substr(0, slash),
+            convention.pair_code.substr(slash + 1)}] = &convention;
+    }
 
     if (ImGui::BeginTable("##crm", static_cast<int>(currencies.size()) + 1,
             flags, ImVec2(0.0f, table_height))) {
@@ -383,7 +387,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         = ImGui::CalcTextSize(delta_text).x;
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX()
                         + ImGui::GetContentRegionAvail().x - delta_width);
-                    if (std::abs(delta) < 0.0001) {
+                    if (std::abs(delta) < 0.005) {
                         ImGui::TextDisabled("0.00%%");
                     } else {
                         ImGui::TextColored(
