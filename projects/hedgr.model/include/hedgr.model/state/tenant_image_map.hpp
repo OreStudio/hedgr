@@ -32,9 +32,13 @@ namespace hedgr::model::state {
 
 /** @brief Where a tenant's currency-to-image map stands. */
 enum class image_map_state : std::uint8_t {
+    /** @brief Nobody has asked refdata yet. */
     unread = 0,
+    /** @brief A read is out. */
     reading = 1,
+    /** @brief The map is held. */
     ready = 2,
+    /** @brief The read failed; the error says why. */
     failed = 3,
 };
 
@@ -54,17 +58,24 @@ struct tenant_images final {
  */
 class HEDGR_MODEL_EXPORT tenant_image_map final {
 public:
+    /** @brief Marks a tenant's map as being read. */
     void begin(std::string_view tenant_id);
+
+    /** @brief Stores a tenant's currency codes and their image identifiers. */
     void set(std::string_view tenant_id,
         std::vector<std::pair<std::string, std::string>> currencies);
+
+    /** @brief Marks a tenant's map read as failed. */
     void fail(std::string_view tenant_id, std::string message);
 
+    /** @brief The tenant's map, or nullptr when none was read. */
     [[nodiscard]] const tenant_images* get(std::string_view tenant_id) const;
 
     /** @brief The image identifier for a currency, or nullptr. */
     [[nodiscard]] const std::string* image_for(std::string_view tenant_id,
         std::string_view currency) const;
 
+    /** @brief Forgets every tenant's map. */
     void clear();
 
 private:

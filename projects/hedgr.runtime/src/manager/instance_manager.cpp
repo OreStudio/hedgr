@@ -27,7 +27,6 @@
 #include "hedgr.runtime/worker/policy_worker.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
-#include "hedgr.runtime/worker/flag_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
@@ -694,12 +693,11 @@ void instance_manager::stop() noexcept {
     }
     market_streams_.clear();
     market_.clear();
-    flags_.clear();
-    flags_reading_.clear();
     currency_images_.clear();
     currency_images_reading_.clear();
     images_.clear();
     images_reading_.clear();
+    failed_images_.clear();
     catalogues_reading_.clear();
     points_reading_.clear();
 
@@ -1524,9 +1522,6 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::store_credential:
         do_store_credential(cmd);
-        break;
-    case command::command_kind::load_flag:
-        do_load_flag(cmd);
         break;
     case command::command_kind::load_image:
         do_load_image(cmd);
@@ -3227,13 +3222,14 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
 
     const auto account = accounts_.find(ev.account_id);
     worker::image_map_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
+    job.session.options = connection_options_for(*instances_.get(*instance),
         seed_options_, database_->path());
-    job.instance_id = ev.instance_id;
-    job.account_id = ev.account_id;
-    job.tenant_id = ev.tenant_id;
-    job.token = token;
-    job.principal = account ? accounts_.get(*account)->principal : std::string{};
+    job.session.instance_id = ev.instance_id;
+    job.session.account_id = ev.account_id;
+    job.session.tenant_id = ev.tenant_id;
+    job.session.token = token;
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
     currency_images_reading_.insert(ev.tenant_id);
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
@@ -3248,10 +3244,11 @@ void instance_manager::do_load_image(const model::command::command& cmd) {
         return;
     const auto tenant = std::string{sessions_.tenant_id(*session)};
     const auto token = std::string{sessions_.token(*session)};
-    if (tenant.empty() || token.empty() || cmd.payload.empty())
+    if (tenant.empty() || token.empty() || cmd.image_id.empty())
         return;
-    const auto key = std::format("{}\x1f{}", tenant, cmd.payload);
-    if (images_reading_.contains(key) || images_.contains(tenant, cmd.payload))
+    const auto key = model::state::make_tenant_key(tenant, cmd.image_id);
+    if (images_reading_.contains(key) || images_.contains(tenant, cmd.image_id)
+        || failed_images_.contains(key))
         return;
     const auto instance = instances_.find(cmd.instance_id);
     if (!instance)
@@ -3259,53 +3256,17 @@ void instance_manager::do_load_image(const model::command::command& cmd) {
     const auto account = accounts_.find(cmd.account_id);
 
     worker::image_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
+    job.session.options = connection_options_for(*instances_.get(*instance),
         seed_options_, database_->path());
-    job.instance_id = cmd.instance_id;
-    job.account_id = cmd.account_id;
-    job.tenant_id = tenant;
-    job.token = token;
-    job.principal = account ? accounts_.get(*account)->principal : std::string{};
-    job.image_id = cmd.payload;
+    job.session.instance_id = cmd.instance_id;
+    job.session.account_id = cmd.account_id;
+    job.session.tenant_id = tenant;
+    job.session.token = token;
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.image_id = cmd.image_id;
     images_reading_.insert(key);
     worker::spawn_image_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::do_load_flag(const model::command::command& cmd) {
-    if (!database_)
-        return;
-    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
-        return;
-    const auto token = std::string{sessions_.token(*session)};
-    if (token.empty())
-        return;
-    const auto instance = instances_.find(cmd.instance_id);
-    if (!instance)
-        return;
-
-    const auto key = std::format("{}\x1f{}",
-        running_key(cmd.instance_id, cmd.account_id), cmd.payload);
-    if (flags_reading_.contains(key))
-        return;
-
-    const auto account = accounts_.find(cmd.account_id);
-    const std::string principal = account
-        ? accounts_.get(*account)->principal : std::string{};
-
-    worker::flag_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.instance_id = cmd.instance_id;
-    job.account_id = cmd.account_id;
-    job.token = token;
-    job.principal = principal;
-    job.code = cmd.payload;
-
-    flags_reading_.insert(key);
-    flags_.begin(cmd.instance_id, cmd.account_id, cmd.payload);
-    worker::spawn_flag_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::start_market_backfill(std::string_view instance_id,
@@ -3899,11 +3860,15 @@ void instance_manager::apply(const event::event& ev) {
         break;
     }
     case event::event_kind::image_loaded: {
-        const auto key = std::format("{}\x1f{}", ev.tenant_id, ev.image_id);
+        const auto key = model::state::make_tenant_key(ev.tenant_id,
+            ev.image_id);
         images_reading_.erase(key);
         if (ev.message.empty()) {
             images_.put(ev.tenant_id, ev.image_id, model::state::image_content{
                 .mime_type = ev.mime_type, .data = ev.bytes});
+            failed_images_.erase(key);
+        } else {
+            failed_images_.insert(key);
         }
         break;
     }
@@ -3911,26 +3876,12 @@ void instance_manager::apply(const event::event& ev) {
         currency_images_reading_.erase(ev.tenant_id);
         if (ev.message.empty()) {
             std::vector<std::pair<std::string, std::string>> mapped;
-            for (std::size_t i = 0; i < ev.image_codes.size()
-                 && i < ev.image_ids.size(); ++i) {
-                mapped.emplace_back(ev.image_codes[i], ev.image_ids[i]);
+            for (const auto& image : ev.image_refs) {
+                mapped.emplace_back(image.currency, image.image_id);
             }
             currency_images_.set(ev.tenant_id, std::move(mapped));
         } else {
             currency_images_.fail(ev.tenant_id, ev.message);
-        }
-        break;
-    }
-    case event::event_kind::flag_image: {
-        const auto key = std::format("{}\x1f{}",
-            running_key(ev.instance_id, ev.account_id), ev.image_code);
-        flags_reading_.erase(key);
-        if (ev.message.empty()) {
-            flags_.set(ev.instance_id, ev.account_id, ev.image_code,
-                ev.mime_type, ev.bytes);
-        } else {
-            flags_.fail(ev.instance_id, ev.account_id, ev.image_code,
-                ev.message);
         }
         break;
     }

@@ -539,47 +539,6 @@ ores::nats::service::subscription session_client::subscribe(
     return client().transport().subscribe(subject, std::move(handler));
 }
 
-result<session_client::image_content>
-session_client::image_by_code(std::string_view code) const {
-    if (!is_connected())
-        return fail(session_errc::closed,
-            "an image read needs an open connection to the instance");
-    if (!is_authenticated())
-        return fail(session_errc::not_authenticated,
-            "an image read needs a signed-in session");
-
-    using ores::assets::messaging::get_image_request;
-    using ores::assets::messaging::get_image_response;
-
-    try {
-        get_image_request request{};
-        request.key.code = std::string{code};
-        const auto answer =
-            ores::nats::service::authenticated_request_and_decode<
-                get_image_response>(client(),
-                get_image_request::nats_subject, request,
-                options_.request_timeout);
-        if (!answer)
-            return fail(session_errc::protocol_error,
-                "the image answer could not be decoded");
-        if (answer->result.outcome != ores::utility::domain::outcome::ok)
-            return fail(session_errc::protocol_error,
-                answer->result.message.empty()
-                    ? std::string("the deployment refused the image")
-                    : answer->result.message);
-        if (!answer->image)
-            return fail(session_errc::protocol_error,
-                "the deployment holds no image with that code");
-        return image_content{
-            .mime_type = answer->image->mime_type,
-            .data = answer->image->data};
-    } catch (const std::exception& e) {
-        return transport_failure(e);
-    } catch (...) {
-        return transport_failure();
-    }
-}
-
 result<std::vector<session_client::currency_image>>
 session_client::currency_images() const {
     if (!is_connected() || !is_authenticated())
@@ -649,6 +608,9 @@ session_client::image_by_id(std::string_view image_id) const {
                 "the deployment holds no image with that identifier");
         return image_content{.mime_type = answer->images.front().mime_type,
             .data = answer->images.front().data};
+    } catch (const boost::bad_lexical_cast&) {
+        return fail(session_errc::protocol_error,
+            "the image identifier is not a UUID");
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {

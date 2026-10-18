@@ -21,6 +21,7 @@
 #define HEDGR_MODEL_STATE_IMAGE_CACHE_HPP
 
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/tenant_key.hpp"
 #include <boost/multi_index/hashed_index.hpp>
 #include <boost/multi_index/member.hpp>
 #include <boost/multi_index/sequenced_index.hpp>
@@ -74,10 +75,24 @@ public:
     void put(std::string_view tenant_id, std::string_view image_id,
         image_content image);
 
+    /**
+     * @brief Visits every cached image without copying or allocating.
+     *
+     * The texture cache walks this once a frame to upload what it does not yet
+     * hold. A callback rather than a vector keeps the frame path free of a
+     * copy of every image.
+     */
+    template<class Visitor>
+    void for_each(Visitor&& visitor) const {
+        for (const auto& entry : entries_)
+            visitor(entry.tenant_id, entry.image_id, entry.image);
+    }
+
     void clear();
 
     [[nodiscard]] std::size_t bytes() const noexcept { return bytes_; }
     [[nodiscard]] std::size_t max_bytes() const noexcept { return max_bytes_; }
+    /** @brief Changes the budget and evicts until it is met. */
     void set_max_bytes(std::size_t max_bytes);
 
     [[nodiscard]] std::uint64_t hits() const noexcept { return hits_; }
@@ -99,6 +114,8 @@ private:
      */
     struct entry final {
         std::string key;
+        std::string tenant_id;
+        std::string image_id;
         image_content image;
     };
 
@@ -107,9 +124,6 @@ private:
             boost::multi_index::hashed_unique<boost::multi_index::member<
                 entry, std::string, &entry::key>>,
             boost::multi_index::sequenced<>>>;
-
-    static std::string key_of(std::string_view tenant_id,
-        std::string_view image_id);
 
     container entries_;
     std::size_t bytes_ = 0;

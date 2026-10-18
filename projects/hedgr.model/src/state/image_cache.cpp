@@ -22,28 +22,14 @@
 
 namespace hedgr::model::state {
 
-namespace {
-constexpr char separator = '\x1f';
-}
-
 image_cache::image_cache(std::size_t max_bytes)
     : max_bytes_(max_bytes) {
-}
-
-std::string image_cache::key_of(std::string_view tenant_id,
-    std::string_view image_id) {
-    std::string key;
-    key.reserve(tenant_id.size() + image_id.size() + 1);
-    key.append(tenant_id);
-    key.push_back(separator);
-    key.append(image_id);
-    return key;
 }
 
 const image_content* image_cache::get(std::string_view tenant_id,
     std::string_view image_id) {
     auto& by_key = entries_.get<0>();
-    const auto found = by_key.find(key_of(tenant_id, image_id));
+    const auto found = by_key.find(make_tenant_key(tenant_id, image_id));
     if (found == by_key.end()) {
         ++misses_;
         return nullptr;
@@ -56,23 +42,29 @@ const image_content* image_cache::get(std::string_view tenant_id,
 
 bool image_cache::contains(std::string_view tenant_id,
     std::string_view image_id) const {
-    return entries_.get<0>().contains(key_of(tenant_id, image_id));
+    return entries_.get<0>().contains(make_tenant_key(tenant_id, image_id));
 }
 
 void image_cache::put(std::string_view tenant_id, std::string_view image_id,
     image_content image) {
-    if (image.data.size() > max_bytes_)
+    if (image.data.size() > max_bytes_) {
+        /* It left the cache as surely as an evicted entry did. */
+        ++evictions_;
         return;
+    }
 
     auto& by_key = entries_.get<0>();
-    const auto key = key_of(tenant_id, image_id);
+    const auto key = make_tenant_key(tenant_id, image_id);
     if (const auto found = by_key.find(key); found != by_key.end()) {
         bytes_ -= found->image.data.size();
         by_key.erase(found);
     }
 
     auto& by_recency = entries_.get<1>();
-    by_recency.push_front(entry{.key = key, .image = std::move(image)});
+    by_recency.push_front(entry{.key = key,
+        .tenant_id = std::string{tenant_id},
+        .image_id = std::string{image_id},
+        .image = std::move(image)});
     bytes_ += by_recency.front().image.data.size();
 
     while (bytes_ > max_bytes_ && !by_recency.empty()) {

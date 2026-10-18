@@ -17,35 +17,30 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HEDGR_RUNTIME_WORKER_FLAG_WORKER_HPP
-#define HEDGR_RUNTIME_WORKER_FLAG_WORKER_HPP
+#ifndef HEDGR_MODEL_STATE_TENANT_KEY_HPP
+#define HEDGR_MODEL_STATE_TENANT_KEY_HPP
 
-#include "hedgr.model/command/channel.hpp"
-#include "hedgr.runtime/export.hpp"
-#include "hedgr.session/transport/session_options.hpp"
-#include <boost/asio/io_context.hpp>
 #include <string>
+#include <string_view>
 
-namespace hedgr::runtime::worker {
-
-/** @brief One flag image read, on the session's token and its own connection. */
-struct flag_job final {
-    session::transport::session_options options;
-    std::string instance_id;
-    std::string account_id;
-    std::string token;
-    std::string principal;
-    std::string code;
-};
+namespace hedgr::model::state {
 
 /**
- * @brief Reads one currency image and posts it as a flag_image event.
+ * @brief The key of something a tenant owns, from the tenant and its own name.
  *
- * @pre Run on an executor thread. Never call from the frame loop.
+ * Image identifiers, currency codes and image reads are all scoped by tenant.
+ * One encoding keeps the cache, the runtime's in-flight set and any future
+ * index from inventing their own separator and drifting apart.
  */
-HEDGR_RUNTIME_EXPORT void
-spawn_flag_read(boost::asio::io_context& context, flag_job job,
-    model::command::event_queue& events);
+[[nodiscard]] inline std::string make_tenant_key(std::string_view tenant_id,
+    std::string_view item) {
+    std::string key;
+    key.reserve(tenant_id.size() + item.size() + 1);
+    key.append(tenant_id);
+    key.push_back('\x1f');
+    key.append(item);
+    return key;
+}
 
 }
 

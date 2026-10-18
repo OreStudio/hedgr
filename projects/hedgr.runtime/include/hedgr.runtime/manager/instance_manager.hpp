@@ -25,14 +25,13 @@
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
-#include "hedgr.model/state/flag_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
+#include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/flag_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
@@ -177,11 +176,6 @@ public:
         return market_;
     }
 
-    /** @brief The currency flags each session has read. */
-    [[nodiscard]] const model::state::flag_table& flags() const noexcept {
-        return flags_;
-    }
-
     /** @brief Which image each tenant currency names. */
     [[nodiscard]] const model::state::tenant_image_map&
     currency_images() const noexcept {
@@ -194,6 +188,18 @@ public:
     }
     [[nodiscard]] const model::state::image_cache& images() const noexcept {
         return images_;
+    }
+
+    /** @brief Images whose reads failed, keyed as the cache keys them. */
+    [[nodiscard]] const std::unordered_set<std::string>&
+    failed_images() const noexcept {
+        return failed_images_;
+    }
+
+    /** @brief Images whose reads are in flight, keyed as the cache keys them. */
+    [[nodiscard]] const std::unordered_set<std::string>&
+    pending_images() const noexcept {
+        return images_reading_;
     }
 
     /**
@@ -367,9 +373,6 @@ private:
     /** @brief Asks for one series' points, on the window's session. */
     void start_market_points_read(std::string_view window_id,
         std::string_view series_id);
-
-    /** @brief Reads one currency flag image for a session. */
-    void do_load_flag(const model::command::command& cmd);
 
     /** @brief Reads a tenant's currency-to-image map. */
     void start_currency_image_map(const model::event::event& ev);
@@ -677,9 +680,6 @@ private:
     /** @brief The market series and the points each chart holds. */
     model::state::market_table market_;
 
-    /** @brief The flags each session has read. */
-    model::state::flag_table flags_;
-
     /** @brief Which image each tenant currency names. */
     model::state::tenant_image_map currency_images_;
 
@@ -692,8 +692,8 @@ private:
     /** @brief Tenant-and-image whose read is out. */
     std::unordered_set<std::string> images_reading_;
 
-    /** @brief The session-and-code whose flag read is out. */
-    std::unordered_set<std::string> flags_reading_;
+    /** @brief Tenant-and-image whose read failed, so it is not asked again. */
+    std::unordered_set<std::string> failed_images_;
 
     /** @brief The sessions whose catalogue read is out, by running key. */
     std::unordered_set<std::string> catalogues_reading_;

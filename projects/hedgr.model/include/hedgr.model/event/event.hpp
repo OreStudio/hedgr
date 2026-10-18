@@ -91,12 +91,10 @@ enum class event_kind : std::uint8_t {
     series_catalogue = 10,
     /** @brief One series' observations were read. */
     series_points = 11,
-    /** @brief One currency flag image was read, or could not be. */
-    flag_image = 12,
     /** @brief A tenant's currency-to-image map was read. */
-    currency_image_map = 13,
+    currency_image_map = 12,
     /** @brief One tenant image was read by identifier, or could not be. */
-    image_loaded = 14,
+    image_loaded = 13,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -188,21 +186,23 @@ struct event final {
     /** @brief Bearer token, for session_authenticated. */
     std::string token;
 
-    /** @brief Currency code a flag event is about, for flag_image. */
-    std::string image_code;
-
-    /** @brief Media type of the flag bytes, for flag_image. */
+    /** @brief Media type of the image, for image_loaded. */
     std::string mime_type;
 
     /** @brief Image identifier, for image_loaded. */
     std::string image_id;
 
-    /** @brief The image bytes, for flag_image. */
+    /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;
 
-    /** @brief Currency codes and image ids, for currency_image_map. */
-    std::vector<std::string> image_codes;
-    std::vector<std::string> image_ids;
+    /** @brief One currency and the image it names, for currency_image_map. */
+    struct image_ref final {
+        std::string currency;
+        std::string image_id;
+    };
+
+    /** @brief The tenant's currency-to-image map, for currency_image_map. */
+    std::vector<image_ref> image_refs;
 
     /**
      * @brief The parties the login may act as, for session_authenticated.

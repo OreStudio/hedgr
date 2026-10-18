@@ -17,55 +17,58 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.runtime/worker/flag_worker.hpp"
+#ifndef HEDGR_RUNTIME_WORKER_SESSION_TASK_HPP
+#define HEDGR_RUNTIME_WORKER_SESSION_TASK_HPP
+
+#include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
-#include "ores.logging/make_logger.hpp"
+#include "hedgr.session/transport/session_options.hpp"
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <format>
+#include <algorithm>
+#include <string>
 #include <utility>
-
-namespace {
-
-[[nodiscard]] auto& lg() {
-    using namespace ores::logging;
-    static auto instance = make_logger("hedgr.runtime.worker.flag_worker");
-    return instance;
-}
-
-}
 
 namespace hedgr::runtime::worker {
 
-namespace {
+/** @brief The identity and token every off-loop session read carries. */
+struct session_read final {
+    session::transport::session_options options;
+    std::string instance_id;
+    std::string account_id;
+    std::string tenant_id;
+    std::string token;
+    std::string principal;
+};
 
-boost::asio::awaitable<void> run_flag(flag_job job,
+/**
+ * @brief Runs one read on its own connection and posts the resulting event.
+ *
+ * Every image read has the same shape: connect, resume the session's token,
+ * run one call, wipe the token, post. @p work fills @p fact on success; this
+ * helper owns the failure sentence, the wipe and the post, so a worker only
+ * names the call it makes.
+ */
+template<class Work>
+boost::asio::awaitable<void> run_session_read(session_read job,
+    model::event::event fact, Work work,
     model::command::event_queue& events) {
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
         boost::asio::use_awaitable);
 
-    model::event::event fact;
-    fact.kind = model::event::event_kind::flag_image;
-    fact.instance_id = job.instance_id;
-    fact.account_id = job.account_id;
-    fact.image_code = job.code;
-
     session::transport::session_client client(std::move(job.options));
     if (const auto connected = client.connect(); !connected) {
         fact.message = connected.error().message;
-    } else if (const auto resumed =
-                   client.resume(job.token, job.principal);
+    } else if (const auto resumed = client.resume(job.token, job.principal);
         !resumed) {
         fact.message = resumed.error().message;
-    } else if (const auto image = client.image_by_code(job.code); image) {
-        fact.mime_type = image->mime_type;
-        fact.bytes = image->data;
     } else {
-        fact.message = image.error().message;
+        work(client, fact);
     }
 
     std::fill(job.token.begin(), job.token.end(), '\0');
@@ -75,10 +78,4 @@ boost::asio::awaitable<void> run_flag(flag_job job,
 
 }
 
-void spawn_flag_read(boost::asio::io_context& context, flag_job job,
-    model::command::event_queue& events) {
-    boost::asio::co_spawn(context, run_flag(std::move(job), events),
-        boost::asio::detached);
-}
-
-}
+#endif

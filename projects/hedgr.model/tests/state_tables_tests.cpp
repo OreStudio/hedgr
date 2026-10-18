@@ -26,7 +26,8 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
-#include "hedgr.model/state/flag_table.hpp"
+#include "hedgr.model/state/tenant_image_map.hpp"
+#include <unordered_set>
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
@@ -1002,27 +1003,23 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     REQUIRE(aggregator.ticks() == 6);
 }
 
-TEST_CASE("a flag is read once per session and code", "[flags]") {
-    using hedgr::model::state::flag_state;
-    using hedgr::model::state::flag_table;
+TEST_CASE("a tenant image map answers by currency", "[images]") {
+    using hedgr::model::state::image_map_state;
+    using hedgr::model::state::tenant_image_map;
 
-    flag_table flags;
-    REQUIRE(flags.get("i-1", "a-1", "gb") == nullptr);
-    flags.begin("i-1", "a-1", "gb");
-    REQUIRE(flags.get("i-1", "a-1", "gb")->state == flag_state::reading);
+    tenant_image_map images;
+    REQUIRE(images.image_for("t-1", "GBP") == nullptr);
+    images.begin("t-1");
+    REQUIRE(images.get("t-1")->state == image_map_state::reading);
 
-    flags.set("i-1", "a-1", "gb", "image/svg+xml",
-        std::vector<std::uint8_t>{1, 2, 3});
-    const auto* image = flags.get("i-1", "a-1", "gb");
-    REQUIRE(image->state == flag_state::ready);
-    REQUIRE(image->mime_type == "image/svg+xml");
-    REQUIRE(image->data.size() == 3);
-    REQUIRE(flags.all_ready().size() == 1);
-    REQUIRE(flags.all_ready().front().first == "gb");
+    images.set("t-1", {{"GBP", "id-gb"}, {"USD", "id-us"}});
+    REQUIRE(images.image_for("t-1", "GBP") != nullptr);
+    REQUIRE(*images.image_for("t-1", "GBP") == "id-gb");
+    REQUIRE(images.image_for("t-2", "GBP") == nullptr);
 
-    flags.fail("i-1", "a-1", "us", "no image");
-    REQUIRE(flags.get("i-1", "a-1", "us")->state == flag_state::failed);
-    REQUIRE(flags.all_ready().size() == 1);
+    images.fail("t-2", "no currencies");
+    REQUIRE(images.get("t-2")->state == image_map_state::failed);
+    REQUIRE(images.get("t-2")->error == "no currencies");
 }
 
 TEST_CASE("the image cache keeps tenants apart and evicts least recently used",

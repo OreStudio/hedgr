@@ -20,6 +20,7 @@
 #ifndef HEDGR_SESSION_TRANSPORT_SESSION_CLIENT_HPP
 #define HEDGR_SESSION_TRANSPORT_SESSION_CLIENT_HPP
 
+#include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
@@ -454,19 +455,8 @@ public:
     subscribe(std::string_view subject,
         ores::nats::message_handler handler) const;
 
-    /**
-     * @brief One image of the tenant, by its code, as the assets service has it.
-     *
-     * Flags are images whose code is the lower-case ISO code of the currency.
-     * @return the bytes and media type, or why it could not be read.
-     */
-    struct image_content final {
-        std::string mime_type;
-        std::vector<std::uint8_t> data;
-    };
-    [[nodiscard]] result<image_content>
-    image_by_code(std::string_view code) const;
-
+    /** @brief One image of the tenant, as the assets service has it. */
+    using image_content = hedgr::model::state::image_content;
     /** @brief One currency's image identifier, empty when it has no image. */
     struct currency_image final {
         std::string currency;
