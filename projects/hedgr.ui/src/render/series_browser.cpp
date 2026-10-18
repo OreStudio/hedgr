@@ -381,6 +381,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         request.instance_id = std::string{input.sessions.instance_id(*session)};
         request.account_id = std::string{input.sessions.account_id(*session)};
         request.new_window_kind = model::domain::window_kind::crm_matrix;
+        request.party_id = state.market_party_id;
         input.commands.push(std::move(request));
     }
     ImGui::SetItemTooltip(

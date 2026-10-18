@@ -56,11 +56,15 @@ void crm_table::begin(std::string_view instance_id,
 void crm_table::set(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::string_view crm_name, bool reciprocal,
-    std::vector<domain::crm_cell> cells, std::string observed_as_of) {
+    std::vector<domain::crm_cell> cells,
+    std::vector<domain::crm_convention> conventions,
+    std::string observed_as_of, std::int64_t latency_ns) {
     auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
         crm_name, reciprocal)];
     entry.cells = std::move(cells);
+    entry.conventions = std::move(conventions);
     entry.observed_as_of = std::move(observed_as_of);
+    entry.latency_ns = latency_ns;
     entry.reading = false;
     entry.error.clear();
 }

@@ -22,6 +22,7 @@
 
 #include "hedgr.model/domain/crm.hpp"
 #include "hedgr.model/export.hpp"
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -32,7 +33,9 @@ namespace hedgr::model::state {
 /** @brief The latest cross-rates batch for one session and party. */
 struct crm_snapshot final {
     std::vector<domain::crm_cell> cells;
+    std::vector<domain::crm_convention> conventions;
     std::string observed_as_of;
+    std::int64_t latency_ns = 0;
     bool reading = false;
     std::string error;
 };
@@ -53,7 +56,9 @@ public:
     /** @brief Replaces the batch with the cells just read. */
     void set(std::string_view instance_id, std::string_view account_id,
         std::string_view party_id, std::string_view crm_name, bool reciprocal,
-        std::vector<domain::crm_cell> cells, std::string observed_as_of);
+        std::vector<domain::crm_cell> cells,
+        std::vector<domain::crm_convention> conventions,
+        std::string observed_as_of, std::int64_t latency_ns);
     /** @brief Records a failed read and drops the cells it could not refresh. */
     void fail(std::string_view instance_id, std::string_view account_id,
         std::string_view party_id, std::string_view crm_name, bool reciprocal,

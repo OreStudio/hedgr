@@ -218,6 +218,12 @@ struct event final {
     /** @brief Whether the window asked for reciprocal backfill. */
     bool crm_reciprocal = false;
 
+    /** @brief Spot display conventions for the batch's pairs. */
+    std::vector<domain::crm_convention> crm_conventions;
+
+    /** @brief How long the batch read took, for the matrix's latency. */
+    std::int64_t crm_latency_ns = 0;
+
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;
 

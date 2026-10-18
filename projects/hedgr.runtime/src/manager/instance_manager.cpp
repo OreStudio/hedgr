@@ -2930,8 +2930,12 @@ void instance_manager::do_open_window(const command::command& cmd) {
         cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
     if (cmd.new_window_kind == domain::window_kind::crm_matrix) {
         auto& crm = std::get<domain::crm_matrix_state>(spec.state);
-        if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
+        if (!cmd.party_id.empty()) {
+            crm.party_id = cmd.party_id;
+        } else if (const auto session = sessions_.find(cmd.instance_id,
+                       cmd.account_id)) {
             crm.party_id = std::string{sessions_.party_id(*session)};
+        }
     }
     if (cmd.new_window_kind == domain::window_kind::term_structure) {
         auto& terms = std::get<domain::term_structure_state>(spec.state);
@@ -4079,7 +4083,8 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::crm_rates: {
         if (ev.message.empty())
             crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-                ev.crm_reciprocal, ev.crm_cells, ev.crm_as_of);
+                ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
+                ev.crm_as_of, ev.crm_latency_ns);
         else
             crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
                 ev.crm_reciprocal, ev.message);

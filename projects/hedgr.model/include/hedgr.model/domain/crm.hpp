@@ -25,6 +25,21 @@
 
 namespace hedgr::model::domain {
 
+/** @brief Display convention for one currency pair's spot rate. */
+struct crm_convention final {
+    /** @brief The pair code, for example EUR/USD. */
+    std::string pair_code;
+
+    /** @brief Decimal places a spot rate for this pair is shown with. */
+    int decimal_places = 5;
+
+    /** @brief Absolute size of a pip, for example 0.0001. */
+    double pip_factor = 0.0001;
+
+    /** @brief Minimum tick, in pips. */
+    double tick_size = 1.0;
+};
+
 /** @brief One cell of a cross-rates matrix, as the batch read returned it. */
 struct crm_cell final {
     /** @brief The CRM that produced this rate. */

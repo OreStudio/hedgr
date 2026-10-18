@@ -19,12 +19,15 @@
  */
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <format>
 #include <map>
 #include <set>
 #include <string>
@@ -320,24 +323,55 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             - widget::status_foot_height(status)
             - ImGui::GetStyle().ItemSpacing.y,
         160.0f);
+    for (const auto& [pair, cell] : cells) {
+        static_cast<void>(cell);
+        request_flags(input, *session, "FX " + pair.first + "/" + pair.second);
+    }
+
+    std::map<std::pair<std::string, std::string>,
+        const model::domain::crm_convention*> conventions;
+    for (const auto& convention : snapshot->conventions)
+        conventions[{convention.pair_code.substr(0, 3),
+            convention.pair_code.substr(4)}] = &convention;
+
     if (ImGui::BeginTable("##crm", static_cast<int>(currencies.size()) + 1,
             flags, ImVec2(0.0f, table_height))) {
         ImGui::TableSetupColumn("Base / Quote",
-            ImGuiTableColumnFlags_WidthFixed, 70.0f);
+            ImGuiTableColumnFlags_WidthFixed, 78.0f);
         for (const auto& currency : currencies)
             ImGui::TableSetupColumn(currency.c_str(),
-                ImGuiTableColumnFlags_WidthFixed, 100.0f);
+                ImGuiTableColumnFlags_WidthFixed, 96.0f);
         ImGui::TableSetupScrollFreeze(1, 1);
-        ImGui::TableHeadersRow();
+
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted("Base / Quote");
+        for (const auto& currency : currencies) {
+            ImGui::TableNextColumn();
+            const auto flag = image_texture(input, *session, currency);
+            if (flag != 0) {
+                ImGui::Image(static_cast<ImTextureID>(flag),
+                    ImVec2(16.0f, 11.0f));
+                ImGui::SameLine(0.0f, 4.0f);
+            }
+            ImGui::TextUnformatted(currency.c_str());
+        }
 
         for (const auto& base : currencies) {
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
+            const auto flag = image_texture(input, *session, base);
+            if (flag != 0) {
+                ImGui::Image(static_cast<ImTextureID>(flag),
+                    ImVec2(16.0f, 11.0f));
+                ImGui::SameLine(0.0f, 4.0f);
+            }
             ImGui::TextUnformatted(base.c_str());
             for (const auto& quote : currencies) {
                 ImGui::TableNextColumn();
                 if (base == quote) {
-                    ImGui::TextDisabled("\u2014");
+                    ImGui::TextColored(ImVec4(0.30f, 0.33f, 0.37f, 1.0f),
+                        "\u2014");
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("Same currency");
                     continue;
@@ -362,6 +396,17 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 }
                 const std::string pair = pair_text(base, quote);
                 const bool selected = state.crm_pair == pair;
+                const double delta = cell.delta_pct.value_or(0.0);
+                if (!selected && std::abs(delta) > 0.0001) {
+                    const float strength = static_cast<float>(std::min(
+                        std::abs(delta) / 0.05, 1.0));
+                    const auto tint = delta < 0.0
+                        ? IM_COL32(255, 80, 90,
+                              8 + static_cast<int>(24 * strength))
+                        : IM_COL32(80, 220, 140,
+                              8 + static_cast<int>(24 * strength));
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, tint);
+                }
                 if (selected)
                     ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg,
                         ImGui::GetColorU32(ImGuiCol_Header));
@@ -373,9 +418,18 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                           theme::readiness_colour(
                               model::domain::readiness::bootstrapping))
                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
-                char text[48];
-                std::snprintf(text, sizeof(text), "%.5f", cell.rate);
-                if (ImGui::Selectable(text, selected,
+                int places = 5;
+                if (const auto convention = conventions.find({base, quote});
+                    convention != conventions.end() && !cell.reciprocal)
+                    places = std::max(convention->second->decimal_places, 0);
+                const std::string rate = std::format("{:.{}f}", cell.rate,
+                    places);
+                const float rate_width = ImGui::CalcTextSize(rate.c_str()).x;
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX()
+                    + ImGui::GetContentRegionAvail().x - rate_width);
+                ImGui::PushStyleColor(ImGuiCol_Text, colour);
+                ImGui::PushFont(icon::numeric_font());
+                if (ImGui::Selectable(rate.c_str(), selected,
                         ImGuiSelectableFlags_AllowDoubleClick)) {
                     state.crm_pair = pair;
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
@@ -409,26 +463,51 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         }
                     }
                 }
+                ImGui::PopFont();
+                ImGui::PopStyleColor();
                 ImGui::SetItemTooltip("%s  %s\n%s  %s\nas of %s", pair.c_str(),
                     cell.crm_name.c_str(), cell.status.c_str(),
                     cell.reciprocal ? "reciprocal" : "direct",
                     cell.as_of.c_str());
-                if (cell.delta_pct) {
+                if (cell.delta_pct && std::abs(delta) >= 0.005) {
+                    char delta_text[32];
+                    std::snprintf(delta_text, sizeof(delta_text), "%+.2f%%",
+                        delta);
+                    const float delta_width
+                        = ImGui::CalcTextSize(delta_text).x;
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX()
+                        + ImGui::GetContentRegionAvail().x - delta_width);
                     ImGui::TextColored(
-                        *cell.delta_pct < 0.0
+                        delta < 0.0
                             ? ImGui::ColorConvertU32ToFloat4(
                                   theme::failure_colour)
                             : ImGui::ColorConvertU32ToFloat4(
                                   theme::health_live_colour),
-                        "%+.2f%%", *cell.delta_pct);
+                        "%s", delta_text);
                 }
-                if (state.crm_name.empty())
+                if (state.crm_name.empty()) {
+                    const float name_width
+                        = ImGui::CalcTextSize(cell.crm_name.c_str()).x;
+                    ImGui::SetCursorPosX(ImGui::GetCursorPosX()
+                        + ImGui::GetContentRegionAvail().x - name_width);
                     ImGui::TextDisabled("%s", cell.crm_name.c_str());
+                }
             }
         }
         ImGui::EndTable();
     }
     ImGui::PopStyleVar();
+
+    std::size_t fresh = 0;
+    for (const auto& [pair, cell] : cells) {
+        static_cast<void>(pair);
+        if (cell->status == "fresh")
+            ++fresh;
+    }
+    const auto latency_ms = snapshot->latency_ns > 0
+        ? static_cast<double>(snapshot->latency_ns) / 1.0e6 : 0.0;
+    foot.word = std::format("{} fresh \u00b7 {:.0f} ms", fresh, latency_ms);
+    foot.colour = theme::health_live_colour;
 
     widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();

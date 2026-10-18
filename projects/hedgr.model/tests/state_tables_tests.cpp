@@ -1120,8 +1120,8 @@ TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
         {model::domain::crm_cell{.crm_name = "majors",
             .base_currency_code = "EUR", .quote_currency_code = "USD",
             .rate = 1.1, .status = "fresh"}},
-        "2026-01-01T00:00:00Z");
-    table.set("i", "a", "p2", "", false, {}, "2026-01-01T00:00:01Z");
+        {}, "2026-01-01T00:00:00Z", 0);
+    table.set("i", "a", "p2", "", false, {}, {}, "2026-01-01T00:00:01Z", 0);
     const auto* one = table.get("i", "a", "p1", "majors", false);
     const auto* two = table.get("i", "a", "p2", "", false);
     REQUIRE(one != nullptr);
@@ -1135,7 +1135,7 @@ TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
 
 TEST_CASE("a failed CRM read keeps the error and drops the cells", "[crm]") {
     crm_table table;
-    table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, "now");
+    table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, {}, "now", 0);
     table.fail("i", "a", "p", "", false, "refused");
     const auto* snapshot = table.get("i", "a", "p", "", false);
     REQUIRE(snapshot != nullptr);

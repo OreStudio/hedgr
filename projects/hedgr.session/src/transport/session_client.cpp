@@ -39,6 +39,7 @@
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.refdata.api/messaging/currency_pair_convention_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
@@ -580,6 +581,51 @@ session_client::crm_rates(std::string_view party_id,
                 .as_of = item.as_of,
                 .reciprocal = item.reciprocal,
                 .delta_pct = item.delta_pct});
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<session_client::pair_convention>>
+session_client::currency_pair_conventions() const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a pair convention read needs a signed-in session");
+
+    using ores::refdata::messaging::list_currency_pair_conventions_request;
+    using ores::refdata::messaging::list_currency_pair_conventions_response;
+    try {
+        std::vector<pair_convention> result;
+        std::uint32_t offset = 0;
+        while (true) {
+            list_currency_pair_conventions_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_currency_pair_conventions_response>(client(),
+                    list_currency_pair_conventions_request::nats_subject,
+                    request, options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the pair convention answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+            for (const auto& convention : answer->conventions) {
+                result.push_back(pair_convention{
+                    .pair_code = convention.pair_code,
+                    .decimal_places = convention.decimal_places,
+                    .pip_factor = convention.pip_factor,
+                    .tick_size = convention.tick_size});
+            }
+            offset += static_cast<std::uint32_t>(answer->conventions.size());
+            if (answer->conventions.empty() || offset >= answer->total)
+                break;
         }
         return result;
     } catch (const std::exception& e) {

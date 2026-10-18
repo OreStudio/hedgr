@@ -486,6 +486,18 @@ public:
         std::string_view party_id, std::string_view crm_name,
         bool reciprocal) const;
 
+    /** @brief A currency pair's spot display convention. */
+    struct pair_convention final {
+        std::string pair_code;
+        int decimal_places = 5;
+        double pip_factor = 0.0001;
+        double tick_size = 1.0;
+    };
+
+    /** @brief Every pair convention the deployment publishes. */
+    [[nodiscard]] result<std::vector<pair_convention>>
+    currency_pair_conventions() const;
+
     /** @brief One currency's image identifier, empty when it has no image. */
     struct currency_image final {
         std::string currency;

@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
+#include <chrono>
 #include "hedgr.model/event/event.hpp"
 #include <algorithm>
 #include <utility>
@@ -38,7 +39,12 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     auto work = [party, crm_name, reciprocal](
                     session::transport::session_client& client,
                     model::event::event& answer) {
+        const auto started = std::chrono::steady_clock::now();
         const auto rates = client.crm_rates(party, "", reciprocal);
+        answer.crm_latency_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - started)
+                .count();
         if (!rates) {
             answer.message = rates.error().message;
             return;
@@ -57,6 +63,15 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
             newest = std::max(newest, item.as_of);
         }
         answer.crm_as_of = std::move(newest);
+        if (const auto conventions = client.currency_pair_conventions()) {
+            for (const auto& item : *conventions) {
+                answer.crm_conventions.push_back(model::domain::crm_convention{
+                    .pair_code = item.pair_code,
+                    .decimal_places = item.decimal_places,
+                    .pip_factor = item.pip_factor,
+                    .tick_size = item.tick_size});
+            }
+        }
     };
     boost::asio::co_spawn(context,
         run_session_read(std::move(job.session), std::move(fact),
