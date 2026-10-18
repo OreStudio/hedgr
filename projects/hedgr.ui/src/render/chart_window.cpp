@@ -370,22 +370,24 @@ void render_chart(window_handle handle, const render_input& input,
                 }
             }
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 1.5f);
-            if (state.market_candles) {
+            const bool candles_selected = state.market_candles;
+            if (candles_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
             }
             if (ImGui::SmallButton("Candles"))
                 state.market_candles = true;
-            if (state.market_candles)
+            if (candles_selected)
                 ImGui::PopStyleColor();
             ImGui::SameLine();
-            if (!state.market_candles) {
+            const bool line_selected = !state.market_candles;
+            if (line_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
             }
             if (ImGui::SmallButton("Line"))
                 state.market_candles = false;
-            if (!state.market_candles)
+            if (line_selected)
                 ImGui::PopStyleColor();
             ImGui::NewLine();
 
