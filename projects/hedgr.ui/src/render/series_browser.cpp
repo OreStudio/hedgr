@@ -425,8 +425,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         constexpr ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg
             | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY
             | ImGuiTableFlags_SizingStretchProp;
-        const float table_height = std::clamp(
-            ImGui::GetContentRegionAvail().y * 0.35f, 120.0f, 200.0f);
+        const float table_height = std::max(120.0f,
+            ImGui::GetContentRegionAvail().y
+                - widget::status_foot_height(status)
+                - ImGui::GetTextLineHeightWithSpacing() * 2.0f);
         if (ImGui::BeginTable("##curves", 3, table_flags,
                 ImVec2(0.0f, table_height))) {
             ImGui::TableSetupColumn("Curve",
