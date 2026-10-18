@@ -469,6 +469,23 @@ public:
 
     /** @brief One image of the tenant, as the assets service has it. */
     using image_content = hedgr::model::state::image_content;
+    /** @brief One cross-rate as the CRM batch read returned it. */
+    struct crm_rate final {
+        std::string crm_name;
+        std::string base_currency_code;
+        std::string quote_currency_code;
+        double rate = 0.0;
+        std::string status;
+        std::string as_of;
+        bool reciprocal = false;
+        std::optional<double> delta_pct;
+    };
+
+    /** @brief Every configured CRM rate for a party, in one batch call. */
+    [[nodiscard]] result<std::vector<crm_rate>> crm_rates(
+        std::string_view party_id, std::string_view crm_name,
+        bool reciprocal) const;
+
     /** @brief One currency's image identifier, empty when it has no image. */
     struct currency_image final {
         std::string currency;

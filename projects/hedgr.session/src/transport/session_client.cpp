@@ -38,6 +38,7 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
@@ -537,6 +538,55 @@ ores::nats::service::subscription session_client::subscribe(
     std::string_view subject,
     ores::nats::message_handler handler) const {
     return client().transport().subscribe(subject, std::move(handler));
+}
+
+result<std::vector<session_client::crm_rate>>
+session_client::crm_rates(std::string_view party_id,
+    std::string_view crm_name, bool reciprocal) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a CRM read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_crm_rates_request;
+    using ores::marketdata::messaging::get_crm_rates_response;
+    try {
+        get_crm_rates_request request{};
+        request.party_id = std::string{party_id};
+        request.crm_name = std::string{crm_name};
+        request.reciprocal = reciprocal;
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_crm_rates_response>(client(),
+                get_crm_rates_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the CRM answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::protocol_error,
+                answer->message.empty()
+                    ? std::string("the deployment refused the CRM read")
+                    : answer->message);
+
+        std::vector<crm_rate> result;
+        result.reserve(answer->rates.size());
+        for (const auto& item : answer->rates) {
+            result.push_back(crm_rate{
+                .crm_name = item.crm_name,
+                .base_currency_code = item.base_currency_code,
+                .quote_currency_code = item.quote_currency_code,
+                .rate = item.rate,
+                .status = item.status,
+                .as_of = item.as_of,
+                .reciprocal = item.reciprocal,
+                .delta_pct = item.delta_pct});
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
 }
 
 result<std::vector<session_client::currency_image>>
