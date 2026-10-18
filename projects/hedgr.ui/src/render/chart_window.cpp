@@ -23,6 +23,7 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -140,12 +141,12 @@ constexpr std::int64_t live_threshold_ns =
 }
 
 /** @brief The date of one instant, in the same zone as the axis ticks. */
-[[nodiscard]] std::string format_date(std::int64_t at_ns) {
+[[nodiscard]] std::string format_timestamp(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
     std::tm utc{};
     gmtime_r(&seconds, &utc);
-    char buffer[32]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y", &utc);
+    char buffer[40]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &utc);
     return buffer;
 }
 
@@ -396,7 +397,7 @@ void render_chart(window_handle handle, const render_input& input,
              * beside it. The ticks themselves carry only the time of day.
              */
             ImGui::PushFont(icon::numeric_font());
-            ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
+            ImGui::TextDisabled("%s", format_timestamp(points.back().at_ns).c_str());
             ImGui::PopFont();
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
@@ -583,12 +584,9 @@ void render_chart(window_handle handle, const render_input& input,
                      * zero would be the whole plot rather than the area under
                      * the line.
                      */
-                    ImPlotSpec fill;
-                    fill.FillColor = line_colour;
-                    fill.FillAlpha = 0.16f;
-                    fill.Flags = ImPlotItemFlags_NoLegend;
-                    ImPlot::PlotShaded("##fill", xs.data(), ys.data(),
-                        static_cast<int>(xs.size()), floor, fill);
+                    fill_gradient_under_curve(xs.data(), ys.data(),
+                        static_cast<int>(xs.size()),
+                        ImGui::ColorConvertFloat4ToU32(line_colour), 0.32f);
                 }
 
                 /*

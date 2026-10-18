@@ -21,6 +21,7 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/flags.hpp"
@@ -47,12 +48,12 @@ namespace theme = hedgr::ui::theme;
 using hedgr::model::command::command;
 
 /** @brief The date the curve was observed, in the reader's local zone. */
-[[nodiscard]] std::string format_date(std::int64_t at_ns) {
+[[nodiscard]] std::string format_timestamp(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
     std::tm local{};
     localtime_r(&seconds, &local);
-    char buffer[32]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y", &local);
+    char buffer[40]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &local);
     return buffer;
 }
 
@@ -146,7 +147,7 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::TextDisabled("Sign in to read this curve.");
     } else if (curve != nullptr && curve->observed_at_ns > 0) {
         ImGui::PushFont(icon::numeric_font());
-        ImGui::TextDisabled("%s", format_date(curve->observed_at_ns).c_str());
+        ImGui::TextDisabled("%s", format_timestamp(curve->observed_at_ns).c_str());
         ImGui::PopFont();
         ImGui::SameLine();
         ImGui::TextDisabled("\u00b7 %zu points", curve->nodes.size());
@@ -225,8 +226,15 @@ void render_term_structure(window_handle handle, const render_input& input,
                 ImPlot::SetupAxisLimits(ImAxis_X1, -0.5,
                     static_cast<double>(xs.size()) - 0.5, ImGuiCond_Always);
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
+                const ImVec4 line_colour = ImPlot::GetColormapColor(0);
+                fill_gradient_under_curve(xs.data(), ys.data(),
+                    static_cast<int>(xs.size()),
+                    ImGui::ColorConvertFloat4ToU32(line_colour), 0.35f);
+                ImPlotSpec line;
+                line.LineColor = line_colour;
+                line.LineWeight = 1.5f;
                 ImPlot::PlotLine("Rate", xs.data(), ys.data(),
-                    static_cast<int>(xs.size()));
+                    static_cast<int>(xs.size()), line);
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();
