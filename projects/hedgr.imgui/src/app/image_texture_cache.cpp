@@ -19,8 +19,8 @@
  */
 #include "hedgr.imgui/app/image_texture_cache.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
+#include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.ui/image/svg_raster.hpp"
-#include <GL/glew.h>
 #include <stb_image.h>
 
 namespace hedgr::imgui::app {
@@ -33,15 +33,15 @@ image_texture_cache::~image_texture_cache() {
     clear();
 }
 
-void image_texture_cache::ensure(std::string_view tenant_id,
+bool image_texture_cache::ensure(std::string_view tenant_id,
     std::string_view image_id, std::string_view mime_type,
-    std::vector<std::uint8_t> const& data) {
+    const std::vector<std::uint8_t>& data) {
     const auto key = model::state::make_tenant_key(tenant_id, image_id);
     if (failed_.contains(key))
-        return;
+        return false;
     auto& by_key = entries_.get<0>();
     if (by_key.contains(key))
-        return;
+        return true;
 
     unsigned int texture = 0;
     std::size_t bytes = 0;
@@ -49,7 +49,7 @@ void image_texture_cache::ensure(std::string_view tenant_id,
         const auto svg = std::string_view{
             reinterpret_cast<const char*>(data.data()), data.size()};
         if (const auto raster = ui::image::rasterize_svg(svg, 64, 44)) {
-            texture = upload(raster->pixels.data(), raster->width,
+            texture = upload_rgba(raster->pixels.data(), raster->width,
                 raster->height);
             bytes = raster->pixels.size();
         }
@@ -60,14 +60,14 @@ void image_texture_cache::ensure(std::string_view tenant_id,
         auto* pixels = stbi_load_from_memory(data.data(),
             static_cast<int>(data.size()), &width, &height, &channels, 4);
         if (pixels != nullptr) {
-            texture = upload(pixels, width, height);
+            texture = upload_rgba(pixels, width, height);
             bytes = static_cast<std::size_t>(width) * height * 4;
             stbi_image_free(pixels);
         }
     }
     if (texture == 0) {
         failed_.insert(key);
-        return;
+        return false;
     }
 
     auto& by_recency = entries_.get<1>();
@@ -78,11 +78,17 @@ void image_texture_cache::ensure(std::string_view tenant_id,
         .bytes = bytes,
         .used_frame = 0});
     bytes_ += bytes;
+    return true;
 }
 
 ImTextureID image_texture_cache::get(std::string_view tenant_id,
-    std::string_view image_id) {
+    std::string_view image_id, std::string_view mime_type,
+    const std::vector<std::uint8_t>& data) {
     auto& by_key = entries_.get<0>();
+    if (!by_key.contains(model::state::make_tenant_key(tenant_id, image_id))
+        && !ensure(tenant_id, image_id, mime_type, data))
+        return 0;
+
     const auto found = by_key.find(
         model::state::make_tenant_key(tenant_id, image_id));
     if (found == by_key.end())
@@ -127,18 +133,6 @@ void image_texture_cache::clear() {
     entries_.clear();
     failed_.clear();
     bytes_ = 0;
-}
-
-unsigned int image_texture_cache::upload(const unsigned char* pixels,
-    int width, int height) {
-    unsigned int texture = 0;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-        GL_UNSIGNED_BYTE, pixels);
-    return texture;
 }
 
 }

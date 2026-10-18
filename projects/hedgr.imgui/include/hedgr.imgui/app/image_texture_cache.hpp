@@ -53,12 +53,9 @@ public:
     image_texture_cache(const image_texture_cache&) = delete;
     image_texture_cache& operator=(const image_texture_cache&) = delete;
 
-    /** @brief Uploads an image unless its texture is already held. */
-    void ensure(std::string_view tenant_id, std::string_view image_id,
-        std::string_view mime_type, std::vector<std::uint8_t> const& data);
-
     [[nodiscard]] ImTextureID get(std::string_view tenant_id,
-        std::string_view image_id) override;
+        std::string_view image_id, std::string_view mime_type,
+        const std::vector<std::uint8_t>& data) override;
 
     /** @brief Starts a frame; textures used after this are pinned. */
     void begin_frame();
@@ -90,8 +87,9 @@ private:
                 entry, std::string, &entry::key>>,
             boost::multi_index::sequenced<>>>;
 
-    [[nodiscard]] unsigned int upload(const unsigned char* pixels, int width,
-        int height);
+    bool ensure(std::string_view tenant_id, std::string_view image_id,
+        std::string_view mime_type,
+        const std::vector<std::uint8_t>& data);
 
     container entries_;
     std::size_t bytes_ = 0;

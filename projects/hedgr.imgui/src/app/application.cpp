@@ -20,6 +20,7 @@
 #include "hedgr.imgui/app/application.hpp"
 
 #include "hedgr.imgui/app/capture_input.hpp"
+#include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
@@ -548,27 +549,6 @@ void application::load_splash_texture() {
         << "Loaded splash image: " << splash_width_ << "x" << splash_height_;
 }
 
-void application::sync_image_textures() {
-    textures_.begin_frame();
-    manager_.images().for_each(
-        [this](std::string_view tenant_id, std::string_view image_id,
-            const model::state::image_content& image) {
-            textures_.ensure(tenant_id, image_id, image.mime_type, image.data);
-        });
-}
-
-unsigned int application::upload_rgba(const unsigned char* data, int width,
-    int height) {
-    unsigned int texture = 0;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA,
-        GL_UNSIGNED_BYTE, data);
-    return texture;
-}
-
 void application::release_instance_icon_textures() {
     for (auto& row : instance_icons_.entries) {
         if (row.texture == 0)
@@ -754,7 +734,7 @@ void application::render_loop(GLFWwindow* window) {
             .runtime_error = manager_.last_error(),
             .instance_icons = &instance_icons_,
         };
-        sync_image_textures();
+        textures_.begin_frame();
         workspace_.render(input);
         textures_.end_frame();
 

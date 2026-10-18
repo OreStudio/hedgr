@@ -37,11 +37,9 @@
 #include <imgui.h>
 #include <array>
 #include <cstdint>
-#include <cstdint>
 #include <string>
 #include <string_view>
 #include <unordered_set>
-#include <string_view>
 #include <vector>
 
 namespace hedgr::ui::render {
@@ -331,12 +329,28 @@ struct window_ui_state final {
 struct image_texture_source {
     virtual ~image_texture_source() = default;
 
-    /** @brief The texture for an image, or zero when none is uploaded.
-     *  Marks the texture as used by this frame. */
-    [[nodiscard]] virtual ImTextureID
-    get(std::string_view tenant_id, std::string_view image_id) = 0;
+    /**
+     * @brief The texture for an image, uploading it if needed.
+     *
+     * Marks the texture as used by this frame. The bytes travel here because
+     * only the caller holds the byte cache; the source owns the graphics
+     * context and nothing else.
+     */
+    [[nodiscard]] virtual ImTextureID get(std::string_view tenant_id,
+        std::string_view image_id, std::string_view mime_type,
+        const std::vector<std::uint8_t>& data) = 0;
 };
 
+/**
+ * @brief Everything a renderer is allowed to read, and the one thing it may do.
+ *
+ * The tables are const because the interface never mutates state: a renderer
+ * reacts to a click by pushing a command onto the queue and the runtime applies
+ * it. That is what keeps rendering free of side effects and the state tables
+ * owned by a single writer. The image cache is the deliberate exception: asking
+ * it for an image records the hit, which is a cache statistic and not model
+ * state.
+ */
 struct render_input final {
     /** @brief The instances known to this process. */
     const hedgr::model::state::instance_table& instances;

@@ -219,7 +219,11 @@ ImTextureID image_texture(const render_input& input,
     const auto* image_id = input.currency_images.image_for(tenant_id, currency);
     if (image_id == nullptr)
         return 0;
-    return input.textures->get(tenant_id, *image_id);
+    const auto* image = input.images.get(tenant_id, *image_id);
+    if (image == nullptr)
+        return 0;
+    return input.textures->get(tenant_id, *image_id, image->mime_type,
+        image->data);
 }
 
 std::string identity_text(const identity_bar_state& state) {
