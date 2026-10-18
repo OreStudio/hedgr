@@ -143,6 +143,10 @@ namespace transport = hedgr::session::transport;
         return series_id.empty()
             ? std::string{}
             : std::format("chart:{}:{}:{}", instance_id, account_id, series_id);
+    case domain::window_kind::term_structure:
+        return series_id.empty()
+            ? std::string{}
+            : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -626,6 +630,13 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
     }
     case domain::window_kind::series_browser:
         return domain::series_browser_state{};
+    case domain::window_kind::term_structure: {
+        domain::term_structure_state terms;
+        terms.label = series_label.empty() ? "Term structure"
+                                           : std::string{series_label};
+        terms.curve_key = std::string{series_id};
+        return terms;
+    }
     case domain::window_kind::accounts: {
         domain::accounts_state accounts;
         accounts.instance_id = std::string{instance_id};
@@ -2867,8 +2878,13 @@ void instance_manager::do_open_window(const command::command& cmd) {
                  */
                 windows_.set_next_refresh_ns(*existing,
                     cmd.new_window_kind == domain::window_kind::chart
+                        || cmd.new_window_kind
+                            == domain::window_kind::term_structure
                         ? std::numeric_limits<std::int64_t>::max()
                         : 0);
+                if (cmd.new_window_kind
+                    == domain::window_kind::term_structure)
+                    start_term_structure_read(*existing);
             }
             return;
         }
@@ -2891,12 +2907,19 @@ void instance_manager::do_open_window(const command::command& cmd) {
         spec.cadence = std::chrono::seconds{60};
     if (cmd.new_window_kind == domain::window_kind::chart)
         spec.cadence = std::chrono::seconds{2};
+    if (cmd.new_window_kind == domain::window_kind::term_structure)
+        spec.cadence = std::chrono::seconds{30};
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
     spec.state = default_state_for(cmd.new_window_kind, last_error,
         cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
+    if (cmd.new_window_kind == domain::window_kind::term_structure) {
+        auto& terms = std::get<domain::term_structure_state>(spec.state);
+        terms.member_ids = cmd.member_ids;
+        terms.member_tenors = cmd.member_tenors;
+    }
 
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         spec.session = domain::session_key{std::string{cmd.instance_id},
@@ -2917,9 +2940,14 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * the watch rather than by the refresh deadline. The deadline is parked at
      * the end of time; a manual refresh still starts a read.
      */
-    if (cmd.new_window_kind == domain::window_kind::chart)
+    if (cmd.new_window_kind == domain::window_kind::chart
+        || cmd.new_window_kind == domain::window_kind::term_structure) {
         windows_.set_next_refresh_ns(handle,
             std::numeric_limits<std::int64_t>::max());
+    }
+
+    if (cmd.new_window_kind == domain::window_kind::term_structure)
+        start_term_structure_read(handle);
 
     if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
         last_error_ = store_failure(
@@ -3000,6 +3028,11 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
      * A command centre's refresh is a deployment read on its own connection.
      * Every other kind still takes the placeholder below.
      */
+    if (spec.kind == domain::window_kind::term_structure) {
+        start_term_structure_read(*handle);
+        return;
+    }
+
     if (spec.kind == domain::window_kind::command_centre) {
         start_deployment_read(cmd.window_id);
         return;
@@ -3263,6 +3296,45 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
     currency_images_reading_.insert(ev.tenant_id);
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::start_term_structure_read(
+    model::state::window_handle handle) {
+    if (!database_ || !windows_.contains(handle))
+        return;
+    const auto spec = windows_.spec(handle, sessions_);
+    const auto* st = std::get_if<domain::term_structure_state>(&spec.state);
+    if (st == nullptr || st->curve_key.empty() || st->member_ids.empty()
+        || st->member_ids.size() != st->member_tenors.size())
+        return;
+    if (!spec.session)
+        return;
+    const auto session = sessions_.find(spec.session->instance_id,
+        spec.session->account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto instance = instances_.find(spec.session->instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(spec.session->account_id);
+
+    worker::term_structure_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = spec.session->instance_id;
+    job.session.account_id = spec.session->account_id;
+    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
+    job.session.token = std::string{sessions_.token(*session)};
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.key = st->curve_key;
+    job.label = st->label;
+    job.member_ids = st->member_ids;
+    job.member_tenors = st->member_tenors;
+    term_structures_.begin(spec.session->instance_id,
+        spec.session->account_id, st->curve_key, st->label);
+    worker::spawn_term_structure_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::do_load_term_structure(

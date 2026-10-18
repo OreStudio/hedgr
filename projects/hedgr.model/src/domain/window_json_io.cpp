@@ -69,6 +69,8 @@ window_state_to_json(window_kind kind, const window_state& state) {
         return write_shape<command_centre_state>(state);
     case window_kind::series_browser:
         return write_shape<series_browser_state>(state);
+    case window_kind::term_structure:
+        return write_shape<term_structure_state>(state);
     }
     return std::unexpected("unknown window kind");
 }
@@ -91,6 +93,8 @@ window_state_from_json(window_kind kind, std::string_view json) {
         return read_shape<command_centre_state>(json);
     case window_kind::series_browser:
         return read_shape<series_browser_state>(json);
+    case window_kind::term_structure:
+        return read_shape<term_structure_state>(json);
     }
     return std::unexpected("unknown window kind");
 }

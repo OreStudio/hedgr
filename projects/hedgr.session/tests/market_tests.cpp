@@ -63,6 +63,9 @@ TEST_CASE("a curve key groups the tenors of one rate series", "[market]") {
     REQUIRE(market::series_term(one_day) == "1D");
     REQUIRE(market::series_term(six_months) == "6M");
     REQUIRE(market::series_term(zero).empty());
+    REQUIRE(market::series_term(
+                "oresmd://ir/INR?type=quote&instrument=ir_swap&tenor=1D&term=10Y")
+        == "10Y");
     REQUIRE(market::series_curve_key(one_day) == market::series_curve_key(six_months));
     REQUIRE(market::series_curve_key(one_day)
         == "oresmd://ir/GBP?fwd_start=0D&instrument=ir_swap&quote=rate&type=series");

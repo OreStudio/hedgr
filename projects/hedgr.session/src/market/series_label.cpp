@@ -114,9 +114,9 @@ std::string series_asset_class(std::string_view oresmd_uri) {
 
 std::string series_term(std::string_view oresmd_uri) {
     const auto uri = parse(oresmd_uri);
-    auto term = parameter(uri, "tenor");
+    auto term = parameter(uri, "term");
     if (term.empty())
-        term = parameter(uri, "term");
+        term = parameter(uri, "tenor");
     return term;
 }
 

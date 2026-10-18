@@ -7,32 +7,34 @@ list from points to term structures. Leaf series that share a curve identity
 (the series URI without its `tenor`) collapse into one row, and a composite
 curve whose observations carry `term` is one row of its own.
 
-Selecting a curve reads the latest observation of each member series and draws
-the curve inline below the list: tenor on the x-axis, rate on the y-axis. The
-refresh button reads the curve again. The read runs on a worker and its own
-connection; the frame loop only draws the result.
+Double-clicking a curve, or choosing it in the combo, opens a term-structure
+window like the FX chart window. It draws tenor on the x-axis and rate on the
+y-axis, and its refresh button reads the curve again. The read runs on a worker
+and its own connection; the frame loop only draws the result.
 
 ## Data path
 
-- `series_term` reads the `tenor` or `term` from an oresmd URI.
+- `series_term` reads the `term` from an observation URI, falling back to
+  `tenor`. The synthetic feed writes both on an IR observation -- the index
+  tenor and the curve term -- and the curve term is the ladder.
 - `series_curve_key` is the URI with those fields removed, so the tenors of one
   curve group together; `series_curve_label` names the curve without a term.
-- The browser groups `IR` catalogue rows by that key. A row with no key is a
-  composite curve; the worker reads its observations and takes the newest value
-  per term from their URIs.
+- One IR series is one curve: the ladder lives in its observations, not in the
+  series URI. The worker reads the series' observations and takes the newest
+  value per term from their URIs.
 - `term_structure_table` holds the latest curve per session; the draw copies the
   nodes, sorts them by tenor, and plots them.
 
 ## Verification
 
 Against `clever_dijkstra` with `tenant_admin@acme_corporation`: the asset-class
-selector shows `IR`, the list shows one row per curve instead of per tenor, and
-selecting a curve issues `load_term_structure` and draws the returned node.
+selector shows `IR`, the list shows curves, and choosing `IR INR IR_SWAP` opens
+a term-structure window with the full twelve-point ladder. The capture is
+[rates-term-structures.png](rates-term-structures.png).
 
-That deployment's Acme curves hold one tenor each, so the live capture shows a
-one-node curve rather than a ladder. The grouping, term ordering, composite
-term extraction and table are covered by the session and model tests; a
-multi-tenor curve is the remaining live check when such data is provisioned.
+The synthetic feed is producing rates: the observations for one IR series carry
+`term=1M` through `term=30Y`. The bug was on the client, which read only the
+newest observation and took the series' index `tenor=1D` as the curve term.
 
 ## Not in this slice
 

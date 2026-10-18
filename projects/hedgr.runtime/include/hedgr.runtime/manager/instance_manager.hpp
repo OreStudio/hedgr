@@ -390,6 +390,9 @@ private:
     /** @brief Reads the latest curve named by a set of tenor series. */
     void do_load_term_structure(const model::command::command& cmd);
 
+    /** @brief Reads the curve a term-structure window shows. */
+    void start_term_structure_read(model::state::window_handle handle);
+
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
         std::string_view account_id, std::string_view series_id);

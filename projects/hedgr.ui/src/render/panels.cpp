@@ -131,6 +131,13 @@ std::string window_title(domain::window_kind kind,
         return "Command centre";
     case domain::window_kind::series_browser:
         return "Market data";
+    case domain::window_kind::term_structure: {
+        if (const auto* terms =
+                std::get_if<domain::term_structure_state>(&state)) {
+            return terms->label.empty() ? "Term structure" : terms->label;
+        }
+        return "Term structure";
+    }
     }
     return "Window";
 }
@@ -273,6 +280,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::workspace:
     case domain::window_kind::command_centre:
     case domain::window_kind::series_browser:
+    case domain::window_kind::term_structure:
         return false;
     }
     return false;

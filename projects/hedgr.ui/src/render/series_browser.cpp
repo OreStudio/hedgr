@@ -188,30 +188,22 @@ struct curve_group final {
 
 [[nodiscard]] std::vector<curve_group> group_curves(
     const std::vector<const domain::market_series_row*>& rows) {
-    std::map<std::string, curve_group> grouped;
+    /*
+     * One IR series is one curve. Its ladder lives in its observations' term
+     * parameter, not in the series URI: the series carries the index tenor
+     * (1D) and each observation names the curve point (1M, 3M, 10Y). Grouping
+     * series by their URI would therefore join the wrong thing, and reading
+     * only the newest observation would show a single point.
+     */
+    std::vector<curve_group> curves;
     for (const auto* row : rows) {
         if (row->asset_class != "IR")
             continue;
-        if (row->curve_key.empty()) {
-            /* A composite curve carries its terms in its observations. */
-            auto& group = grouped[row->id];
-            group.key = row->id;
-            group.label = row->curve_label.empty() ? row->label
-                                                   : row->curve_label;
-            group.members.push_back(row);
-            continue;
-        }
-        auto& group = grouped[row->curve_key];
-        group.key = row->curve_key;
-        group.label = row->curve_label;
+        curve_group group;
+        group.key = row->id;
+        group.label = row->curve_label.empty() ? row->label
+                                               : row->curve_label;
         group.members.push_back(row);
-    }
-    std::vector<curve_group> curves;
-    for (auto& [key, group] : grouped) {
-        std::sort(group.members.begin(), group.members.end(),
-            [](const auto* a, const auto* b) {
-                return tenor_rank(a->tenor) < tenor_rank(b->tenor);
-            });
         curves.push_back(std::move(group));
     }
     std::sort(curves.begin(), curves.end(),
@@ -221,20 +213,23 @@ struct curve_group final {
     return curves;
 }
 
-void request_curve(const render_input& input,
+void open_curve(const render_input& input,
     hedgr::model::state::session_handle session,
     const curve_group& curve) {
     if (curve.members.empty())
         return;
     command request;
-    request.kind = command_kind::load_term_structure;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::term_structure;
+    request.series_id = curve.key;
+    request.series_label = curve.label;
     request.instance_id = std::string{input.sessions.instance_id(session)};
     request.account_id = std::string{input.sessions.account_id(session)};
     request.curve_key = curve.key;
     request.curve_label = curve.label;
     for (const auto* member : curve.members) {
         request.member_ids.push_back(member->id);
-        request.member_tenors.push_back(member->tenor);
+        request.member_tenors.push_back({});
     }
     input.commands.push(std::move(request));
 }
@@ -412,7 +407,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 if (ImGui::Selectable("##curve-row", chosen)) {
                     state.market_selected_curve_key = curve.key;
                     state.market_selected_curve_label = curve.label;
-                    request_curve(input, *session, curve);
+                    open_curve(input, *session, curve);
                 }
                 ImGui::SameLine();
                 ImGui::TextUnformatted(curve.label.c_str());
@@ -450,10 +445,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::Selectable(curve.label.c_str(), chosen,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick);
-                if (ImGui::IsItemClicked()) {
+                if (ImGui::IsItemHovered()
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     state.market_selected_curve_key = curve.key;
                     state.market_selected_curve_label = curve.label;
-                    request_curve(input, *session, curve);
+                    open_curve(input, *session, curve);
                 }
                 ImGui::SetItemTooltip("%s", curve.key.c_str());
                 ImGui::PopID();
@@ -466,58 +462,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             ImGui::EndTable();
         }
 
-        if (!state.market_selected_curve_key.empty()) {
-            const auto* curve = input.term_structures.get(
-                input.sessions.instance_id(*session),
-                input.sessions.account_id(*session),
-                state.market_selected_curve_key);
-            ImGui::TextUnformatted(state.market_selected_curve_label.c_str());
-            ImGui::SameLine();
-            if (ImGui::SmallButton("Refresh curve")) {
-                for (const auto& group : curves) {
-                    if (group.key == state.market_selected_curve_key) {
-                        request_curve(input, *session, group);
-                        break;
-                    }
-                }
-            }
-            if (curve != nullptr && !curve->error.empty()) {
-                ImGui::TextDisabled("%s", curve->error.c_str());
-            } else if (curve == nullptr || curve->nodes.empty()) {
-                ImGui::TextDisabled("Reading the curve...");
-            } else {
-                auto nodes = curve->nodes;
-                std::sort(nodes.begin(), nodes.end(),
-                    [](const auto& a, const auto& b) {
-                        return tenor_rank(a.tenor) < tenor_rank(b.tenor);
-                    });
-                std::vector<double> xs;
-                std::vector<double> ys;
-                std::vector<const char*> labels;
-                xs.reserve(nodes.size());
-                ys.reserve(nodes.size());
-                labels.reserve(nodes.size());
-                for (std::size_t i = 0; i < nodes.size(); ++i) {
-                    xs.push_back(static_cast<double>(i));
-                    ys.push_back(nodes[i].value);
-                    labels.push_back(nodes[i].tenor.c_str());
-                }
-                const float plot_height = std::max(140.0f,
-                    ImGui::GetContentRegionAvail().y
-                        - widget::status_foot_height(status) - 8.0f);
-                if (ImPlot::BeginPlot("##term-structure",
-                        ImVec2(-1, plot_height))) {
-                    ImPlot::SetupAxes("Tenor", "Rate");
-                    ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
-                        static_cast<int>(xs.size()), labels.data());
-                    ImPlot::PlotLine("Rate", xs.data(), ys.data(),
-                        static_cast<int>(xs.size()));
-                    ImPlot::EndPlot();
-                }
-            }
-        }
         ImGui::TextDisabled(
-            "Choose a curve to read its latest term structure.");
+            "Double-click a curve to open its term structure.");
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
