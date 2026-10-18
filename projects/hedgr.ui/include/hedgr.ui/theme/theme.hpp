@@ -116,6 +116,13 @@ HEDGR_UI_EXPORT void apply_theme();
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
+/*
+ * Term-structure history. The newest curve is the accent green the web
+ * simulator uses; earlier curves are a grey-blue that fades with age, so a
+ * reader can tell the live curve from the ones behind it at a glance.
+ */
+inline constexpr ImU32 curve_latest_colour = IM_COL32(64, 156, 255, 255);
+
 /**
  * @brief The colour of a field whose edited value differs from the stored one.
  *

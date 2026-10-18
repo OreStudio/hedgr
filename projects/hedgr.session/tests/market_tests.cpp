@@ -52,6 +52,27 @@ TEST_CASE("a series label names the parts its URI carries", "[market]") {
     REQUIRE(market::series_label("") == "");
 }
 
+TEST_CASE("a curve key groups the tenors of one rate series", "[market]") {
+    const auto one_day =
+        "oresmd://ir/GBP?type=series&instrument=ir_swap&quote=rate&fwd_start=0D&tenor=1D";
+    const auto six_months =
+        "oresmd://ir/GBP?type=series&instrument=ir_swap&quote=rate&fwd_start=0D&tenor=6M";
+    const auto zero =
+        "oresmd://ir/HUF?type=series&instrument=zero&quote=rate&curve_id=HUF1D&day_counter=A365";
+
+    REQUIRE(market::series_term(one_day) == "1D");
+    REQUIRE(market::series_term(six_months) == "6M");
+    REQUIRE(market::series_term(zero).empty());
+    REQUIRE(market::series_term(
+                "oresmd://ir/INR?type=quote&instrument=ir_swap&tenor=1D&term=10Y")
+        == "10Y");
+    REQUIRE(market::series_curve_key(one_day) == market::series_curve_key(six_months));
+    REQUIRE(market::series_curve_key(one_day)
+        == "oresmd://ir/GBP?fwd_start=0D&instrument=ir_swap&quote=rate&type=series");
+    REQUIRE(market::series_curve_key(zero).empty());
+    REQUIRE(market::series_curve_label(one_day) == "IR GBP IR_SWAP");
+}
+
 TEST_CASE("a series asset class is the URI's own word, upper-cased",
     "[market]") {
     REQUIRE(market::series_asset_class("oresmd://fx/GBP?ccy=USD") == "FX");

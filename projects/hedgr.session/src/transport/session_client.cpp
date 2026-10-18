@@ -1091,7 +1091,10 @@ session_client::market_series(std::uint32_t limit) const {
                 .label = market::series_label(row.oresmd_uri),
                 .asset_class = market::series_asset_class(row.oresmd_uri),
                 .producer_kind = row.producer_kind,
-                .party_id = boost::uuids::to_string(row.party_id)});
+                .party_id = boost::uuids::to_string(row.party_id),
+                .tenor = market::series_term(row.oresmd_uri),
+                .curve_key = market::series_curve_key(row.oresmd_uri),
+                .curve_label = market::series_curve_label(row.oresmd_uri)});
         }
         std::sort(rows.begin(), rows.end(),
             [](const market_series_summary& a, const market_series_summary& b) {
@@ -1200,7 +1203,9 @@ session_client::market_series_points(std::string_view series_id,
                 std::chrono::nanoseconds>(
                 row.observation_datetime.time_since_epoch())
                                    .count();
-            read.points.push_back(market_point{.at_ns = at_ns, .value = value});
+            read.points.push_back(market_point{.at_ns = at_ns,
+                .value = value,
+                .term = market::series_term(row.oresmd_uri)});
         }
 
         std::sort(read.points.begin(), read.points.end(),

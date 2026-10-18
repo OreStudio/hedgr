@@ -51,6 +51,28 @@ series_label(std::string_view oresmd_uri);
 [[nodiscard]] HEDGR_SESSION_EXPORT std::string
 series_asset_class(std::string_view oresmd_uri);
 
+/**
+ * @brief The tenor or term a series varies over, or empty.
+ *
+ * A leaf rate series carries its tenor in the URI; a composite curve may carry
+ * the term on each observation rather than in the series identity.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::string
+series_term(std::string_view oresmd_uri);
+
+/**
+ * @brief The identity a term structure groups on, or empty.
+ *
+ * The series URI with its tenor and term removed, so the tenors of one curve
+ * share a key. Empty when the URI names a point rather than a term of a curve.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::string
+series_curve_key(std::string_view oresmd_uri);
+
+/** @brief A curve's label: asset, subject, instrument and curve id, no term. */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::string
+series_curve_label(std::string_view oresmd_uri);
+
 }
 
 #endif

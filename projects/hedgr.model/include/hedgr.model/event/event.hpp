@@ -95,6 +95,8 @@ enum class event_kind : std::uint8_t {
     currency_image_map = 12,
     /** @brief One tenant image was read by identifier, or could not be. */
     image_loaded = 13,
+    /** @brief One interest-rate curve was read, as its latest term nodes. */
+    term_structure = 14,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -191,6 +193,15 @@ struct event final {
 
     /** @brief Image identifier, for image_loaded. */
     std::string image_id;
+
+    /** @brief The curve identity, for term_structure. */
+    std::string curve_key;
+
+    /** @brief The curve's name, for term_structure. */
+    std::string curve_label;
+
+    /** @brief The recent curves, oldest first, for term_structure. */
+    std::vector<domain::term_curve> term_curves;
 
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;

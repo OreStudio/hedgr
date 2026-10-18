@@ -51,6 +51,8 @@ std::string_view to_string(event_kind value) noexcept {
         return "currency_image_map";
     case event_kind::image_loaded:
         return "image_loaded";
+    case event_kind::term_structure:
+        return "term_structure";
     }
     return "unknown";
 }

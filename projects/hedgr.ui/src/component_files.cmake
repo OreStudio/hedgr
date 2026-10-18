@@ -18,6 +18,7 @@ set(files
     "render/panels.cpp"
     "render/renderer.cpp"
     "render/series_browser.cpp"
+    "render/term_structure_window.cpp"
     "render/shortcut_bar.cpp"
     "render/splash.cpp"
     "render/workspace.cpp"

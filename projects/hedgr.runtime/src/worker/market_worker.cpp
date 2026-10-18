@@ -90,7 +90,10 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .label = row.label,
                     .asset_class = row.asset_class,
                     .producer_kind = row.producer_kind,
-                    .party_id = row.party_id});
+                    .party_id = row.party_id,
+                    .tenor = row.tenor,
+                    .curve_key = row.curve_key,
+                    .curve_label = row.curve_label});
             }
         } else {
             fact.kind = event::event_kind::series_catalogue;
@@ -104,7 +107,9 @@ boost::asio::awaitable<void> run_market(market_job job,
             fact.points.reserve(read->points.size());
             for (const auto& point : read->points) {
                 fact.points.push_back(domain::market_point{
-                    .at_ns = point.at_ns, .value = point.value});
+                    .at_ns = point.at_ns,
+                    .value = point.value,
+                    .term = point.term});
             }
         } else {
             fact.kind = event::event_kind::series_points;

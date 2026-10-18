@@ -28,6 +28,7 @@
 #include <expected>
 #include <optional>
 #include <string>
+#include <vector>
 #include <string_view>
 #include <variant>
 
@@ -64,10 +65,12 @@ enum class window_kind : std::uint8_t {
     command_centre = 6,
     /** @brief The market series a session may plot, as a chooser list. */
     series_browser = 7,
+    /** @brief One interest-rate curve as a term structure. */
+    term_structure = 8,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 8;
+inline constexpr std::size_t window_kind_count = 9;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -87,6 +90,22 @@ struct chart_state final {
 
     /** @brief Ring capacity of the plotted series. */
     std::uint32_t max_points = 600;
+};
+
+/** @brief State of a term-structure window. */
+struct term_structure_state final {
+    /** @brief The curve's name, shown in the title. */
+    std::string label;
+
+    /** @brief The curve identity: the series URI without its tenor. */
+    std::string curve_key;
+
+    /** @brief Member series keys, in tenor order. */
+    std::vector<std::string> member_ids;
+
+    /** @brief Member tenors, index for index with member_ids. Empty for a
+     *  composite curve, whose terms are read from its observations. */
+    std::vector<std::string> member_tenors;
 };
 
 /** @brief State of a grid window. */
@@ -159,7 +178,7 @@ struct command_centre_state final {
 /** @brief The kind-specific state of a window. */
 using window_state = std::variant<chart_state, grid_state, notice_state,
     accounts_state, workspace_state, command_centre_state,
-    series_browser_state>;
+    series_browser_state, term_structure_state>;
 
 /**
  * @brief The persisted description of a window.

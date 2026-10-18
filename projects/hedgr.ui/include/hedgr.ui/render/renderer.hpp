@@ -27,6 +27,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
@@ -203,6 +204,9 @@ struct window_ui_state final {
     /** @brief The selected row of the window's primary table, or -1. */
     int selected_row = -1;
 
+    /** @brief How many recent curves a term-structure window overlays. */
+    int term_history = 5;
+
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;
 
@@ -295,6 +299,14 @@ struct window_ui_state final {
     std::string market_party_id;
 
     /**
+     * @brief The asset class the chooser shows, or empty for all.
+     *
+     * Choosing IR switches the list from points to term structures: the
+     * per-tenor series of one curve collapse into one row.
+     */
+    std::string market_asset_class;
+
+    /**
      * @brief The span a chart plots, in nanoseconds.
      *
      * Five minutes is what a live series is read for. The header's 1M to All
@@ -304,11 +316,15 @@ struct window_ui_state final {
         std::int64_t{5} * 60 * 1'000'000'000;
 
     /** @brief Whether a chart draws candles rather than a line. */
-    bool market_candles = true;
+    bool market_candles = false;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
     std::string market_selected_series_label;
+
+    /** @brief The curve last chosen in the rates view. */
+    std::string market_selected_curve_key;
+    std::string market_selected_curve_label;
 };
 
 /**
@@ -372,6 +388,9 @@ struct render_input final {
 
     /** @brief The market series and the points each chart holds. */
     const hedgr::model::state::market_table& market;
+
+    /** @brief The latest term structure each browser session read. */
+    const hedgr::model::state::term_structure_table& term_structures;
 
     /** @brief Which image each tenant currency names. */
     const hedgr::model::state::tenant_image_map& currency_images;

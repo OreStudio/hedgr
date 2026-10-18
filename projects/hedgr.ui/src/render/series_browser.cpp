@@ -27,9 +27,13 @@
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
+#include "implot.h"
 #include <cctype>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <map>
+#include <vector>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -144,6 +148,92 @@ void open_chart(const render_input& input,
 
 namespace hedgr::ui::render {
 
+
+/** @brief A tenor's rank in days, for ordering a curve's nodes. */
+[[nodiscard]] int tenor_rank(std::string_view tenor) {
+    if (tenor.empty())
+        return 0;
+    int amount = 0;
+    std::size_t i = 0;
+    while (i < tenor.size()
+        && std::isdigit(static_cast<unsigned char>(tenor[i]))) {
+        amount = amount * 10 + (tenor[i] - '0');
+        ++i;
+    }
+    if (amount == 0)
+        amount = 1;
+    if (i >= tenor.size())
+        return amount;
+    switch (static_cast<char>(std::toupper(
+        static_cast<unsigned char>(tenor[i])))) {
+    case 'D':
+        return amount;
+    case 'W':
+        return amount * 7;
+    case 'M':
+        return amount * 30;
+    case 'Y':
+        return amount * 365;
+    default:
+        return amount;
+    }
+}
+
+/** @brief The tenors of one curve, as the chooser lists them. */
+struct curve_group final {
+    std::string key;
+    std::string label;
+    std::vector<const domain::market_series_row*> members;
+};
+
+[[nodiscard]] std::vector<curve_group> group_curves(
+    const std::vector<const domain::market_series_row*>& rows) {
+    /*
+     * One IR series is one curve. Its ladder lives in its observations' term
+     * parameter, not in the series URI: the series carries the index tenor
+     * (1D) and each observation names the curve point (1M, 3M, 10Y). Grouping
+     * series by their URI would therefore join the wrong thing, and reading
+     * only the newest observation would show a single point.
+     */
+    std::vector<curve_group> curves;
+    for (const auto* row : rows) {
+        if (row->asset_class != "IR")
+            continue;
+        curve_group group;
+        group.key = row->id;
+        group.label = row->curve_label.empty() ? row->label
+                                               : row->curve_label;
+        group.members.push_back(row);
+        curves.push_back(std::move(group));
+    }
+    std::sort(curves.begin(), curves.end(),
+        [](const curve_group& a, const curve_group& b) {
+            return a.label < b.label;
+        });
+    return curves;
+}
+
+void open_curve(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const curve_group& curve) {
+    if (curve.members.empty())
+        return;
+    command request;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::term_structure;
+    request.series_id = curve.key;
+    request.series_label = curve.label;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.curve_key = curve.key;
+    request.curve_label = curve.label;
+    for (const auto* member : curve.members) {
+        request.member_ids.push_back(member->id);
+        request.member_tenors.push_back({});
+    }
+    input.commands.push(std::move(request));
+}
+
 void render_series_browser(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
@@ -255,6 +345,133 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     }
 
     /*
+     * Asset class is the first cut. Choosing IR switches the list from points
+     * to term structures: the per-tenor series of one curve become one row.
+     */
+    std::vector<std::string> asset_classes;
+    for (const auto& row : rows) {
+        if (row.asset_class.empty())
+            continue;
+        if (std::find(asset_classes.begin(), asset_classes.end(),
+                row.asset_class) == asset_classes.end())
+            asset_classes.push_back(row.asset_class);
+    }
+    std::sort(asset_classes.begin(), asset_classes.end());
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150.0f);
+    const char* asset_preview = state.market_asset_class.empty()
+        ? "All assets" : state.market_asset_class.c_str();
+    if (ImGui::BeginCombo("##asset-class", asset_preview)) {
+        if (ImGui::Selectable("All assets", state.market_asset_class.empty()))
+            state.market_asset_class.clear();
+        for (const auto& asset_class : asset_classes) {
+            const bool chosen = asset_class == state.market_asset_class;
+            if (ImGui::Selectable(asset_class.c_str(), chosen))
+                state.market_asset_class = asset_class;
+            if (chosen)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    if (state.market_asset_class == "IR") {
+        std::vector<const domain::market_series_row*> filtered;
+        for (const auto& row : rows) {
+            if (row.asset_class != "IR")
+                continue;
+            if (state.market_synthetic_only
+                && row.producer_kind != "SYNTHETIC")
+                continue;
+            if (!state.market_party_id.empty()
+                && row.party_id != state.market_party_id)
+                continue;
+            if (!contains_ci(row.label, filter)
+                && !contains_ci(row.uri, filter))
+                continue;
+            filtered.push_back(&row);
+        }
+        const auto curves = group_curves(filtered);
+
+        ImGui::TextUnformatted("Curve");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(520.0f);
+        const char* preview = state.market_selected_curve_label.empty()
+            ? "Select a term structure..." 
+            : state.market_selected_curve_label.c_str();
+        if (ImGui::BeginCombo("##curve-combo", preview,
+                ImGuiComboFlags_HeightLarge)) {
+            for (const auto& curve : curves) {
+                ImGui::PushID(curve.key.c_str());
+                const bool chosen = curve.key
+                    == state.market_selected_curve_key;
+                if (ImGui::Selectable("##curve-row", chosen)) {
+                    state.market_selected_curve_key = curve.key;
+                    state.market_selected_curve_label = curve.label;
+                    open_curve(input, *session, curve);
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted(curve.label.c_str());
+                ImGui::SameLine();
+                ImGui::TextDisabled("%zu tenors", curve.members.size());
+                if (chosen)
+                    ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
+            }
+            if (curves.empty())
+                ImGui::TextDisabled("No curves match the filters.");
+            ImGui::EndCombo();
+        }
+
+        constexpr ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg
+            | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY
+            | ImGuiTableFlags_SizingStretchProp;
+        const float table_height = std::max(120.0f,
+            ImGui::GetContentRegionAvail().y
+                - widget::status_foot_height(status)
+                - ImGui::GetTextLineHeightWithSpacing() * 2.0f);
+        if (ImGui::BeginTable("##curves", 3, table_flags,
+                ImVec2(0.0f, table_height))) {
+            ImGui::TableSetupColumn("Curve",
+                ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Tenors",
+                ImGuiTableColumnFlags_WidthFixed, 70.0f);
+            ImGui::TableSetupColumn("Source",
+                ImGuiTableColumnFlags_WidthFixed, 110.0f);
+            ImGui::TableHeadersRow();
+            for (const auto& curve : curves) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(curve.key.c_str());
+                const bool chosen = curve.key
+                    == state.market_selected_curve_key;
+                ImGui::Selectable(curve.label.c_str(), chosen,
+                    ImGuiSelectableFlags_SpanAllColumns
+                        | ImGuiSelectableFlags_AllowDoubleClick);
+                if (ImGui::IsItemHovered()
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    state.market_selected_curve_key = curve.key;
+                    state.market_selected_curve_label = curve.label;
+                    open_curve(input, *session, curve);
+                }
+                ImGui::SetItemTooltip("%s", curve.key.c_str());
+                ImGui::PopID();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%zu", curve.members.size());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", curve.members.front()
+                        ->producer_kind.c_str());
+            }
+            ImGui::EndTable();
+        }
+
+        ImGui::TextDisabled(
+            "Double-click a curve to open its term structure.");
+        widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+        return;
+    }
+
+    /*
      * The filtered series, in one vector so the combobox and the table list
      * exactly the same rows. The combobox is the quick way in; the table is the
      * overview, and a row in either opens the same chart.
@@ -262,6 +479,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     std::vector<const domain::market_series_row*> visible;
     visible.reserve(rows.size());
     for (const auto& row : rows) {
+        if (!state.market_asset_class.empty()
+            && row.asset_class != state.market_asset_class) {
+            continue;
+        }
         if (state.market_synthetic_only
             && row.producer_kind != "SYNTHETIC") {
             continue;

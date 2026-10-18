@@ -183,6 +183,15 @@ struct market_series_summary final {
 
     /** @brief The party that owns the series. */
     std::string party_id;
+
+    /** @brief The tenor or term the series carries, or empty. */
+    std::string tenor;
+
+    /** @brief The curve identity the series belongs to, or empty. */
+    std::string curve_key;
+
+    /** @brief The curve's name, from the URI without its term. */
+    std::string curve_label;
 };
 
 /** @brief One observation: when the market was observed and what it was. */
@@ -192,6 +201,9 @@ struct market_point final {
 
     /** @brief The observed value, parsed from the deployment's decimal text. */
     double value = 0.0;
+
+    /** @brief The term the observation names, or empty for a leaf series. */
+    std::string term;
 };
 
 /** @brief One series' observations, oldest first. */

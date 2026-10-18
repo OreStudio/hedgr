@@ -108,6 +108,8 @@ enum class command_kind : std::uint8_t {
     store_credential = 23,
     /** @brief Read one tenant image by its identifier. */
     load_image = 24,
+    /** @brief Read the latest curve a set of tenors names. */
+    load_term_structure = 25,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -187,6 +189,18 @@ struct command final {
 
     /** @brief Image identifier, for load_image. */
     std::string image_id;
+
+    /** @brief The curve identity, for load_term_structure. */
+    std::string curve_key;
+
+    /** @brief The curve's name, for load_term_structure. */
+    std::string curve_label;
+
+    /** @brief Member series keys, for load_term_structure. */
+    std::vector<std::string> member_ids;
+
+    /** @brief Member tenors, index for index with member_ids. */
+    std::vector<std::string> member_tenors;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;

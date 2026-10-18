@@ -23,6 +23,7 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -140,12 +141,12 @@ constexpr std::int64_t live_threshold_ns =
 }
 
 /** @brief The date of one instant, in the same zone as the axis ticks. */
-[[nodiscard]] std::string format_date(std::int64_t at_ns) {
+[[nodiscard]] std::string format_timestamp(std::int64_t at_ns) {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
     std::tm utc{};
     gmtime_r(&seconds, &utc);
-    char buffer[32]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y", &utc);
+    char buffer[40]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &utc);
     return buffer;
 }
 
@@ -370,22 +371,24 @@ void render_chart(window_handle handle, const render_input& input,
                 }
             }
             ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 1.5f);
-            if (state.market_candles) {
+            const bool candles_selected = state.market_candles;
+            if (candles_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
             }
             if (ImGui::SmallButton("Candles"))
                 state.market_candles = true;
-            if (state.market_candles)
+            if (candles_selected)
                 ImGui::PopStyleColor();
             ImGui::SameLine();
-            if (!state.market_candles) {
+            const bool line_selected = !state.market_candles;
+            if (line_selected) {
                 ImGui::PushStyleColor(ImGuiCol_Button,
                     ImGui::ColorConvertU32ToFloat4(theme::rail_selection_bar));
             }
             if (ImGui::SmallButton("Line"))
                 state.market_candles = false;
-            if (!state.market_candles)
+            if (line_selected)
                 ImGui::PopStyleColor();
             ImGui::NewLine();
 
@@ -394,7 +397,7 @@ void render_chart(window_handle handle, const render_input& input,
              * beside it. The ticks themselves carry only the time of day.
              */
             ImGui::PushFont(icon::numeric_font());
-            ImGui::TextDisabled("%s", format_date(points.back().at_ns).c_str());
+            ImGui::TextDisabled("%s", format_timestamp(points.back().at_ns).c_str());
             ImGui::PopFont();
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %zu points", points.size() - start);
@@ -487,7 +490,9 @@ void render_chart(window_handle handle, const render_input& input,
                 low = std::min(low, point.value);
                 high = std::max(high, point.value);
             }
-            const double span = high - low > 0.0 ? high - low : 1.0;
+            const double span = high - low > 0.0
+                ? high - low
+                : std::max(std::abs(high) * 0.005, 1e-6);
             const double floor = low - span * 0.08;
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
@@ -496,9 +501,7 @@ void render_chart(window_handle handle, const render_input& input,
             const ImPlotAxisFlags x_flags = use_candles
                 ? ImPlotAxisFlags_None
                 : ImPlotAxisFlags_AutoFit;
-            const ImPlotAxisFlags y_flags = use_candles
-                ? ImPlotAxisFlags_Opposite
-                : ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite;
+            constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
@@ -521,6 +524,10 @@ void render_chart(window_handle handle, const render_input& input,
                 ImPlot::SetupAxisFormat(ImAxis_X1, format_time,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
+                if (!use_candles) {
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
+                        high + span * 0.08, ImPlotCond_Always);
+                }
 
                 if (use_candles) {
                     double candle_low = candle_points.front().low;
@@ -581,12 +588,9 @@ void render_chart(window_handle handle, const render_input& input,
                      * zero would be the whole plot rather than the area under
                      * the line.
                      */
-                    ImPlotSpec fill;
-                    fill.FillColor = line_colour;
-                    fill.FillAlpha = 0.16f;
-                    fill.Flags = ImPlotItemFlags_NoLegend;
-                    ImPlot::PlotShaded("##fill", xs.data(), ys.data(),
-                        static_cast<int>(xs.size()), floor, fill);
+                    fill_gradient_under_curve(xs.data(), ys.data(),
+                        static_cast<int>(xs.size()),
+                        ImGui::ColorConvertFloat4ToU32(line_colour), 0.32f);
                 }
 
                 /*

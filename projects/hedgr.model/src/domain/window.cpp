@@ -40,6 +40,8 @@ std::string_view to_string(window_kind value) noexcept {
         return "command_centre";
     case window_kind::series_browser:
         return "series_browser";
+    case window_kind::term_structure:
+        return "term_structure";
     }
     return "unknown";
 }
@@ -62,6 +64,8 @@ window_kind_from_string(std::string_view text) {
         return window_kind::command_centre;
     if (text == "series_browser")
         return window_kind::series_browser;
+    if (text == "term_structure")
+        return window_kind::term_structure;
     return std::unexpected(std::format("unknown window kind '{}'", text));
 }
 
