@@ -48,6 +48,7 @@
         },
         "sqlgen",
         "catch2",
-        "lunasvg"
+        "lunasvg",
+        "boost-multi-index"
     ]
 }

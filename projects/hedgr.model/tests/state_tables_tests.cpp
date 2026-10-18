@@ -27,6 +27,7 @@
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.model/state/flag_table.hpp"
+#include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
@@ -1022,6 +1023,40 @@ TEST_CASE("a flag is read once per session and code", "[flags]") {
     flags.fail("i-1", "a-1", "us", "no image");
     REQUIRE(flags.get("i-1", "a-1", "us")->state == flag_state::failed);
     REQUIRE(flags.all_ready().size() == 1);
+}
+
+TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
+    "[images]") {
+    using hedgr::model::state::image_cache;
+    using hedgr::model::state::image_content;
+
+    image_cache cache{12};
+    const auto make = [](std::uint8_t v) {
+        return image_content{.mime_type = "image/png",
+            .data = std::vector<std::uint8_t>(4, v)};
+    };
+
+    cache.put("t-1", "i-1", make(1));
+    cache.put("t-1", "i-2", make(2));
+    cache.put("t-2", "i-1", make(3));
+    REQUIRE(cache.bytes() == 12);
+    REQUIRE(cache.get("t-1", "i-1") != nullptr);
+    REQUIRE(cache.get("t-2", "i-1")->data[0] == 3);
+    REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
+
+    /* i-1 is now the least recently used, so a fourth image evicts it. */
+    cache.put("t-1", "i-3", make(4));
+    REQUIRE_FALSE(cache.contains("t-1", "i-1"));
+    REQUIRE(cache.get("t-1", "i-2")->data[0] == 2);
+    REQUIRE(cache.evictions() == 1);
+
+    /* An image larger than the whole budget is not cached. */
+    image_content big{.mime_type = "image/png",
+        .data = std::vector<std::uint8_t>(13)};
+    cache.put("t-1", "big", std::move(big));
+    REQUIRE_FALSE(cache.contains("t-1", "big"));
+    REQUIRE(cache.get("t-1", "missing") == nullptr);
+    REQUIRE(cache.misses() >= 1);
 }
 
 TEST_CASE("a restored window keeps the session it was saved against",
