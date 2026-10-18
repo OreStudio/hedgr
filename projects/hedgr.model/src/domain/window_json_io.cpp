@@ -71,6 +71,8 @@ window_state_to_json(window_kind kind, const window_state& state) {
         return write_shape<series_browser_state>(state);
     case window_kind::term_structure:
         return write_shape<term_structure_state>(state);
+    case window_kind::crm_matrix:
+        return write_shape<crm_matrix_state>(state);
     }
     return std::unexpected("unknown window kind");
 }
@@ -95,6 +97,8 @@ window_state_from_json(window_kind kind, std::string_view json) {
         return read_shape<series_browser_state>(json);
     case window_kind::term_structure:
         return read_shape<term_structure_state>(json);
+    case window_kind::crm_matrix:
+        return read_shape<crm_matrix_state>(json);
     }
     return std::unexpected("unknown window kind");
 }
