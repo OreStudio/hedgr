@@ -42,36 +42,35 @@ void spawn_term_structure_read(boost::asio::io_context& context,
 
     auto work = [ids, tenors](session::transport::session_client& client,
                     model::event::event& answer) {
-        std::int64_t newest = 0;
+        /*
+         * The observations are one pillar per row; a curve is the rows sharing
+         * one observation time. Group by time, then by term, so repeated rows
+         * for the same pillar collapse and the last twenty curves are kept.
+         */
+        std::map<std::int64_t, std::map<std::string, double>> by_time;
         for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
-            const bool whole_curve = tenors[i].empty();
-            const auto read = client.market_series_points(ids[i],
-                whole_curve ? 500 : 1);
-            if (!read || read->points.empty())
+            const auto read = client.market_series_points(ids[i], 10000);
+            if (!read)
                 continue;
-            if (!whole_curve) {
-                const auto& point = read->points.back();
-                answer.term_nodes.push_back(model::domain::term_node{
-                    .tenor = tenors[i],
-                    .value = point.value,
-                    .at_ns = point.at_ns});
-                newest = std::max(newest, point.at_ns);
-                continue;
-            }
-            std::map<std::string, model::domain::term_node> by_term;
             for (const auto& point : read->points) {
-                by_term[point.term] = model::domain::term_node{
-                    .tenor = point.term,
-                    .value = point.value,
-                    .at_ns = point.at_ns};
-            }
-            for (auto& [tenor, node] : by_term) {
-                newest = std::max(newest, node.at_ns);
-                answer.term_nodes.push_back(std::move(node));
+                const auto tenor = tenors[i].empty() ? point.term : tenors[i];
+                by_time[point.at_ns][tenor] = point.value;
             }
         }
-        answer.observed_at_ns = newest;
-        if (answer.term_nodes.empty())
+
+        constexpr std::size_t max_history = 20;
+        const auto first = by_time.size() > max_history
+            ? std::prev(by_time.end(), max_history) : by_time.begin();
+        for (auto it = first; it != by_time.end(); ++it) {
+            model::domain::term_curve curve;
+            curve.at_ns = it->first;
+            for (const auto& [tenor, value] : it->second) {
+                curve.nodes.push_back(model::domain::term_node{
+                    .tenor = tenor, .value = value, .at_ns = it->first});
+            }
+            answer.term_curves.push_back(std::move(curve));
+        }
+        if (answer.term_curves.empty())
             answer.message = "the curve's tenors hold no observations";
     };
     boost::asio::co_spawn(context,

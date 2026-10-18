@@ -13,7 +13,14 @@ curve name, a refresh control, a term count and the update time with its age.
 The metadata row above the plot matches FX: the observation date and time, the
 term count and a `live` or `stale N s` label. Both IRR and FX rows now carry the
 time of the last update. The area under the line is a vertical gradient in the
-line's colour, fading to the floor of the plot. The plot uses the FX plot flags, grid,
+line's colour, fading to the floor of the plot.
+
+The curve window overlays recent history, as the web simulator does: the
+History control selects up to twenty curves, the newest complete curve is bold
+green with the gradient fill, and earlier curves are grey-blue and fade with
+age. The worker groups observations by timestamp and tenor and keeps the last
+twenty curves, so a curve that arrives one pillar at a time does not replace a
+complete one with a partial snapshot. The plot uses the FX plot flags, grid,
 padding and numeric font, with bright axis text and no legend; tenor is the
 categorical x-axis. Its refresh button reads the curve again. The read runs on a worker
 and its own connection; the frame loop only draws the result.

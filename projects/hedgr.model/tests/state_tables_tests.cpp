@@ -1029,21 +1029,20 @@ TEST_CASE("a term structure read replaces the previous curve", "[rates]") {
     term_structure_table curves;
     REQUIRE(curves.get("i", "a", "k") == nullptr);
     curves.begin("i", "a", "k", "IR GBP IR_SWAP");
-    REQUIRE(curves.get("i", "a", "k")->nodes.empty());
+    REQUIRE(curves.get("i", "a", "k")->curves.empty());
 
     curves.set("i", "a", "k", "IR GBP IR_SWAP",
-        {hedgr::model::domain::term_node{.tenor = "1D", .value = 0.04,
-             .at_ns = 10},
-            hedgr::model::domain::term_node{.tenor = "6M", .value = 0.05,
-                .at_ns = 12}},
-        12);
+        {hedgr::model::domain::term_curve{.at_ns = 10,
+             .nodes = {{.tenor = "1D", .value = 0.04, .at_ns = 10}}},
+            hedgr::model::domain::term_curve{.at_ns = 12,
+                .nodes = {{.tenor = "1D", .value = 0.05, .at_ns = 12}}}});
     const auto* curve = curves.get("i", "a", "k");
     REQUIRE(curve->label == "IR GBP IR_SWAP");
-    REQUIRE(curve->nodes.size() == 2);
-    REQUIRE(curve->observed_at_ns == 12);
+    REQUIRE(curve->curves.size() == 2);
+    REQUIRE(curve->curves.back().at_ns == 12);
 
     curves.fail("i", "a", "k", "no observations");
-    REQUIRE(curves.get("i", "a", "k")->nodes.empty());
+    REQUIRE(curves.get("i", "a", "k")->curves.empty());
     REQUIRE(curves.get("i", "a", "k")->error == "no observations");
 }
 

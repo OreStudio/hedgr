@@ -46,12 +46,11 @@ void term_structure_table::begin(std::string_view instance_id,
 
 void term_structure_table::set(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string label,
-    std::vector<domain::term_node> nodes, std::int64_t observed_at_ns) {
+    std::vector<domain::term_curve> curves) {
     auto& entry = structures_[key_of(instance_id, account_id, key)];
     entry = term_structure{.key = std::string{key},
         .label = std::move(label),
-        .nodes = std::move(nodes),
-        .observed_at_ns = observed_at_ns};
+        .curves = std::move(curves)};
 }
 
 void term_structure_table::fail(std::string_view instance_id,
@@ -59,7 +58,7 @@ void term_structure_table::fail(std::string_view instance_id,
     auto& entry = structures_[key_of(instance_id, account_id, key)];
     entry.key = std::string{key};
     entry.error = std::move(message);
-    entry.nodes.clear();
+    entry.curves.clear();
 }
 
 const term_structure* term_structure_table::get(std::string_view instance_id,

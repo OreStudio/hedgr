@@ -74,6 +74,15 @@ struct term_node final {
     std::int64_t at_ns = 0;
 };
 
+/** @brief One observation of a term structure at one instant. */
+struct term_curve final {
+    /** @brief The instant the curve was observed. */
+    std::int64_t at_ns = 0;
+
+    /** @brief One value per tenor. */
+    std::vector<term_node> nodes;
+};
+
 /** @brief The three resolutions a live series keeps. */
 enum class market_level : std::uint8_t {
     fine = 0,

@@ -3998,7 +3998,7 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::term_structure: {
         if (ev.message.empty()) {
             term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.curve_label, ev.term_nodes, ev.observed_at_ns);
+                ev.curve_label, ev.term_curves);
         } else {
             term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
                 ev.message);

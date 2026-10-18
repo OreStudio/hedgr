@@ -200,8 +200,8 @@ struct event final {
     /** @brief The curve's name, for term_structure. */
     std::string curve_label;
 
-    /** @brief The curve's nodes, for term_structure. */
-    std::vector<domain::term_node> term_nodes;
+    /** @brief The recent curves, oldest first, for term_structure. */
+    std::vector<domain::term_curve> term_curves;
 
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;

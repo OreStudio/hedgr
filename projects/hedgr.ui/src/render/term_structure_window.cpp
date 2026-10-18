@@ -31,6 +31,9 @@
 #include <algorithm>
 #include <cctype>
 #include <ctime>
+#include <format>
+#include <limits>
+#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -92,7 +95,6 @@ void render_term_structure(window_handle handle, const render_input& input,
     window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
-    static_cast<void>(state);
     static_cast<void>(lock);
     using hedgr::model::domain::term_structure_state;
 
@@ -137,21 +139,52 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::TextUnformatted(terms->label.c_str());
     ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
 
-    if (curve != nullptr && !curve->nodes.empty()) {
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::TextDisabled("%zu terms", curve->nodes.size());
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    ImGui::TextDisabled("History");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(80.0f);
+    ImGui::InputInt("##history", &state.term_history, 1, 1);
+    state.term_history = std::clamp(state.term_history, 1, 20);
+    ImGui::SetItemTooltip("%s",
+        "How many recent curves to overlay; the newest is green and the "
+        "earlier ones fade with age");
+
+    int first = 0;
+    int primary = -1;
+    if (curve != nullptr && !curve->curves.empty()) {
+        /*
+         * The live stream publishes a few pillars at a time, so the newest
+         * timestamp is often a partial curve. The newest complete curve is the
+         * one worth drawing boldly; the history window ends there.
+         */
+        std::size_t best = 0;
+        primary = 0;
+        for (int c = 0; c < static_cast<int>(curve->curves.size()); ++c) {
+            if (curve->curves[c].nodes.size() >= best) {
+                best = curve->curves[c].nodes.size();
+                primary = c;
+            }
+        }
+        first = std::max(0, primary - state.term_history + 1);
+        if (primary >= 0 && !curve->curves[primary].nodes.empty()) {
+            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            ImGui::TextDisabled("%zu terms",
+                curve->curves[primary].nodes.size());
+        }
     }
     ImGui::NewLine();
 
     if (!session.has_value()) {
         ImGui::TextDisabled("Sign in to read this curve.");
-    } else if (curve != nullptr && curve->observed_at_ns > 0) {
+    } else if (curve != nullptr && primary >= 0
+        && curve->curves[primary].at_ns > 0) {
+        const auto& newest_curve = curve->curves[primary];
         ImGui::PushFont(icon::numeric_font());
-        ImGui::TextDisabled("%s", format_timestamp(curve->observed_at_ns).c_str());
+        ImGui::TextDisabled("%s", format_timestamp(newest_curve.at_ns).c_str());
         ImGui::PopFont();
         ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 %zu points", curve->nodes.size());
-        const auto age_ns = input.now_ns - curve->observed_at_ns;
+        ImGui::TextDisabled("\u00b7 %zu terms", newest_curve.nodes.size());
+        const auto age_ns = input.now_ns - newest_curve.at_ns;
         const auto age_s = age_ns > 0
             ? static_cast<double>(age_ns) / 1.0e9 : 0.0;
         const ImU32 colour = age_s > 10.0
@@ -183,31 +216,38 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (curve == nullptr || (curve->nodes.empty() && curve->error.empty())) {
+        if (curve == nullptr
+            || (curve->curves.empty() && curve->error.empty())) {
             ImGui::TextDisabled("Reading the curve...");
         } else if (!curve->error.empty()) {
             ImGui::TextWrapped("%s", curve->error.c_str());
         } else {
-            auto nodes = curve->nodes;
-            std::sort(nodes.begin(), nodes.end(),
+            const auto& all_curves = curve->curves;
+            const int end = primary + 1;
+            const int count = end - first;
+
+            auto ladder = all_curves[primary].nodes;
+            std::sort(ladder.begin(), ladder.end(),
                 [](const auto& a, const auto& b) {
                     return tenor_rank(a.tenor) < tenor_rank(b.tenor);
                 });
-            std::vector<double> xs;
-            std::vector<double> ys;
-            std::vector<const char*> labels;
-            xs.reserve(nodes.size());
-            ys.reserve(nodes.size());
-            labels.reserve(nodes.size());
-            double low = nodes.front().value;
-            double high = nodes.front().value;
-            for (std::size_t i = 0; i < nodes.size(); ++i) {
-                xs.push_back(static_cast<double>(i));
-                ys.push_back(nodes[i].value);
-                labels.push_back(nodes[i].tenor.empty()
-                        ? "spot" : nodes[i].tenor.c_str());
-                low = std::min(low, nodes[i].value);
-                high = std::max(high, nodes[i].value);
+            std::vector<double> xs(ladder.size());
+            std::vector<const char*> labels(ladder.size());
+            std::map<std::string, std::size_t> index_of;
+            for (std::size_t i = 0; i < ladder.size(); ++i) {
+                xs[i] = static_cast<double>(i);
+                labels[i] = ladder[i].tenor.empty()
+                    ? "spot" : ladder[i].tenor.c_str();
+                index_of[ladder[i].tenor] = i;
+            }
+
+            double low = all_curves[primary].nodes.front().value;
+            double high = low;
+            for (int c = first; c < end; ++c) {
+                for (const auto& node : all_curves[c].nodes) {
+                    low = std::min(low, node.value);
+                    high = std::max(high, node.value);
+                }
             }
             const double span = high - low > 0.0
                 ? high - low
@@ -236,15 +276,45 @@ void render_term_structure(window_handle handle, const render_input& input,
                 ImPlot::SetupAxisLimits(ImAxis_Y1, low - pad, high + pad,
                     ImGuiCond_Always);
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
-                const ImVec4 line_colour = ImPlot::GetColormapColor(0);
-                fill_gradient_under_curve(xs.data(), ys.data(),
-                    static_cast<int>(xs.size()),
-                    ImGui::ColorConvertFloat4ToU32(line_colour), 0.35f);
-                ImPlotSpec line;
-                line.LineColor = line_colour;
-                line.LineWeight = 1.5f;
-                ImPlot::PlotLine("Rate", xs.data(), ys.data(),
-                    static_cast<int>(xs.size()), line);
+
+                const ImVec4 newest_colour =
+                    ImGui::ColorConvertU32ToFloat4(theme::curve_latest_colour);
+                for (int c = first; c < end; ++c) {
+                    const auto& history_curve = all_curves[c];
+                    const bool newest = c == primary;
+                    std::vector<double> ys(xs.size(),
+                        std::numeric_limits<double>::quiet_NaN());
+                    for (const auto& node : history_curve.nodes) {
+                        const auto found = index_of.find(node.tenor);
+                        if (found != index_of.end())
+                            ys[found->second] = node.value;
+                    }
+
+                    if (newest) {
+                        fill_gradient_under_curve(xs.data(), ys.data(),
+                            static_cast<int>(xs.size()),
+                            theme::curve_latest_colour, 0.30f);
+                    }
+
+                    const int age_index = c - first;
+                    const auto alpha = newest ? 1.0f : std::max(40.0f,
+                        (255.0f * (age_index + 1)) / count - 60.0f) / 255.0f;
+                    const ImVec4 colour = newest
+                        ? newest_colour
+                        : ImGui::ColorConvertU32ToFloat4(
+                              theme::curve_history_colour);
+                    ImPlotSpec spec;
+                    spec.LineColor = ImVec4(colour.x, colour.y, colour.z,
+                        alpha);
+                    spec.LineWeight = newest ? 2.5f : 1.0f;
+                    if (newest) {
+                        spec.Marker = ImPlotMarker_Circle;
+                        spec.MarkerSize = 3.0f;
+                    }
+                    const auto name = std::format("##curve-{}", c);
+                    ImPlot::PlotLine(name.c_str(), xs.data(), ys.data(),
+                        static_cast<int>(xs.size()), spec);
+                }
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();

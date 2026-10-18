@@ -204,6 +204,9 @@ struct window_ui_state final {
     /** @brief The selected row of the window's primary table, or -1. */
     int selected_row = -1;
 
+    /** @brief How many recent curves a term-structure window overlays. */
+    int term_history = 5;
+
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;
 

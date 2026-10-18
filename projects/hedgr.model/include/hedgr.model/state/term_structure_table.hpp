@@ -38,11 +38,8 @@ struct term_structure final {
     /** @brief The curve's name, for the plot heading. */
     std::string label;
 
-    /** @brief One value per tenor, ordered as the caller asked. */
-    std::vector<domain::term_node> nodes;
-
-    /** @brief The newest observation among the nodes. */
-    std::int64_t observed_at_ns = 0;
+    /** @brief The recent curves, oldest first. */
+    std::vector<domain::term_curve> curves;
 
     /** @brief Why the read failed, or empty. */
     std::string error;
@@ -65,7 +62,7 @@ public:
     /** @brief Stores a completed curve read. */
     void set(std::string_view instance_id, std::string_view account_id,
         std::string_view key, std::string label,
-        std::vector<domain::term_node> nodes, std::int64_t observed_at_ns);
+        std::vector<domain::term_curve> curves);
 
     /** @brief Records a failed curve read. */
     void fail(std::string_view instance_id, std::string_view account_id,
