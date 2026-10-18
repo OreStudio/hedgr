@@ -4008,9 +4008,9 @@ void instance_manager::apply(const event::event& ev) {
          * brackets, so the tooltip carries both: the sentence says who to ask,
          * the code says what to tell them.
          */
-        sessions_.set_last_error(*handle, ev.image_code.empty()
+        sessions_.set_last_error(*handle, ev.code.empty()
                 ? ev.message
-                : std::format("{} ({})", ev.message, ev.image_code));
+                : std::format("{} ({})", ev.message, ev.code));
         break;
     }
     case event::event_kind::session_data:
