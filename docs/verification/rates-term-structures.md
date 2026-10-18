@@ -9,7 +9,8 @@ curve whose observations carry `term` is one row of its own.
 
 Double-clicking a curve, or choosing it in the combo, opens a term-structure
 window like the FX chart window. It draws tenor on the x-axis and rate on the
-y-axis, and its refresh button reads the curve again. The read runs on a worker
+y-axis, with the same plot flags, grid and numeric font as FX, no legend, and
+the observation time in the header. Its refresh button reads the curve again. The read runs on a worker
 and its own connection; the frame loop only draws the result.
 
 ## Data path

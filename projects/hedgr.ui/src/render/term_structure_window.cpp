@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -26,6 +27,7 @@
 #include "implot.h"
 #include <algorithm>
 #include <cctype>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -40,6 +42,16 @@ namespace {
 namespace domain = hedgr::model::domain;
 namespace icon = hedgr::ui::icon;
 using hedgr::model::command::command;
+
+/** @brief The instant the curve was observed, in the reader's local zone. */
+[[nodiscard]] std::string format_updated(std::int64_t at_ns) {
+    const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
+    std::tm local{};
+    localtime_r(&seconds, &local);
+    char buffer[40]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &local);
+    return buffer;
+}
 
 [[nodiscard]] int tenor_rank(std::string_view tenor) {
     if (tenor.empty())
@@ -109,6 +121,11 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::TextUnformatted(terms->label.c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("%s", terms->curve_key.c_str());
+    if (curve != nullptr && curve->observed_at_ns > 0) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Updated %s",
+            format_updated(curve->observed_at_ns).c_str());
+    }
 
     if (!session.has_value()) {
         ImGui::TextDisabled("Sign in to read this curve.");
@@ -135,14 +152,33 @@ void render_term_structure(window_handle handle, const render_input& input,
             labels.push_back(nodes[i].tenor.empty() ? "spot"
                                                     : nodes[i].tenor.c_str());
         }
-        if (ImPlot::BeginPlot("##curve", ImVec2(-1, -1))) {
-            ImPlot::SetupAxes("Tenor", "Rate");
+        constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
+            | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
+            | ImPlotFlags_NoMenus;
+
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
+        ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+        ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
+            ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
+        ImPlot::PushStyleColor(ImPlotCol_AxisText,
+            ImGui::GetStyleColorVec4(ImGuiCol_Text));
+        ImGui::PushFont(icon::numeric_font());
+        if (ImPlot::BeginPlot("##curve", ImVec2(-1.0f, -1.0f),
+                plot_flags)) {
+            ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
+                ImPlotAxisFlags_AutoFit | ImPlotAxisFlags_Opposite);
             ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
                 static_cast<int>(xs.size()), labels.data());
+            ImPlot::SetupAxisLimits(ImAxis_X1, -0.5,
+                static_cast<double>(xs.size()) - 0.5, ImGuiCond_Always);
+            ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
             ImPlot::PlotLine("Rate", xs.data(), ys.data(),
                 static_cast<int>(xs.size()));
             ImPlot::EndPlot();
         }
+        ImGui::PopFont();
+        ImPlot::PopStyleColor(2);
+        ImPlot::PopStyleVar(2);
         ImGui::TextDisabled("%zu terms from member series.", nodes.size());
     }
 
