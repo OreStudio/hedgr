@@ -24,14 +24,14 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
-#include "hedgr.runtime/worker/policy_worker.hpp"
-#include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
+#include "hedgr.runtime/worker/policy_worker.hpp"
+#include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
-#include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
@@ -3011,6 +3011,8 @@ void instance_manager::do_configure_crm(const command::command& cmd) {
     crm->party_id = cmd.party_id;
     crm->crm_name = cmd.crm_name;
     crm->reciprocal = cmd.crm_reciprocal;
+    if (auto saved = save_windows(); !saved)
+        last_error_ = saved.error();
     start_crm_read(*handle);
 }
 
@@ -3070,6 +3072,7 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     }
     if (spec.kind == domain::window_kind::crm_matrix) {
         start_crm_read(*handle);
+        start_market_catalogue_read(cmd.window_id);
         return;
     }
 
@@ -3367,6 +3370,10 @@ void instance_manager::start_crm_read(
     job.party_id = state->party_id;
     job.crm_name = state->crm_name;
     job.reciprocal = state->reciprocal;
+    if (const auto* current = crm_.get(spec.session->instance_id,
+            spec.session->account_id, state->party_id);
+        current != nullptr && current->reading)
+        return;
     crm_.begin(spec.session->instance_id, spec.session->account_id,
         state->party_id);
     worker::spawn_crm_read(pool_.context(), std::move(job), events_);

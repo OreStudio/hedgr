@@ -122,7 +122,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     const auto* snapshot = input.crm.get(instance_id, account_id,
         state.crm_party_id);
 
-    auto request_read = [&] {
+    auto configure_scope = [&] {
         model::command::command request;
         request.kind = model::command::command_kind::configure_crm;
         request.window_id = std::string{input.windows.id(handle)};
@@ -157,7 +157,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             const bool chosen = party.id == state.crm_party_id;
             if (ImGui::Selectable(party.name.c_str(), chosen)) {
                 state.crm_party_id = party.id;
-                request_read();
+                configure_scope();
             }
             if (chosen)
                 ImGui::SetItemDefaultFocus();
@@ -166,10 +166,23 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
     ImGui::SameLine();
 
-    std::set<std::string> crm_names;
     if (snapshot != nullptr)
         for (const auto& cell : snapshot->cells)
-            crm_names.insert(cell.crm_name);
+            state.crm_known_names.insert(cell.crm_name);
+    const auto& crm_names = state.crm_known_names;
+
+    /*
+     * A matrix opens on one CRM, because "all" mixes the same pair from several
+     * providers into one cell. The first configured name is the default; the
+     * All choice is explicit and survives until the user picks a name.
+     */
+    if (state.crm_name.empty() && !state.crm_all_chosen
+        && !crm_names.empty()) {
+        state.crm_name = crm_names.contains("majors")
+            ? "majors" : *crm_names.begin();
+        configure_scope();
+    }
+
     ImGui::TextUnformatted("CRM");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(200.0f);
@@ -178,13 +191,15 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     if (ImGui::BeginCombo("##crm-name", crm_preview.c_str())) {
         if (ImGui::Selectable("All CRMs", state.crm_name.empty())) {
             state.crm_name.clear();
-            request_read();
+            state.crm_all_chosen = true;
+            configure_scope();
         }
         for (const auto& name : crm_names) {
             const bool chosen = name == state.crm_name;
             if (ImGui::Selectable(name.c_str(), chosen)) {
                 state.crm_name = name;
-                request_read();
+                state.crm_all_chosen = false;
+                configure_scope();
             }
             if (chosen)
                 ImGui::SetItemDefaultFocus();
@@ -194,7 +209,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     ImGui::SameLine();
 
     if (ImGui::Checkbox("Reciprocal", &state.crm_reciprocal))
-        request_read();
+        configure_scope();
     ImGui::SetItemTooltip(
         "Fill a configured pair with 1/reverse when only the reverse has a "
         "direct quote.");
@@ -218,6 +233,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_next_poll = now + 5.0;
     }
 
+    const std::string filter{state.filter.data()};
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (snapshot == nullptr || snapshot->cells.empty()) {
         if (snapshot != nullptr && !snapshot->error.empty())
@@ -232,6 +248,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         std::size_t unavailable = 0;
         for (const auto& cell : snapshot->cells) {
             if (!state.crm_name.empty() && cell.crm_name != state.crm_name)
+                continue;
+            if (!matches(cell.base_currency_code, filter)
+                && !matches(cell.quote_currency_code, filter))
                 continue;
             if (cell.status == "fresh")
                 ++fresh;
@@ -257,7 +276,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         return;
     }
 
-    const std::string filter{state.filter.data()};
     std::set<std::string> currencies;
     std::map<std::pair<std::string, std::string>,
         const model::domain::crm_cell*> cells;
@@ -313,14 +331,28 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 ImGui::TableNextColumn();
                 if (base == quote) {
                     ImGui::TextDisabled("\u2014");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Same currency");
                     continue;
                 }
                 const auto found = cells.find({base, quote});
                 if (found == cells.end()) {
                     ImGui::TextDisabled("\u2014");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("No configured rate for %s",
+                            pair_text(base, quote).c_str());
                     continue;
                 }
                 const auto& cell = *found->second;
+                if (cell.status == "unavailable") {
+                    ImGui::TextDisabled("\u2014");
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("%s  %s\n%s\n%s",
+                            pair_text(base, quote).c_str(),
+                            cell.crm_name.c_str(), cell.status.c_str(),
+                            "No direct or derived quote");
+                    continue;
+                }
                 const std::string pair = pair_text(base, quote);
                 const bool selected = state.crm_pair == pair;
                 if (selected)
@@ -339,7 +371,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 if (ImGui::Selectable(text, selected,
                         ImGuiSelectableFlags_AllowDoubleClick)) {
                     state.crm_pair = pair;
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)
+                        && !cell.reciprocal) {
                         const auto* catalogue = input.market.catalogue(
                             instance_id, account_id);
                         if (catalogue != nullptr) {
@@ -373,14 +406,16 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                     cell.reciprocal ? "reciprocal" : "direct",
                     cell.as_of.c_str());
                 if (cell.delta_pct) {
-                    ImGui::SameLine();
                     ImGui::TextColored(
                         *cell.delta_pct < 0.0
                             ? ImGui::ColorConvertU32ToFloat4(
                                   theme::failure_colour)
-                            : colour,
+                            : ImGui::ColorConvertU32ToFloat4(
+                                  theme::health_live_colour),
                         "%+.2f%%", *cell.delta_pct);
                 }
+                if (state.crm_name.empty())
+                    ImGui::TextDisabled("%s", cell.crm_name.c_str());
             }
         }
         ImGui::EndTable();

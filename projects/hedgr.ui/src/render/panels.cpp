@@ -277,13 +277,13 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::grid:
     case domain::window_kind::notice:
     case domain::window_kind::instance_manager:
+    case domain::window_kind::crm_matrix:
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
     case domain::window_kind::command_centre:
     case domain::window_kind::series_browser:
     case domain::window_kind::term_structure:
-    case domain::window_kind::crm_matrix:
         return false;
     }
     return false;

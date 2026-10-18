@@ -716,6 +716,7 @@ void application::render_loop(GLFWwindow* window) {
             .sessions = manager_.sessions(),
             .market = manager_.market(),
             .term_structures = manager_.term_structures(),
+            .crm = manager_.crm(),
             .currency_images = manager_.currency_images(),
             .images = manager_.images(),
             .failed_images = manager_.failed_images(),
