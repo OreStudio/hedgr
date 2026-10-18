@@ -1,0 +1,50 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.runtime/worker/crm_names_worker.hpp"
+#include "hedgr.model/event/event.hpp"
+#include <utility>
+
+namespace hedgr::runtime::worker {
+
+void spawn_crm_names_read(boost::asio::io_context& context,
+    crm_names_job job, model::command::event_queue& events) {
+    const auto party = job.party_id;
+    model::event::event fact;
+    fact.kind = model::event::event_kind::crm_names;
+    fact.instance_id = job.session.instance_id;
+    fact.account_id = job.session.account_id;
+    fact.tenant_id = job.session.tenant_id;
+    fact.party_id = party;
+    auto work = [party](session::transport::session_client& client,
+                    model::event::event& answer) {
+        const auto names = client.crm_names(party);
+        if (!names) {
+            answer.message = names.error().message;
+            return;
+        }
+        answer.crm_names = *names;
+    };
+    boost::asio::co_spawn(context,
+        run_session_read(std::move(job.session), std::move(fact),
+            std::move(work), events),
+        boost::asio::detached);
+}
+
+}

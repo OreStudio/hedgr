@@ -539,6 +539,7 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     case hedgr::model::domain::window_kind::series_browser:
         return icon::grid;
     case hedgr::model::domain::window_kind::term_structure:
+    case hedgr::model::domain::window_kind::crm_matrix:
         return icon::chart;
     }
     return icon::information;

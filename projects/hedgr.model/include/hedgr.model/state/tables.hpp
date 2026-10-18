@@ -599,6 +599,12 @@ public:
     [[nodiscard]] bool is_open(window_handle h) const;
     void set_open(window_handle h, bool value);
 
+    /** @brief Asks the frame loop to raise a window on its next frame. */
+    void request_focus(std::string_view id);
+
+    /** @brief Takes the pending focus request, if there is one. */
+    [[nodiscard]] std::string take_focus_request() const;
+
     [[nodiscard]] domain::window_kind kind(window_handle h) const;
 
     [[nodiscard]] std::string_view id(window_handle h) const;
@@ -658,6 +664,8 @@ private:
     window_columns columns_;
     slab layout_;
     std::unordered_map<std::string, window_handle> by_id_;
+
+    mutable std::string focus_request_;
 };
 
 }

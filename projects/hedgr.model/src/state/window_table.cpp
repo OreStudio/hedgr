@@ -86,6 +86,16 @@ bool window_table::is_open(window_handle h) const {
     return columns_.open[h.index] != 0;
 }
 
+void window_table::request_focus(std::string_view id) {
+    focus_request_ = std::string{id};
+}
+
+std::string window_table::take_focus_request() const {
+    std::string result = std::move(focus_request_);
+    focus_request_.clear();
+    return result;
+}
+
 void window_table::set_open(window_handle h, bool value) {
     columns_.open[h.index] = value ? 1 : 0;
 }

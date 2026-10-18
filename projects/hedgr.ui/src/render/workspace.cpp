@@ -239,6 +239,7 @@ void workspace::render(const render_input& input) {
      */
     const auto kind_column = input.windows.kind_column();
     const auto open_column = input.windows.open_column();
+    const std::string focus_request = input.windows.take_focus_request();
     const auto refresh_column = input.windows.next_refresh_column();
 
     for (std::size_t index = 0; index < layout.alive.size(); ++index) {
@@ -315,6 +316,10 @@ void workspace::render(const render_input& input) {
          * here, at the only point in the frame where the window can still be
          * raised, rather than where the click was read.
          */
+        if (!focus_request.empty()
+            && focus_request == input.windows.id(handle)) {
+            ImGui::SetNextWindowFocus();
+        }
         if (kind == hedgr::model::domain::window_kind::instance_manager
             && focus_instances_) {
             ImGui::SetNextWindowFocus();
@@ -349,6 +354,8 @@ void workspace::render(const render_input& input) {
             ? ImVec2(1120.0f, 760.0f)
             : kind == hedgr::model::domain::window_kind::chart
             ? ImVec2(1000.0f, 620.0f)
+            : kind == hedgr::model::domain::window_kind::crm_matrix
+            ? ImVec2(1180.0f, 760.0f)
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 

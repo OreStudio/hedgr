@@ -38,6 +38,9 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
+#include "ores.refdata.api/messaging/currency_pair_convention_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
@@ -537,6 +540,146 @@ ores::nats::service::subscription session_client::subscribe(
     std::string_view subject,
     ores::nats::message_handler handler) const {
     return client().transport().subscribe(subject, std::move(handler));
+}
+
+result<std::vector<session_client::crm_rate>>
+session_client::crm_rates(std::string_view party_id,
+    std::string_view crm_name, bool reciprocal) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a CRM read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_crm_rates_request;
+    using ores::marketdata::messaging::get_crm_rates_response;
+    try {
+        get_crm_rates_request request{};
+        request.party_id = std::string{party_id};
+        request.crm_name = std::string{crm_name};
+        request.reciprocal = reciprocal;
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_crm_rates_response>(client(),
+                get_crm_rates_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the CRM answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::protocol_error,
+                answer->message.empty()
+                    ? std::string("the deployment refused the CRM read")
+                    : answer->message);
+
+        std::vector<crm_rate> result;
+        result.reserve(answer->rates.size());
+        for (const auto& item : answer->rates) {
+            result.push_back(crm_rate{
+                .crm_name = item.crm_name,
+                .base_currency_code = item.base_currency_code,
+                .quote_currency_code = item.quote_currency_code,
+                .rate = item.rate,
+                .status = item.status,
+                .as_of = item.as_of,
+                .reciprocal = item.reciprocal,
+                .delta_pct = item.delta_pct});
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<std::string>>
+session_client::crm_names(std::string_view party_id) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a CRM name read needs a signed-in session");
+
+    using ores::refdata::messaging::list_crm_topology_configs_request;
+    using ores::refdata::messaging::list_crm_topology_configs_response;
+    try {
+        std::vector<std::string> result;
+        std::uint32_t offset = 0;
+        while (true) {
+            list_crm_topology_configs_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_crm_topology_configs_response>(client(),
+                    list_crm_topology_configs_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the CRM name answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+            for (const auto& config : answer->crm_topology_configs) {
+                if (!config.enabled
+                    || boost::uuids::to_string(config.party_id)
+                        != party_id)
+                    continue;
+                result.push_back(config.name);
+            }
+            offset += static_cast<std::uint32_t>(
+                answer->crm_topology_configs.size());
+            if (answer->crm_topology_configs.empty() || offset >= answer->total)
+                break;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<session_client::pair_convention>>
+session_client::currency_pair_conventions() const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a pair convention read needs a signed-in session");
+
+    using ores::refdata::messaging::list_currency_pair_conventions_request;
+    using ores::refdata::messaging::list_currency_pair_conventions_response;
+    try {
+        std::vector<pair_convention> result;
+        std::uint32_t offset = 0;
+        while (true) {
+            list_currency_pair_conventions_request request{};
+            request.offset = offset;
+            request.limit = 500;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_currency_pair_conventions_response>(client(),
+                    list_currency_pair_conventions_request::nats_subject,
+                    request, options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the pair convention answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::protocol_error,
+                    answer->result.message);
+            for (const auto& convention : answer->conventions) {
+                result.push_back(pair_convention{
+                    .pair_code = convention.pair_code,
+                    .decimal_places = convention.decimal_places,
+                    .pip_factor = convention.pip_factor,
+                    .tick_size = convention.tick_size});
+            }
+            offset += static_cast<std::uint32_t>(answer->conventions.size());
+            if (answer->conventions.empty() || offset >= answer->total)
+                break;
+        }
+        return result;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
 }
 
 result<std::vector<session_client::currency_image>>

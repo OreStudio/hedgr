@@ -20,6 +20,7 @@
 #ifndef HEDGR_MODEL_EVENT_EVENT_HPP
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
+#include "hedgr.model/domain/crm.hpp"
 #include "hedgr.model/domain/deployment.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/password_policy.hpp"
@@ -97,6 +98,10 @@ enum class event_kind : std::uint8_t {
     image_loaded = 13,
     /** @brief One interest-rate curve was read, as its latest term nodes. */
     term_structure = 14,
+    /** @brief A party's cross-rates batch was read. */
+    crm_rates = 15,
+    /** @brief The enabled CRM names a party has configured. */
+    crm_names = 16,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -202,6 +207,27 @@ struct event final {
 
     /** @brief The recent curves, oldest first, for term_structure. */
     std::vector<domain::term_curve> term_curves;
+
+    /** @brief The batch's cells, for crm_rates. */
+    std::vector<domain::crm_cell> crm_cells;
+
+    /** @brief The batch's newest as-of text, for crm_rates. */
+    std::string crm_as_of;
+
+    /** @brief The CRM scope the window asked for, for crm_rates. */
+    std::string crm_name;
+
+    /** @brief Whether the window asked for reciprocal backfill. */
+    bool crm_reciprocal = false;
+
+    /** @brief Spot display conventions for the batch's pairs. */
+    std::vector<domain::crm_convention> crm_conventions;
+
+    /** @brief How long the batch read took, for the matrix's latency. */
+    std::int64_t crm_latency_ns = 0;
+
+    /** @brief The enabled CRM names, for crm_names. */
+    std::vector<std::string> crm_names;
 
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;

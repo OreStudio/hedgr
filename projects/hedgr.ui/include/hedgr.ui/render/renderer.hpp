@@ -27,6 +27,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
@@ -38,6 +39,7 @@
 #include <imgui.h>
 #include <array>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -206,6 +208,33 @@ struct window_ui_state final {
 
     /** @brief How many recent curves a term-structure window overlays. */
     int term_history = 5;
+
+    /** @brief The party whose CRM rates are shown. */
+    std::string crm_party_id;
+
+    /** @brief The CRM filter, or empty for every CRM. */
+    std::string crm_name;
+
+    /** @brief Whether to ask for reciprocal backfill. */
+    bool crm_reciprocal = false;
+
+    /** @brief The pair selected in the matrix, empty when none. */
+    std::string crm_pair;
+
+    /** @brief When the CRM window next polls, on the ImGui clock. */
+    double crm_next_poll = 0.0;
+
+    /** @brief Whether the CRM window has taken its scope from its state. */
+    bool crm_initialised = false;
+
+    /** @brief Every currency seen since the party was chosen. */
+    std::set<std::string> crm_currencies;
+
+    /** @brief Whether the CRM picker popup is open. */
+    bool crm_picker_open = false;
+
+    /** @brief Whether this opening of the picker has asked for the names. */
+    bool crm_picker_requested = false;
 
     /** @brief Stable id of a row the user asked to remove, awaiting confirm. */
     std::string pending_remove_id;
@@ -394,6 +423,9 @@ struct render_input final {
 
     /** @brief The latest term structure each browser session read. */
     const hedgr::model::state::term_structure_table& term_structures;
+
+    /** @brief The latest CRM batch each session and party read. */
+    const hedgr::model::state::crm_table& crm;
 
     /** @brief Which image each tenant currency names. */
     const hedgr::model::state::tenant_image_map& currency_images;

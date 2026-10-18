@@ -42,6 +42,8 @@ std::string_view to_string(window_kind value) noexcept {
         return "series_browser";
     case window_kind::term_structure:
         return "term_structure";
+    case window_kind::crm_matrix:
+        return "crm_matrix";
     }
     return "unknown";
 }
@@ -66,6 +68,8 @@ window_kind_from_string(std::string_view text) {
         return window_kind::series_browser;
     if (text == "term_structure")
         return window_kind::term_structure;
+    if (text == "crm_matrix")
+        return window_kind::crm_matrix;
     return std::unexpected(std::format("unknown window kind '{}'", text));
 }
 

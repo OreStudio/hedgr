@@ -24,12 +24,14 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
-#include "hedgr.runtime/worker/policy_worker.hpp"
-#include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.runtime/worker/crm_names_worker.hpp"
+#include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
+#include "hedgr.runtime/worker/policy_worker.hpp"
+#include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
@@ -115,13 +117,15 @@ namespace transport = hedgr::session::transport;
  * A window whose id is a function of what it shows is opened by looking it up
  * rather than by making another: "one accounts window per instance" and "one
  * workspace per session" are then answered by the id, and a second request
- * focuses the window that exists. The kinds with no such identity -- a chart,
- * a grid, a notice -- have no key, and a request for one always makes a new
- * window, because two charts of two series are two windows.
+ * focuses the window that exists. CRM windows also carry the party and CRM
+ * name, because the same map differs between them. The kinds with no such
+ * identity -- a chart, a grid, a notice -- have no key, and a request for one
+ * always makes a new window, because two charts of two series are two windows.
  */
 [[nodiscard]] std::string window_key_for(domain::window_kind kind,
     std::string_view instance_id, std::string_view account_id,
-    std::string_view series_id = {}) {
+    std::string_view series_id = {}, std::string_view crm_name = {},
+    std::string_view party_id = {}) {
     switch (kind) {
     case domain::window_kind::instance_manager:
         return "instance-manager";
@@ -147,6 +151,9 @@ namespace transport = hedgr::session::transport;
         return series_id.empty()
             ? std::string{}
             : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
+    case domain::window_kind::crm_matrix:
+        return std::format("crm:{}:{}:{}:{}", instance_id, account_id, party_id,
+            crm_name);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -630,6 +637,8 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
     }
     case domain::window_kind::series_browser:
         return domain::series_browser_state{};
+    case domain::window_kind::crm_matrix:
+        return domain::crm_matrix_state{};
     case domain::window_kind::term_structure: {
         domain::term_structure_state terms;
         terms.label = series_label.empty() ? "Term structure"
@@ -711,6 +720,7 @@ void instance_manager::stop() noexcept {
     images_reading_.clear();
     failed_images_.clear();
     term_structures_.clear();
+    crm_.clear();
     catalogues_reading_.clear();
     points_reading_.clear();
 
@@ -1553,6 +1563,12 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::refresh_window:
         do_refresh_window(cmd);
+        break;
+    case command::command_kind::configure_crm:
+        do_configure_crm(cmd);
+        break;
+    case command::command_kind::load_crm_names:
+        do_load_crm_names(cmd);
         break;
     case command::command_kind::probe_instance:
         do_probe_instance(cmd);
@@ -2853,10 +2869,11 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * functions rather than serials.
      */
     const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
-        cmd.account_id, cmd.series_id);
+        cmd.account_id, cmd.series_id, cmd.crm_name, cmd.party_id);
     if (!key.empty()) {
         if (const auto existing = windows_.find(key)) {
             windows_.set_open(*existing, true);
+            windows_.request_focus(key);
 
             /*
              * A window restored from the store is open and unbound: the
@@ -2885,6 +2902,8 @@ void instance_manager::do_open_window(const command::command& cmd) {
                 if (cmd.new_window_kind
                     == domain::window_kind::term_structure)
                     start_term_structure_read(*existing);
+                if (cmd.new_window_kind == domain::window_kind::crm_matrix)
+                    start_crm_read(*existing);
             }
             return;
         }
@@ -2909,12 +2928,24 @@ void instance_manager::do_open_window(const command::command& cmd) {
         spec.cadence = std::chrono::seconds{2};
     if (cmd.new_window_kind == domain::window_kind::term_structure)
         spec.cadence = std::chrono::seconds{30};
+    if (cmd.new_window_kind == domain::window_kind::crm_matrix)
+        spec.cadence = std::chrono::seconds{5};
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
     spec.state = default_state_for(cmd.new_window_kind, last_error,
         cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
+    if (cmd.new_window_kind == domain::window_kind::crm_matrix) {
+        auto& crm = std::get<domain::crm_matrix_state>(spec.state);
+        crm.crm_name = cmd.crm_name;
+        if (!cmd.party_id.empty()) {
+            crm.party_id = cmd.party_id;
+        } else if (const auto session = sessions_.find(cmd.instance_id,
+                       cmd.account_id)) {
+            crm.party_id = std::string{sessions_.party_id(*session)};
+        }
+    }
     if (cmd.new_window_kind == domain::window_kind::term_structure) {
         auto& terms = std::get<domain::term_structure_state>(spec.state);
         terms.member_ids = cmd.member_ids;
@@ -2941,13 +2972,16 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * the end of time; a manual refresh still starts a read.
      */
     if (cmd.new_window_kind == domain::window_kind::chart
-        || cmd.new_window_kind == domain::window_kind::term_structure) {
+        || cmd.new_window_kind == domain::window_kind::term_structure
+        || cmd.new_window_kind == domain::window_kind::crm_matrix) {
         windows_.set_next_refresh_ns(handle,
             std::numeric_limits<std::int64_t>::max());
     }
 
     if (cmd.new_window_kind == domain::window_kind::term_structure)
         start_term_structure_read(handle);
+    if (cmd.new_window_kind == domain::window_kind::crm_matrix)
+        start_crm_read(handle);
 
     if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
         last_error_ = store_failure(
@@ -2979,6 +3013,26 @@ void instance_manager::do_close_window(const command::command& cmd) {
     }
 }
 
+void instance_manager::do_load_crm_names(const command::command& cmd) {
+    start_crm_names_read(cmd.instance_id, cmd.account_id, cmd.party_id);
+}
+
+void instance_manager::do_configure_crm(const command::command& cmd) {
+    const auto handle = windows_.find(cmd.window_id);
+    if (!handle)
+        return;
+    auto* crm = std::get_if<domain::crm_matrix_state>(
+        &windows_.state(*handle));
+    if (crm == nullptr)
+        return;
+    crm->party_id = cmd.party_id;
+    crm->crm_name = cmd.crm_name;
+    crm->reciprocal = cmd.crm_reciprocal;
+    if (auto saved = save_windows(); !saved)
+        last_error_ = saved.error();
+    start_crm_read(*handle);
+}
+
 void instance_manager::do_refresh_window(const command::command& cmd) {
     const auto handle = windows_.find(cmd.window_id);
     if (!handle)
@@ -3001,6 +3055,7 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
      */
     windows_.set_next_refresh_ns(*handle,
         spec.kind == domain::window_kind::chart
+                || spec.kind == domain::window_kind::crm_matrix
             ? std::numeric_limits<std::int64_t>::max()
             : due.count());
 
@@ -3030,6 +3085,10 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
      */
     if (spec.kind == domain::window_kind::term_structure) {
         start_term_structure_read(*handle);
+        return;
+    }
+    if (spec.kind == domain::window_kind::crm_matrix) {
+        start_crm_read(*handle);
         return;
     }
 
@@ -3296,6 +3355,70 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
     currency_images_reading_.insert(ev.tenant_id);
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::start_crm_names_read(std::string_view instance_id,
+    std::string_view account_id, std::string_view party_id) {
+    if (!database_)
+        return;
+    const auto session = sessions_.find(instance_id, account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto instance = instances_.find(instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(account_id);
+    worker::crm_names_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = std::string{instance_id};
+    job.session.account_id = std::string{account_id};
+    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
+    job.session.token = std::string{sessions_.token(*session)};
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.party_id = std::string{party_id};
+    worker::spawn_crm_names_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::start_crm_read(
+    model::state::window_handle handle) {
+    if (!database_ || !windows_.contains(handle))
+        return;
+    const auto spec = windows_.spec(handle, sessions_);
+    const auto* state = std::get_if<domain::crm_matrix_state>(&spec.state);
+    if (state == nullptr || !spec.session || state->party_id.empty())
+        return;
+    const auto session = sessions_.find(spec.session->instance_id,
+        spec.session->account_id);
+    if (!session || sessions_.status(*session)
+            != domain::session_status::authenticated)
+        return;
+    const auto instance = instances_.find(spec.session->instance_id);
+    if (!instance)
+        return;
+    const auto account = accounts_.find(spec.session->account_id);
+    worker::crm_job job;
+    job.session.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    job.session.instance_id = spec.session->instance_id;
+    job.session.account_id = spec.session->account_id;
+    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
+    job.session.token = std::string{sessions_.token(*session)};
+    job.session.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    job.party_id = state->party_id;
+    job.crm_name = state->crm_name;
+    job.reciprocal = state->reciprocal;
+    if (const auto* current = crm_.get(spec.session->instance_id,
+            spec.session->account_id, state->party_id, state->crm_name,
+            state->reciprocal);
+        current != nullptr && current->reading)
+        return;
+    crm_.begin(spec.session->instance_id, spec.session->account_id,
+        state->party_id, state->crm_name, state->reciprocal);
+    worker::spawn_crm_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::start_term_structure_read(
@@ -3993,6 +4116,21 @@ void instance_manager::apply(const event::event& ev) {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);
         }
+        break;
+    }
+    case event::event_kind::crm_names: {
+        crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
+            ev.crm_names);
+        break;
+    }
+    case event::event_kind::crm_rates: {
+        if (ev.message.empty())
+            crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
+                ev.crm_as_of, ev.crm_latency_ns);
+        else
+            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.message);
         break;
     }
     case event::event_kind::term_structure: {
