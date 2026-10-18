@@ -153,6 +153,11 @@ HEDGR_UI_EXPORT void render_series_browser(
     lock_control& lock);
 
 /** @brief One interest-rate curve, tenor against rate. */
+HEDGR_UI_EXPORT void render_crm_matrix(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 HEDGR_UI_EXPORT void render_term_structure(
     hedgr::model::state::window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,

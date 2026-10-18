@@ -28,6 +28,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
+#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
@@ -181,6 +182,11 @@ public:
     [[nodiscard]] const model::state::tenant_image_map&
     currency_images() const noexcept {
         return currency_images_;
+    }
+
+    /** @brief The latest CRM batch each session and party read. */
+    [[nodiscard]] const model::state::crm_table& crm() const noexcept {
+        return crm_;
     }
 
     /** @brief The latest curve each browser session read. */
@@ -392,6 +398,9 @@ private:
 
     /** @brief Reads the curve a term-structure window shows. */
     void start_term_structure_read(model::state::window_handle handle);
+
+    /** @brief Reads the CRM batch a cross-rates window shows. */
+    void start_crm_read(model::state::window_handle handle);
 
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
@@ -704,6 +713,8 @@ private:
 
     /** @brief The latest curve each browser session read. */
     model::state::term_structure_table term_structures_;
+
+    model::state::crm_table crm_;
 
     /** @brief Tenant-and-image whose read is out. */
     std::unordered_set<std::string> images_reading_;

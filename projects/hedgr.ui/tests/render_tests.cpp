@@ -188,6 +188,7 @@ using hedgr::model::state::labelling_table;
 using hedgr::model::state::image_cache;
 using hedgr::model::state::tenant_image_map;
 using hedgr::model::state::market_table;
+using hedgr::model::state::crm_table;
 using hedgr::model::state::term_structure_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
@@ -207,6 +208,7 @@ struct empty_state final {
     session_table sessions;
     market_table market;
     term_structure_table term_structures;
+    crm_table crm;
     tenant_image_map currency_images;
     image_cache images;
     probe_table probes;
@@ -229,6 +231,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .sessions = state.sessions,
         .market = state.market,
         .term_structures = state.term_structures,
+        .crm = state.crm,
         .currency_images = state.currency_images,
         .images = state.images,
         .failed_images = state.failed_images,

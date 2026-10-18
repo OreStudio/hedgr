@@ -27,6 +27,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
@@ -394,6 +395,9 @@ struct render_input final {
 
     /** @brief The latest term structure each browser session read. */
     const hedgr::model::state::term_structure_table& term_structures;
+
+    /** @brief The latest CRM batch each session and party read. */
+    const hedgr::model::state::crm_table& crm;
 
     /** @brief Which image each tenant currency names. */
     const hedgr::model::state::tenant_image_map& currency_images;
