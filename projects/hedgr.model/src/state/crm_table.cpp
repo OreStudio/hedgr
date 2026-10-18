@@ -74,7 +74,6 @@ void crm_table::fail(std::string_view instance_id,
     std::string_view crm_name, bool reciprocal, std::string message) {
     auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
         crm_name, reciprocal)];
-    entry.cells.clear();
     entry.reading = false;
     entry.error = std::move(message);
 }

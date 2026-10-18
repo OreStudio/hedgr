@@ -32,11 +32,22 @@ namespace hedgr::model::state {
 
 /** @brief The latest cross-rates batch for one session and party. */
 struct crm_snapshot final {
+    /** @brief Every cell the batch returned. */
     std::vector<domain::crm_cell> cells;
+
+    /** @brief Spot display conventions for the batch. */
     std::vector<domain::crm_convention> conventions;
+
+    /** @brief The newest observation time, ISO-8601 UTC. */
     std::string observed_as_of;
+
+    /** @brief How long the deployment took to answer, in nanoseconds. */
     std::int64_t latency_ns = 0;
+
+    /** @brief Whether a batch is in flight. */
     bool reading = false;
+
+    /** @brief Why the last read failed, or empty. */
     std::string error;
 };
 
@@ -59,7 +70,7 @@ public:
         std::vector<domain::crm_cell> cells,
         std::vector<domain::crm_convention> conventions,
         std::string observed_as_of, std::int64_t latency_ns);
-    /** @brief Records a failed read and drops the cells it could not refresh. */
+    /** @brief Records a failed read, keeping the last good cells on screen. */
     void fail(std::string_view instance_id, std::string_view account_id,
         std::string_view party_id, std::string_view crm_name, bool reciprocal,
         std::string message);

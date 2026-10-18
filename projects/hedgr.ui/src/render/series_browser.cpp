@@ -407,6 +407,18 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 }
             } else if (names->empty()) {
                 ImGui::TextDisabled("No CRMs configured for this party.");
+                if (ImGui::Button("Retry")) {
+                    model::command::command request;
+                    request.kind
+                        = model::command::command_kind::load_crm_names;
+                    request.instance_id
+                        = std::string{input.sessions.instance_id(*session)};
+                    request.account_id
+                        = std::string{input.sessions.account_id(*session)};
+                    request.party_id = state.market_party_id;
+                    input.commands.push(std::move(request));
+                    state.crm_picker_requested = true;
+                }
             } else {
                 for (const auto& name : *names) {
                     if (!ImGui::Selectable(name.c_str()))
@@ -428,8 +440,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 }
             }
             ImGui::Separator();
-            if (ImGui::Button("Cancel"))
+            if (ImGui::Button("Cancel")) {
                 state.crm_picker_open = false;
+                ImGui::CloseCurrentPopup();
+            }
             ImGui::EndPopup();
         } else {
             state.crm_picker_open = false;

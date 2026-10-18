@@ -20,8 +20,8 @@
 #ifndef HEDGR_MODEL_EVENT_EVENT_HPP
 #define HEDGR_MODEL_EVENT_EVENT_HPP
 
-#include "hedgr.model/domain/deployment.hpp"
 #include "hedgr.model/domain/crm.hpp"
+#include "hedgr.model/domain/deployment.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/password_policy.hpp"
 #include "hedgr.model/domain/probe.hpp"

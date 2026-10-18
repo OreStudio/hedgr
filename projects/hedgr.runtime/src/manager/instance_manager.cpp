@@ -117,13 +117,15 @@ namespace transport = hedgr::session::transport;
  * A window whose id is a function of what it shows is opened by looking it up
  * rather than by making another: "one accounts window per instance" and "one
  * workspace per session" are then answered by the id, and a second request
- * focuses the window that exists. The kinds with no such identity -- a chart,
- * a grid, a notice -- have no key, and a request for one always makes a new
- * window, because two charts of two series are two windows.
+ * focuses the window that exists. CRM windows also carry the party and CRM
+ * name, because the same map differs between them. The kinds with no such
+ * identity -- a chart, a grid, a notice -- have no key, and a request for one
+ * always makes a new window, because two charts of two series are two windows.
  */
 [[nodiscard]] std::string window_key_for(domain::window_kind kind,
     std::string_view instance_id, std::string_view account_id,
-    std::string_view series_id = {}, std::string_view crm_name = {}) {
+    std::string_view series_id = {}, std::string_view crm_name = {},
+    std::string_view party_id = {}) {
     switch (kind) {
     case domain::window_kind::instance_manager:
         return "instance-manager";
@@ -150,7 +152,8 @@ namespace transport = hedgr::session::transport;
             ? std::string{}
             : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
     case domain::window_kind::crm_matrix:
-        return std::format("crm:{}:{}:{}", instance_id, account_id, crm_name);
+        return std::format("crm:{}:{}:{}:{}", instance_id, account_id, party_id,
+            crm_name);
     case domain::window_kind::grid:
     case domain::window_kind::notice:
         break;
@@ -2866,10 +2869,11 @@ void instance_manager::do_open_window(const command::command& cmd) {
      * functions rather than serials.
      */
     const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
-        cmd.account_id, cmd.series_id, cmd.crm_name);
+        cmd.account_id, cmd.series_id, cmd.crm_name, cmd.party_id);
     if (!key.empty()) {
         if (const auto existing = windows_.find(key)) {
             windows_.set_open(*existing, true);
+            windows_.request_focus(key);
 
             /*
              * A window restored from the store is open and unbound: the
@@ -4115,9 +4119,8 @@ void instance_manager::apply(const event::event& ev) {
         break;
     }
     case event::event_kind::crm_names: {
-        if (ev.message.empty())
-            crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
-                ev.crm_names);
+        crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
+            ev.crm_names);
         break;
     }
     case event::event_kind::crm_rates: {

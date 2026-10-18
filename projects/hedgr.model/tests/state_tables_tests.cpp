@@ -25,8 +25,8 @@
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/state/bucket_aggregator.hpp"
-#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include <unordered_set>
@@ -59,7 +59,6 @@ using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::domain::window_spec;
 using hedgr::model::state::account_table;
-namespace model = hedgr::model;
 using hedgr::model::state::crm_table;
 using hedgr::model::state::estate_history;
 using hedgr::model::state::estate_sample;
@@ -70,6 +69,8 @@ using hedgr::model::state::labelling_table;
 using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
 using hedgr::model::state::window_table;
+
+namespace model = hedgr::model;
 
 /** @brief An instance row carrying only what a table test reads back. */
 [[nodiscard]] instance make_instance(std::string id, std::string name) {
@@ -1133,12 +1134,12 @@ TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
     CHECK(table.get("i", "a", "p3", "", false) == nullptr);
 }
 
-TEST_CASE("a failed CRM read keeps the error and drops the cells", "[crm]") {
+TEST_CASE("a failed CRM read keeps the error and the last cells", "[crm]") {
     crm_table table;
     table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, {}, "now", 0);
     table.fail("i", "a", "p", "", false, "refused");
     const auto* snapshot = table.get("i", "a", "p", "", false);
     REQUIRE(snapshot != nullptr);
-    CHECK(snapshot->cells.empty());
+    CHECK(snapshot->cells.size() == 1);
     CHECK(snapshot->error == "refused");
 }

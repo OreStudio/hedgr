@@ -17,10 +17,11 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.ui/render/windows.hpp"
-#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
+#include "hedgr.ui/render/crm_rate.hpp"
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
@@ -90,6 +91,15 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_name = crm->crm_name;
         state.crm_reciprocal = crm->reciprocal;
         state.crm_initialised = true;
+    }
+
+    if (state.crm_name.empty()) {
+        ImGui::TextDisabled("No CRM selected.");
+        foot.word = "No CRM";
+        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+        return;
     }
 
     const auto* snapshot = input.crm.get(instance_id, account_id,
@@ -177,6 +187,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
 
     if (snapshot == nullptr || snapshot->cells.empty()) {
+        foot.word = snapshot == nullptr ? "Reading" : "No rates";
+        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -202,7 +214,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     for (const auto& currency : state.crm_currencies)
         currencies.insert(currency);
     if (currencies.size() < 2) {
-        ImGui::TextDisabled("No pairs match the filter.");
+        ImGui::TextDisabled("No pairs for this CRM.");
+        foot.word = "No pairs";
+        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -257,12 +271,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         }
 
         /*
-         * A cell's second line is the delta and, in All mode, a third names
-         * the CRM. Both appear and disappear with the market, so the row is
-         * given a fixed minimum height: otherwise a row grows when a delta
-         * crosses the threshold and shrinks back on the next tick, moving the
-         * whole grid under the pointer. The line count is fixed for the mode,
-         * not for the data.
+         * A cell has a fixed two-line height. The delta line is always
+         * reserved, so a tick that removes or adds a delta cannot change the
+         * row height and move the grid under the pointer.
          */
         const float cell_line = ImGui::GetTextLineHeight();
         const float row_height = cell_line * 2.0f
@@ -307,7 +318,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 const std::string pair = pair_text(base, quote);
                 const bool selected = state.crm_pair == pair;
                 const double delta = cell.delta_pct.value_or(0.0);
-                if (!selected && std::abs(delta) > 0.0001) {
+                if (!selected && !crm_delta_is_zero(delta)
+                    && std::abs(delta) > 0.0) {
                     const float strength = static_cast<float>(std::min(
                         std::abs(delta) / 0.05, 1.0));
                     const auto tint = delta < 0.0
@@ -328,10 +340,12 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                           theme::readiness_colour(
                               model::domain::readiness::bootstrapping))
                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
-                int places = 5;
+                int convention_places = -1;
                 if (const auto convention = conventions.find({base, quote});
-                    convention != conventions.end() && !cell.reciprocal)
-                    places = std::max(convention->second->decimal_places, 0);
+                    convention != conventions.end())
+                    convention_places = convention->second->decimal_places;
+                const int places = crm_decimal_places(convention_places,
+                    cell.reciprocal, cell.rate);
                 const std::string rate = std::format("{:.{}f}", cell.rate,
                     places);
                 const float rate_width = ImGui::CalcTextSize(rate.c_str()).x;
@@ -375,10 +389,10 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 }
                 ImGui::PopFont();
                 ImGui::PopStyleColor();
-                ImGui::SetItemTooltip("%s  %s\n%s  %s\nas of %s", pair.c_str(),
-                    cell.crm_name.c_str(), cell.status.c_str(),
+                ImGui::SetItemTooltip("%s\nprovider %s  %s\n%s  %s\nas of %s",
+                    pair.c_str(), cell.crm_name.c_str(), cell.status.c_str(),
                     cell.reciprocal ? "reciprocal" : "direct",
-                    cell.as_of.c_str());
+                    "double-click to open its FX chart", cell.as_of.c_str());
                 if (cell.delta_pct) {
                     char delta_text[32];
                     std::snprintf(delta_text, sizeof(delta_text), "%+.2f%%",
@@ -387,7 +401,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         = ImGui::CalcTextSize(delta_text).x;
                     ImGui::SetCursorPosX(ImGui::GetCursorPosX()
                         + ImGui::GetContentRegionAvail().x - delta_width);
-                    if (std::abs(delta) < 0.005) {
+                    if (crm_delta_is_zero(delta)) {
                         ImGui::TextDisabled("0.00%%");
                     } else {
                         ImGui::TextColored(
@@ -415,8 +429,11 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
     const auto latency_ms = snapshot->latency_ns > 0
         ? static_cast<double>(snapshot->latency_ns) / 1.0e6 : 0.0;
-    foot.word = std::format("{} fresh \u00b7 {:.0f} ms", fresh, latency_ms);
-    foot.colour = theme::health_live_colour;
+    foot.word = snapshot->error.empty()
+        ? std::format("{} fresh \u00b7 {:.0f} ms", fresh, latency_ms)
+        : "read failed";
+    foot.colour = snapshot->error.empty()
+        ? theme::health_live_colour : theme::failure_colour;
 
     widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();

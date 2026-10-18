@@ -27,6 +27,7 @@
 #include "hedgr.session/transport/session_options.hpp"
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>

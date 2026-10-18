@@ -18,10 +18,11 @@
  *
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
-#include <chrono>
 #include "hedgr.model/event/event.hpp"
 #include <algorithm>
+#include <chrono>
 #include <utility>
+
 namespace hedgr::runtime::worker {
 void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     model::command::event_queue& events) {
