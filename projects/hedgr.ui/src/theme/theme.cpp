@@ -41,17 +41,12 @@ constexpr ImVec4 colour(std::uint32_t rgba) {
  * the reading instead of trusting it. Regions are given as an x and y in the
  * reference's own pixels.
  *
- * The second reference, the glass one at
- * docs/samples/267987113-b1f2b31e-a315-4ec4-90ea-f6f0ff00134b.png, shows
- * surfaces that let the render behind them through. Its Outliner panel was
- * measured against the render behind it by fitting the panel's own colour to
- * the render just outside its left edge, which gave an alpha of about 0.75, so
- * about a quarter of what is behind comes through. The window, the panels and
- * the cards take that reading in steps rather than all at once, because a card
- * sits on a panel and two layers at the same alpha would lose the step between
- * them. The alpha is not one number: the photograph behind is already dimmed by
- * the workspace, and a card holds the smallest text in the window and needs the
- * most of its own colour to stay readable.
+ * The glass reference at
+ * docs/samples/267987113-b1f2b31e-a315-4ec4-90ea-f6f0ff00134b.png informed
+ * the colour steps between the window, the panels and the cards, but its
+ * translucency was not kept: stacked windows and panels must not read through
+ * each other. Every surface here is opaque. The photograph remains only on the
+ * workspace behind the windows, where it is never seen through a control.
  */
 constexpr ImVec4 with_alpha(ImVec4 base, float alpha) {
     base.w = alpha;
@@ -59,9 +54,9 @@ constexpr ImVec4 with_alpha(ImVec4 base, float alpha) {
 }
 
 constexpr float window_alpha = 1.00f; // the window's own body; opaque so windows do not read through each other
-constexpr float panel_alpha = 0.82f; // a child pane and a card upon it
-constexpr float chrome_alpha = 0.85f; // title bar, status foot, buttons
-constexpr float field_alpha = 0.90f; // a text box or a combo, inside a card
+constexpr float panel_alpha = 1.00f; // a child pane and a card upon it, opaque
+constexpr float chrome_alpha = 1.00f; // title bar, status foot, buttons, opaque
+constexpr float field_alpha = 1.00f; // a text box or a combo, inside a card, opaque
 
 const ImVec4 bg_base = with_alpha(colour(0x101113ff), chrome_alpha); // gap between the two panels, x 406 y 700
 const ImVec4 bg_window = with_alpha(colour(0x1b1f20ff), window_alpha); // main panel body, x 1600 y 300
