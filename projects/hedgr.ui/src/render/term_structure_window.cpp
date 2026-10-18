@@ -297,8 +297,8 @@ void render_term_structure(window_handle handle, const render_input& input,
                     }
 
                     const int age_index = c - first;
-                    const auto alpha = newest ? 1.0f : std::max(40.0f,
-                        (255.0f * (age_index + 1)) / count - 60.0f) / 255.0f;
+                    const auto alpha = newest ? 1.0f
+                        : std::clamp(0.72f - 0.025f * age_index, 0.30f, 0.72f);
                     const ImVec4 colour = newest
                         ? newest_colour
                         : ImGui::ColorConvertU32ToFloat4(
@@ -306,7 +306,7 @@ void render_term_structure(window_handle handle, const render_input& input,
                     ImPlotSpec spec;
                     spec.LineColor = ImVec4(colour.x, colour.y, colour.z,
                         alpha);
-                    spec.LineWeight = newest ? 2.5f : 1.0f;
+                    spec.LineWeight = newest ? 2.5f : 1.2f;
                     if (newest) {
                         spec.Marker = ImPlotMarker_Circle;
                         spec.MarkerSize = 3.0f;

@@ -316,7 +316,7 @@ struct window_ui_state final {
         std::int64_t{5} * 60 * 1'000'000'000;
 
     /** @brief Whether a chart draws candles rather than a line. */
-    bool market_candles = true;
+    bool market_candles = false;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
