@@ -33,10 +33,12 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     fact.account_id = job.session.account_id;
     fact.tenant_id = job.session.tenant_id;
     fact.party_id = party;
+    fact.crm_name = crm_name;
+    fact.crm_reciprocal = reciprocal;
     auto work = [party, crm_name, reciprocal](
                     session::transport::session_client& client,
                     model::event::event& answer) {
-        const auto rates = client.crm_rates(party, crm_name, reciprocal);
+        const auto rates = client.crm_rates(party, "", reciprocal);
         if (!rates) {
             answer.message = rates.error().message;
             return;

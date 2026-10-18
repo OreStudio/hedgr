@@ -1116,28 +1116,28 @@ TEST_CASE("a restored window keeps the session it was saved against",
 
 TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
     crm_table table;
-    table.set("i", "a", "p1",
+    table.set("i", "a", "p1", "majors", false,
         {model::domain::crm_cell{.crm_name = "majors",
             .base_currency_code = "EUR", .quote_currency_code = "USD",
             .rate = 1.1, .status = "fresh"}},
         "2026-01-01T00:00:00Z");
-    table.set("i", "a", "p2", {}, "2026-01-01T00:00:01Z");
-    const auto* one = table.get("i", "a", "p1");
-    const auto* two = table.get("i", "a", "p2");
+    table.set("i", "a", "p2", "", false, {}, "2026-01-01T00:00:01Z");
+    const auto* one = table.get("i", "a", "p1", "majors", false);
+    const auto* two = table.get("i", "a", "p2", "", false);
     REQUIRE(one != nullptr);
     REQUIRE(two != nullptr);
     CHECK(one->cells.size() == 1);
     CHECK(one->cells.front().rate == 1.1);
     CHECK(one->observed_as_of == "2026-01-01T00:00:00Z");
     CHECK(two->cells.empty());
-    CHECK(table.get("i", "a", "p3") == nullptr);
+    CHECK(table.get("i", "a", "p3", "", false) == nullptr);
 }
 
 TEST_CASE("a failed CRM read keeps the error and drops the cells", "[crm]") {
     crm_table table;
-    table.set("i", "a", "p", {model::domain::crm_cell{}}, "now");
-    table.fail("i", "a", "p", "refused");
-    const auto* snapshot = table.get("i", "a", "p");
+    table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, "now");
+    table.fail("i", "a", "p", "", false, "refused");
+    const auto* snapshot = table.get("i", "a", "p", "", false);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->cells.empty());
     CHECK(snapshot->error == "refused");

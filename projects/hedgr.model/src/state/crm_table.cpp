@@ -26,29 +26,39 @@ namespace {
 constexpr char separator = '\x1f';
 
 [[nodiscard]] std::string key_of(std::string_view instance_id,
-    std::string_view account_id, std::string_view party_id) {
+    std::string_view account_id, std::string_view party_id,
+    std::string_view crm_name, bool reciprocal) {
     std::string key;
-    key.reserve(instance_id.size() + account_id.size() + party_id.size() + 2);
+    key.reserve(instance_id.size() + account_id.size() + party_id.size()
+        + crm_name.size() + 4);
     key.append(instance_id);
     key.push_back(separator);
     key.append(account_id);
     key.push_back(separator);
     key.append(party_id);
+    key.push_back(separator);
+    key.append(crm_name);
+    key.push_back(separator);
+    key.push_back(reciprocal ? '1' : '0');
     return key;
 }
 }
 
 void crm_table::begin(std::string_view instance_id,
-    std::string_view account_id, std::string_view party_id) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id)];
+    std::string_view account_id, std::string_view party_id,
+    std::string_view crm_name, bool reciprocal) {
+    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal)];
     entry.reading = true;
     entry.error.clear();
 }
 
 void crm_table::set(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
+    std::string_view crm_name, bool reciprocal,
     std::vector<domain::crm_cell> cells, std::string observed_as_of) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id)];
+    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal)];
     entry.cells = std::move(cells);
     entry.observed_as_of = std::move(observed_as_of);
     entry.reading = false;
@@ -57,16 +67,19 @@ void crm_table::set(std::string_view instance_id,
 
 void crm_table::fail(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
-    std::string message) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id)];
+    std::string_view crm_name, bool reciprocal, std::string message) {
+    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal)];
     entry.cells.clear();
     entry.reading = false;
     entry.error = std::move(message);
 }
 
 const crm_snapshot* crm_table::get(std::string_view instance_id,
-    std::string_view account_id, std::string_view party_id) const {
-    const auto found = snapshots_.find(key_of(instance_id, account_id, party_id));
+    std::string_view account_id, std::string_view party_id,
+    std::string_view crm_name, bool reciprocal) const {
+    const auto found = snapshots_.find(key_of(instance_id, account_id,
+        party_id, crm_name, reciprocal));
     return found == snapshots_.end() ? nullptr : &found->second;
 }
 

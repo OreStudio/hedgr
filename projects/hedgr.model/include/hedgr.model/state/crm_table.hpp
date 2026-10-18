@@ -48,18 +48,21 @@ class HEDGR_MODEL_EXPORT crm_table final {
 public:
     /** @brief Marks the batch as in flight, keeping the cells on screen. */
     void begin(std::string_view instance_id, std::string_view account_id,
-        std::string_view party_id);
+        std::string_view party_id, std::string_view crm_name,
+        bool reciprocal);
     /** @brief Replaces the batch with the cells just read. */
     void set(std::string_view instance_id, std::string_view account_id,
-        std::string_view party_id, std::vector<domain::crm_cell> cells,
-        std::string observed_as_of);
+        std::string_view party_id, std::string_view crm_name, bool reciprocal,
+        std::vector<domain::crm_cell> cells, std::string observed_as_of);
     /** @brief Records a failed read and drops the cells it could not refresh. */
     void fail(std::string_view instance_id, std::string_view account_id,
-        std::string_view party_id, std::string message);
+        std::string_view party_id, std::string_view crm_name, bool reciprocal,
+        std::string message);
 
     /** @brief One session and party's latest batch, or nullptr. */
     [[nodiscard]] const crm_snapshot* get(std::string_view instance_id,
-        std::string_view account_id, std::string_view party_id) const;
+        std::string_view account_id, std::string_view party_id,
+        std::string_view crm_name, bool reciprocal) const;
 
     /** @brief Drops every batch, for a session teardown. */
     void clear();

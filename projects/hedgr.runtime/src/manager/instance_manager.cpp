@@ -3072,7 +3072,6 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     }
     if (spec.kind == domain::window_kind::crm_matrix) {
         start_crm_read(*handle);
-        start_market_catalogue_read(cmd.window_id);
         return;
     }
 
@@ -3371,11 +3370,12 @@ void instance_manager::start_crm_read(
     job.crm_name = state->crm_name;
     job.reciprocal = state->reciprocal;
     if (const auto* current = crm_.get(spec.session->instance_id,
-            spec.session->account_id, state->party_id);
+            spec.session->account_id, state->party_id, state->crm_name,
+            state->reciprocal);
         current != nullptr && current->reading)
         return;
     crm_.begin(spec.session->instance_id, spec.session->account_id,
-        state->party_id);
+        state->party_id, state->crm_name, state->reciprocal);
     worker::spawn_crm_read(pool_.context(), std::move(job), events_);
 }
 
@@ -4078,10 +4078,11 @@ void instance_manager::apply(const event::event& ev) {
     }
     case event::event_kind::crm_rates: {
         if (ev.message.empty())
-            crm_.set(ev.instance_id, ev.account_id, ev.party_id,
-                ev.crm_cells, ev.crm_as_of);
+            crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.crm_cells, ev.crm_as_of);
         else
-            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.message);
+            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.message);
         break;
     }
     case event::event_kind::term_structure: {

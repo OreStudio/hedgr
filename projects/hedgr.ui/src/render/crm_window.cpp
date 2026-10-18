@@ -120,7 +120,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
 
     const auto* snapshot = input.crm.get(instance_id, account_id,
-        state.crm_party_id);
+        state.crm_party_id, state.crm_name, state.crm_reciprocal);
 
     auto configure_scope = [&] {
         model::command::command request;
@@ -157,6 +157,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             const bool chosen = party.id == state.crm_party_id;
             if (ImGui::Selectable(party.name.c_str(), chosen)) {
                 state.crm_party_id = party.id;
+                state.crm_name.clear();
+                state.crm_all_chosen = false;
+                state.crm_known_names.clear();
                 configure_scope();
             }
             if (chosen)
@@ -240,31 +243,35 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             ImGui::TextColored(
                 ImGui::ColorConvertU32ToFloat4(theme::failure_colour), "%s",
                 snapshot->error.c_str());
+        else if (snapshot != nullptr)
+            ImGui::TextDisabled("No rates configured for this party.");
         else
             ImGui::TextDisabled("Reading the CRM...");
     } else {
-        std::size_t fresh = 0;
-        std::size_t stale = 0;
-        std::size_t unavailable = 0;
+        std::set<std::pair<std::string, std::string>> fresh;
+        std::set<std::pair<std::string, std::string>> stale;
+        std::set<std::pair<std::string, std::string>> unavailable;
         for (const auto& cell : snapshot->cells) {
             if (!state.crm_name.empty() && cell.crm_name != state.crm_name)
                 continue;
             if (!matches(cell.base_currency_code, filter)
                 && !matches(cell.quote_currency_code, filter))
                 continue;
+            const auto pair = std::make_pair(cell.base_currency_code,
+                cell.quote_currency_code);
             if (cell.status == "fresh")
-                ++fresh;
+                fresh.insert(pair);
             else if (cell.status == "stale")
-                ++stale;
+                stale.insert(pair);
             else
-                ++unavailable;
+                unavailable.insert(pair);
         }
-        const ImU32 colour = stale > 0 || unavailable > 0
+        const ImU32 colour = !stale.empty() || !unavailable.empty()
             ? theme::readiness_colour(model::domain::readiness::bootstrapping)
             : theme::health_live_colour;
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-            "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh, stale,
-            unavailable);
+            "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
+            stale.size(), unavailable.size());
         ImGui::SameLine();
         ImGui::TextDisabled("\u00b7 as of %s",
             as_of_text(snapshot->observed_as_of).c_str());
@@ -377,7 +384,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                             instance_id, account_id);
                         if (catalogue != nullptr) {
                             for (const auto& row : catalogue->series) {
-                                if (row.asset_class != "FX")
+                                if (row.asset_class != "FX"
+                                    || row.party_id != state.crm_party_id)
                                     continue;
                                 const auto base_at
                                     = row.uri.find("/fx/" + base + "?");

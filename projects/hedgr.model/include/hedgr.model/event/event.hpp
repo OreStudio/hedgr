@@ -212,6 +212,12 @@ struct event final {
     /** @brief The batch's newest as-of text, for crm_rates. */
     std::string crm_as_of;
 
+    /** @brief The CRM scope the window asked for, for crm_rates. */
+    std::string crm_name;
+
+    /** @brief Whether the window asked for reciprocal backfill. */
+    bool crm_reciprocal = false;
+
     /** @brief The image bytes, for image_loaded. */
     std::vector<std::uint8_t> bytes;
 
