@@ -50,6 +50,8 @@
 #include "hedgr.store/sqlite/database.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
@@ -2405,4 +2407,332 @@ TEST_CASE("the currency image map is read for a token and refused without one",
             == with_token);
         manager.stop();
     }
+}
+
+namespace {
+
+/**
+ * @brief A loopback listener that counts connections and drops each at once.
+ *
+ * A read against it fails as fast as one against a refused port, and the count
+ * says how many reads reached the wire, which is the only way to see a read
+ * that was deduplicated and so never started.
+ */
+class connection_counter final {
+public:
+    connection_counter()
+        : acceptor_(context_, {boost::asio::ip::address_v4::loopback(), 0}) {
+        accept();
+        thread_ = std::thread([this] { context_.run(); });
+    }
+
+    ~connection_counter() {
+        context_.stop();
+        thread_.join();
+    }
+
+    connection_counter(const connection_counter&) = delete;
+    connection_counter& operator=(const connection_counter&) = delete;
+
+    [[nodiscard]] std::string url() const {
+        return std::format("nats://127.0.0.1:{}",
+            acceptor_.local_endpoint().port());
+    }
+
+    [[nodiscard]] unsigned count() const { return count_.load(); }
+
+private:
+    void accept() {
+        acceptor_.async_accept([this](boost::system::error_code failure,
+                                   boost::asio::ip::tcp::socket socket) {
+            if (failure)
+                return;
+            count_.fetch_add(1);
+            socket.close();
+            accept();
+        });
+    }
+
+    boost::asio::io_context context_;
+    boost::asio::ip::tcp::acceptor acceptor_;
+    std::atomic<unsigned> count_{0};
+    std::thread thread_;
+};
+
+/**
+ * @brief Pumps until no connection has arrived for a quiet period.
+ *
+ * Every read in these tests is refused at once, so a quiet period means every
+ * answer has been applied and no further read is on its way.
+ */
+void settle(instance_manager& manager, const connection_counter& counter) {
+    auto last = counter.count();
+    auto quiet_since = std::chrono::steady_clock::now();
+    const auto deadline = quiet_since + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline) {
+        manager.pump();
+        if (counter.count() != last) {
+            last = counter.count();
+            quiet_since = std::chrono::steady_clock::now();
+        } else if (std::chrono::steady_clock::now() - quiet_since
+            > std::chrono::milliseconds(400)) {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    FAIL("the connections never went quiet");
+}
+
+/** @brief An instance and a signed-in account that read through @p url. */
+void sign_in_at(instance_manager& manager, const std::string& url) {
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance(read_instance, "Counted", "ores.test.counted");
+    save.instance_row.nats_url = url;
+    save.instance_id = read_instance;
+    push_command(manager, save);
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account(read_account, read_instance);
+    push_command(manager, save_account);
+    sign_in_unreachable(manager, read_instance, read_account, "a-token",
+        read_tenant);
+}
+
+[[nodiscard]] command load_image(std::string image_id) {
+    command request;
+    request.kind = command_kind::load_image;
+    request.instance_id = read_instance;
+    request.account_id = read_account;
+    request.image_id = std::move(image_id);
+    return request;
+}
+
+}
+
+TEST_CASE("a points answer fills the table and frees the series for the next read",
+    "[runtime][reads]") {
+    const temporary_database database("points-answer");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    push_command(manager,
+        open_window(window_kind::chart, read_instance, read_account, "s-1"));
+    const auto chart = find_window_of_kind(manager, window_kind::chart);
+    REQUIRE(chart.has_value());
+    const std::string chart_id{manager.windows().id(*chart)};
+    push_command(manager, refresh(chart_id));
+
+    const auto points_version = [&manager]() -> std::uint64_t {
+        const auto* held =
+            manager.market().points(read_instance, read_account, "s-1");
+        return held == nullptr ? 0 : held->version;
+    };
+
+    const auto first = wait_until([&] {
+        manager.pump();
+        return points_version() != 0;
+    }, std::chrono::seconds(10));
+    REQUIRE(first);
+    const auto after_first = points_version();
+    CHECK_FALSE(manager.market().points(read_instance, read_account, "s-1")
+                    ->failure.empty());
+
+    /*
+     * The first answer cleared the series' mark, so a second request is a read
+     * and its answer replaces the first. A mark left behind would drop it.
+     */
+    push_command(manager, refresh(chart_id));
+    const auto second = wait_until([&] {
+        manager.pump();
+        return points_version() != after_first;
+    }, std::chrono::seconds(10));
+    CHECK(second);
+    const auto after_second = points_version();
+
+    event answer;
+    answer.kind = event_kind::series_points;
+    answer.instance_id = read_instance;
+    answer.account_id = read_account;
+    answer.series_id = "s-1";
+    answer.observed_at_ns = 5;
+    manager.events().push(answer);
+    manager.pump();
+    const auto* filled =
+        manager.market().points(read_instance, read_account, "s-1");
+    REQUIRE(filled != nullptr);
+    CHECK(filled->failure.empty());
+    CHECK(filled->version != after_second);
+    manager.stop();
+}
+
+TEST_CASE("an image is read once and not asked for again while in flight or after it failed",
+    "[runtime][reads]") {
+    const temporary_database database("image-dedup");
+    connection_counter counter;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    sign_in_at(manager, counter.url());
+    settle(manager, counter);
+
+    /*
+     * Six requests in one pump, so the five after the first find it in flight.
+     * One read may open the connection twice, so the bound is two and not one,
+     * and six reads could not fit under it.
+     */
+    const auto before = counter.count();
+    for (int request = 0; request < 6; ++request)
+        manager.commands().push(load_image("img-a"));
+    manager.pump();
+    CHECK(manager.pending_images().size() == 1);
+    settle(manager, counter);
+    CHECK(counter.count() - before >= 1);
+    CHECK(counter.count() - before <= 2);
+
+    REQUIRE(manager.failed_images().size() == 1);
+    CHECK(manager.pending_images().empty());
+
+    /* A key that failed is not asked for again, so no read is marked. */
+    push_command(manager, load_image("img-a"));
+    CHECK(manager.pending_images().empty());
+    manager.stop();
+}
+
+TEST_CASE("a term structure whose member lists differ is never read",
+    "[runtime][reads]") {
+    const temporary_database database("term-structure-mismatch");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    auto window = open_window(window_kind::term_structure, read_instance,
+        read_account, "curve-1");
+    window.member_tenors = {"1Y"};
+    push_command(manager, window);
+    CHECK(manager.term_structures().get(read_instance, read_account, "curve-1")
+        == nullptr);
+
+    command load;
+    load.kind = command_kind::load_term_structure;
+    load.instance_id = read_instance;
+    load.account_id = read_account;
+    load.curve_key = "curve-2";
+    load.curve_label = "Curve";
+    load.member_ids = {"m-1y", "m-2y"};
+    load.member_tenors = {"1Y"};
+    push_command(manager, load);
+    CHECK(manager.term_structures().get(read_instance, read_account, "curve-2")
+        == nullptr);
+
+    load.member_tenors = {"1Y", "2Y"};
+    push_command(manager, load);
+    CHECK(manager.term_structures().get(read_instance, read_account, "curve-2")
+        != nullptr);
+    manager.stop();
+}
+
+TEST_CASE("a failed currency image map is read again on refresh and a ready one is not",
+    "[runtime][reads]") {
+    const temporary_database database("image-map-retry");
+    connection_counter counter;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    sign_in_at(manager, counter.url());
+    settle(manager, counter);
+    REQUIRE(manager.currency_images().get(read_tenant)->state
+        == hedgr::model::state::image_map_state::failed);
+
+    /* A chart with no series has no read of its own, so only the map can connect. */
+    push_command(manager,
+        open_window(window_kind::chart, read_instance, read_account));
+    const auto chart = find_window_of_kind(manager, window_kind::chart);
+    REQUIRE(chart.has_value());
+    auto chart_refresh = refresh(std::string{manager.windows().id(*chart)});
+    chart_refresh.instance_id = read_instance;
+    chart_refresh.account_id = read_account;
+    settle(manager, counter);
+
+    /*
+     * A marker in place of the real refusal, so that a read started from here
+     * shows itself by replacing it.
+     */
+    const auto mark_failed = [&manager] {
+        event marker;
+        marker.kind = event_kind::currency_image_map;
+        marker.instance_id = read_instance;
+        marker.account_id = read_account;
+        marker.tenant_id = read_tenant;
+        marker.message = "marker";
+        manager.events().push(marker);
+        manager.pump();
+        REQUIRE(manager.currency_images().get(read_tenant)->error == "marker");
+    };
+    mark_failed();
+    push_command(manager, chart_refresh);
+    settle(manager, counter);
+    CHECK(manager.currency_images().get(read_tenant)->error != "marker");
+
+    event ready;
+    ready.kind = event_kind::currency_image_map;
+    ready.instance_id = read_instance;
+    ready.account_id = read_account;
+    ready.tenant_id = read_tenant;
+    manager.events().push(ready);
+    manager.pump();
+    REQUIRE(manager.currency_images().get(read_tenant)->state
+        == hedgr::model::state::image_map_state::ready);
+
+    /* A sign-in of the same pair again must not read a map that is ready. */
+    event again;
+    again.kind = event_kind::session_authenticated;
+    again.instance_id = read_instance;
+    again.account_id = read_account;
+    again.tenant_id = read_tenant;
+    again.token = secret_string{std::string{"a-new-token"}};
+    manager.events().push(again);
+    manager.pump();
+    push_command(manager, chart_refresh);
+    settle(manager, counter);
+    CHECK(manager.currency_images().get(read_tenant)->state
+        == hedgr::model::state::image_map_state::ready);
+    manager.stop();
+}
+
+TEST_CASE("a deployment snapshot lands on the session row and frees the next read",
+    "[runtime][reads]") {
+    const temporary_database database("deployment-snapshot");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    push_command(manager, open_window(window_kind::command_centre,
+        read_instance, read_account));
+    const auto handle = manager.sessions().find(read_instance, read_account);
+    REQUIRE(handle.has_value());
+    const auto centre = find_window_of_kind(manager, window_kind::command_centre);
+    REQUIRE(centre.has_value());
+    const std::string centre_id{manager.windows().id(*centre)};
+    push_command(manager, refresh(centre_id));
+    const auto failed = [&] {
+        manager.pump();
+        return !manager.sessions().deployment(*handle).failure.empty();
+    };
+    REQUIRE(wait_until(failed, std::chrono::seconds(10)));
+
+    event snapshot;
+    snapshot.kind = event_kind::deployment_snapshot;
+    snapshot.instance_id = read_instance;
+    snapshot.account_id = read_account;
+    snapshot.deployment.tenant_total = 7;
+    manager.events().push(snapshot);
+    manager.pump();
+    CHECK(manager.sessions().deployment(*handle).tenant_total == 7);
+    CHECK(manager.sessions().deployment(*handle).failure.empty());
+
+    /* The first snapshot cleared the mark, so this read runs and overwrites it. */
+    push_command(manager, refresh(centre_id));
+    CHECK(wait_until(failed, std::chrono::seconds(10)));
+    CHECK(manager.sessions().deployment(*handle).tenant_total == 0);
+    manager.stop();
 }
