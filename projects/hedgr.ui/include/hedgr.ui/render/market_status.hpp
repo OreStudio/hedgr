@@ -20,8 +20,12 @@
 #ifndef HEDGR_UI_RENDER_MARKET_STATUS_HPP
 #define HEDGR_UI_RENDER_MARKET_STATUS_HPP
 
-#include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.model/domain/health.hpp"
+#include "hedgr.ui/render/time_text.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
+#include <cstdint>
+#include <string>
 
 namespace hedgr::ui::render {
 
@@ -32,7 +36,9 @@ namespace hedgr::ui::render {
  * are the same statement, and two copies of the colour choice would let them
  * drift into two different reds.
  */
-[[nodiscard]] inline ImU32 health_colour(data_health state) {
+[[nodiscard]] inline ImU32 health_colour(
+    hedgr::model::domain::data_health state) {
+    using hedgr::model::domain::data_health;
     switch (state) {
     case data_health::live:
         return hedgr::ui::theme::health_live_colour;
@@ -45,6 +51,21 @@ namespace hedgr::ui::render {
         return ImGui::GetColorU32(ImGuiCol_TextDisabled);
     }
     return ImGui::GetColorU32(ImGuiCol_TextDisabled);
+}
+
+/**
+ * @brief Puts one health verdict on a market window's foot.
+ *
+ * Every market window states its health through this, so the word, the colour
+ * and the as-of instant cannot drift apart from one window to the next.
+ */
+inline void set_health_foot(hedgr::ui::widget::foot_state& foot,
+    hedgr::model::domain::data_health state, std::int64_t as_of_ns,
+    bool reading) {
+    foot.word = std::string{hedgr::model::domain::data_health_word(state)};
+    foot.colour = health_colour(state);
+    foot.as_of = as_of_text(as_of_ns);
+    foot.updating = reading;
 }
 
 }

@@ -24,7 +24,9 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -124,6 +126,26 @@ struct identity_bar_state final {
     /** @brief Whether the window's session is signed in. */
     bool signed_in = false;
 };
+
+/**
+ * @brief The window's session when it is signed in, or nothing.
+ *
+ * Signed in means authenticated and still holding a token. A window whose
+ * session dropped keeps its binding, so a bound session alone is not enough.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::optional<hedgr::model::state::session_handle>
+signed_in_session(const render_input& input,
+    hedgr::model::state::window_handle handle);
+
+/**
+ * @brief Draws the one statement every data window makes for a lost session.
+ *
+ * The sentence in the body and NO DATA on the foot, the same in every window,
+ * so an operator whose session dropped is told so rather than shown a window
+ * that looks as if it is still loading. The caller returns after it.
+ */
+HEDGR_UI_EXPORT void draw_signed_out(const render_input& input,
+    hedgr::ui::widget::status_bar& status, hedgr::ui::widget::foot_state& foot);
 
 /** @brief Resolves the bar for one window, from its session or its state. */
 [[nodiscard]] HEDGR_UI_EXPORT identity_bar_state

@@ -13,7 +13,7 @@ set(files
     "render/chart_plot.cpp"
     "render/chart_window.cpp"
     "render/crm_window.cpp"
-    "render/data_health.cpp"
+    "render/time_text.cpp"
     "render/command_centre.cpp"
     "render/grid_window.cpp"
     "render/instances_window.cpp"

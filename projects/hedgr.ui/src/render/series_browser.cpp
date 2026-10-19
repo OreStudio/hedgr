@@ -250,14 +250,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     widget::foot_state foot;
     foot.identity = identity_text(identity_of(input, handle));
 
-    const auto session = input.windows.session_of(handle);
-    if (!session
-        || input.sessions.status(*session)
-            != domain::session_status::authenticated) {
-        ImGui::TextWrapped(
-            "This window is not signed in. Sign in from the Accounts window "
-            "to read the market series.");
-        widget::draw_status_foot(status, input.now_ns, foot);
+    const auto session = signed_in_session(input, handle);
+    if (!session) {
+        draw_signed_out(input, status, foot);
         ImGui::PopID();
         return;
     }
