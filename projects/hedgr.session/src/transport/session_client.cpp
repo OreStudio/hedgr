@@ -430,7 +430,9 @@ result<session_account> session_client::authenticate(std::string_view principal,
             .party_id = answer.selected_party_id,
             .party_name = party_name,
             .principal = answer.username.empty()
-                ? std::string(principal) : answer.username};
+                ? std::string(principal) : answer.username,
+            .access_lifetime_s = answer.access_lifetime_s > 0
+                ? answer.access_lifetime_s : 1800};
 
         /*
          * A session with no party and parties to choose from has to choose one
@@ -768,6 +770,51 @@ session_client::image_by_id(std::string_view image_id) const {
     }
 }
 
+result<int> session_client::refresh() {
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "a token can only be refreshed by a signed-in session");
+    }
+
+    using ores::iam::messaging::refresh_request;
+    using ores::iam::messaging::refresh_response;
+
+    try {
+        const auto reply =
+            ores::nats::service::authenticated_request_and_decode<
+                refresh_response>(client(), refresh_request::nats_subject,
+                refresh_request{}, options_.request_timeout);
+        if (!reply) {
+            return fail(session_errc::protocol_error,
+                "the token refresh answer could not be decoded");
+        }
+
+        const auto& answer = *reply;
+        if (!answer.success) {
+            return std::unexpected(session_error{
+                .code = session_errc::authentication_rejected,
+                .message = answer.message.empty()
+                    ? std::string("the instance refused to refresh the session")
+                    : answer.message,
+                .detail = std::format("{} answered success=false",
+                    refresh_request::nats_subject)});
+        }
+
+        auto info = nats_.auth();
+        info.jwt = answer.token;
+        nats_.set_auth(std::move(info));
+        account_.token = answer.token;
+        if (answer.access_lifetime_s > 0)
+            account_.access_lifetime_s = answer.access_lifetime_s;
+
+        return account_.access_lifetime_s;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
 result<void> session_client::select_party(std::string_view party_id) {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,
@@ -816,6 +863,8 @@ result<void> session_client::select_party(std::string_view party_id) {
         account_.token = answer.token;
         account_.party_id = std::string(party_id);
         account_.party_name = answer.party_name;
+        account_.access_lifetime_s = answer.access_lifetime_s > 0
+            ? answer.access_lifetime_s : account_.access_lifetime_s;
         if (!answer.tenant_name.empty())
             account_.tenant_name = answer.tenant_name;
         if (!answer.username.empty())

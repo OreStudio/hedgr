@@ -172,6 +172,10 @@ std::string_view session_table::token(session_handle h) const {
     return columns_.token[h.index];
 }
 
+void session_table::set_token(session_handle h, std::string token) {
+    columns_.token[h.index] = std::move(token);
+}
+
 const domain::deployment_snapshot&
 session_table::deployment(session_handle h) const {
     return columns_.deployment[h.index];

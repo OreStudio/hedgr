@@ -490,6 +490,9 @@ public:
      */
     [[nodiscard]] std::string_view token(session_handle h) const;
 
+    /** @brief Replaces the token after IAM issues a fresh one. */
+    void set_token(session_handle h, std::string token);
+
     /**
      * @brief The last deployment read for this session, if any.
      *

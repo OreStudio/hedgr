@@ -265,6 +265,46 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                     << key.account_id << "' is authenticated";
                 push_status(events, key, job.attempt, status);
 
+                /*
+                 * The token is a short-lived credential, not a session. IAM
+                 * issues a replacement before the old one expires, and every
+                 * read that starts after that replacement must carry it. The
+                 * values are copied out here because the sign-in answer goes
+                 * out of scope at the end of this branch.
+                 */
+                std::string token = account.token;
+                const std::string principal = account.principal;
+                const std::string tenant_id = account.tenant_id;
+                const std::string party_id = account.party_id;
+                int lifetime_s = account.access_lifetime_s > 0
+                    ? account.access_lifetime_s : 1800;
+
+                /*
+                 * Refresh at four fifths of the token's life, the same point
+                 * ores.qt uses and the point the deployment's own
+                 * iam.token.refresh_threshold_pct names. The instance states
+                 * the lifetime, so a deployment that shortens it is followed
+                 * without a client rebuild.
+                 */
+                const auto refresh_delay_for = [](int seconds) {
+                    const auto life = std::chrono::seconds{
+                        seconds > 0 ? seconds : 1800};
+                    return life * 4 / 5;
+                };
+                auto next_refresh =
+                    std::chrono::steady_clock::now()
+                    + refresh_delay_for(lifetime_s);
+
+                BOOST_LOG_SEV(lg(), ores::logging::info)
+                    << "Session '" << key.instance_id << "' / '"
+                    << key.account_id << "' token lasts " << lifetime_s
+                    << " s; refreshing in "
+                    << std::chrono::duration_cast<std::chrono::seconds>(
+                           next_refresh
+                           - std::chrono::steady_clock::now())
+                           .count()
+                    << " s";
+
                 boost::asio::steady_timer timer(
                     co_await boost::asio::this_coro::executor);
 
@@ -291,6 +331,51 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                     const auto elapsed = std::chrono::steady_clock::now() - started;
                     if (stop->stop_requested())
                         break;
+
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now >= next_refresh) {
+                        BOOST_LOG_SEV(lg(), ores::logging::info)
+                            << "Proactive token refresh triggered for '"
+                            << key.account_id << "' on '" << key.instance_id
+                            << "'";
+                        const auto refreshed = client.refresh();
+                        if (!refreshed) {
+                            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                                << "Token refresh for '" << key.account_id
+                                << "' on '" << key.instance_id << "' failed: "
+                                << refreshed.error().message << " ["
+                                << transport::to_string(
+                                       refreshed.error().code)
+                                << "]";
+                            push_failure(events, key, job.attempt,
+                                refreshed.error());
+                            status = domain::session_status::failed;
+                            break;
+                        }
+
+                        lifetime_s = *refreshed;
+                        token = client.account().token;
+
+                        auto refreshed_fact = for_key(key, job.attempt);
+                        refreshed_fact.kind =
+                            event::event_kind::session_token_refreshed;
+                        refreshed_fact.token = token;
+                        refreshed_fact.tenant_id = tenant_id;
+                        refreshed_fact.party_id = party_id;
+                        refreshed_fact.payload = principal;
+                        events.push(std::move(refreshed_fact));
+
+                        next_refresh = now + refresh_delay_for(lifetime_s);
+                        BOOST_LOG_SEV(lg(), ores::logging::info)
+                            << "Proactive token refresh succeeded for '"
+                            << key.account_id << "' on '" << key.instance_id
+                            << "'; next refresh in "
+                            << std::chrono::duration_cast<
+                                   std::chrono::seconds>(
+                                   next_refresh - now)
+                                   .count()
+                            << " s";
+                    }
 
                     /*
                      * Placeholder data path. There is no live data protocol in

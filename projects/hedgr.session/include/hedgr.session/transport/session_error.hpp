@@ -56,6 +56,8 @@ enum class session_errc : std::uint8_t {
     protocol_error = 6,
     /** @brief There is no open connection to send on. */
     closed = 7,
+    /** @brief The instance ended the login session, so the token is dead. */
+    session_expired = 8,
 };
 
 /**

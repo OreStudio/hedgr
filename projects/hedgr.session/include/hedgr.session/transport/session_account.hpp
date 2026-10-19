@@ -63,6 +63,15 @@ struct session_account final {
     std::string principal;
 
     /**
+     * @brief How long the token lasts, in seconds, as the instance stated it.
+     *
+     * The session arms its refresh from this rather than from a constant, so a
+     * deployment that shortens its token lifetime does not require a client
+     * rebuild to keep a long session alive.
+     */
+    int access_lifetime_s = 1800;
+
+    /**
      * @brief The parties this login may act as.
      *
      * IAM's own list, in the order it sent them. The session acts as one of

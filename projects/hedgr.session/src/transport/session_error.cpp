@@ -22,6 +22,7 @@
 #include <string>
 #include <utility>
 #include "ores.nats/service/nats_connect_error.hpp"
+#include "ores.nats/service/session_expired_error.hpp"
 
 namespace {
 
@@ -58,6 +59,8 @@ using hedgr::session::transport::session_errc;
             return "the instance answered something this client could not understand";
         case closed:
             return "the session is not connected";
+        case session_expired:
+            return "the session has expired; sign in again";
     }
     return "the session could not be used";
 }
@@ -109,6 +112,8 @@ std::string_view to_string(session_errc value) noexcept {
             return "protocol_error";
         case closed:
             return "closed";
+        case session_expired:
+            return "session_expired";
     }
     return "closed";
 }
@@ -121,6 +126,18 @@ session_error make_error(session_errc code, std::string detail) {
 }
 
 session_error translate_connect_error(const std::exception& error) {
+    /*
+     * An expired login session is not a protocol failure. The instance said
+     * what happened in its own words, and the operator's next step is to sign
+     * in again rather than to wonder what the client misunderstood.
+     */
+    if (const auto* expired =
+            dynamic_cast<const ores::nats::service::session_expired_error*>(
+                &error);
+        expired != nullptr) {
+        return make_error(session_errc::session_expired, expired->what());
+    }
+
     const auto* connect =
         dynamic_cast<const ores::nats::service::nats_connect_error*>(&error);
 

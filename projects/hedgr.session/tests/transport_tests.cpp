@@ -43,6 +43,7 @@
 #include <string>
 #include <string_view>
 #include "ores.nats/service/nats_connect_error.hpp"
+#include "ores.nats/service/session_expired_error.hpp"
 
 using hedgr::session::transport::make_subject;
 using hedgr::session::transport::session_client;
@@ -238,6 +239,17 @@ TEST_CASE("an unreachable broker reads as the instance being unreachable",
 
     REQUIRE(error.code == session_errc::unreachable);
     REQUIRE(error.detail == "NATS connect failed: No servers available");
+}
+
+TEST_CASE("an expired session is named as a session expiry", "[transport]") {
+    const ores::nats::service::session_expired_error expired(
+        "Session has expired. Please log in again.");
+
+    const auto error = translate_connect_error(expired);
+
+    REQUIRE(error.code == session_errc::session_expired);
+    REQUIRE(error.message == "the session has expired; sign in again");
+    REQUIRE(error.detail == "Session has expired. Please log in again.");
 }
 
 TEST_CASE("a failure the transport cannot name is a protocol error",

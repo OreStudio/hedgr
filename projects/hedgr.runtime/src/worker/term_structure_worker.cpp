@@ -54,8 +54,16 @@ void spawn_term_structure_read(boost::asio::io_context& context,
         std::set<std::int64_t> times;
         for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
             const auto read = client.market_series_points(ids[i], 10000);
-            if (!read)
-                continue;
+            if (!read) {
+                /*
+                 * A failed pillar is not a curve with no observations. Saying
+                 * so keeps an expired session, a refused read and a genuinely
+                 * empty series from all reading as the same thing.
+                 */
+                answer.message = read.error().message.empty()
+                    ? read.error().detail : read.error().message;
+                return;
+            }
             for (const auto& point : read->points) {
                 const auto tenor = tenors[i].empty() ? point.term : tenors[i];
                 by_term[tenor][point.at_ns] = point.value;

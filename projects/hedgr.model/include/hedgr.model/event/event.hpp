@@ -102,6 +102,8 @@ enum class event_kind : std::uint8_t {
     crm_rates = 15,
     /** @brief The enabled CRM names a party has configured. */
     crm_names = 16,
+    /** @brief IAM issued a replacement token for a live session. */
+    session_token_refreshed = 17,
 };
 
 /** @brief The canonical text of an event kind, for logs. */

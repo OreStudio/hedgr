@@ -4230,6 +4230,15 @@ void instance_manager::apply(const event::event& ev) {
          */
         rebind_restored_windows(ev.instance_id, ev.account_id, *handle);
         break;
+    case event::event_kind::session_token_refreshed:
+        /*
+         * A refresh replaces the credential, not the session. Reads that start
+         * from here on take the new token, and the tick stream is reopened on
+         * it so a reconnect after the next expiry still carries a live one.
+         */
+        sessions_.set_token(*handle, ev.token);
+        start_market_stream(ev);
+        break;
     case event::event_kind::deployment_snapshot:
         deployment_reads_.erase(
             running_key(ev.instance_id, ev.account_id));

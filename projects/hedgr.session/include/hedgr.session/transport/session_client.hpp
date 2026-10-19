@@ -308,6 +308,20 @@ public:
     authenticate(std::string_view principal, std::string_view password);
 
     /**
+     * @brief Replaces the held token with a fresh one from the instance.
+     *
+     * A token has a short life and the instance issues a replacement without
+     * the password. Refreshing before it expires is what keeps a session that
+     * has been open for hours reading the same as one that was just opened.
+     * The replacement is held here and presented on every later request.
+     *
+     * @pre the session is authenticated.
+     * @return the lifetime of the new token in seconds, or why the instance
+     *         refused to refresh. A refusal means the session itself is over.
+     */
+    [[nodiscard]] result<int> refresh();
+
+    /**
      * @brief Scopes an already signed-in session to one party.
      *
      * Exchanges the current token for one carrying the chosen party, which is

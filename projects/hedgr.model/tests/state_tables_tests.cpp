@@ -241,6 +241,17 @@ TEST_CASE("removing a session drops the token it held", "[session]") {
     REQUIRE(sessions.size() == 0);
 }
 
+TEST_CASE("a refreshed token replaces the one the session holds", "[session]") {
+    session_table sessions;
+    const auto handle = sessions.insert("inst-1", "id-1");
+    sessions.set_account_result(handle, "acme", "books", "party-1",
+        "old-token");
+
+    sessions.set_token(handle, "new-token");
+
+    REQUIRE(sessions.token(handle) == "new-token");
+}
+
 TEST_CASE("the parties a login may act as are kept with its session", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
