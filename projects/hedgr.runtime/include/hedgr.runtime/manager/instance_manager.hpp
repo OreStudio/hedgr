@@ -538,44 +538,6 @@ private:
     void forget_probe(model::state::instance_handle handle,
                       const std::string& instance_id);
 
-    void seed_first_run();
-
-    /**
-     * @brief Gives a seeded instance back the illustration key a migration
-     * dropped.
-     *
-     * The version 7 to 8 migration added @c icon_key empty on every existing
-     * row, because empty is the stored meaning of no illustration chosen and
-     * the migration would not guess which rows had one. It runs here, where the
-     * store has just been read, rather than in the migration, so it reaches
-     * every store rather than only the one that happens to migrate next, and it
-     * is idempotent because a row whose key is already set is left alone.
-     *
-     * It only writes a row whose id carries the seeder's prefix and whose
-     * derived key has an asset behind it, so a hand-typed row is never given a
-     * picture. A refused write is raised as a condition on the instance.
-     */
-    void backfill_seeded_icon_keys();
-
-    /**
-     * @brief Makes sure the folder the seeded environments sit in exists.
-     *
-     * @return The folder's id, which is a constant rather than a generated key:
-     * the seeder runs once per store, and the folder is a fact about the
-     * environments it seeds rather than a row an operator named.
-     */
-    [[nodiscard]] std::string ensure_development_folder();
-
-    /**
-     * @brief Makes sure the label the seeded environments carry exists.
-     *
-     * @return The label's id, which is the id of an existing label of the same
-     * name when the operator already has one: a label's name is unique, so a
-     * second row carrying that name would be refused and the seeded instances
-     * would come up unlabelled.
-     */
-    [[nodiscard]] std::string ensure_development_label();
-
     void ensure_instance_manager_window();
 
     /**
@@ -623,49 +585,6 @@ private:
      * @c failed. The distinction is the whole reason the two states exist.
      */
     void drop_master_password(bool deliberate);
-
-    /**
-     * @brief Creates the folders a tree is anchored by, when they are missing.
-     *
-     * Idempotent, and run on every start: an instance added by a build that did
-     * not create accounts roots still gets one, which is what stops a start
-     * from depending on the order the store was written in.
-     */
-    void ensure_roots();
-
-    /** @brief Creates the accounts root of one instance, if it has none. */
-    void ensure_accounts_root(const std::string& instance_id);
-
-    /**
-     * @brief Makes sure the folder the seeded logins sit in exists.
-     *
-     * @return The folder's id, which is derived from the instance id rather
-     * than generated. The seeder runs on every start, and the derived key is
-     * what makes a second pass write the same folder rather than a second one
-     * beside it.
-     */
-    [[nodiscard]] std::string ensure_privileged_folder(
-        const std::string& instance_id);
-
-    /**
-     * @brief Gives every stored instance the two logins it is seeded with.
-     *
-     * Run on every start rather than only on the first, because the walk has to
-     * reach an instance this build never seeded as well as one it just made,
-     * and because a row that is already there is replaced under the same
-     * derived key rather than added to.
-     */
-    void seed_instance_accounts();
-
-    /**
-     * @brief Writes the two logins of one instance, a super admin and a tenant
-     * admin.
-     *
-     * The principals are built from the instance's subject prefix, so they name
-     * the deployment IAM is being asked about; the rows land in that instance's
-     * accounts root.
-     */
-    void seed_accounts_for_instance(const model::domain::instance& instance);
 
     void stop_session(const std::string& window_or_session_id);
 
