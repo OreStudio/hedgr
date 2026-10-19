@@ -1541,3 +1541,72 @@ TEST_CASE("a failed catalogue read leaves the session signed in",
 
     manager.stop();
 }
+
+TEST_CASE("a read in flight at sign-out does not refuse reads after sign-in",
+    "[runtime]") {
+    const temporary_database database("read-across-sign-out");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+
+    command open;
+    open.kind = command_kind::open_window;
+    open.instance_id = "inst-refused";
+    open.account_id = "ident-1";
+    open.new_window_kind = window_kind::series_browser;
+    push_command(manager, open);
+
+    /*
+     * One pump applies both commands before any event, so the read's answer
+     * can only arrive after the session row is gone.
+     */
+    command disconnect;
+    disconnect.kind = command_kind::disconnect_session;
+    disconnect.instance_id = "inst-refused";
+    disconnect.account_id = "ident-1";
+    manager.commands().push(refresh("series-browser:inst-refused:ident-1"));
+    manager.commands().push(disconnect);
+    manager.pump();
+    REQUIRE_FALSE(
+        manager.sessions().find("inst-refused", "ident-1").has_value());
+
+    const auto settled = wait_until([&manager] {
+        manager.pump();
+        const auto* catalogue =
+            manager.market().catalogue("inst-refused", "ident-1");
+        return catalogue != nullptr
+            && catalogue->state == catalogue_state::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(settled);
+
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+
+    /*
+     * A catalogue the session already holds, so that a failed answer from here
+     * on can only come from a read started after the second sign-in.
+     */
+    event held;
+    held.kind = event_kind::series_catalogue;
+    held.instance_id = "inst-refused";
+    held.account_id = "ident-1";
+    manager.events().push(held);
+    manager.pump();
+    REQUIRE(manager.market().catalogue("inst-refused", "ident-1")->state
+        == catalogue_state::ready);
+
+    push_command(manager, refresh("series-browser:inst-refused:ident-1"));
+    const auto read_again = wait_until([&manager] {
+        manager.pump();
+        return manager.market().catalogue("inst-refused", "ident-1")->state
+            == catalogue_state::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(read_again);
+
+    manager.stop();
+}
