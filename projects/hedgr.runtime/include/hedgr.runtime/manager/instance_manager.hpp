@@ -36,13 +36,14 @@
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/service/lock_service.hpp"
+#include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.runtime/service/password_policy_service.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
 #include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
-#include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/folder_repository.hpp"
@@ -80,8 +81,14 @@ namespace hedgr::runtime::manager {
  */
 class HEDGR_RUNTIME_EXPORT instance_manager final {
 public:
-    /** @brief Zero threads means the executor's default pool size. */
-    explicit instance_manager(std::size_t pool_threads = 0);
+    /**
+     * @brief Zero threads means the executor's default pool size.
+     *
+     * @p market_feeds makes the live price feed of each authenticated session.
+     * Empty means a real @c market_stream; a test passes a fake.
+     */
+    explicit instance_manager(std::size_t pool_threads = 0,
+        worker::tick_feed_factory market_feeds = {});
 
     ~instance_manager();
 
@@ -376,18 +383,6 @@ private:
     /** @brief Routes a window's read request to the starter that serves it. */
     void start_read(const service::read_request& request);
 
-    /** @brief Opens the live stream for one authenticated session. */
-    void start_market_stream(const model::event::event& ev);
-
-    /** @brief Stops and forgets one session's live stream. */
-    void stop_market_stream(std::string_view instance_id,
-        std::string_view account_id);
-
-    /** @brief Asks one stream to stop without waiting for it. */
-    void retire_market_stream(std::unique_ptr<worker::market_stream> stream);
-
-    /** @brief Reconciles watches, drains buckets and applies them to the model. */
-    void pump_market_streams();
     /**
      * @brief Drops every shortcut pointing at a target that is going away.
      *
@@ -485,31 +480,6 @@ private:
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
 
     /**
-     * @brief One authenticated session's live prices.
-     *
-     * The stream owns the connection and its thread; the manager owns the
-     * watch set, the backfill and the drain into the model. Keyed by the
-     * session's running key.
-     */
-    struct market_stream_entry final {
-        std::string instance_id;
-        std::string account_id;
-        std::unique_ptr<worker::market_stream> stream;
-        std::unordered_map<std::string, std::string> watched;
-    };
-
-    std::unordered_map<std::string, market_stream_entry> market_streams_;
-
-    /**
-     * @brief Streams asked to stop, joined once each says it has finished.
-     *
-     * A stream's thread can be inside a connect, so the frame thread never
-     * joins one that is still running. The pump joins the finished ones,
-     * which costs nothing, and shutdown joins the rest.
-     */
-    std::vector<std::unique_ptr<worker::market_stream>> retired_market_streams_;
-
-    /**
      * @brief The attempt each pair is on, by the pair's running key.
      *
      * A replacement worker is started while the old one is still winding down.
@@ -551,6 +521,7 @@ private:
     service::lock_service lock_service_{pool_.context(), commands_, events_, accounts_};
     service::read_service read_service_{pool_.context(), events_, instances_,
         accounts_, sessions_, window_service_.windows(), seed_options_};
+    service::market_feed market_feed_;
 };
 
 }

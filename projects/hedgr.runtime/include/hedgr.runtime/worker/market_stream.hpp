@@ -22,6 +22,7 @@
 
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
@@ -63,12 +64,12 @@ struct market_stream_options final {
  * thread asks it to stop with @c request_stop and joins it only once
  * @c finished says the connection is closed.
  */
-class HEDGR_RUNTIME_EXPORT market_stream final {
+class HEDGR_RUNTIME_EXPORT market_stream final : public tick_feed {
 public:
     explicit market_stream(market_stream_options options);
 
     /** @brief Stops and joins the thread. Blocks for a connect in flight. */
-    ~market_stream();
+    ~market_stream() override;
 
     market_stream(const market_stream&) = delete;
     market_stream& operator=(const market_stream&) = delete;
@@ -82,10 +83,10 @@ public:
      * Returns at once. The thread closes the connection when its current
      * connect attempt, if any, returns, and @c finished then answers true.
      */
-    void request_stop();
+    void request_stop() override;
 
     /** @brief Whether the thread has closed the connection and is exiting. */
-    [[nodiscard]] bool finished() const noexcept {
+    [[nodiscard]] bool finished() const noexcept override {
         return finished_.load(std::memory_order_acquire);
     }
 
@@ -95,7 +96,7 @@ public:
      * A refresh changes the credential and nothing else. The subscription
      * stays, and so do the open buckets.
      */
-    void set_token(std::string token);
+    void set_token(std::string token) override;
 
     /**
      * @brief Watches one series, keeping its ticks.
@@ -103,17 +104,17 @@ public:
      * Thread safe. The series is watched until @c unwatch, whether or not the
      * connection is open at the time.
      */
-    void watch(std::string series_id, std::string uri);
+    void watch(std::string series_id, std::string uri) override;
 
     /** @brief Stops watching one series. Thread safe. */
-    void unwatch(std::string_view series_id);
+    void unwatch(std::string_view series_id) override;
 
     /**
      * @brief Copies the closed buckets waiting for the frame loop.
      *
      * Called from the frame thread only.
      */
-    std::size_t drain(std::vector<model::state::market_bucket>& out) {
+    std::size_t drain(std::vector<model::state::market_bucket>& out) override {
         return sink_->drain(out);
     }
 
@@ -123,7 +124,7 @@ public:
      * The caller seeds history again for every watched series, because the
      * ticks published while the connection was down are gone.
      */
-    bool take_reconnected();
+    bool take_reconnected() override;
 
     /** @brief Ticks bucketed since construction. */
     [[nodiscard]] std::size_t ticks() const noexcept {

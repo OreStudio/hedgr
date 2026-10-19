@@ -13,6 +13,7 @@ set(files
     "manager/instance_manager.cpp"
     "seed/seeder.cpp"
     "service/lock_service.cpp"
+    "service/market_feed.cpp"
     "service/password_policy_service.cpp"
     "service/probe_service.cpp"
     "service/read_service.cpp"
@@ -45,6 +46,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/seed/seeder.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/hedgr.runtime.service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/lock_service.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/market_feed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/password_policy_service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/pending_reads.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/probe_service.hpp"
@@ -63,6 +65,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_names_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/market_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/market_stream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_feed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_sink.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
 )
