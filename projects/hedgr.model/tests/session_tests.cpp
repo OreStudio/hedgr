@@ -65,3 +65,21 @@ TEST_CASE("a command centre state survives the stored form", "[window]") {
     REQUIRE(centre != nullptr);
     REQUIRE(centre->instance_id == "inst-clever_dijkstra");
 }
+
+TEST_CASE("a saved window state missing fields reads with their defaults",
+    "[window]") {
+    for (auto value = 0; value <= static_cast<int>(domain::window_kind::crm_matrix);
+         ++value) {
+        const auto kind = static_cast<domain::window_kind>(value);
+        INFO("kind " << domain::to_string(kind));
+        REQUIRE(domain::window_state_from_json(kind, "{}").has_value());
+    }
+
+    const auto chart = domain::window_state_from_json(
+        domain::window_kind::chart, R"({"series_id":"trades"})");
+    REQUIRE(chart.has_value());
+    const auto* state = std::get_if<domain::chart_state>(&*chart);
+    REQUIRE(state != nullptr);
+    REQUIRE(state->series_id == "trades");
+    REQUIRE(state->max_points == domain::chart_state{}.max_points);
+}
