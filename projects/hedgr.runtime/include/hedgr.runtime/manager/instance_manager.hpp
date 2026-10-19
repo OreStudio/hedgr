@@ -43,6 +43,7 @@
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/folder_repository.hpp"
@@ -80,8 +81,14 @@ namespace hedgr::runtime::manager {
  */
 class HEDGR_RUNTIME_EXPORT instance_manager final {
 public:
-    /** @brief Zero threads means the executor's default pool size. */
-    explicit instance_manager(std::size_t pool_threads = 0);
+    /**
+     * @brief Zero threads means the executor's default pool size.
+     *
+     * @p market_feeds makes the live price feed of each authenticated session.
+     * Empty means a real @c market_stream; a test passes a fake.
+     */
+    explicit instance_manager(std::size_t pool_threads = 0,
+        worker::tick_feed_factory market_feeds = {});
 
     ~instance_manager();
 
@@ -384,7 +391,7 @@ private:
         std::string_view account_id);
 
     /** @brief Asks one stream to stop without waiting for it. */
-    void retire_market_stream(std::unique_ptr<worker::market_stream> stream);
+    void retire_market_stream(std::unique_ptr<worker::tick_feed> stream);
 
     /** @brief Reconciles watches, drains buckets and applies them to the model. */
     void pump_market_streams();
@@ -494,7 +501,7 @@ private:
     struct market_stream_entry final {
         std::string instance_id;
         std::string account_id;
-        std::unique_ptr<worker::market_stream> stream;
+        std::unique_ptr<worker::tick_feed> stream;
         std::unordered_map<std::string, std::string> watched;
     };
 
@@ -507,7 +514,10 @@ private:
      * joins one that is still running. The pump joins the finished ones,
      * which costs nothing, and shutdown joins the rest.
      */
-    std::vector<std::unique_ptr<worker::market_stream>> retired_market_streams_;
+    std::vector<std::unique_ptr<worker::tick_feed>> retired_market_streams_;
+
+    /** @brief Makes the feed for one session; a real stream unless a test says. */
+    worker::tick_feed_factory market_feeds_;
 
     /**
      * @brief The attempt each pair is on, by the pair's running key.

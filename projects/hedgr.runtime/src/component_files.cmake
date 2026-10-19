@@ -63,6 +63,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_names_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/market_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/market_stream.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_feed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_sink.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
 )

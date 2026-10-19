@@ -116,8 +116,19 @@ constexpr std::size_t probe_thread_count = 2;
 
 }
 
-instance_manager::instance_manager(std::size_t pool_threads)
-    : pool_(pool_threads), probe_pool_(probe_thread_count) {
+instance_manager::instance_manager(std::size_t pool_threads,
+    worker::tick_feed_factory market_feeds)
+    : pool_(pool_threads), probe_pool_(probe_thread_count)
+    , market_feeds_(std::move(market_feeds)) {
+    if (!market_feeds_) {
+        market_feeds_ = [](worker::market_stream_options options)
+            -> std::unique_ptr<worker::tick_feed> {
+            auto stream =
+                std::make_unique<worker::market_stream>(std::move(options));
+            stream->start();
+            return stream;
+        };
+    }
 }
 
 instance_manager::~instance_manager() {
@@ -1669,8 +1680,7 @@ void instance_manager::start_market_stream(const model::event::event& ev) {
     options.tenant_id = ev.tenant_id;
     options.party_id = ev.party_id;
 
-    auto stream = std::make_unique<worker::market_stream>(std::move(options));
-    stream->start();
+    auto stream = market_feeds_(std::move(options));
 
     market_stream_entry entry;
     entry.instance_id = ev.instance_id;
@@ -1694,7 +1704,7 @@ void instance_manager::stop_market_stream(std::string_view instance_id,
 }
 
 void instance_manager::retire_market_stream(
-    std::unique_ptr<worker::market_stream> stream) {
+    std::unique_ptr<worker::tick_feed> stream) {
     if (!stream)
         return;
     stream->request_stop();
