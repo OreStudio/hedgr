@@ -39,6 +39,7 @@
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
@@ -79,6 +80,7 @@ using hedgr::model::domain::shortcut;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
+using hedgr::model::state::catalogue_state;
 using hedgr::runtime::async::executor;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::runtime::worker::failure_detail;
@@ -251,6 +253,53 @@ void add_unreachable_instance(instance_manager& manager, std::string id) {
     save.instance_row.nats_url = "nats://127.0.0.1:1";
     save.instance_id = save.instance_row.id;
     push_command(manager, save);
+}
+
+/**
+ * @brief Signs @p account_id in on an unreachable instance, as far as the
+ * frame loop can tell.
+ *
+ * The worker's own sign-in is refused, and only then is the authenticated fact
+ * pushed by hand: pushing it earlier would let the refusal land on top of it.
+ * Every read the session starts afterwards connects to the same refused port,
+ * so it fails fast and its answer exercises the real event path.
+ */
+void sign_in_unreachable(instance_manager& manager,
+    const std::string& instance_id, const std::string& account_id) {
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = instance_id;
+    connect.account_id = account_id;
+    connect.principal = "alice@example.test";
+    connect.password = secret_string{std::string{"not-a-real-secret"}};
+    push_command(manager, connect);
+
+    const auto refused = wait_until([&] {
+        manager.pump();
+        const auto handle = manager.sessions().find(instance_id, account_id);
+        return handle
+            && manager.sessions().status(*handle) == session_status::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(refused);
+
+    event fact;
+    fact.kind = event_kind::session_authenticated;
+    fact.instance_id = instance_id;
+    fact.account_id = account_id;
+    fact.token = secret_string{std::string{"a-token-nobody-checks"}};
+    manager.events().push(fact);
+    manager.pump();
+
+    const auto handle = manager.sessions().find(instance_id, account_id);
+    REQUIRE(handle.has_value());
+    REQUIRE(manager.sessions().status(*handle) == session_status::authenticated);
+}
+
+[[nodiscard]] command refresh(std::string window_id) {
+    command request;
+    request.kind = command_kind::refresh_window;
+    request.window_id = std::move(window_id);
+    return request;
 }
 
 /**
@@ -1450,6 +1499,45 @@ TEST_CASE("two sessions on two instances open their own windows",
             .find("chart:" + local + ":acct-a:s-1").has_value());
     REQUIRE(manager.windows()
             .find("chart:" + other + ":acct-b:s-1").has_value());
+
+    manager.stop();
+}
+
+TEST_CASE("a failed catalogue read leaves the session signed in",
+    "[runtime]") {
+    const temporary_database database("market-read-failed");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+
+    command open;
+    open.kind = command_kind::open_window;
+    open.instance_id = "inst-refused";
+    open.account_id = "ident-1";
+    open.new_window_kind = window_kind::series_browser;
+    push_command(manager, open);
+    push_command(manager, refresh("series-browser:inst-refused:ident-1"));
+
+    const auto answered = wait_until([&manager] {
+        manager.pump();
+        const auto* catalogue =
+            manager.market().catalogue("inst-refused", "ident-1");
+        return catalogue != nullptr
+            && catalogue->state == catalogue_state::failed;
+    }, std::chrono::seconds(10));
+    REQUIRE(answered);
+    REQUIRE_FALSE(
+        manager.market().catalogue("inst-refused", "ident-1")->error.empty());
+
+    const auto handle = manager.sessions().find("inst-refused", "ident-1");
+    REQUIRE(handle.has_value());
+    REQUIRE(manager.sessions().status(*handle) == session_status::authenticated);
 
     manager.stop();
 }

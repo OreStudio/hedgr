@@ -69,6 +69,8 @@ boost::asio::awaitable<void> run_market(market_job job,
         boost::asio::use_awaitable);
 
     auto fact = event::event{};
+    fact.kind = job.catalogue ? event::event_kind::series_catalogue
+                              : event::event_kind::series_points;
     fact.instance_id = key.instance_id;
     fact.account_id = key.account_id;
     fact.series_id = job.series_id;
@@ -81,7 +83,6 @@ boost::asio::awaitable<void> run_market(market_job job,
         fact.message = describe(resumed.error());
     } else if (job.catalogue) {
         if (const auto read = client.market_series(); read) {
-            fact.kind = event::event_kind::series_catalogue;
             fact.series.reserve(read->size());
             for (const auto& row : *read) {
                 fact.series.push_back(domain::market_series_row{
@@ -96,14 +97,12 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .curve_label = row.curve_label});
             }
         } else {
-            fact.kind = event::event_kind::series_catalogue;
             fact.message = describe(read.error());
         }
     } else {
         if (const auto read = client.market_series_points(job.series_id,
                 job.limit);
             read) {
-            fact.kind = event::event_kind::series_points;
             fact.points.reserve(read->points.size());
             for (const auto& point : read->points) {
                 fact.points.push_back(domain::market_point{
@@ -112,7 +111,6 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .term = point.term});
             }
         } else {
-            fact.kind = event::event_kind::series_points;
             fact.message = describe(read.error());
         }
     }
