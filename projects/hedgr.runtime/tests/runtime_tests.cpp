@@ -1610,3 +1610,67 @@ TEST_CASE("a read in flight at sign-out does not refuse reads after sign-in",
 
     manager.stop();
 }
+
+TEST_CASE("windows over one CRM matrix share its reads and its cadence",
+    "[crm]") {
+    const temporary_database database("crm-cadence");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-refused");
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+
+    const auto open_crm = [&](std::string name) {
+        command open;
+        open.kind = command_kind::open_window;
+        open.instance_id = "inst-refused";
+        open.account_id = "ident-1";
+        open.new_window_kind = window_kind::crm_matrix;
+        open.party_id = "p";
+        open.crm_name = std::move(name);
+        push_command(manager, open);
+    };
+    const auto batch = [&](std::string_view name) {
+        return manager.crm().get("inst-refused", "ident-1", "p", name, false);
+    };
+    const auto settled = [&](std::string_view name) {
+        return wait_until([&] {
+            manager.pump();
+            const auto* held = batch(name);
+            return held != nullptr && !held->reading && !held->error.empty();
+        }, std::chrono::seconds(10));
+    };
+
+    /* Nothing draws here: the pump alone starts the read. */
+    open_crm("majors");
+    REQUIRE(batch("majors") != nullptr);
+    REQUIRE(batch("majors")->reading);
+    REQUIRE(settled("majors"));
+
+    const auto next = batch("majors")->next_read_ns - steady_now_ns();
+    REQUIRE(next > 4'000'000'000);
+    REQUIRE(next <= 5'000'000'000);
+
+    /*
+     * A second window moved onto the held matrix reads nothing until the
+     * matrix's own deadline, rather than starting a read of its own.
+     */
+    open_crm("minors");
+    REQUIRE(settled("minors"));
+    command configure;
+    configure.kind = command_kind::configure_crm;
+    configure.window_id = "crm:inst-refused:ident-1:p:minors";
+    configure.party_id = "p";
+    configure.crm_name = "majors";
+    push_command(manager, configure);
+    for (int i = 0; i < 10; ++i)
+        manager.pump();
+    CHECK_FALSE(batch("majors")->reading);
+    CHECK(batch("majors")->next_read_ns - steady_now_ns() > 0);
+
+    manager.stop();
+}

@@ -38,8 +38,8 @@ struct crm_snapshot final {
     /** @brief Spot display conventions for the batch. */
     std::vector<domain::crm_convention> conventions;
 
-    /** @brief The newest observation time, ISO-8601 UTC. */
-    std::string observed_as_of;
+    /** @brief The newest observation time, in UTC nanoseconds; 0 when unknown. */
+    std::int64_t observed_as_of_ns = 0;
 
     /** @brief How long the deployment took to answer, in nanoseconds. */
     std::int64_t latency_ns = 0;
@@ -49,6 +49,12 @@ struct crm_snapshot final {
 
     /** @brief Why the last read failed, or empty. */
     std::string error;
+
+    /** @brief Stamped when the cells change; unique across the table. */
+    std::uint64_t version = 0;
+
+    /** @brief When the runtime next reads this batch, on the steady clock. */
+    std::int64_t next_read_ns = 0;
 };
 
 /**
@@ -69,11 +75,16 @@ public:
         std::string_view party_id, std::string_view crm_name, bool reciprocal,
         std::vector<domain::crm_cell> cells,
         std::vector<domain::crm_convention> conventions,
-        std::string observed_as_of, std::int64_t latency_ns);
+        std::int64_t observed_as_of_ns, std::int64_t latency_ns);
     /** @brief Records a failed read, keeping the last good cells on screen. */
     void fail(std::string_view instance_id, std::string_view account_id,
         std::string_view party_id, std::string_view crm_name, bool reciprocal,
         std::string message);
+
+    /** @brief Sets when the batch is next read, on the steady clock. */
+    void schedule(std::string_view instance_id, std::string_view account_id,
+        std::string_view party_id, std::string_view crm_name, bool reciprocal,
+        std::int64_t next_read_ns);
 
     /** @brief One session and party's latest batch, or nullptr. */
     [[nodiscard]] const crm_snapshot* get(std::string_view instance_id,
@@ -95,6 +106,8 @@ public:
 private:
     composite_map<5, crm_snapshot> snapshots_;
     composite_map<3, std::vector<std::string>> names_;
+    /** @brief The last version stamped; never reset, so none repeats. */
+    std::uint64_t version_ = 0;
 };
 
 }

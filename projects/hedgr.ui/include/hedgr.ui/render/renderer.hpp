@@ -220,9 +220,6 @@ struct window_ui_state final {
     /** @brief The pair selected in the matrix, empty when none. */
     std::string crm_pair;
 
-    /** @brief When the CRM window next polls, on the ImGui clock. */
-    double crm_next_poll = 0.0;
-
     /** @brief Whether the CRM window has taken its scope from its state. */
     bool crm_initialised = false;
 

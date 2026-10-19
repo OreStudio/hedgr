@@ -144,7 +144,7 @@ std::string crm_text(const std::vector<std::pair<std::string,
             .as_of = "2026-10-19T10:00:00Z"});
     }
     desk.crm.set("i", "a", "p", "majors", false, std::move(cells), {},
-        "2026-10-19T10:00:00Z", 0);
+        now - 10 * second, 0);
     const auto handle = desk.open(window_kind::crm_matrix,
         model::domain::crm_matrix_state{.party_id = "p",
             .crm_name = "majors"});

@@ -24,7 +24,9 @@
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
 #include <boost/asio/io_context.hpp>
+#include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace hedgr::runtime::worker {
 
@@ -46,11 +48,23 @@ struct crm_job final {
 /**
  * @brief Reads one CRM batch and posts its cells as a crm_rates event.
  *
- * The read is one get_crm_rates call on a worker connection; the UI polling it
- * is the only clock.
+ * The read is one get_crm_rates call on a worker connection. The runtime's
+ * pump decides when it runs, once per batch however many windows show it.
  */
 HEDGR_RUNTIME_EXPORT void spawn_crm_read(boost::asio::io_context& context,
     crm_job job, model::command::event_queue& events);
+
+/**
+ * @brief Reads an ISO-8601 UTC instant, or returns zero when it cannot.
+ *
+ * The CRM service reports its observation times as text. This is where that
+ * text becomes nanoseconds, once per batch, so no screen parses it per frame.
+ * The grammar is OreStudio's wire shape: either separator, an optional
+ * fraction, and a UTC designator. A non-zero offset or a missing designator
+ * reads as zero rather than as the wrong instant.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT std::int64_t parse_iso8601_utc(
+    std::string_view text);
 
 }
 

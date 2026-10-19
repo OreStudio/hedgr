@@ -97,7 +97,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_party_id, state.crm_name, state.crm_reciprocal);
 
     const auto as_of_ns = snapshot != nullptr
-        ? parse_iso8601_utc(snapshot->observed_as_of) : 0;
+        ? snapshot->observed_as_of_ns : 0;
     const bool reading = snapshot != nullptr && snapshot->reading;
     set_health_foot(foot, model::domain::data_health::unavailable, as_of_ns,
         reading);
@@ -133,18 +133,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     ImGui::SameLine();
     if (ImGui::Button("Refresh"))
         request_refresh();
-
-    /*
-     * The window polls only while it is drawn. The server computes the batch
-     * on demand, so a hidden matrix must not keep a party's rate engine busy.
-     */
-    const double now = ImGui::GetTime();
-    if (state.crm_next_poll == 0.0)
-        state.crm_next_poll = now + 5.0;
-    if (now >= state.crm_next_poll) {
-        request_refresh();
-        state.crm_next_poll = now + 5.0;
-    }
 
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (snapshot == nullptr || snapshot->cells.empty()) {

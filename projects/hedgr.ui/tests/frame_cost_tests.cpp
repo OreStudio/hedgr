@@ -121,3 +121,49 @@ TEST_CASE("a collapsed window costs a frame no allocation", "[frame][workspace]"
     INFO("allocations with 10 collapsed: " << few << ", with 110: " << many);
     CHECK(many == few);
 }
+
+namespace {
+
+const std::vector<std::string> crm_currencies{"AUD", "CAD", "CHF", "EUR",
+    "GBP", "JPY", "NOK", "NZD", "SEK", "SGD", "USD", "ZAR"};
+
+/** @brief A desk holding one CRM batch over every pair of @p count currencies. */
+void hold_crm(desk& desk, std::size_t count) {
+    std::vector<model::domain::crm_cell> cells;
+    for (std::size_t b = 0; b < count; ++b) {
+        for (std::size_t q = 0; q < count; ++q) {
+            if (b == q)
+                continue;
+            cells.push_back(model::domain::crm_cell{.crm_name = "majors",
+                .base_currency_code = crm_currencies[b],
+                .quote_currency_code = crm_currencies[q],
+                .rate = 1.0 + static_cast<double>(b * count + q) / 1000.0,
+                .status = "fresh", .as_of = "2026-10-19T10:00:00Z",
+                .delta_pct = 0.01});
+        }
+    }
+    desk.crm.set("i", "a", "p", "majors", false, std::move(cells), {}, 1, 0);
+}
+
+}
+
+TEST_CASE("drawing a CRM window never asks for a read", "[frame][crm]") {
+    headless_imgui imgui;
+    desk desk;
+    hold_crm(desk, 3);
+    const auto handle = desk.open(model::domain::window_kind::crm_matrix,
+        model::domain::crm_matrix_state{.party_id = "p", .crm_name = "majors"});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+
+    /* Twelve frames a second apart: well past any polling cadence. */
+    ImGui::GetIO().DeltaTime = 1.0f;
+    for (int i = 0; i < 12; ++i)
+        frame([&] {
+            render::render_crm_matrix(handle, input, state, status, lock);
+        });
+    for (const auto& request : desk.commands.drain())
+        CHECK(request.kind != model::command::command_kind::refresh_window);
+}

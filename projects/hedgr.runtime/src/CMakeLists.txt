@@ -55,6 +55,8 @@ target_link_libraries(${lib_target_name}
         hedgr.store.lib
         ores::logging
         Threads::Threads
+    PRIVATE
+        ores::platform
 )
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)

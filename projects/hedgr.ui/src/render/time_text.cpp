@@ -18,24 +18,10 @@
  *
  */
 #include "hedgr.ui/render/time_text.hpp"
-#include "ores.platform/time/datetime.hpp"
 #include "ores.platform/time/relative_time_formatter.hpp"
 #include <chrono>
-#include <exception>
 
 namespace hedgr::ui::render {
-
-std::int64_t parse_iso8601_utc(std::string_view text) {
-    try {
-        const auto instant = ores::platform::time::datetime::from_iso8601_utc(
-            std::string{text});
-        const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-            instant.time_since_epoch()).count();
-        return ns > 0 ? ns : 0;
-    } catch (const std::exception&) {
-        return 0;
-    }
-}
 
 std::string age_text(std::int64_t age_ns) {
     using clock = std::chrono::system_clock;

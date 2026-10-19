@@ -45,15 +45,16 @@ void crm_table::set(std::string_view instance_id,
     std::string_view crm_name, bool reciprocal,
     std::vector<domain::crm_cell> cells,
     std::vector<domain::crm_convention> conventions,
-    std::string observed_as_of, std::int64_t latency_ns) {
+    std::int64_t observed_as_of_ns, std::int64_t latency_ns) {
     auto& entry = slot_in(snapshots_, key_of(instance_id, account_id, party_id,
         crm_name, reciprocal));
     entry.cells = std::move(cells);
     entry.conventions = std::move(conventions);
-    entry.observed_as_of = std::move(observed_as_of);
+    entry.observed_as_of_ns = observed_as_of_ns;
     entry.latency_ns = latency_ns;
     entry.reading = false;
     entry.error.clear();
+    entry.version = ++version_;
 }
 
 void crm_table::fail(std::string_view instance_id,
@@ -63,6 +64,13 @@ void crm_table::fail(std::string_view instance_id,
         crm_name, reciprocal));
     entry.reading = false;
     entry.error = std::move(message);
+}
+
+void crm_table::schedule(std::string_view instance_id,
+    std::string_view account_id, std::string_view party_id,
+    std::string_view crm_name, bool reciprocal, std::int64_t next_read_ns) {
+    slot_in(snapshots_, key_of(instance_id, account_id, party_id, crm_name,
+        reciprocal)).next_read_ns = next_read_ns;
 }
 
 const crm_snapshot* crm_table::get(std::string_view instance_id,

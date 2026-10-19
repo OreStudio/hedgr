@@ -605,6 +605,14 @@ constexpr std::chrono::milliseconds probe_cadence{5000};
 constexpr std::chrono::milliseconds probe_cadence_max{60000};
 
 /**
+ * @brief How often an open CRM matrix is read again.
+ *
+ * The deployment computes the batch on demand, so this is a request rate on a
+ * party's rate engine, paid once per matrix however many windows show it.
+ */
+constexpr std::chrono::milliseconds crm_cadence{5000};
+
+/**
  * @brief How many probes may be in flight at once.
  *
  * Two, from ADR 5: a slow probe cannot starve the other probes, and at most
@@ -1435,6 +1443,7 @@ void instance_manager::pump() {
      * the deadline the schedule reads.
      */
     pump_probes();
+    pump_crm_reads();
 
     /*
      * Then the policy read, once per process. The create prompt is drawn from
@@ -2897,8 +2906,6 @@ void instance_manager::do_open_window(const command::command& cmd) {
                 if (cmd.new_window_kind
                     == domain::window_kind::term_structure)
                     start_term_structure_read(*existing);
-                if (cmd.new_window_kind == domain::window_kind::crm_matrix)
-                    start_crm_read(*existing);
             }
             return;
         }
@@ -2923,8 +2930,6 @@ void instance_manager::do_open_window(const command::command& cmd) {
         spec.cadence = std::chrono::seconds{2};
     if (cmd.new_window_kind == domain::window_kind::term_structure)
         spec.cadence = std::chrono::seconds{30};
-    if (cmd.new_window_kind == domain::window_kind::crm_matrix)
-        spec.cadence = std::chrono::seconds{5};
 
     std::string_view last_error;
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
@@ -2975,8 +2980,6 @@ void instance_manager::do_open_window(const command::command& cmd) {
 
     if (cmd.new_window_kind == domain::window_kind::term_structure)
         start_term_structure_read(handle);
-    if (cmd.new_window_kind == domain::window_kind::crm_matrix)
-        start_crm_read(handle);
 
     if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
         last_error_ = store_failure(
@@ -3025,7 +3028,6 @@ void instance_manager::do_configure_crm(const command::command& cmd) {
     crm->reciprocal = cmd.crm_reciprocal;
     if (auto saved = save_windows(); !saved)
         last_error_ = saved.error();
-    start_crm_read(*handle);
 }
 
 void instance_manager::do_refresh_window(const command::command& cmd) {
@@ -3046,7 +3048,8 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
     /*
      * A chart has no cadence any more. Its prices arrive on the session's
      * subscription; a refresh is the operator asking for the backfill again,
-     * and it must not rearm a poll.
+     * and it must not rearm a poll. A CRM matrix's cadence belongs to its
+     * batch, which pump_crm_reads keeps.
      */
     windows_.set_next_refresh_ns(*handle,
         spec.kind == domain::window_kind::chart
@@ -3414,6 +3417,37 @@ void instance_manager::start_crm_read(
     crm_.begin(spec.session->instance_id, spec.session->account_id,
         state->party_id, state->crm_name, state->reciprocal);
     worker::spawn_crm_read(pool_.context(), std::move(job), events_);
+}
+
+void instance_manager::pump_crm_reads() {
+    if (!database_)
+        return;
+    const auto now = steady_now_ns();
+    const auto& layout = windows_.layout();
+    const auto kinds = windows_.kind_column();
+    const auto open = windows_.open_column();
+    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
+        if (layout.alive[index] == 0 || open[index] == 0
+            || static_cast<domain::window_kind>(kinds[index])
+                != domain::window_kind::crm_matrix)
+            continue;
+        const model_state::window_handle window{index,
+            layout.generation[index]};
+        const auto session = windows_.session_of(window);
+        if (!session || sessions_.status(*session)
+                != domain::session_status::authenticated)
+            continue;
+        const auto* crm =
+            std::get_if<domain::crm_matrix_state>(&windows_.state(window));
+        if (crm == nullptr || crm->party_id.empty() || crm->crm_name.empty())
+            continue;
+        const auto* batch = crm_.get(sessions_.instance_id(*session),
+            sessions_.account_id(*session), crm->party_id, crm->crm_name,
+            crm->reciprocal);
+        if (batch != nullptr && (batch->reading || now < batch->next_read_ns))
+            continue;
+        start_crm_read(window);
+    }
 }
 
 void instance_manager::start_term_structure_read(
@@ -3984,10 +4018,14 @@ bool instance_manager::apply_read_answer(const event::event& ev) {
         if (ev.message.empty())
             crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
                 ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
-                ev.crm_as_of, ev.crm_latency_ns);
+                ev.crm_as_of_ns, ev.crm_latency_ns);
         else
             crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
                 ev.crm_reciprocal, ev.message);
+        crm_.schedule(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+            ev.crm_reciprocal, steady_now_ns()
+                + std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    crm_cadence).count());
         return true;
     }
     case event::event_kind::term_structure: {
