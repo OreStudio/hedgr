@@ -185,8 +185,9 @@ lock_service::set_master_password(const command::command& cmd) {
     auto password = cmd.password;
 
     unlocking_ = true;
+    const auto attempt = ++attempt_;
     boost::asio::co_spawn(pool_,
-        [this, password = std::move(password)]() mutable
+        [this, attempt, password = std::move(password)]() mutable
         -> boost::asio::awaitable<void> {
             co_await boost::asio::post(co_await boost::asio::this_coro::executor,
                 boost::asio::use_awaitable);
@@ -194,6 +195,7 @@ lock_service::set_master_password(const command::command& cmd) {
             auto sealed = store::repository::master_repository::seal(password.view());
 
             event::event fact;
+            fact.attempt = attempt;
             if (!sealed) {
                 fact.kind = event::event_kind::store_lock_failed;
                 fact.message = store_failure(
@@ -253,8 +255,9 @@ lock_service::unlock_store(const command::command& cmd) {
      */
     lock_error_.clear();
     unlocking_ = true;
+    const auto attempt = ++attempt_;
     boost::asio::co_spawn(pool_,
-        [this, password = std::move(password), sealed]() mutable
+        [this, attempt, password = std::move(password), sealed]() mutable
         -> boost::asio::awaitable<void> {
             co_await boost::asio::post(co_await boost::asio::this_coro::executor,
                 boost::asio::use_awaitable);
@@ -262,6 +265,7 @@ lock_service::unlock_store(const command::command& cmd) {
             auto opened = store_crypto::secret_box::open(password.view(), sealed);
 
             event::event fact;
+            fact.attempt = attempt;
             if (opened) {
                 fact.kind = event::event_kind::store_unlocked;
                 fact.lock = domain::store_lock::unlocked;
@@ -302,6 +306,8 @@ void lock_service::lock_store() {
      * unreadable the moment this returns, which is the point of the action.
      */
     lock_error_.clear();
+    unlocking_ = false;
+    ++attempt_;
     drop_master_password(true);
 }
 
@@ -313,6 +319,15 @@ void lock_service::drop_master_password(bool deliberate) {
 
 lock_effect lock_service::apply(const event::event& ev) {
     lock_effect effect;
+
+    /*
+     * A result from an attempt that a lock has since overtaken is not news: the
+     * operator locked the store after asking to unlock it, and applying the
+     * result would open what they just closed. An event with no attempt is one
+     * the pool did not derive, which is the credential failure below.
+     */
+    if (ev.attempt != 0 && ev.attempt != attempt_)
+        return effect;
     if (ev.kind == event::event_kind::master_sealed) {
         unlocking_ = false;
         auto stored = master_repo_->store_verification(ev.payload);

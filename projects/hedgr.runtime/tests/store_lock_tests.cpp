@@ -907,3 +907,90 @@ TEST_CASE("a credential failure does not end an unlock that is running",
     REQUIRE(manager.is_unlocking());
     REQUIRE(manager.store_lock() == store_lock::locked);
 }
+
+TEST_CASE("an unlock that lands after a lock is dropped", "[store_lock]") {
+    const temporary_database database;
+    create_locked_store(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command unlock;
+    unlock.kind = command_kind::unlock_store;
+    unlock.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(unlock));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    command lock;
+    lock.kind = command_kind::lock_store;
+    manager.commands().push(std::move(lock));
+    manager.pump();
+    REQUIRE(manager.store_lock() == store_lock::locked);
+    REQUIRE_FALSE(manager.is_unlocking());
+
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.store_lock() != store_lock::locked; },
+        std::chrono::milliseconds(2000)));
+    REQUIRE(manager.lock_error().empty());
+    REQUIRE_FALSE(manager.is_unlocking());
+}
+
+TEST_CASE("a master password sealed after a lock is dropped and not stored",
+    "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command create;
+    create.kind = command_kind::set_master_password;
+    create.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(create));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    command lock;
+    lock.kind = command_kind::lock_store;
+    manager.commands().push(std::move(lock));
+    manager.pump();
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::unlocked; },
+        std::chrono::milliseconds(2000)));
+
+    /* The row was never written, so a restart finds a store with no master. */
+    instance_manager reopened;
+    REQUIRE(reopened.start(database.path(), seed_options()).has_value());
+    REQUIRE(reopened.store_lock() == store_lock::absent);
+}
+
+TEST_CASE("an unlock started after a lock is applied while the older one is dropped",
+    "[store_lock]") {
+    const temporary_database database;
+    create_locked_store(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command stale;
+    stale.kind = command_kind::unlock_store;
+    stale.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(stale));
+    manager.pump();
+
+    command lock;
+    lock.kind = command_kind::lock_store;
+    manager.commands().push(std::move(lock));
+    manager.pump();
+
+    command wrong;
+    wrong.kind = command_kind::unlock_store;
+    wrong.password = secret_string{std::string{"not-the-master-password"}};
+    manager.commands().push(std::move(wrong));
+    REQUIRE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::failed; },
+        std::chrono::seconds(20)));
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::unlocked; },
+        std::chrono::milliseconds(1500)));
+    REQUIRE(manager.lock_error() == "the master password is not correct");
+}

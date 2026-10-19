@@ -31,6 +31,7 @@
 #include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <boost/asio/io_context.hpp>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <optional>
@@ -161,6 +162,15 @@ private:
     model::domain::store_lock store_lock_ = model::domain::store_lock::absent;
 
     bool unlocking_ = false;
+
+    /**
+     * @brief The attempt a pool result must carry to be applied.
+     *
+     * Each derivation takes the next number and tags its event with it. A lock
+     * advances the number, so a result that was still deriving when the lock
+     * landed no longer matches and is dropped.
+     */
+    std::uint64_t attempt_ = 0;
 
     std::string lock_error_;
 };
