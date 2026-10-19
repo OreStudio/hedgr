@@ -47,6 +47,7 @@
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "hedgr.session/market/series_label.hpp"
+#include "hedgr.session/transport/observation_page.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
 #include <boost/lexical_cast.hpp>
@@ -1329,81 +1330,26 @@ session_client::market_series_points(std::string_view series_id,
             std::format("'{}' is not a series key", series_id));
     }
 
-    using ores::marketdata::messaging::list_market_observations_request;
-    using ores::marketdata::messaging::list_market_observations_response;
-    using ores::marketdata::messaging::market_observations_filter;
+    using ores::marketdata::messaging::list_by_series_id_market_observations_request;
+    using ores::marketdata::messaging::list_by_series_id_market_observations_response;
 
     try {
-        const auto fetch = [&](std::uint32_t offset) {
-            list_market_observations_request request{};
-            request.offset = offset;
-            request.limit = limit;
-            market_observations_filter filter{};
-            filter.series_id = id;
-            request.filter = filter;
-            return ores::nats::service::authenticated_request_and_decode<
-                list_market_observations_response>(client(),
-                list_market_observations_request::nats_subject, request,
-                options_.request_timeout);
-        };
-
-        const auto first = fetch(0);
-        if (!first) {
+        const auto page = ores::nats::service::authenticated_request_and_decode<
+            list_by_series_id_market_observations_response>(client(),
+            list_by_series_id_market_observations_request::nats_subject,
+            newest_observations_request(id, limit), options_.request_timeout);
+        if (!page) {
             return fail(session_errc::protocol_error,
                 "the observation answer could not be decoded");
         }
-        if (first->result.outcome != ores::utility::domain::outcome::ok) {
+        if (page->result.outcome != ores::utility::domain::outcome::ok) {
             return fail(session_errc::protocol_error,
-                first->result.message.empty()
+                page->result.message.empty()
                     ? std::string("the deployment refused the observations")
-                    : first->result.message);
+                    : page->result.message);
         }
 
-        auto rows = first->market_observations;
-        /*
-         * The deployment's default order is oldest first and it does not let a
-         * caller order observations by time. A plot wants the newest window, so
-         * a series longer than the page is read from its tail.
-         */
-        if (first->total > limit) {
-            const auto offset = static_cast<std::uint32_t>(
-                first->total - limit);
-            const auto tail = fetch(offset);
-            if (!tail) {
-                return fail(session_errc::protocol_error,
-                    "the observation answer could not be decoded");
-            }
-            if (tail->result.outcome != ores::utility::domain::outcome::ok) {
-                return fail(session_errc::protocol_error,
-                    tail->result.message.empty()
-                        ? std::string("the deployment refused the observations")
-                        : tail->result.message);
-            }
-            rows = tail->market_observations;
-        }
-
-        market_series_read read;
-        read.points.reserve(rows.size());
-        for (const auto& row : rows) {
-            double value = 0.0;
-            try {
-                value = std::stod(row.value);
-            } catch (const std::exception&) {
-                continue;
-            }
-            const auto at_ns = std::chrono::duration_cast<
-                std::chrono::nanoseconds>(
-                row.observation_datetime.time_since_epoch())
-                                   .count();
-            read.points.push_back(market_point{.at_ns = at_ns,
-                .value = value,
-                .term = market::series_term(row.oresmd_uri)});
-        }
-
-        std::sort(read.points.begin(), read.points.end(),
-            [](const market_point& a, const market_point& b) {
-                return a.at_ns < b.at_ns;
-            });
+        auto read = series_read_from(page->market_observations);
 
         BOOST_LOG_SEV(lg(), ores::logging::debug)
             << "Read " << read.points.size() << " points for series '"

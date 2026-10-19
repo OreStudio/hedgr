@@ -9,6 +9,7 @@
 #
 set(files
     "market_tests.cpp"
+    "observation_page_tests.cpp"
     "transport_tests.cpp"
 )
 
