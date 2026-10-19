@@ -1748,6 +1748,43 @@ void instance_manager::start_read(const service::read_request& request) {
     }
 }
 
+std::optional<worker::session_read> instance_manager::session_read_for(
+    model::state::session_handle session, read_gate gate) const {
+    if (!database_)
+        return std::nullopt;
+    if (gate != read_gate::token_only
+        && sessions_.status(session) != domain::session_status::authenticated)
+        return std::nullopt;
+
+    worker::session_read read;
+    read.token = std::string{sessions_.token(session)};
+    if (read.token.empty() && gate != read_gate::signed_in)
+        return std::nullopt;
+
+    read.instance_id = std::string{sessions_.instance_id(session)};
+    read.account_id = std::string{sessions_.account_id(session)};
+    read.tenant_id = std::string{sessions_.tenant_id(session)};
+    const auto instance = instances_.find(read.instance_id);
+    if (!instance)
+        return std::nullopt;
+
+    const auto account = accounts_.find(read.account_id);
+    read.principal =
+        account ? accounts_.get(*account)->principal : std::string{};
+    read.options = connection_options_for(*instances_.get(*instance),
+        seed_options_, database_->path());
+    return read;
+}
+
+std::optional<worker::session_read> instance_manager::session_read_for(
+    std::string_view instance_id, std::string_view account_id,
+    read_gate gate) const {
+    const auto session = sessions_.find(instance_id, account_id);
+    if (!session)
+        return std::nullopt;
+    return session_read_for(*session, gate);
+}
+
 void instance_manager::start_deployment_read(std::string_view window_id) {
     if (!database_) {
         raise({condition_source::read, std::string{window_id}},
@@ -1763,46 +1800,24 @@ void instance_manager::start_deployment_read(std::string_view window_id) {
     if (!session)
         return;
 
-    /*
-     * Only a signed-in session has a token to present, and a window that
-     * outlived its session has nothing to read with. The window draws its
-     * session-loss state instead.
-     */
-    if (sessions_.status(*session)
-        != domain::session_status::authenticated) {
-        return;
-    }
-
-    const auto token = std::string{sessions_.token(*session)};
-    if (token.empty())
+    auto read = session_read_for(*session, read_gate::signed_in_with_token);
+    if (!read)
         return;
 
-    const auto instance_id = std::string{sessions_.instance_id(*session)};
-    const auto account_id = std::string{sessions_.account_id(*session)};
-
-    const auto instance = instances_.find(instance_id);
-    if (!instance)
-        return;
-
-    const auto key = running_key(instance_id, account_id);
+    const auto key = running_key(read->instance_id, read->account_id);
     if (deployment_reads_.contains(key))
         return;
 
-    const auto account = accounts_.find(account_id);
-    const std::string principal = account
-        ? accounts_.get(*account)->principal : std::string{};
-
     worker::deployment_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.key = domain::session_key{instance_id, account_id};
-    job.token = token;
-    job.principal = principal;
+    job.options = std::move(read->options);
+    job.key = domain::session_key{read->instance_id, read->account_id};
+    job.token = std::move(read->token);
+    job.principal = std::move(read->principal);
 
     deployment_reads_.insert(key);
     BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Starting a deployment read for '" << instance_id << "' / '"
-        << account_id << "'";
+        << "Starting a deployment read for '" << read->instance_id << "' / '"
+        << read->account_id << "'";
     worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
 }
 
@@ -1832,22 +1847,12 @@ void instance_manager::start_market_read(std::string_view window_id,
     if (!session)
         return;
 
-    if (sessions_.status(*session) != domain::session_status::authenticated)
-        return;
-
-    const auto token = std::string{sessions_.token(*session)};
-    if (token.empty())
-        return;
-
-    const auto instance_id = std::string{sessions_.instance_id(*session)};
-    const auto account_id = std::string{sessions_.account_id(*session)};
-
-    const auto instance = instances_.find(instance_id);
-    if (!instance)
+    auto read = session_read_for(*session, read_gate::signed_in_with_token);
+    if (!read)
         return;
 
     const bool catalogue = series_id.empty();
-    const auto session_key = running_key(instance_id, account_id);
+    const auto session_key = running_key(read->instance_id, read->account_id);
     const auto points_key =
         std::format("{}\x1f{}", session_key, series_id);
     if (catalogue) {
@@ -1857,29 +1862,25 @@ void instance_manager::start_market_read(std::string_view window_id,
         return;
     }
 
-    const auto account = accounts_.find(account_id);
-    const std::string principal = account
-        ? accounts_.get(*account)->principal : std::string{};
-
     worker::market_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.key = domain::session_key{instance_id, account_id};
-    job.token = token;
-    job.principal = principal;
+    job.options = std::move(read->options);
+    job.key = domain::session_key{read->instance_id, read->account_id};
+    job.token = std::move(read->token);
+    job.principal = std::move(read->principal);
     job.catalogue = catalogue;
     job.series_id = std::string{series_id};
 
     if (catalogue) {
         catalogues_reading_.insert(session_key);
-        market_.begin_catalogue(instance_id, account_id);
+        market_.begin_catalogue(read->instance_id, read->account_id);
     } else {
         points_reading_.insert(points_key);
     }
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a market " << (catalogue ? "catalogue" : "points")
-        << " read for '" << instance_id << "' / '" << account_id << "'"
+        << " read for '" << read->instance_id << "' / '" << read->account_id
+        << "'"
         << (catalogue ? std::string{}
                       : std::format(" series '{}'", series_id));
     worker::spawn_market_read(pool_.context(), std::move(job), events_);
@@ -1895,26 +1896,14 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
         return;
     if (currency_images_reading_.contains(ev.tenant_id))
         return;
-    const auto session = sessions_.find(ev.instance_id, ev.account_id);
-    if (!session)
-        return;
-    const auto instance = instances_.find(ev.instance_id);
-    if (!instance)
-        return;
-    const auto token = std::string{sessions_.token(*session)};
-    if (token.empty())
+    auto read = session_read_for(ev.instance_id, ev.account_id,
+        read_gate::token_only);
+    if (!read)
         return;
 
-    const auto account = accounts_.find(ev.account_id);
     worker::image_map_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = ev.instance_id;
-    job.session.account_id = ev.account_id;
+    job.session = std::move(*read);
     job.session.tenant_id = ev.tenant_id;
-    job.session.token = token;
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
     currency_images_reading_.insert(ev.tenant_id);
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
@@ -1922,25 +1911,11 @@ void instance_manager::start_currency_image_map(const model::event::event& ev) {
 
 void instance_manager::start_crm_names_read(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id) {
-    if (!database_)
+    auto read = session_read_for(instance_id, account_id, read_gate::signed_in);
+    if (!read)
         return;
-    const auto session = sessions_.find(instance_id, account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
-        return;
-    const auto instance = instances_.find(instance_id);
-    if (!instance)
-        return;
-    const auto account = accounts_.find(account_id);
     worker::crm_names_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = std::string{instance_id};
-    job.session.account_id = std::string{account_id};
-    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
-    job.session.token = std::string{sessions_.token(*session)};
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
+    job.session = std::move(*read);
     job.party_id = std::string{party_id};
     worker::spawn_crm_names_read(pool_.context(), std::move(job), events_);
 }
@@ -1953,33 +1928,21 @@ void instance_manager::start_crm_read(
     const auto* state = std::get_if<domain::crm_matrix_state>(&spec.state);
     if (state == nullptr || !spec.session || state->party_id.empty())
         return;
-    const auto session = sessions_.find(spec.session->instance_id,
-        spec.session->account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
+    auto read = session_read_for(spec.session->instance_id,
+        spec.session->account_id, read_gate::signed_in);
+    if (!read)
         return;
-    const auto instance = instances_.find(spec.session->instance_id);
-    if (!instance)
-        return;
-    const auto account = accounts_.find(spec.session->account_id);
     worker::crm_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = spec.session->instance_id;
-    job.session.account_id = spec.session->account_id;
-    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
-    job.session.token = std::string{sessions_.token(*session)};
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
+    job.session = std::move(*read);
     job.party_id = state->party_id;
     job.crm_name = state->crm_name;
     job.reciprocal = state->reciprocal;
-    if (const auto* current = crm_.get(spec.session->instance_id,
-            spec.session->account_id, state->party_id, state->crm_name,
+    if (const auto* current = crm_.get(job.session.instance_id,
+            job.session.account_id, state->party_id, state->crm_name,
             state->reciprocal);
         current != nullptr && current->reading)
         return;
-    crm_.begin(spec.session->instance_id, spec.session->account_id,
+    crm_.begin(job.session.instance_id, job.session.account_id,
         state->party_id, state->crm_name, state->reciprocal);
     worker::spawn_crm_read(pool_.context(), std::move(job), events_);
 }
@@ -2026,59 +1989,35 @@ void instance_manager::start_term_structure_read(
         return;
     if (!spec.session)
         return;
-    const auto session = sessions_.find(spec.session->instance_id,
-        spec.session->account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
+    auto read = session_read_for(spec.session->instance_id,
+        spec.session->account_id, read_gate::signed_in);
+    if (!read)
         return;
-    const auto instance = instances_.find(spec.session->instance_id);
-    if (!instance)
-        return;
-    const auto account = accounts_.find(spec.session->account_id);
 
     worker::term_structure_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = spec.session->instance_id;
-    job.session.account_id = spec.session->account_id;
-    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
-    job.session.token = std::string{sessions_.token(*session)};
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
+    job.session = std::move(*read);
     job.key = st->curve_key;
     job.label = st->label;
     job.member_ids = st->member_ids;
     job.member_tenors = st->member_tenors;
-    term_structures_.begin(spec.session->instance_id,
-        spec.session->account_id, st->curve_key, st->label);
+    term_structures_.begin(job.session.instance_id, job.session.account_id,
+        st->curve_key, st->label);
     worker::spawn_term_structure_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::do_load_term_structure(
     const model::command::command& cmd) {
-    if (!database_ || cmd.curve_key.empty()
+    if (cmd.curve_key.empty()
         || cmd.member_ids.size() != cmd.member_tenors.size()
         || cmd.member_ids.empty())
         return;
-    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
+    auto read = session_read_for(cmd.instance_id, cmd.account_id,
+        read_gate::signed_in);
+    if (!read)
         return;
-    const auto instance = instances_.find(cmd.instance_id);
-    if (!instance)
-        return;
-    const auto account = accounts_.find(cmd.account_id);
-    const auto token = std::string{sessions_.token(*session)};
 
     worker::term_structure_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = cmd.instance_id;
-    job.session.account_id = cmd.account_id;
-    job.session.tenant_id = std::string{sessions_.tenant_id(*session)};
-    job.session.token = token;
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
+    job.session = std::move(*read);
     job.key = cmd.curve_key;
     job.label = cmd.curve_label;
     job.member_ids = cmd.member_ids;
@@ -2089,34 +2028,19 @@ void instance_manager::do_load_term_structure(
 }
 
 void instance_manager::do_load_image(const model::command::command& cmd) {
-    if (!database_)
+    auto read = session_read_for(cmd.instance_id, cmd.account_id,
+        read_gate::signed_in_with_token);
+    if (!read || read->tenant_id.empty() || cmd.image_id.empty())
         return;
-    const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
-        return;
-    const auto tenant = std::string{sessions_.tenant_id(*session)};
-    const auto token = std::string{sessions_.token(*session)};
-    if (tenant.empty() || token.empty() || cmd.image_id.empty())
-        return;
-    const auto key = model::state::make_tenant_key(tenant, cmd.image_id);
-    if (images_reading_.contains(key) || images_.contains(tenant, cmd.image_id)
+    const auto key = model::state::make_tenant_key(read->tenant_id,
+        cmd.image_id);
+    if (images_reading_.contains(key)
+        || images_.contains(read->tenant_id, cmd.image_id)
         || failed_images_.contains(key))
         return;
-    const auto instance = instances_.find(cmd.instance_id);
-    if (!instance)
-        return;
-    const auto account = accounts_.find(cmd.account_id);
 
     worker::image_job job;
-    job.session.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    job.session.instance_id = cmd.instance_id;
-    job.session.account_id = cmd.account_id;
-    job.session.tenant_id = tenant;
-    job.session.token = token;
-    job.session.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
+    job.session = std::move(*read);
     job.image_id = cmd.image_id;
     images_reading_.insert(key);
     worker::spawn_image_read(pool_.context(), std::move(job), events_);
@@ -2124,39 +2048,22 @@ void instance_manager::do_load_image(const model::command::command& cmd) {
 
 void instance_manager::start_market_backfill(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) {
-    if (!database_)
+    auto read = session_read_for(instance_id, account_id,
+        read_gate::signed_in_with_token);
+    if (!read)
         return;
 
-    const auto session = sessions_.find(instance_id, account_id);
-    if (!session || sessions_.status(*session)
-            != domain::session_status::authenticated)
-        return;
-
-    const auto token = std::string{sessions_.token(*session)};
-    if (token.empty())
-        return;
-
-    const auto instance = instances_.find(instance_id);
-    if (!instance)
-        return;
-
-    const auto session_key =
-        running_key(instance_id, account_id);
-    const auto points_key = std::format("{}\x1f{}", session_key, series_id);
+    const auto points_key = std::format("{}\x1f{}",
+        running_key(instance_id, account_id), series_id);
     if (points_reading_.contains(points_key))
         return;
 
-    const auto account = accounts_.find(account_id);
-    const std::string principal = account
-        ? accounts_.get(*account)->principal : std::string{};
-
     worker::market_job job;
-    job.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
+    job.options = std::move(read->options);
     job.key = domain::session_key{std::string{instance_id},
         std::string{account_id}};
-    job.token = token;
-    job.principal = principal;
+    job.token = std::move(read->token);
+    job.principal = std::move(read->principal);
     job.catalogue = false;
     job.series_id = std::string{series_id};
     job.limit = 2000;

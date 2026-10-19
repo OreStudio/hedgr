@@ -55,6 +55,7 @@
 #include <expected>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <unordered_map>
@@ -375,6 +376,28 @@ private:
     void start_read(const service::read_request& request);
 
     void do_load_crm_names(const model::command::command& cmd);
+
+    /** @brief What a read needs of a session before it may start. */
+    enum class read_gate {
+        signed_in,
+        signed_in_with_token,
+        token_only,
+    };
+
+    /**
+     * @brief The identity, token and connection a read on @p session presents.
+     *
+     * Empty when the session fails @p gate or its instance row is gone. Every
+     * refusal is silent: a window over a session that cannot read draws its own
+     * session-loss state.
+     */
+    [[nodiscard]] std::optional<worker::session_read> session_read_for(
+        model::state::session_handle session, read_gate gate) const;
+
+    /** @brief The same, for the session signed in as one instance and account. */
+    [[nodiscard]] std::optional<worker::session_read> session_read_for(
+        std::string_view instance_id, std::string_view account_id,
+        read_gate gate) const;
 
     /**
      * @brief Asks for one command centre's deployment read.
