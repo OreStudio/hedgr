@@ -32,6 +32,7 @@
 #include "hedgr.ui/widget/capture.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/domain/wire_format.hpp"
+#include "ores.platform/process/executable.hpp"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -443,7 +444,7 @@ GLFWwindow* application::initialise_graphics() {
 
 void application::load_background_texture() {
     namespace fs = std::filesystem;
-    const auto exe_path = fs::read_symlink("/proc/self/exe");
+    const auto exe_path = ores::platform::process::executable_path();
     const auto image_path =
         exe_path.parent_path().parent_path() / "share" / "hedgr.imgui" / "background.jpeg";
 
@@ -454,7 +455,7 @@ void application::load_background_texture() {
 
     int channels = 0;
     unsigned char* data =
-        stbi_load(image_path.c_str(), &background_width_, &background_height_, &channels, 4);
+        stbi_load(image_path.string().c_str(), &background_width_, &background_height_, &channels, 4);
     if (data == nullptr) {
         BOOST_LOG_SEV(lg(), warn)
             << "Failed to load background image: " << stbi_failure_reason();
@@ -514,7 +515,7 @@ void application::load_instance_icon_textures() {
         int height = 0;
         int channels = 0;
         unsigned char* data =
-            stbi_load(entry.path().c_str(), &width, &height, &channels, 4);
+            stbi_load(entry.path().string().c_str(), &width, &height, &channels, 4);
         if (data == nullptr) {
             /*
              * One unreadable asset does not cost the others. The entry simply
@@ -554,7 +555,7 @@ void application::load_splash_texture() {
     }
 
     int channels = 0;
-    unsigned char* data = stbi_load(image_path.c_str(), &splash_width_,
+    unsigned char* data = stbi_load(image_path.string().c_str(), &splash_width_,
         &splash_height_, &channels, 4);
     if (data == nullptr) {
         BOOST_LOG_SEV(lg(), warn)
