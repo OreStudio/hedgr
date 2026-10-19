@@ -17,15 +17,19 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "allocation_counter.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
+#include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <catch2/catch_all.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <format>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -133,10 +137,13 @@ struct desk final {
     }
 
     [[nodiscard]] model::state::window_handle open(model::domain::window_kind kind,
-        model::domain::window_state state) {
+        model::domain::window_state state, std::string id = "w") {
         const auto handle = windows.insert(model::domain::window_spec{
-            .id = "w", .kind = kind, .state = std::move(state)});
+            .id = std::move(id), .kind = kind, .state = std::move(state)});
         windows.bind_session(handle, session);
+        windows.set_open(handle, true);
+        windows.set_next_refresh_ns(handle,
+            std::numeric_limits<std::int64_t>::max());
         return handle;
     }
 };
@@ -190,4 +197,44 @@ TEST_CASE("a series browser draws only the flags of the rows in view",
     const auto large = texture_asks_over(5000);
     CHECK(small > 0);
     CHECK(large == small);
+}
+
+namespace {
+
+/** @brief Allocations of one steady workspace frame with @p count collapsed charts. */
+std::size_t allocations_with_collapsed(std::size_t count) {
+    headless_imgui imgui;
+    desk desk;
+    std::string settings;
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto id = std::format("chart-window-{:04}", i);
+        static_cast<void>(desk.open(model::domain::window_kind::chart,
+            model::domain::chart_state{
+                .label = "FX GBP/USD spot, synthetic feed", .series_id = "s"},
+            id));
+        settings += std::format("[Window][###{}]\nCollapsed=1\n\n", id);
+    }
+    ImGui::LoadIniSettingsFromMemory(settings.c_str(), settings.size());
+    render::workspace workspace;
+    auto input = desk.input();
+
+    const auto draw = [&] {
+        ImGui::NewFrame();
+        workspace.render(input);
+        ImGui::Render();
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const auto before = hedgr::testing::allocations();
+    draw();
+    return hedgr::testing::allocations() - before;
+}
+
+}
+
+TEST_CASE("a collapsed window costs a frame no allocation", "[frame][workspace]") {
+    const auto few = allocations_with_collapsed(10);
+    const auto many = allocations_with_collapsed(110);
+    INFO("allocations with 10 collapsed: " << few << ", with 110: " << many);
+    CHECK(many == few);
 }

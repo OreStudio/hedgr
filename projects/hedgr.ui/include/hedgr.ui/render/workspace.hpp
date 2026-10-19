@@ -20,6 +20,7 @@
 #ifndef HEDGR_UI_RENDER_WORKSPACE_HPP
 #define HEDGR_UI_RENDER_WORKSPACE_HPP
 
+#include "hedgr.model/state/composite_key.hpp"
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
@@ -27,7 +28,6 @@
 #include <array>
 #include <filesystem>
 #include <string>
-#include <unordered_map>
 
 namespace hedgr::ui::render {
 
@@ -149,7 +149,15 @@ private:
      * closed and reopened, or which survives a rebuild of the window table,
      * keeps whatever the person had typed into it.
      */
-    std::unordered_map<std::string, window_ui_state> ui_state_;
+    hedgr::model::state::composite_map<1, window_ui_state> ui_state_;
+
+    /**
+     * @brief The ImGui label of the window being drawn, reused by every window.
+     *
+     * Built for each window before its culling check, so a buffer that keeps
+     * its capacity is what lets a culled window cost no allocation.
+     */
+    std::string begin_label_;
 
     /** @brief The choices the market-data screens share across windows. */
     market_view_state market_view_;

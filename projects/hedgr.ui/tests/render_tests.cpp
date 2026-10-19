@@ -254,6 +254,15 @@ render_input input_with(empty_state& state, store_lock lock) {
     };
 }
 
+/** @brief A window's title on its own. */
+std::string title_of(window_kind kind,
+    const hedgr::model::domain::window_state& state,
+    const render_input& input) {
+    std::string title;
+    hedgr::ui::render::append_window_title(title, kind, state, input);
+    return title;
+}
+
 }
 
 TEST_CASE("the instances window is drawn only while the store is unlocked",
@@ -753,21 +762,25 @@ TEST_CASE("the new window kinds have renderers and titles", "[renderer]") {
      * instance must still say what it is.
      */
     const window_state orphan = accounts_state{ "inst-gone" };
-    REQUIRE(hedgr::ui::render::window_title(window_kind::accounts, orphan, input)
+    REQUIRE(title_of(window_kind::accounts, orphan, input)
         == "Accounts: inst-gone");
 
     const window_state session = workspace_state{ "acct-gone" };
-    REQUIRE(hedgr::ui::render::window_title(window_kind::workspace, session, input)
-        == "acct-gone");
+    REQUIRE(title_of(window_kind::workspace, session, input) == "acct-gone");
 
     /*
      * A command centre names its deployment, because a wall holds one per
      * deployment and the title is what tells them apart.
      */
     const window_state centre = command_centre_state{ "inst-gone" };
-    REQUIRE(hedgr::ui::render::window_title(window_kind::command_centre, centre,
-                input)
+    REQUIRE(title_of(window_kind::command_centre, centre, input)
         == "Command centre: inst-gone");
+
+    /* The frame loop builds its label around the title, so it appends. */
+    std::string label = "icon  ";
+    hedgr::ui::render::append_window_title(label, window_kind::workspace,
+        session, input);
+    REQUIRE(label == "icon  acct-gone");
 }
 
 TEST_CASE("sign in asks for a password for the two reasons it can", "[renderer]") {
