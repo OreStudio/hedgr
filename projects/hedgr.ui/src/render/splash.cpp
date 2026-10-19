@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/splash.hpp"
 
 #include "imgui.h"
+#include "ores.platform/process/executable.hpp"
 #include <algorithm>
 #include <system_error>
 #include <vector>
@@ -44,10 +45,9 @@ constexpr ImU32 splash_ground = IM_COL32(16, 17, 19, 255);
  * the per-environment illustrations that share the folder.
  */
 std::filesystem::path splash_image_path_impl() {
-    std::error_code ec;
-    const auto self = std::filesystem::read_symlink("/proc/self/exe", ec);
+    const auto self = ores::platform::process::executable_path();
     std::vector<std::filesystem::path> candidates;
-    if (!ec) {
+    if (!self.empty()) {
         const auto exe_dir = self.parent_path();
         candidates.push_back(exe_dir.parent_path() / "share" / "hedgr.ui"
             / "branding" / "ore-studio-splash.png");
@@ -55,6 +55,7 @@ std::filesystem::path splash_image_path_impl() {
     }
     candidates.push_back("assets/branding/ore-studio-splash.png");
 
+    std::error_code ec;
     for (const auto& candidate : candidates) {
         if (std::filesystem::exists(candidate, ec) && !ec)
             return candidate;

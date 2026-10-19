@@ -27,6 +27,10 @@ endif()
 
 add_library(${lib_target_name} ${files})
 target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY)
+# Vendored upstream code is kept byte-for-byte apart from its patch, so it is
+# not held to the project's warning set.
+set_source_files_properties(../third_party/imcoolbar/ImCoolBar.cpp
+    PROPERTIES COMPILE_OPTIONS $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-w>)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${lib_target_name} PRIVATE
         -fvisibility=hidden -fvisibility-inlines-hidden)
@@ -54,6 +58,7 @@ target_link_libraries(${lib_target_name}
         imgui::imgui
         implot::implot
     PRIVATE
+        ores::platform
         ores::utility
         # miniaudio's Linux backends are loaded at run time, so what it needs
         # from the host is the dynamic loader, threads and the math library

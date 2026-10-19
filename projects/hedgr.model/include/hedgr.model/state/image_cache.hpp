@@ -87,8 +87,8 @@ public:
      */
     template<class Visitor>
     void for_each(Visitor&& visitor) const {
-        for (const auto& entry : entries_)
-            visitor(entry.tenant_id, entry.image_id, entry.image);
+        for (const auto& item : entries_)
+            visitor(item.tenant_id, item.image_id, item.image);
     }
 
     void clear();

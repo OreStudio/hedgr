@@ -46,16 +46,6 @@ using hedgr::ui::render::render_input;
     return std::string{id};
 }
 
-/** @brief An account's name by key, falling back to the key itself. */
-[[nodiscard]] std::string account_name(const render_input& input,
-    std::string_view id) {
-    if (const auto handle = input.accounts.find(id)) {
-        const auto* row = input.accounts.get(*handle);
-        return row->name.empty() ? row->principal : row->name;
-    }
-    return std::string{id};
-}
-
 /** @brief An account's principal by key, which is what a workspace titles. */
 [[nodiscard]] std::string account_principal(const render_input& input,
     std::string_view id) {

@@ -45,10 +45,10 @@ namespace hedgr::runtime::worker {
  */
 struct market_stream::series_state final {
     series_state(std::string id, model::state::bucket_ring& ring,
-        std::atomic<std::size_t>& ticks)
+        std::atomic<std::size_t>& tick_count)
         : series_id(std::move(id))
         , aggregator(series_id, ring)
-        , ticks(ticks) {
+        , ticks(tick_count) {
     }
 
     void on_tick(const session::market::tick& tick) {

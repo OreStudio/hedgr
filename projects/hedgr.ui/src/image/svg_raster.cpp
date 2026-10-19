@@ -40,7 +40,8 @@ std::optional<rgba_image> rasterize_svg(std::string_view svg, int width,
     result.width = bitmap.width();
     result.height = bitmap.height();
     result.pixels.resize(
-        static_cast<std::size_t>(result.width) * result.height * 4);
+        static_cast<std::size_t>(result.width)
+        * static_cast<std::size_t>(result.height) * 4);
 
     const auto* source = bitmap.data();
     for (int y = 0; y < result.height; ++y) {
@@ -48,7 +49,8 @@ std::optional<rgba_image> rasterize_svg(std::string_view svg, int width,
             const auto* pixel = source + y * bitmap.stride() + x * 4;
             const auto alpha = pixel[3];
             auto* target = result.pixels.data()
-                + (static_cast<std::size_t>(y) * result.width + x) * 4;
+                + (static_cast<std::size_t>(y) * static_cast<std::size_t>(result.width)
+                    + static_cast<std::size_t>(x)) * 4;
             if (alpha == 0) {
                 target[0] = target[1] = target[2] = target[3] = 0;
                 continue;

@@ -349,7 +349,9 @@ void load_ui_fonts(float base_size_px) {
             const std::uint8_t* source =
                 sheet.data() + y * sheet_width + i * cell;
             auto* destination = reinterpret_cast<ImU32*>(texture->Pixels)
-                + (rect.y + y) * texture->Width + rect.x;
+                + (static_cast<std::size_t>(rect.y) + y)
+                    * static_cast<std::size_t>(texture->Width)
+                + static_cast<std::size_t>(rect.x);
             for (std::size_t x = 0; x < cell; ++x) {
                 /*
                  * White with the sheet's coverage as alpha, so the text colour

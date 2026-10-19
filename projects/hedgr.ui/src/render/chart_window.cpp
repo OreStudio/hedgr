@@ -539,7 +539,7 @@ void render_chart(window_handle handle, const render_input& input,
                 ImPlot::PushPlotClipRect();
                 if (health.state == hedgr::ui::render::data_health::live) {
                     const auto phase = static_cast<float>(
-                        (input.now_ns % 1'000'000'000) / 1.0e9);
+                        static_cast<double>(input.now_ns % 1'000'000'000) / 1.0e9);
                     const float pulse = 0.5f
                         + 0.5f * std::sin(phase * 6.2831853f);
                     const float radius = 2.5f + pulse * 3.5f;

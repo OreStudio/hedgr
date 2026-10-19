@@ -15,17 +15,16 @@
 # this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
 # Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
-if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_COMPILER_IS_CLANGXX "TRUE")
-endif()
-
-if (CMAKE_COMPILER_IS_GNUCXX OR CMAKE_COMPILER_IS_CLANGXX)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${flags}")
-    message(STATUS "C++ flags: ${CMAKE_CXX_FLAGS}")
-endif()
-
+#
+# Designated initialisers that leave fields to their default member
+# initialisers are the intended style, so that -Wextra check stays off. GCC's
+# -Wmaybe-uninitialized reports std::string inside std::expected at -O3, which
+# is not a defect in this code, so it stays a warning there.
+#
 add_compile_options(
-    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-Werror>
+    "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall;-Wextra;-Wpedantic;-Wshadow;-Wnon-virtual-dtor;-Wconversion;-Wsign-conversion;-Werror>"
+    "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-missing-designated-field-initializers>"
+    "$<$<CXX_COMPILER_ID:GNU>:-Wno-missing-field-initializers;-Wno-error=maybe-uninitialized>"
     $<$<CXX_COMPILER_ID:MSVC>:/WX>)
 
 #

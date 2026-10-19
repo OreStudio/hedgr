@@ -1063,11 +1063,11 @@ void draw_dashboard(const render_input& input) {
             std::array<std::array<char, 6>, tick_capacity> tick_text{};
             std::array<const char*, tick_capacity> tick_labels{};
             std::array<double, tick_capacity> tick_values{};
-            int tick_count = 0;
+            std::size_t tick_count = 0;
             for (std::int64_t minute =
                      static_cast<std::int64_t>(std::ceil(window_start));
                  minute <= static_cast<std::int64_t>(std::floor(now_minutes))
-                     && tick_count < static_cast<int>(tick_capacity);
+                     && tick_count < tick_capacity;
                  ++minute) {
                 tick_values[tick_count] = static_cast<double>(minute);
                 tick_labels[tick_count] = tick_text[tick_count].data();
@@ -1080,7 +1080,7 @@ void draw_dashboard(const render_input& input) {
             }
             if (tick_count > 0)
                 ImPlot::SetupAxisTicks(ImAxis_X1, tick_values.data(),
-                    tick_count, tick_labels.data());
+                    static_cast<int>(tick_count), tick_labels.data());
 
             /*
              * An empty history draws the axes and no lines rather than a crash.

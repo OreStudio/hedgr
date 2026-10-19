@@ -151,9 +151,8 @@ void menu_screen(hedgr::ui::render::command_centre_ui_state& state,
  * screen of zeros reads as an estate with nothing in it rather than as a
  * deployment nobody has set up, which are two different instructions.
  */
-void draw_bootstrap_card(const render_input& input, hedgr::model::state::instance_handle instance,
+void draw_bootstrap_card(const render_input& input,
     std::string_view instance_id, std::string_view instance_name) {
-    const auto* probe = input.probes.get(instance);
     const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
     const int columns = widget::card_columns(pane_width);
     const float width = widget::card_width(pane_width, columns);
@@ -426,7 +425,6 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
 
     scratch.session_loss_reported = false;
 
-    const auto* probe = instance ? input.probes.get(*instance) : nullptr;
     const auto* bootstrap = instance ? bootstrap_of(input, *instance) : nullptr;
 
     /*
@@ -441,7 +439,7 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
                 << "' is showing the bootstrap card";
             scratch.bootstrap_reported = true;
         }
-        draw_bootstrap_card(input, *instance, instance_id, instance_name);
+        draw_bootstrap_card(input, instance_id, instance_name);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;

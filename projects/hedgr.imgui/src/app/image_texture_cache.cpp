@@ -61,7 +61,7 @@ bool image_texture_cache::ensure(std::string_view tenant_id,
             static_cast<int>(data.size()), &width, &height, &channels, 4);
         if (pixels != nullptr) {
             texture = upload_rgba(pixels, width, height);
-            bytes = static_cast<std::size_t>(width) * height * 4;
+            bytes = static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4;
             stbi_image_free(pixels);
         }
     }

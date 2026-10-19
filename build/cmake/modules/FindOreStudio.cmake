@@ -26,6 +26,8 @@ Input variables:
 
 ``ORES_SOURCE_DIR``
   Path to the OreStudio source tree. Only its public headers are consumed.
+  Defaults to the tree ``ORES_BUILD_DIR`` was configured from; configure fails
+  if it names a different tree.
 
 ``ORES_BUILD_DIR``
   Path to the OreStudio build output directory (e.g.
@@ -41,24 +43,49 @@ Imported targets:
   Interface target for executables that call ``OPENSSL_cleanup()``.
 #]=======================================================================]
 
-set(ORES_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/OreStudio"
-    CACHE PATH "Path to OreStudio source tree")
-
 #
 # Validate inputs
 #
-if(NOT EXISTS "${ORES_SOURCE_DIR}/projects")
-    message(FATAL_ERROR
-        "OreStudio source not found at ${ORES_SOURCE_DIR}. "
-        "Did you initialise the git submodule? "
-        "(git submodule update --init --recursive)")
-endif()
-
 if(NOT EXISTS "${ORES_BUILD_DIR}/publish/lib")
     message(FATAL_ERROR
         "OreStudio pre-built libraries not found at ${ORES_BUILD_DIR}/publish/lib. "
         "Please build OreStudio first: "
         "cd external/OreStudio && cmake --preset <preset> && cmake --build --preset <preset>")
+endif()
+
+#
+# The headers must come from the tree the libraries were built from, or Hedgr
+# compiles against struct layouts the linked libraries do not have. The build
+# directory records its source tree, so that record decides ORES_SOURCE_DIR.
+#
+file(STRINGS "${ORES_BUILD_DIR}/CMakeCache.txt" _ores_home_entry
+    REGEX "^CMAKE_HOME_DIRECTORY:INTERNAL=")
+if(NOT _ores_home_entry)
+    message(FATAL_ERROR
+        "Cannot tell which OreStudio source tree ${ORES_BUILD_DIR} was built from: "
+        "no CMAKE_HOME_DIRECTORY in ${ORES_BUILD_DIR}/CMakeCache.txt.")
+endif()
+string(REGEX REPLACE "^CMAKE_HOME_DIRECTORY:INTERNAL=" "" _ores_built_from
+    "${_ores_home_entry}")
+
+set(ORES_SOURCE_DIR "${_ores_built_from}"
+    CACHE PATH "Path to OreStudio source tree. Defaults to the tree ORES_BUILD_DIR was built from.")
+
+file(REAL_PATH "${ORES_SOURCE_DIR}" _ores_source_real)
+file(REAL_PATH "${_ores_built_from}" _ores_built_from_real)
+if(NOT _ores_source_real STREQUAL _ores_built_from_real)
+    message(FATAL_ERROR
+        "ORES_SOURCE_DIR and ORES_BUILD_DIR name different OreStudio trees.\n"
+        "  ORES_SOURCE_DIR: ${ORES_SOURCE_DIR}\n"
+        "  ORES_BUILD_DIR:  ${ORES_BUILD_DIR} (built from ${_ores_built_from})\n"
+        "Unset ORES_SOURCE_DIR (cmake -U ORES_SOURCE_DIR) to take it from the "
+        "build directory, or point ORES_BUILD_DIR at a build of ORES_SOURCE_DIR.")
+endif()
+
+if(NOT EXISTS "${ORES_SOURCE_DIR}/projects")
+    message(FATAL_ERROR
+        "OreStudio source not found at ${ORES_SOURCE_DIR}, the tree "
+        "${ORES_BUILD_DIR} was built from.")
 endif()
 
 #
@@ -86,6 +113,14 @@ message(STATUS "OreStudio build:  ${ORES_BUILD_DIR}")
 message(STATUS "OreStudio include dirs found: ${_ores_include_dirs}")
 
 #
+# The OreStudio libraries depend on each other, and the build-tree RUNPATH only
+# reaches them once the bundling step has copied them into publish/lib. Point
+# the linker at the OreStudio build so a target that links one of them before
+# bundling still resolves the rest.
+#
+set(_ores_rpath_link "$<$<PLATFORM_ID:Linux>:LINKER:-rpath-link,${ORES_BUILD_DIR}/publish/lib>")
+
+#
 # Create ores::client INTERFACE IMPORTED target
 #
 # OreStudio bakes its third-party dependencies statically into each shared
@@ -100,6 +135,7 @@ if(NOT TARGET ores::client)
     set_target_properties(ores::client PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${_ores_include_dirs}"
         INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib"
+        INTERFACE_LINK_OPTIONS "${_ores_rpath_link}"
     )
 
     target_link_libraries(ores::client INTERFACE
@@ -162,7 +198,8 @@ foreach(_ores_library IN LISTS _ores_libraries)
     add_library(ores::${_ores_library} INTERFACE IMPORTED)
     set_target_properties(ores::${_ores_library} PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${_ores_include_dirs}"
-        INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib")
+        INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib"
+        INTERFACE_LINK_OPTIONS "${_ores_rpath_link}")
     target_link_libraries(ores::${_ores_library} INTERFACE
         ores.${_ores_library}
         reflectcpp::reflectcpp

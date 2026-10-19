@@ -497,8 +497,8 @@ result<session_account> session_client::authenticate(std::string_view principal,
                         if (party.party_id == account_.party_id)
                             account_.party_name = party.name;
                         const bool known = std::any_of(party_choices.begin(),
-                            party_choices.end(), [&party](const auto& known) {
-                                return known.id == party.party_id;
+                            party_choices.end(), [&party](const auto& choice) {
+                                return choice.id == party.party_id;
                             });
                         if (!known) {
                             party_choices.push_back(transport::party_choice{
