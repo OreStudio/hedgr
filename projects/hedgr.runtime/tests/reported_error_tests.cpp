@@ -24,6 +24,7 @@
 #include "hedgr.store/sqlite/database.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <random>
@@ -169,6 +170,60 @@ TEST_CASE("a store the build cannot read is reported, not left to a log",
     REQUIRE(rows.size() == 2);
     REQUIRE(rows[0].key.source == hedgr::model::state::condition_source::startup);
     REQUIRE(rows[0].message == reason);
+}
+
+TEST_CASE("a seed write the store refuses is a start failure", "[reported]") {
+    /*
+     * A store that refuses the seeded instance must not come up showing a row
+     * no store holds: the next run would not find it and would seed it again.
+     * The refusal is a trigger, so the store itself says no and the error is
+     * the repository's own.
+     */
+    setenv("HEDGR_ORESTUDIO_ROOT", "", 1);
+    const temporary_database database;
+    {
+        auto opened = hedgr::store::sqlite::database::open(database.path());
+        REQUIRE(opened.has_value());
+        REQUIRE(opened->apply_schema().has_value());
+        REQUIRE(opened->execute(
+                    "CREATE TRIGGER refuse_instance BEFORE INSERT ON instance "
+                    "BEGIN SELECT RAISE(ABORT, 'refused by test'); END")
+                    .has_value());
+    }
+
+    instance_manager manager;
+    const auto started = manager.start(database.path(), seed_options());
+
+    REQUIRE_FALSE(started.has_value());
+    REQUIRE_FALSE(manager.is_started());
+
+    REQUIRE(manager.instances().size() == 1);
+    const auto seeded_id = manager.instances().rows().front().id;
+    using hedgr::model::state::condition_source;
+
+    /*
+     * The instance refusal is not the only one: the seeded logins reference
+     * the instance the store never took, so both are refused after it, and
+     * every refusal is kept in the order the seeder met it.
+     */
+    const auto rows = manager.conditions().rows();
+    REQUIRE(rows.size() == 3);
+    REQUIRE(rows[0].key.source == condition_source::instance);
+    REQUIRE(rows[0].key.subject == seeded_id);
+    REQUIRE(rows[0].message == std::format(
+        "cannot save the seeded instance {}: refused by test (step_failed)",
+        seeded_id));
+    REQUIRE(rows[1].key.source == condition_source::account);
+    REQUIRE(rows[1].key.subject == std::format("acct:{}:super admin", seeded_id));
+    REQUIRE(rows[1].message.starts_with(std::format(
+        "cannot save the seeded account acct:{}:super admin: ", seeded_id)));
+    REQUIRE(rows[2].key.source == condition_source::account);
+    REQUIRE(rows[2].key.subject == std::format("acct:{}:tenant admin", seeded_id));
+
+    /* The start failure is the newest refusal, and the bar reads the same. */
+    REQUIRE(started.error() == rows[2].message);
+    REQUIRE(manager.startup_failure() == rows[2].message);
+    REQUIRE(manager.last_error() == rows[2].message);
 }
 
 TEST_CASE("the reported failure is the last attempt's, not an old one",
