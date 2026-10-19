@@ -325,6 +325,23 @@ TEST_CASE("an account credential round-trips and can be cleared", "[credential]"
     REQUIRE(accounts.credential_of("acct-1").value() == std::nullopt);
 }
 
+TEST_CASE("storing or clearing a credential for a missing account is not_found",
+    "[credential]") {
+    auto db = fresh_store();
+    account_repository accounts(db);
+
+    const auto sealed = secret_box::seal("a-master-password", "hunter2");
+    REQUIRE(sealed.has_value());
+
+    const auto stored = accounts.set_credential("acct-gone", sealed.value());
+    REQUIRE_FALSE(stored.has_value());
+    REQUIRE(stored.error().code == store_errc::not_found);
+
+    const auto cleared = accounts.clear_credential("acct-gone");
+    REQUIRE_FALSE(cleared.has_value());
+    REQUIRE(cleared.error().code == store_errc::not_found);
+}
+
 TEST_CASE("the accounts with a credential are named without it", "[credential]") {
     auto db = fresh_store();
     instance_repository instances(db);
