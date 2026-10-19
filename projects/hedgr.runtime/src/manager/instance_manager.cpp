@@ -23,6 +23,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/seed/seeder.hpp"
+#include "hedgr.runtime/service/window_traits.hpp"
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
@@ -48,7 +49,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -75,6 +75,7 @@ using condition_source = model_state::condition_source;
 
 using support::lg;
 using support::live_indices;
+using support::live_windows;
 using support::steady_now_ns;
 using support::store_failure;
 
@@ -95,56 +96,6 @@ using support::store_failure;
     return result;
 }
 
-/**
- * @brief The stable id of the window showing one subject, or empty.
- *
- * A window whose id is a function of what it shows is opened by looking it up
- * rather than by making another: "one accounts window per instance" and "one
- * workspace per session" are then answered by the id, and a second request
- * focuses the window that exists. CRM windows also carry the party and CRM
- * name, because the same map differs between them. The kinds with no such
- * identity -- a chart, a grid, a notice -- have no key, and a request for one
- * always makes a new window, because two charts of two series are two windows.
- */
-[[nodiscard]] std::string window_key_for(domain::window_kind kind,
-    std::string_view instance_id, std::string_view account_id,
-    std::string_view series_id = {}, std::string_view crm_name = {},
-    std::string_view party_id = {}) {
-    switch (kind) {
-    case domain::window_kind::instance_manager:
-        return "instance-manager";
-    case domain::window_kind::accounts:
-        return std::format("accounts:{}", instance_id);
-    case domain::window_kind::workspace:
-        return std::format("workspace:{}:{}", instance_id, account_id);
-    case domain::window_kind::command_centre:
-        return std::format("command-centre:{}:{}", instance_id, account_id);
-    case domain::window_kind::series_browser:
-        return std::format("series-browser:{}:{}", instance_id, account_id);
-    case domain::window_kind::chart:
-        /*
-         * One chart per series per session. Reopening GBP/USD as the same
-         * login focuses the plot already drawn; another login on the same
-         * deployment is another session and gets its own window, with its own
-         * identity bar and its own token.
-         */
-        return series_id.empty()
-            ? std::string{}
-            : std::format("chart:{}:{}:{}", instance_id, account_id, series_id);
-    case domain::window_kind::term_structure:
-        return series_id.empty()
-            ? std::string{}
-            : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
-    case domain::window_kind::crm_matrix:
-        return std::format("crm:{}:{}:{}:{}", instance_id, account_id, party_id,
-            crm_name);
-    case domain::window_kind::grid:
-    case domain::window_kind::notice:
-        break;
-    }
-    return {};
-}
-
 /** @brief Every live session row, holes skipped, for a whole-table walk. */
 [[nodiscard]] std::vector<model_state::session_handle>
 live_sessions(const model_state::session_table& sessions) {
@@ -154,19 +105,6 @@ live_sessions(const model_state::session_table& sessions) {
         if (layout.alive[index] == 0)
             continue;
         result.push_back(model_state::session_handle{index, layout.generation[index]});
-    }
-    return result;
-}
-
-/** @brief Every live window row, holes skipped, for a whole-table walk. */
-[[nodiscard]] std::vector<model_state::window_handle>
-live_windows(const model_state::window_table& windows) {
-    std::vector<model_state::window_handle> result;
-    const auto& layout = windows.layout();
-    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
-        if (layout.alive[index] == 0)
-            continue;
-        result.push_back(model_state::window_handle{index, layout.generation[index]});
     }
     return result;
 }
@@ -206,78 +144,6 @@ constexpr std::chrono::milliseconds crm_cadence{5000};
  * about when twenty instances are unreachable.
  */
 constexpr std::size_t probe_thread_count = 2;
-
-/**
- * @brief The default kind-specific state for a window opened by kind.
- *
- * The instance and the account are parameters because two kinds cannot be
- * described without them: an accounts window is the accounts of one instance,
- * and a workspace is one account's session. Passing them in rather than
- * reaching for them keeps this function a pure mapping from a command to the
- * state its window starts with.
- */
-[[nodiscard]] domain::window_state
-default_state_for(domain::window_kind kind, std::string_view last_error,
-    std::string_view instance_id, std::string_view account_id,
-    std::string_view series_id = {},
-    std::string_view series_label = {}) {
-    switch (kind) {
-    case domain::window_kind::chart: {
-        domain::chart_state chart;
-        chart.label = series_label.empty() ? "Series"
-                                          : std::string{series_label};
-        chart.series_id = std::string{series_id};
-        return chart;
-    }
-    case domain::window_kind::series_browser:
-        return domain::series_browser_state{};
-    case domain::window_kind::crm_matrix:
-        return domain::crm_matrix_state{};
-    case domain::window_kind::term_structure: {
-        domain::term_structure_state terms;
-        terms.label = series_label.empty() ? "Term structure"
-                                           : std::string{series_label};
-        terms.curve_key = std::string{series_id};
-        return terms;
-    }
-    case domain::window_kind::accounts: {
-        domain::accounts_state accounts;
-        accounts.instance_id = std::string{instance_id};
-        return accounts;
-    }
-    case domain::window_kind::workspace: {
-        domain::workspace_state session;
-        session.account_id = std::string{account_id};
-        return session;
-    }
-    case domain::window_kind::command_centre: {
-        domain::command_centre_state centre;
-        centre.instance_id = std::string{instance_id};
-        return centre;
-    }
-    case domain::window_kind::grid: {
-        domain::grid_state grid;
-        grid.resource = "trades";
-        return grid;
-    }
-    case domain::window_kind::notice:
-    case domain::window_kind::instance_manager: {
-        /*
-         * The session table keeps the friendly sentence and nothing else, so a
-         * notice opened after a failure shows the sentence and leaves the
-         * dimmed low-level line empty rather than inventing one.
-         */
-        domain::notice_state notice;
-        notice.title = "Notice";
-        if (!last_error.empty()) {
-            notice.title = "Session error";
-            notice.text = std::string(last_error);
-        }
-        return notice;
-    }
-    }
-    return domain::notice_state{};
-}
 
 }
 
@@ -391,8 +257,7 @@ instance_manager::start(const std::filesystem::path& database_path,
         *database_);
     shortcut_repo_ = std::make_unique<store::repository::shortcut_repository>(
         *database_);
-    window_repo_ = std::make_unique<store::repository::window_repository>(
-        *database_);
+    window_service_.attach(*database_);
     master_repo_ = std::make_unique<store::repository::master_repository>(
         *database_);
 
@@ -528,35 +393,16 @@ instance_manager::start(const std::filesystem::path& database_path,
     for (const auto& row : shortcuts.value())
         shortcuts_.upsert(row);
 
-    auto windows = window_repo_->list();
-    if (!windows) {
-        startup_failure_ = store_failure("cannot read the stored windows",
-            windows.error());
+    if (auto loaded = window_service_.load(); !loaded) {
+        startup_failure_ = loaded.error();
         raise({condition_source::startup, {}}, startup_failure_);
         return std::unexpected(startup_failure_);
-    }
-    windows_.clear();
-    for (const auto& spec : windows.value()) {
-        const auto handle = windows_.insert(spec);
-
-        /*
-         * Sessions are not persisted, so on a cold start the bind below finds
-         * nothing and the window comes back unbound. That is correct rather
-         * than a gap: a session is a live connection, and a window that
-         * outlives one renders the session-loss state.
-         */
-        if (!spec.session)
-            continue;
-        if (const auto session = sessions_.find(spec.session->instance_id,
-                spec.session->account_id)) {
-            windows_.bind_session(handle, *session);
-        }
     }
 
     for (auto& refused : seed::seed_store(seed_tables, seed_repositories,
              seed_options_))
         raise(std::move(refused.key), std::move(refused.message));
-    ensure_instance_manager_window();
+    window_service_.ensure_instance_manager_window();
 
     /*
      * A seed the store refused is a start failure like any other: the next run
@@ -573,26 +419,6 @@ instance_manager::start(const std::filesystem::path& database_path,
         << "Runtime ready with " << instances_.size() << " instances and "
         << accounts_.size() << " accounts";
     return {};
-}
-
-void instance_manager::ensure_instance_manager_window() {
-    if (windows_.find("instance-manager"))
-        return;
-
-    domain::window_spec spec;
-    spec.id = "instance-manager";
-    spec.kind = domain::window_kind::instance_manager;
-
-    /*
-     * No session, and never one: the Instance Manager is the root of the
-     * interface and is the surface a person uses to open a session in the first
-     * place.
-     */
-    spec.session = std::nullopt;
-
-    /* The handle is discarded on purpose: nothing binds to this window and its
-     * stable id is how everything else finds it. */
-    static_cast<void>(windows_.insert(spec));
 }
 
 void instance_manager::pump() {
@@ -643,12 +469,10 @@ std::string instance_manager::open_accounts_window(const std::string& instance_i
      * queue to push to: the id is derived from the instance, and one lookup
      * answers whether the window exists.
      */
-    const std::string wanted = window_key_for(domain::window_kind::accounts,
-        instance_id, {}, {});
-    if (const auto existing = windows_.find(wanted)) {
-        windows_.set_open(*existing, true);
+    const std::string wanted = service::window_key_for(
+        domain::window_kind::accounts, instance_id, {}, {});
+    if (window_service_.show_existing(wanted))
         return wanted;
-    }
 
     command::command request;
     request.kind = command::command_kind::open_window;
@@ -739,16 +563,18 @@ void instance_manager::handle(command::command& cmd) {
         do_disconnect_session(cmd);
         break;
     case command::command_kind::open_window:
-        do_open_window(cmd);
+        complete_open(window_service_.open(cmd));
         break;
     case command::command_kind::close_window:
-        do_close_window(cmd);
+        if (auto refused = window_service_.close(cmd))
+            raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::refresh_window:
         do_refresh_window(cmd);
         break;
     case command::command_kind::configure_crm:
-        do_configure_crm(cmd);
+        if (window_service_.configure_crm(cmd))
+            static_cast<void>(save_windows());
         break;
     case command::command_kind::load_crm_names:
         do_load_crm_names(cmd);
@@ -976,10 +802,7 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
          * releasing bumps the generation and the handle the window holds would
          * stop comparing equal to the row it points at.
          */
-        for (const auto window : live_windows(windows_)) {
-            if (windows_.session_of(window) == session)
-                windows_.clear_session(window);
-        }
+        window_service_.unbind(session);
 
         sessions_.remove(session);
     }
@@ -1079,10 +902,7 @@ void instance_manager::do_remove_account(const command::command& cmd) {
     if (const auto session = sessions_.find(instance_id, id)) {
         stop_session(running_key(instance_id, id));
         stop_market_stream(instance_id, id);
-        for (const auto window : live_windows(windows_)) {
-            if (windows_.session_of(window) == *session)
-                windows_.clear_session(window);
-        }
+        window_service_.unbind(*session);
         sessions_.remove(*session);
     }
 
@@ -2089,214 +1909,20 @@ void instance_manager::do_disconnect_session(const command::command& cmd) {
      * the generation: after it, the handle a window holds no longer compares
      * equal to the row it was bound to, and the unlink would silently miss.
      */
-    for (const auto window : live_windows(windows_)) {
-        if (windows_.session_of(window) == *handle)
-            windows_.clear_session(window);
-    }
+    window_service_.unbind(*handle);
 
     sessions_.remove(*handle);
     static_cast<void>(save_windows());
-}
-
-void instance_manager::do_open_window(const command::command& cmd) {
-    if (!window_repo_) {
-        raise({condition_source::window, {}},
-            "cannot open a window: the store is not open");
-        return;
-    }
-
-    /*
-     * A window whose id is derived from what it shows is opened by focusing the
-     * one that already exists. That is what makes two requests for the same
-     * subject one window, and it is the reason the ids of those kinds are
-     * functions rather than serials.
-     */
-    const auto key = window_key_for(cmd.new_window_kind, cmd.instance_id,
-        cmd.account_id, cmd.series_id, cmd.crm_name, cmd.party_id);
-    if (!key.empty()) {
-        if (const auto existing = windows_.find(key)) {
-            windows_.set_open(*existing, true);
-            windows_.request_focus(key);
-
-            /*
-             * A window restored from the store is open and unbound: the
-             * session it was saved against does not exist at start. A sign-in
-             * that asks for that window again is the moment the binding can be
-             * made, and without it the window draws the session-loss state
-             * forever while its session is live beside it.
-             */
-            if (const auto session =
-                    sessions_.find(cmd.instance_id, cmd.account_id)) {
-                windows_.bind_session(*existing, *session);
-
-                /*
-                 * The restored window's first refresh ran while it had no
-                 * session, so its deadline has already moved a cadence out.
-                 * Binding makes the read possible, and asking for it now is
-                 * what makes the window show the deployment rather than sit on
-                 * "reading" until the next tick.
-                 */
-                windows_.set_next_refresh_ns(*existing,
-                    cmd.new_window_kind == domain::window_kind::chart
-                        || cmd.new_window_kind
-                            == domain::window_kind::term_structure
-                        ? std::numeric_limits<std::int64_t>::max()
-                        : 0);
-                if (cmd.new_window_kind
-                    == domain::window_kind::term_structure)
-                    start_term_structure_read(*existing);
-            }
-            return;
-        }
-    }
-
-    domain::window_spec spec;
-    spec.id = key.empty() ? std::format("w-{}", next_window_serial_++)
-                          : key;
-    spec.kind = cmd.new_window_kind;
-
-    /*
-     * A command centre reads a deployment, not a frame: six list calls on a
-     * second connection. The one second default is the placeholder's cadence
-     * and would put six requests a second on the broker for a screen whose
-     * numbers move over hours.
-     */
-    if (cmd.new_window_kind == domain::window_kind::command_centre)
-        spec.cadence = std::chrono::seconds{30};
-    if (cmd.new_window_kind == domain::window_kind::series_browser)
-        spec.cadence = std::chrono::seconds{60};
-    if (cmd.new_window_kind == domain::window_kind::chart)
-        spec.cadence = std::chrono::seconds{2};
-    if (cmd.new_window_kind == domain::window_kind::term_structure)
-        spec.cadence = std::chrono::seconds{30};
-
-    std::string_view last_error;
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
-        last_error = sessions_.last_error(*session);
-    spec.state = default_state_for(cmd.new_window_kind, last_error,
-        cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
-    if (cmd.new_window_kind == domain::window_kind::crm_matrix) {
-        auto& crm = std::get<domain::crm_matrix_state>(spec.state);
-        crm.crm_name = cmd.crm_name;
-        if (!cmd.party_id.empty()) {
-            crm.party_id = cmd.party_id;
-        } else if (const auto session = sessions_.find(cmd.instance_id,
-                       cmd.account_id)) {
-            crm.party_id = std::string{sessions_.party_id(*session)};
-        }
-    }
-    if (cmd.new_window_kind == domain::window_kind::term_structure) {
-        auto& terms = std::get<domain::term_structure_state>(spec.state);
-        terms.member_ids = cmd.member_ids;
-        terms.member_tenors = cmd.member_tenors;
-    }
-
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
-        spec.session = domain::session_key{std::string{cmd.instance_id},
-            std::string{cmd.account_id}};
-
-    const auto handle = windows_.insert(spec);
-
-    /*
-     * A window opened from a session is bound to it, so the frame loop can
-     * reach its state without a key lookup per window. A window opened with no
-     * session named stays unbound and renders the session-loss state.
-     */
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
-        windows_.bind_session(handle, *session);
-
-    /*
-     * A chart is fed by the subscription, so its first backfill is asked for by
-     * the watch rather than by the refresh deadline. The deadline is parked at
-     * the end of time; a manual refresh still starts a read.
-     */
-    if (cmd.new_window_kind == domain::window_kind::chart
-        || cmd.new_window_kind == domain::window_kind::term_structure
-        || cmd.new_window_kind == domain::window_kind::crm_matrix) {
-        windows_.set_next_refresh_ns(handle,
-            std::numeric_limits<std::int64_t>::max());
-    }
-
-    if (cmd.new_window_kind == domain::window_kind::term_structure)
-        start_term_structure_read(handle);
-
-    if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
-        raise({condition_source::window, spec.id},
-            store_failure(
-                std::format("cannot save window {}", spec.id), saved.error()));
-    }
-
-    BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Opened window '" << spec.id << "' of kind '"
-        << domain::to_string(spec.kind) << "'";
-}
-
-void instance_manager::do_close_window(const command::command& cmd) {
-    BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Closing window '" << cmd.window_id << "'";
-    const auto handle = windows_.find(cmd.window_id);
-    if (!handle) {
-        raise({condition_source::window, cmd.window_id},
-            std::format("cannot close: no window {}", cmd.window_id));
-        return;
-    }
-
-    windows_.remove(*handle);
-
-    if (window_repo_) {
-        if (auto removed = window_repo_->remove(cmd.window_id); !removed) {
-            raise({condition_source::window, cmd.window_id},
-                store_failure(
-                    std::format("cannot remove window {}", cmd.window_id),
-                    removed.error()));
-        }
-    }
 }
 
 void instance_manager::do_load_crm_names(const command::command& cmd) {
     start_crm_names_read(cmd.instance_id, cmd.account_id, cmd.party_id);
 }
 
-void instance_manager::do_configure_crm(const command::command& cmd) {
-    const auto handle = windows_.find(cmd.window_id);
-    if (!handle)
-        return;
-    auto* crm = std::get_if<domain::crm_matrix_state>(
-        &windows_.state(*handle));
-    if (crm == nullptr)
-        return;
-    crm->party_id = cmd.party_id;
-    crm->crm_name = cmd.crm_name;
-    crm->reciprocal = cmd.crm_reciprocal;
-    static_cast<void>(save_windows());
-}
-
 void instance_manager::do_refresh_window(const command::command& cmd) {
-    const auto handle = windows_.find(cmd.window_id);
-    if (!handle)
+    const auto request = window_service_.refresh(cmd);
+    if (!request)
         return;
-
-    /*
-     * The cadence comes from the window's own persisted description, read back
-     * through spec(), rather than from a column: the live table carries what
-     * the frame loop reads every frame, and the cadence is not one of those.
-     */
-    const auto spec = windows_.spec(*handle, sessions_);
-    const auto now = std::chrono::steady_clock::now().time_since_epoch();
-    const auto due = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        now + spec.cadence);
-
-    /*
-     * A chart has no cadence any more. Its prices arrive on the session's
-     * subscription; a refresh is the operator asking for the backfill again,
-     * and it must not rearm a poll. A CRM matrix's cadence belongs to its
-     * batch, which pump_crm_reads keeps.
-     */
-    windows_.set_next_refresh_ns(*handle,
-        spec.kind == domain::window_kind::chart
-                || spec.kind == domain::window_kind::crm_matrix
-            ? std::numeric_limits<std::int64_t>::max()
-            : due.count());
 
     /*
      * A refresh is also the operator's chance to retry the currency image map
@@ -2318,78 +1944,52 @@ void instance_manager::do_refresh_window(const command::command& cmd) {
         }
     }
 
-    /*
-     * A command centre's refresh is a deployment read on its own connection.
-     * Every other kind still takes the placeholder below.
-     */
-    if (spec.kind == domain::window_kind::term_structure) {
-        start_term_structure_read(*handle);
-        return;
-    }
-    if (spec.kind == domain::window_kind::crm_matrix) {
-        start_crm_read(*handle);
-        return;
-    }
-
-    if (spec.kind == domain::window_kind::command_centre) {
-        start_deployment_read(cmd.window_id);
-        return;
-    }
-
-    if (spec.kind == domain::window_kind::series_browser) {
-        start_market_catalogue_read(cmd.window_id);
-        return;
-    }
-
-    if (spec.kind == domain::window_kind::chart) {
-        if (const auto* chart = std::get_if<domain::chart_state>(
-                &windows_.state(*handle));
-            chart != nullptr && !chart->series_id.empty()) {
-            start_market_points_read(cmd.window_id, chart->series_id);
-        }
-        return;
-    }
-
-    /*
-     * Placeholder. A refresh has nothing real to ask for yet, so the request is
-     * turned into an event carrying the window id and nothing else, which is
-     * enough to exercise the path from a command through the event channel and
-     * back into apply(). The real handler replaces the payload, not the shape.
-     */
-    event::event fact;
-    fact.kind = event::event_kind::window_data;
-    fact.payload = cmd.window_id;
-    events_.push(std::move(fact));
+    start_read(*request);
 }
 
-void instance_manager::rebind_restored_windows(std::string_view instance_id,
-    std::string_view account_id, model_state::session_handle session) {
-    const auto& layout = windows_.layout();
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
+void instance_manager::complete_open(service::open_outcome outcome) {
+    if (outcome.read)
+        start_read(*outcome.read);
+    if (outcome.refused)
+        raise(std::move(outcome.refused->key), std::move(outcome.refused->message));
+}
 
-        const model_state::window_handle window{
-            index, layout.generation[index]};
-        if (windows_.session_of(window))
-            continue;
-
-        const auto spec = windows_.spec(window, sessions_);
-        if (!spec.session)
-            continue;
-        if (spec.session->instance_id != instance_id
-            || spec.session->account_id != account_id) {
-            continue;
+void instance_manager::start_read(const service::read_request& request) {
+    switch (request.kind) {
+    case service::read_kind::term_structure:
+        start_term_structure_read(request.window);
+        return;
+    case service::read_kind::crm_batch:
+        start_crm_read(request.window);
+        return;
+    case service::read_kind::deployment:
+        start_deployment_read(windows().id(request.window));
+        return;
+    case service::read_kind::market_catalogue:
+        start_market_catalogue_read(windows().id(request.window));
+        return;
+    case service::read_kind::market_points:
+        if (const auto* chart = std::get_if<domain::chart_state>(
+                &windows().state(request.window));
+            chart != nullptr && !chart->series_id.empty()) {
+            start_market_points_read(windows().id(request.window),
+                chart->series_id);
         }
-
-        windows_.bind_session(window, session);
-        windows_.set_next_refresh_ns(window,
-            spec.kind == domain::window_kind::chart
-                ? std::numeric_limits<std::int64_t>::max()
-                : 0);
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Rebound restored window '" << spec.id << "' to '"
-            << instance_id << "' / '" << account_id << "'";
+        return;
+    case service::read_kind::placeholder: {
+        /*
+         * A refresh has nothing real to ask for yet, so the request is turned
+         * into an event carrying the window id and nothing else, which is
+         * enough to exercise the path from a command through the event
+         * channel and back into apply(). The real handler replaces the
+         * payload, not the shape.
+         */
+        event::event fact;
+        fact.kind = event::event_kind::window_data;
+        fact.payload = std::string{windows().id(request.window)};
+        events_.push(std::move(fact));
+        return;
+    }
     }
 }
 
@@ -2400,11 +2000,11 @@ void instance_manager::start_deployment_read(std::string_view window_id) {
         return;
     }
 
-    const auto window = windows_.find(window_id);
+    const auto window = windows().find(window_id);
     if (!window)
         return;
 
-    const auto session = windows_.session_of(*window);
+    const auto session = windows().session_of(*window);
     if (!session)
         return;
 
@@ -2469,11 +2069,11 @@ void instance_manager::start_market_read(std::string_view window_id,
         return;
     }
 
-    const auto window = windows_.find(window_id);
+    const auto window = windows().find(window_id);
     if (!window)
         return;
 
-    const auto session = windows_.session_of(*window);
+    const auto session = windows().session_of(*window);
     if (!session)
         return;
 
@@ -2592,9 +2192,9 @@ void instance_manager::start_crm_names_read(std::string_view instance_id,
 
 void instance_manager::start_crm_read(
     model::state::window_handle handle) {
-    if (!database_ || !windows_.contains(handle))
+    if (!database_ || !windows().contains(handle))
         return;
-    const auto spec = windows_.spec(handle, sessions_);
+    const auto spec = windows().spec(handle, sessions_);
     const auto* state = std::get_if<domain::crm_matrix_state>(&spec.state);
     if (state == nullptr || !spec.session || state->party_id.empty())
         return;
@@ -2633,9 +2233,9 @@ void instance_manager::pump_crm_reads() {
     if (!database_)
         return;
     const auto now = steady_now_ns();
-    const auto& layout = windows_.layout();
-    const auto kinds = windows_.kind_column();
-    const auto open = windows_.open_column();
+    const auto& layout = windows().layout();
+    const auto kinds = windows().kind_column();
+    const auto open = windows().open_column();
     for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
         if (layout.alive[index] == 0 || open[index] == 0
             || static_cast<domain::window_kind>(kinds[index])
@@ -2643,12 +2243,12 @@ void instance_manager::pump_crm_reads() {
             continue;
         const model_state::window_handle window{index,
             layout.generation[index]};
-        const auto session = windows_.session_of(window);
+        const auto session = windows().session_of(window);
         if (!session || sessions_.status(*session)
                 != domain::session_status::authenticated)
             continue;
         const auto* crm =
-            std::get_if<domain::crm_matrix_state>(&windows_.state(window));
+            std::get_if<domain::crm_matrix_state>(&windows().state(window));
         if (crm == nullptr || crm->party_id.empty() || crm->crm_name.empty())
             continue;
         const auto* batch = crm_.get(sessions_.instance_id(*session),
@@ -2662,9 +2262,9 @@ void instance_manager::pump_crm_reads() {
 
 void instance_manager::start_term_structure_read(
     model::state::window_handle handle) {
-    if (!database_ || !windows_.contains(handle))
+    if (!database_ || !windows().contains(handle))
         return;
-    const auto spec = windows_.spec(handle, sessions_);
+    const auto spec = windows().spec(handle, sessions_);
     const auto* st = std::get_if<domain::term_structure_state>(&spec.state);
     if (st == nullptr || st->curve_key.empty() || st->member_ids.empty()
         || st->member_ids.size() != st->member_tenors.size())
@@ -2870,14 +2470,14 @@ void instance_manager::pump_market_streams() {
     std::unordered_map<std::string,
         std::vector<std::pair<std::string, std::string>>> wanted;
 
-    for (const auto window : live_windows(windows_)) {
-        if (windows_.kind(window) != domain::window_kind::chart)
+    for (const auto window : live_windows(windows())) {
+        if (windows().kind(window) != domain::window_kind::chart)
             continue;
-        const auto session = windows_.session_of(window);
+        const auto session = windows().session_of(window);
         if (!session)
             continue;
         const auto* chart =
-            std::get_if<domain::chart_state>(&windows_.state(window));
+            std::get_if<domain::chart_state>(&windows().state(window));
         if (chart == nullptr || chart->series_id.empty())
             continue;
 
@@ -2896,7 +2496,7 @@ void instance_manager::pump_market_streams() {
              * on every frame.
              */
             if (catalogue == nullptr)
-                start_market_catalogue_read(windows_.id(window));
+                start_market_catalogue_read(windows().id(window));
             continue;
         }
 
@@ -3221,24 +2821,18 @@ void instance_manager::apply(const event::event& ev) {
          * tenant, and that is known only once IAM has answered. Opening it here
          * also means a refused sign-in leaves no window behind.
          */
-        {
-            command::command open;
-            open.kind = command::command_kind::open_window;
-            open.instance_id = ev.instance_id;
-            open.account_id = ev.account_id;
-            open.new_window_kind =
-                sessions_.mode(*handle) == domain::session_mode::system_administration
+        complete_open(window_service_.open_landing(ev.instance_id,
+            ev.account_id,
+            sessions_.mode(*handle) == domain::session_mode::system_administration
                 ? domain::window_kind::command_centre
-                : domain::window_kind::workspace;
-            do_open_window(open);
-        }
+                : domain::window_kind::workspace));
 
         /*
          * Every other window the wall restored was saved against this same
          * pair and is still unbound. Binding them here is what makes a
          * restored series browser or chart live on the sign-in that owns it.
          */
-        rebind_restored_windows(ev.instance_id, ev.account_id, *handle);
+        window_service_.rebind(ev.instance_id, ev.account_id, *handle);
         break;
     case event::event_kind::session_token_refreshed:
         /*
@@ -3312,16 +2906,13 @@ void instance_manager::apply(const event::event& ev) {
 }
 
 std::expected<void, std::string> instance_manager::save_windows() {
-    if (!window_repo_)
+    if (!window_service_.has_store())
         return std::unexpected(std::string("the store is not open"));
 
-    for (const auto& spec : windows_.specs(sessions_)) {
-        if (auto saved = window_repo_->save(spec); !saved) {
-            auto failure = store_failure(
-                std::format("cannot save window {}", spec.id), saved.error());
-            raise({condition_source::window_wall, {}}, failure);
-            return std::unexpected(std::move(failure));
-        }
+    if (auto refused = window_service_.save_windows()) {
+        auto failure = refused->message;
+        raise(std::move(refused->key), std::move(refused->message));
+        return std::unexpected(std::move(failure));
     }
     conditions_.clear({condition_source::window_wall, {}});
     return {};

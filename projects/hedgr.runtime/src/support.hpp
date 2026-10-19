@@ -54,6 +54,19 @@ namespace sqlite = hedgr::store::sqlite;
     return instance;
 }
 
+/** @brief Every live window row, holes skipped, for a whole-table walk. */
+[[nodiscard]] inline std::vector<model_state::window_handle>
+live_windows(const model_state::window_table& windows) {
+    std::vector<model_state::window_handle> result;
+    const auto& layout = windows.layout();
+    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
+        if (layout.alive[index] == 0)
+            continue;
+        result.push_back(model_state::window_handle{index, layout.generation[index]});
+    }
+    return result;
+}
+
 /** @brief The live slot index of every row of a table, holes skipped. */
 [[nodiscard]] inline std::vector<std::uint32_t>
 live_indices(const model_state::slab& layout) {

@@ -47,6 +47,7 @@
 #include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include "hedgr.store/sqlite/database.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -54,6 +55,8 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <limits>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -84,6 +87,8 @@ using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::catalogue_state;
+using hedgr::model::state::condition_source;
+using hedgr::model::state::window_handle;
 using hedgr::runtime::async::executor;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::runtime::worker::failure_detail;
@@ -305,6 +310,72 @@ void sign_in_unreachable(instance_manager& manager,
     request.kind = command_kind::refresh_window;
     request.window_id = std::move(window_id);
     return request;
+}
+
+/**
+ * @brief An open_window request for @p kind on one pair.
+ *
+ * The series id names a chart's series or a term structure's curve, and a
+ * term structure gets two members so the runtime treats it as readable. The
+ * CRM fields are set for every kind and ignored by all but the matrix.
+ */
+[[nodiscard]] command open_window(window_kind kind, std::string instance_id,
+    std::string account_id, std::string series_id = {}) {
+    command request;
+    request.kind = command_kind::open_window;
+    request.instance_id = std::move(instance_id);
+    request.account_id = std::move(account_id);
+    request.new_window_kind = kind;
+    request.series_id = std::move(series_id);
+    request.series_label = "FX GBP/USD";
+    request.member_ids = {"m-1y", "m-2y"};
+    request.member_tenors = {"1Y", "2Y"};
+    request.party_id = "p";
+    request.crm_name = "majors";
+    return request;
+}
+
+/** @brief The first live window of @p kind, or nothing. */
+[[nodiscard]] std::optional<window_handle> find_window_of_kind(
+    const instance_manager& manager, window_kind kind) {
+    const auto& layout = manager.windows().layout();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        const window_handle window{index, layout.generation[index]};
+        if (manager.windows().kind(window) == kind)
+            return window;
+    }
+    return std::nullopt;
+}
+
+constexpr std::int64_t parked_deadline = std::numeric_limits<std::int64_t>::max();
+
+/**
+ * @brief Saves a wall of four windows against one signed-in pair, then lets
+ * the runtime go, so a second runtime on the same store restores the wall
+ * with its session key but no session.
+ */
+void save_wall_signed_in(const temporary_database& database) {
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    add_unreachable_instance(manager, "inst-refused");
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-1", "inst-refused");
+    push_command(manager, save_account);
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+
+    push_command(manager, open_window(window_kind::series_browser,
+        "inst-refused", "ident-1"));
+    push_command(manager, open_window(window_kind::command_centre,
+        "inst-refused", "ident-1"));
+    push_command(manager, open_window(window_kind::chart,
+        "inst-refused", "ident-1", "s-1"));
+    push_command(manager, open_window(window_kind::term_structure,
+        "inst-refused", "ident-1", "curve-1"));
+    REQUIRE(manager.windows().size() == 6);
+    manager.stop();
 }
 
 /**
@@ -1852,6 +1923,283 @@ TEST_CASE("windows over one CRM matrix share its reads and its cadence",
         manager.pump();
     CHECK_FALSE(batch("majors")->reading);
     CHECK(batch("majors")->next_read_ns - steady_now_ns() > 0);
+
+    manager.stop();
+}
+
+TEST_CASE("a restored wall is rebound by the sign-in it was saved against",
+    "[windows]") {
+    const temporary_database database("rebind-wall");
+    save_wall_signed_in(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.windows().size() == 6);
+
+    const std::vector<std::string> restored{
+        "workspace:inst-refused:ident-1",
+        "series-browser:inst-refused:ident-1",
+        "command-centre:inst-refused:ident-1",
+        "chart:inst-refused:ident-1:s-1",
+        "terms:inst-refused:ident-1:curve-1",
+    };
+
+    /*
+     * Sessions are not persisted, so every window comes back open, unbound and
+     * still naming the pair it was saved against.
+     */
+    for (const auto& id : restored) {
+        const auto window = manager.windows().find(id);
+        REQUIRE(window.has_value());
+        REQUIRE_FALSE(manager.windows().session_of(*window).has_value());
+        const auto spec = manager.windows().spec(*window, manager.sessions());
+        REQUIRE(spec.session.has_value());
+        REQUIRE(spec.session->instance_id == "inst-refused");
+        REQUIRE(spec.session->account_id == "ident-1");
+    }
+
+    /*
+     * A refresh before the sign-in moves the browser's deadline a cadence out
+     * with no session to read on. The rebind must bring it back to now, or the
+     * window sits on "reading" for a minute after the sign-in that made the
+     * read possible.
+     */
+    const auto browser =
+        *manager.windows().find("series-browser:inst-refused:ident-1");
+    push_command(manager, refresh("series-browser:inst-refused:ident-1"));
+    REQUIRE(manager.windows().next_refresh_ns(browser) > steady_now_ns());
+
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+    const auto session = manager.sessions().find("inst-refused", "ident-1");
+    REQUIRE(session.has_value());
+
+    for (const auto& id : restored) {
+        const auto window = *manager.windows().find(id);
+        CHECK(manager.windows().session_of(window) == session);
+    }
+    CHECK(manager.windows().next_refresh_ns(browser) == 0);
+    CHECK(manager.windows().next_refresh_ns(
+        *manager.windows().find("command-centre:inst-refused:ident-1")) == 0);
+    CHECK(manager.windows().next_refresh_ns(
+        *manager.windows().find("terms:inst-refused:ident-1:curve-1")) == 0);
+    CHECK(manager.windows().next_refresh_ns(
+        *manager.windows().find("workspace:inst-refused:ident-1")) == 0);
+
+    /* A chart is fed by the stream, so the rebind parks its deadline. */
+    CHECK(manager.windows().next_refresh_ns(
+        *manager.windows().find("chart:inst-refused:ident-1:s-1"))
+        == parked_deadline);
+
+    manager.stop();
+}
+
+TEST_CASE("a restored window reopened by command is rebound and reads at once",
+    "[windows]") {
+    const temporary_database database("reopen-restored");
+    save_wall_signed_in(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    /*
+     * A chart opened for the pair before it signs in is unbound and names no
+     * session, so the sign-in's rebind passes it over. It is the window the
+     * reopen below has to bind, because nothing else will.
+     */
+    push_command(manager, open_window(window_kind::chart, "inst-refused",
+        "ident-1", "s-2"));
+    const auto orphan = *manager.windows().find("chart:inst-refused:ident-1:s-2");
+    REQUIRE_FALSE(manager.windows().spec(orphan, manager.sessions())
+        .session.has_value());
+
+    sign_in_unreachable(manager, "inst-refused", "ident-1");
+    const auto session = manager.sessions().find("inst-refused", "ident-1");
+    REQUIRE(session.has_value());
+    REQUIRE_FALSE(manager.windows().session_of(orphan).has_value());
+
+    push_command(manager, open_window(window_kind::chart, "inst-refused",
+        "ident-1", "s-2"));
+    CHECK(manager.windows().session_of(orphan) == session);
+    CHECK(manager.windows().next_refresh_ns(orphan) == parked_deadline);
+
+    /*
+     * The sign-in rebound the term structure and left its deadline at now. No
+     * curve has been asked for yet: nothing drew the window, so nothing
+     * pushed the refresh its deadline calls for.
+     */
+    const auto terms =
+        *manager.windows().find("terms:inst-refused:ident-1:curve-1");
+    REQUIRE(manager.windows().next_refresh_ns(terms) == 0);
+    REQUIRE(manager.term_structures().get("inst-refused", "ident-1", "curve-1")
+        == nullptr);
+
+    push_command(manager, open_window(window_kind::term_structure,
+        "inst-refused", "ident-1", "curve-1"));
+
+    /*
+     * Reopening the same curve focuses the existing window rather than making
+     * a second, binds it, parks the deadline and asks for the curve itself.
+     * The read goes to the refused port, so it settles as a failure, which is
+     * the proof that a real read was started.
+     */
+    REQUIRE(manager.windows().size() == 7);
+    CHECK(manager.windows().session_of(terms) == session);
+    CHECK(manager.windows().next_refresh_ns(terms) == parked_deadline);
+    const auto* curve =
+        manager.term_structures().get("inst-refused", "ident-1", "curve-1");
+    REQUIRE(curve != nullptr);
+    const auto settled = wait_until([&] {
+        manager.pump();
+        const auto* held =
+            manager.term_structures().get("inst-refused", "ident-1", "curve-1");
+        return held != nullptr && !held->reading && !held->error.empty();
+    }, std::chrono::seconds(10));
+    REQUIRE(settled);
+
+    /*
+     * The kinds that poll come due at once when reopened, whatever their
+     * deadline was before. A refresh first moves it out so the reset shows.
+     */
+    for (const auto& [kind, id] : {
+             std::pair{window_kind::series_browser,
+                 std::string{"series-browser:inst-refused:ident-1"}},
+             std::pair{window_kind::command_centre,
+                 std::string{"command-centre:inst-refused:ident-1"}}}) {
+        const auto window = *manager.windows().find(id);
+        push_command(manager, refresh(id));
+        REQUIRE(manager.windows().next_refresh_ns(window) > steady_now_ns());
+        push_command(manager, open_window(kind, "inst-refused", "ident-1"));
+        CHECK(manager.windows().next_refresh_ns(window) == 0);
+        CHECK(manager.windows().session_of(window) == session);
+    }
+
+    const auto chart = *manager.windows().find("chart:inst-refused:ident-1:s-1");
+    push_command(manager, open_window(window_kind::chart, "inst-refused",
+        "ident-1", "s-1"));
+    CHECK(manager.windows().next_refresh_ns(chart) == parked_deadline);
+    REQUIRE(manager.windows().size() == 7);
+
+    manager.stop();
+}
+
+TEST_CASE("each window kind opens with its own cadence and deadline",
+    "[windows]") {
+    const temporary_database database("kind-cadence");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    /*
+     * What each kind starts with, pinned as the runtime does it today. A
+     * parked deadline is one the frame loop never reaches, so the kind is
+     * fed some other way or reads on open, and a manual refresh still reads.
+     * The chart's two-second cadence is listed as it is, although nothing
+     * polls on it once the deadline is parked.
+     */
+    struct expectation final {
+        window_kind kind;
+        std::string series_id;
+        std::chrono::milliseconds cadence;
+        bool parked_on_open;
+        bool parked_on_refresh;
+    };
+    const std::vector<expectation> expected{
+        {window_kind::chart, "s-1", std::chrono::seconds{2}, true, true},
+        {window_kind::grid, {}, std::chrono::seconds{1}, false, false},
+        {window_kind::notice, {}, std::chrono::seconds{1}, false, false},
+        {window_kind::instance_manager, {}, std::chrono::seconds{1}, false,
+            false},
+        {window_kind::accounts, {}, std::chrono::seconds{1}, false, false},
+        {window_kind::workspace, {}, std::chrono::seconds{1}, false, false},
+        {window_kind::command_centre, {}, std::chrono::seconds{30}, false,
+            false},
+        {window_kind::series_browser, {}, std::chrono::seconds{60}, false,
+            false},
+        {window_kind::term_structure, "curve-1", std::chrono::seconds{30}, true,
+            false},
+        {window_kind::crm_matrix, {}, std::chrono::seconds{1}, true, true},
+    };
+    REQUIRE(expected.size() == hedgr::model::domain::window_kind_count);
+
+    for (const auto& row : expected) {
+        INFO("kind " << hedgr::model::domain::to_string(row.kind));
+        push_command(manager, open_window(row.kind, "inst-1", "acct-1",
+            row.series_id));
+        const auto window = find_window_of_kind(manager, row.kind);
+        REQUIRE(window.has_value());
+
+        const auto spec = manager.windows().spec(*window, manager.sessions());
+        CHECK(spec.cadence == row.cadence);
+        CHECK(manager.windows().next_refresh_ns(*window)
+            == (row.parked_on_open ? parked_deadline : 0));
+
+        /*
+         * A refresh rearms the poll one cadence out, except for the kinds
+         * whose data arrives some other way: those stay parked.
+         */
+        const auto before = steady_now_ns();
+        push_command(manager, refresh(std::string{manager.windows().id(*window)}));
+        const auto after = steady_now_ns();
+        const auto due = manager.windows().next_refresh_ns(*window);
+        if (row.parked_on_refresh) {
+            CHECK(due == parked_deadline);
+        } else {
+            const auto cadence_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    row.cadence).count();
+            CHECK(due >= before + cadence_ns);
+            CHECK(due <= after + cadence_ns);
+        }
+    }
+    REQUIRE(manager.windows().size() == expected.size());
+
+    manager.stop();
+}
+
+TEST_CASE("a wall the store refuses to save is a standing condition",
+    "[windows]") {
+    const temporary_database database("wall-refused");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.save_windows().has_value());
+    REQUIRE(manager.last_error().empty());
+
+    const auto execute = [&](std::string_view sql) {
+        auto opened = hedgr::store::sqlite::database::open(database.path());
+        REQUIRE(opened.has_value());
+        REQUIRE(opened->execute(std::string{sql}).has_value());
+    };
+    execute("CREATE TRIGGER refuse_wall_insert BEFORE INSERT ON window_spec "
+            "BEGIN SELECT RAISE(ABORT, 'refused by test'); END");
+    execute("CREATE TRIGGER refuse_wall_update BEFORE UPDATE ON window_spec "
+            "BEGIN SELECT RAISE(ABORT, 'refused by test'); END");
+
+    const auto refused = manager.save_windows();
+    REQUIRE_FALSE(refused.has_value());
+    REQUIRE(refused.error().starts_with(
+        "cannot save window instance-manager: refused by test"));
+
+    /*
+     * The refusal is the one failure the status bar shows, keyed to the wall
+     * and not to a window, and it stays up across commands that cannot fail:
+     * the wall is still unsaved whatever the operator does next.
+     */
+    REQUIRE(manager.last_error() == refused.error());
+    const auto rows = manager.conditions().rows();
+    REQUIRE(rows.size() == 1);
+    REQUIRE(rows[0].key.source == condition_source::window_wall);
+    REQUIRE(rows[0].key.subject.empty());
+
+    command probe_all;
+    probe_all.kind = command_kind::probe_all;
+    push_command(manager, probe_all);
+    REQUIRE(manager.last_error() == refused.error());
+
+    /* The save that goes through is the only thing that takes it down. */
+    execute("DROP TRIGGER refuse_wall_insert");
+    execute("DROP TRIGGER refuse_wall_update");
+    REQUIRE(manager.save_windows().has_value());
+    REQUIRE(manager.last_error().empty());
+    REQUIRE(manager.conditions().empty());
 
     manager.stop();
 }
