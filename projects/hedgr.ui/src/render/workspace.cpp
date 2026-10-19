@@ -592,13 +592,16 @@ void workspace::draw_startup_failure(const render_input& input) {
     /*
      * The close button is the way out, and it is offered because the
      * application behind the notice still works and an operator may want to
-     * look at it. The flag is re-armed every time the window appears, exactly
-     * as the password prompt's is: ImGui clears it on the click, and that
-     * clear is the dismissal.
+     * look at it. ImGui clears the flag on the click, and that clear is the
+     * dismissal: the notice is not submitted again for the rest of the run.
      */
-    const char title[] = "The store could not be opened###hedgr-startup-failure";
-    if (!ImGui::Begin(title, &startup_notice_open_, flags))
+    if (!startup_notice_open_)
         return;
+    const char title[] = "The store could not be opened###hedgr-startup-failure";
+    if (!ImGui::Begin(title, &startup_notice_open_, flags)) {
+        ImGui::End();
+        return;
+    }
 
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + notice_width - 40.0f);
 
@@ -623,9 +626,6 @@ void workspace::draw_startup_failure(const render_input& input) {
     ImGui::Separator();
     ImGui::TextUnformatted(notice.reason.c_str());
     ImGui::PopTextWrapPos();
-
-    if (ImGui::IsWindowAppearing())
-        startup_notice_open_ = true;
     ImGui::End();
 }
 
@@ -685,8 +685,10 @@ void workspace::draw_lock_prompt(const render_input& input) {
      */
     const char* title = creating ? "Create the master password###hedgr-lock"
                                  : "Unlock the store###hedgr-lock";
-    if (!ImGui::Begin(title, &prompt_open_, flags))
+    if (!ImGui::Begin(title, &prompt_open_, flags)) {
+        ImGui::End();
         return;
+    }
 
     if (creating) {
         ImGui::TextWrapped(
