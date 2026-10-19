@@ -709,10 +709,10 @@ void instance_manager::stop() noexcept {
     attempts_.clear();
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
-        if (entry.stream)
-            entry.stream->stop();
+        retire_market_stream(std::move(entry.stream));
     }
     market_streams_.clear();
+    retired_market_streams_.clear();
     market_.clear();
     currency_images_.clear();
     currency_images_reading_.clear();
@@ -3605,9 +3605,16 @@ void instance_manager::stop_market_stream(std::string_view instance_id,
     const auto found = market_streams_.find(key);
     if (found == market_streams_.end())
         return;
-    if (found->second.stream)
-        found->second.stream->stop();
+    retire_market_stream(std::move(found->second.stream));
     market_streams_.erase(found);
+}
+
+void instance_manager::retire_market_stream(
+    std::unique_ptr<worker::market_stream> stream) {
+    if (!stream)
+        return;
+    stream->request_stop();
+    retired_market_streams_.push_back(std::move(stream));
 }
 
 void instance_manager::pump_market_streams() {
@@ -3678,8 +3685,7 @@ void instance_manager::pump_market_streams() {
         if (!session
             || sessions_.status(*session)
                 != domain::session_status::authenticated) {
-            if (entry.stream)
-                entry.stream->stop();
+            retire_market_stream(std::move(entry.stream));
             it = market_streams_.erase(it);
             continue;
         }
@@ -3694,15 +3700,6 @@ void instance_manager::pump_market_streams() {
         for (const auto& [series_id, uri] : desired) {
             if (entry.watched.contains(series_id))
                 continue;
-            if (entry.watched.size() >= worker::market_stream::max_watched_series) {
-                if (entry.refused.insert(series_id).second) {
-                    BOOST_LOG_SEV(lg(), ores::logging::warn)
-                        << "Not watching series '" << series_id
-                        << "': the session already watches the maximum of "
-                        << worker::market_stream::max_watched_series;
-                }
-                continue;
-            }
             entry.stream->watch(series_id, uri);
             entry.watched.emplace(series_id, uri);
             start_market_backfill(entry.instance_id, entry.account_id,
@@ -3733,6 +3730,9 @@ void instance_manager::pump_market_streams() {
 
         ++it;
     }
+
+    std::erase_if(retired_market_streams_,
+        [](const auto& stream) { return stream->finished(); });
 }
 
 void instance_manager::pump_probes() {
@@ -4249,11 +4249,18 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_token_refreshed:
         /*
          * A refresh replaces the credential, not the session. Reads that start
-         * from here on take the new token, and the tick stream is reopened on
-         * it so a reconnect after the next expiry still carries a live one.
+         * from here on take the new token, and the tick stream keeps it for
+         * its next resume. The stream itself stays, with its subscription and
+         * its open buckets.
          */
         sessions_.set_token(*handle, ev.token);
-        start_market_stream(ev);
+        if (const auto stream = market_streams_.find(
+                running_key(ev.instance_id, ev.account_id));
+            stream != market_streams_.end() && stream->second.stream) {
+            stream->second.stream->set_token(std::string{ev.token.view()});
+        } else {
+            start_market_stream(ev);
+        }
         break;
     case event::event_kind::deployment_snapshot:
         sessions_.set_deployment(*handle, ev.deployment);

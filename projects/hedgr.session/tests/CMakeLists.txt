@@ -27,6 +27,8 @@ target_link_libraries(${name}.tests
         ores::nats
         ores::iam.client
         ores::iam.api
+        ores::marketdata.api
+        ores::marketdata.core
         ores::logging
         ores::utility
         Catch2::Catch2WithMain

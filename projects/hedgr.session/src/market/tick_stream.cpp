@@ -20,8 +20,10 @@
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.utility/rfl/reflectors.hpp" // IWYU pragma: keep.
 #include "ores.logging/make_logger.hpp"
+#include "ores.marketdata.api/datum/market_datum.hpp"
 #include "ores.marketdata.api/domain/tick_subjects.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.marketdata.core/datum/oresmd_uri_codec.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include <atomic>
 #include <cmath>
@@ -42,19 +44,17 @@ namespace {
 
 namespace hedgr::session::market {
 
-std::string tick_uri_for_series(std::string_view series_uri) {
-    /*
-     * Only the type changes. A series URI already carries every coordinate its
-     * quote carries, so a forward keeps its term; a composite series that names
-     * no coordinate cannot be watched as one exact quote and is left as it is.
-     */
-    std::string uri{series_uri};
-    constexpr std::string_view series_type = "type=series";
-    constexpr std::string_view quote_type = "type=quote";
-    const auto position = uri.find(series_type);
-    if (position != std::string::npos)
-        uri.replace(position, series_type.size(), quote_type);
-    return uri;
+std::optional<std::string> canonical_series_uri(std::string_view oresmd_uri) {
+    using ores::marketdata::datum::oresmd_uri_codec;
+    const auto datum = oresmd_uri_codec::read(oresmd_uri);
+    if (!datum)
+        return std::nullopt;
+    const auto written = oresmd_uri_codec::write(datum->is_series()
+            ? *datum
+            : ores::marketdata::datum::series_of(*datum));
+    if (!written)
+        return std::nullopt;
+    return *written;
 }
 
 std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
@@ -74,7 +74,12 @@ std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
                            .count();
     if (at_ns <= 0)
         return std::nullopt;
-    return tick{.at_ns = at_ns, .value = value};
+
+    auto series_uri = canonical_series_uri(decoded->oresmd_uri);
+    if (!series_uri)
+        return std::nullopt;
+    return tick{.series_uri = std::move(*series_uri), .at_ns = at_ns,
+        .value = value};
 }
 
 market_tick_stream::market_tick_stream(transport::session_options options,
@@ -120,32 +125,28 @@ bool market_tick_stream::connected() const {
 
 void market_tick_stream::disconnect() {
     /*
-     * Draining waits for the callbacks already in flight. The ring and the
-     * series state they write to are owned by the caller, and a callback that
-     * outlived its owner would write into freed memory.
+     * The subscription handle's destructor drains and waits for a handler
+     * that is running, so the connection closes under no handler and the
+     * caller's state is free to go once this returns.
      */
-    for (auto& [series_id, subscription] : subscriptions_) {
-        static_cast<void>(series_id);
-        try {
-            subscription.drain();
-        } catch (const std::exception&) {
-            /* A subscription already gone has nothing left to drain. */
-        }
-    }
-    subscriptions_.clear();
+    subscription_.reset();
     client_.disconnect();
 }
 
-bool market_tick_stream::subscribe(std::string series_id,
-    std::string_view oresmd_uri, tick_handler handler) {
+void market_tick_stream::set_token(std::string token) {
+    token_ = std::move(token);
+}
+
+bool market_tick_stream::subscribe(tick_handler handler) {
     if (!connected()) {
         last_error_ = "the tick stream is not connected";
         return false;
     }
 
     try {
-        const auto subject = ores::marketdata::domain::market_tick_subject(
-            tenant_id_, party_id_, tick_uri_for_series(oresmd_uri));
+        const auto subject =
+            ores::marketdata::domain::market_tick_subject_all(tenant_id_,
+                party_id_);
         auto warned = std::make_shared<std::atomic<bool>>(false);
         auto subscription = client_.subscribe(subject,
             [handler = std::move(handler), warned,
@@ -158,8 +159,8 @@ bool market_tick_stream::subscribe(std::string series_id,
                         << "' (" << msg.data.size() << " bytes)";
                 }
             });
-        subscriptions_.insert_or_assign(std::move(series_id),
-            std::move(subscription));
+        subscription_.reset();
+        subscription_.emplace(std::move(subscription));
         return true;
     } catch (const std::exception& e) {
         last_error_ = e.what();
@@ -167,10 +168,6 @@ bool market_tick_stream::subscribe(std::string series_id,
             << "Tick subscription failed: " << last_error_;
         return false;
     }
-}
-
-void market_tick_stream::unsubscribe(std::string_view series_id) {
-    subscriptions_.erase(std::string{series_id});
 }
 
 }

@@ -20,8 +20,8 @@ model as it does now.
 ## Pipeline
 
 ```
-marketdata.v1.ops.market_tick.<tenant>.<party>.<oresmd-uri>
-        |  one NATS subscription per watched series
+marketdata.v1.ops.market_tick.<tenant>.<party>.>
+        |  one NATS subscription per session, filtered by series
         v
 market_stream                 one per authenticated session
   decode tick
@@ -44,15 +44,21 @@ chart renderer                reads the ring for its span every frame
    NATS dispatch thread for that session's one connection, the consumer is the
    frame loop. Overflow drops the newest bucket and counts it; the producer never
    blocks.
-3. **Exact series subjects.** Subscriptions are per watched series, built with
-   `market_tick_subject(tenant_id, party_id, uri)`. NATS filters server side and
-   the callback knows its series. A party wildcard would decode every series in
-   the tenant to discard most of them.
+3. **One party subscription, filtered by series.** A series is not a subject
+   a feed publishes on: each of its points travels on the subject of the
+   quote's canonical URI, which carries coordinates such as a swap's term, so
+   no wildcard covers exactly one series. The stream subscribes to
+   `market_tick_subject_all(tenant_id, party_id)`, reduces each tick's URI to
+   its series through `oresmd_uri_codec` and `series_of`, and keeps the ticks
+   whose series is watched. One subscription is one cnats delivery thread,
+   which is what makes the ring single producer. (Revised from per-series
+   subjects, which never matched a curve family's quotes; see C-3 in
+   `docs/review/architecture.md`.)
 4. **Live ticks are for the session's party.** A chart viewing another party
    through the picker gets its backfill and manual refresh, not a live stream.
    The tick subject is party scoped, and the session token is for one party.
 5. **Retention** per watched series, about 170 KB: 1s for 2h (7,200 points), 1m
-   for 2d (2,880), 1h for 30d (720). A cap of 512 watched series per session.
+   for 2d (2,880), 1h for 30d (720).
 6. **All reads the coarse ring.** It updates hourly. Spans up to 2h read fine,
    up to 2d read medium, beyond that coarse.
 7. **No scheduled poll.** The open, a reconnect and the manual refresh seed
@@ -75,10 +81,12 @@ transport.
 ### `hedgr.session` tick stream
 
 `market_tick_stream` owns one `session_client`, connected and resumed on the
-stream's own thread. It subscribes and unsubscribes per series, decodes
-`ores::marketdata::messaging::market_tick`, parses the decimal value and the
-observation time, and calls a handler. The connection reconnects through the
-wrapped client; after a reconnect the runtime seeds history again.
+stream's own thread. It subscribes once to the party's ticks, decodes
+`ores::marketdata::messaging::market_tick`, parses the decimal value, the
+observation time and the series the quote belongs to, and calls a handler. A
+token refresh replaces the token the next resume uses and nothing else. The
+connection reconnects through the wrapped client; after a reconnect the
+runtime seeds history again.
 
 ### `hedgr.runtime` market stream
 
@@ -141,8 +149,8 @@ meaning.
   the reconnect are lost. The backfill after reconnect fills the gap.
 - **Late ticks.** A tick older than the current bucket start is dropped and
   counted rather than written out of order.
-- **Watch count.** More than 512 watched series in one session is refused with a
-  logged warning rather than growing memory without bound.
+- **Watch count.** Watches cost one aggregator each and no subscription, so
+  there is no cap; the series browser bounds them by what is open.
 
 ## Phases
 

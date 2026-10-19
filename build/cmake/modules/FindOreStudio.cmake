@@ -181,6 +181,7 @@ set(_ores_libraries
     iam.client
     iam.api
     marketdata.api
+    marketdata.core
     assets.api
     eventing.api
     platform

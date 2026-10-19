@@ -18,11 +18,10 @@
  *
  */
 #include "hedgr.runtime/worker/market_stream.hpp"
-#include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.logging/make_logger.hpp"
-#include <array>
 #include <chrono>
+#include <utility>
 
 namespace {
 
@@ -36,41 +35,9 @@ namespace {
 
 namespace hedgr::runtime::worker {
 
-/**
- * @brief One watched series' current buckets.
- *
- * Shared with the subscription's callback so a watch that is removed while a
- * tick is in flight keeps its state alive until the callback returns. The
- * mutex serialises the aggregator, which is the only lock on the tick path.
- */
-struct market_stream::series_state final {
-    series_state(std::string id, model::state::bucket_ring& ring,
-        std::atomic<std::size_t>& tick_count)
-        : series_id(std::move(id))
-        , aggregator(series_id, ring)
-        , ticks(tick_count) {
-    }
-
-    void on_tick(const session::market::tick& tick) {
-        std::lock_guard lock(mu);
-        const bool first = aggregator.ticks() == 0;
-        aggregator.on_tick(tick.at_ns, tick.value);
-        ticks.fetch_add(1, std::memory_order_relaxed);
-        if (first) {
-            BOOST_LOG_SEV(lg(), ores::logging::info)
-                << "First live tick for series '" << series_id << "' at '"
-                << tick.at_ns << "'";
-        }
-    }
-
-    std::string series_id;
-    model::state::bucket_aggregator aggregator;
-    std::atomic<std::size_t>& ticks;
-    std::mutex mu;
-};
-
 market_stream::market_stream(market_stream_options options)
-    : options_(std::move(options)) {
+    : options_(std::move(options))
+    , sink_(std::make_shared<tick_sink>()) {
 }
 
 market_stream::~market_stream() {
@@ -83,16 +50,26 @@ void market_stream::start() {
     thread_ = std::thread([this]() { run(); });
 }
 
-void market_stream::stop() {
+void market_stream::request_stop() {
     {
         std::lock_guard lock(mu_);
-        if (stopping_)
-            return;
         stopping_ = true;
     }
     cv_.notify_all();
+}
+
+void market_stream::stop() {
+    request_stop();
     if (thread_.joinable())
         thread_.join();
+}
+
+void market_stream::set_token(std::string token) {
+    {
+        std::lock_guard lock(mu_);
+        new_token_ = std::move(token);
+    }
+    cv_.notify_all();
 }
 
 void market_stream::watch(std::string series_id, std::string uri) {
@@ -114,35 +91,8 @@ void market_stream::unwatch(std::string_view series_id) {
     cv_.notify_all();
 }
 
-std::size_t market_stream::drain(
-    std::vector<model::state::market_bucket>& out) {
-    return ring_.drain(out);
-}
-
 bool market_stream::take_reconnected() {
     return reconnected_.exchange(false, std::memory_order_acq_rel);
-}
-
-void market_stream::apply_commands(
-    std::unordered_map<std::string, std::string>& desired, bool& changed) {
-    std::vector<command> queued;
-    {
-        std::lock_guard lock(mu_);
-        queued.swap(commands_);
-    }
-    for (auto& item : queued) {
-        if (item.add) {
-            const auto found = desired.find(item.series_id);
-            if (found == desired.end() || found->second != item.uri) {
-                desired.insert_or_assign(std::move(item.series_id),
-                    std::move(item.uri));
-                changed = true;
-            }
-        } else {
-            if (desired.erase(item.series_id) > 0)
-                changed = true;
-        }
-    }
 }
 
 void market_stream::wait_for_retry() {
@@ -156,64 +106,45 @@ void market_stream::run() {
         options_.token, options_.principal, options_.tenant_id,
         options_.party_id);
 
-    std::unordered_map<std::string, std::string> desired;
-    std::unordered_map<std::string, std::shared_ptr<series_state>> series;
-    std::unordered_map<std::string, std::chrono::steady_clock::time_point>
-        retry_at;
+    /*
+     * The handler owns the sink with this object, so a handler still running
+     * when the stream closes writes into memory that is alive.
+     */
+    const auto sink = sink_;
+    const auto on_tick = [sink](const session::market::tick& tick) {
+        sink->on_tick(tick);
+    };
     bool ever_connected = false;
 
-    auto reconcile = [&]() {
-        const auto now = std::chrono::steady_clock::now();
-        for (auto it = desired.begin(); it != desired.end(); ++it) {
-            if (series.contains(it->first))
-                continue;
-            if (const auto retry = retry_at.find(it->first);
-                retry != retry_at.end() && retry->second > now) {
-                continue;
-            }
-            auto state = std::make_shared<series_state>(it->first, ring_,
-                ticks_);
-            if (stream.subscribe(it->first, it->second,
-                    [state](const session::market::tick& tick) {
-                        state->on_tick(tick);
-                    })) {
-                series.insert_or_assign(it->first, std::move(state));
-            } else {
-                retry_at[it->first] = now + std::chrono::seconds{10};
-                BOOST_LOG_SEV(lg(), ores::logging::warn)
-                    << "Could not watch series '" << it->first
-                    << "' in party '" << options_.party_id << "': "
-                    << stream.last_error();
-            }
-        }
-        for (auto it = series.begin(); it != series.end();) {
-            if (desired.contains(it->first)) {
-                ++it;
-                continue;
-            }
-            stream.unsubscribe(it->first);
-            it = series.erase(it);
-        }
-        subscriptions_.store(stream.watched(), std::memory_order_relaxed);
-    };
-
     while (true) {
+        std::vector<command> queued;
+        std::optional<std::string> token;
         {
             std::unique_lock lock(mu_);
             cv_.wait_for(lock, std::chrono::milliseconds{100}, [this]() {
-                return stopping_ || !commands_.empty();
+                return stopping_ || !commands_.empty()
+                    || new_token_.has_value();
             });
             if (stopping_)
                 break;
+            queued.swap(commands_);
+            token.swap(new_token_);
         }
 
-        bool changed = false;
-        apply_commands(desired, changed);
-        static_cast<void>(changed);
+        if (token)
+            stream.set_token(std::move(*token));
+        for (auto& item : queued) {
+            if (!item.add) {
+                sink->unwatch(item.series_id);
+            } else if (!sink->watch(item.series_id, item.uri)) {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "Not watching series '" << item.series_id
+                    << "' in party '" << options_.party_id
+                    << "': its URI names no series: " << item.uri;
+            }
+        }
 
         if (!stream.connected()) {
-            series.clear();
-            subscriptions_.store(0, std::memory_order_relaxed);
             if (!stream.connect()) {
                 wait_for_retry();
                 continue;
@@ -223,10 +154,12 @@ void market_stream::run() {
             ever_connected = true;
         }
 
-        reconcile();
+        if (!stream.subscribed() && !stream.subscribe(on_tick))
+            wait_for_retry();
     }
 
     stream.disconnect();
+    finished_.store(true, std::memory_order_release);
 }
 
 }
