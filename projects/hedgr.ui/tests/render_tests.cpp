@@ -21,6 +21,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"

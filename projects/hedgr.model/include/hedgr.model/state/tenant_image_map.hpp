@@ -21,6 +21,7 @@
 #define HEDGR_MODEL_STATE_TENANT_IMAGE_MAP_HPP
 
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/composite_key.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -79,7 +80,7 @@ public:
     void clear();
 
 private:
-    std::unordered_map<std::string, tenant_images> tenants_;
+    composite_map<1, tenant_images> tenants_;
 };
 
 }

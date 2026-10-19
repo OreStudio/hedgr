@@ -23,32 +23,19 @@
 namespace hedgr::model::state {
 
 namespace {
-constexpr char separator = '\x1f';
-
-[[nodiscard]] std::string key_of(std::string_view instance_id,
+[[nodiscard]] key_parts<5> key_of(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::string_view crm_name, bool reciprocal) {
-    std::string key;
-    key.reserve(instance_id.size() + account_id.size() + party_id.size()
-        + crm_name.size() + 4);
-    key.append(instance_id);
-    key.push_back(separator);
-    key.append(account_id);
-    key.push_back(separator);
-    key.append(party_id);
-    key.push_back(separator);
-    key.append(crm_name);
-    key.push_back(separator);
-    key.push_back(reciprocal ? '1' : '0');
-    return key;
+    return {instance_id, account_id, party_id, crm_name,
+        reciprocal ? std::string_view{"1"} : std::string_view{"0"}};
 }
 }
 
 void crm_table::begin(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::string_view crm_name, bool reciprocal) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
-        crm_name, reciprocal)];
+    auto& entry = slot_in(snapshots_, key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal));
     entry.reading = true;
     entry.error.clear();
 }
@@ -59,8 +46,8 @@ void crm_table::set(std::string_view instance_id,
     std::vector<domain::crm_cell> cells,
     std::vector<domain::crm_convention> conventions,
     std::string observed_as_of, std::int64_t latency_ns) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
-        crm_name, reciprocal)];
+    auto& entry = slot_in(snapshots_, key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal));
     entry.cells = std::move(cells);
     entry.conventions = std::move(conventions);
     entry.observed_as_of = std::move(observed_as_of);
@@ -72,8 +59,8 @@ void crm_table::set(std::string_view instance_id,
 void crm_table::fail(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::string_view crm_name, bool reciprocal, std::string message) {
-    auto& entry = snapshots_[key_of(instance_id, account_id, party_id,
-        crm_name, reciprocal)];
+    auto& entry = slot_in(snapshots_, key_of(instance_id, account_id, party_id,
+        crm_name, reciprocal));
     entry.reading = false;
     entry.error = std::move(message);
 }
@@ -81,24 +68,20 @@ void crm_table::fail(std::string_view instance_id,
 const crm_snapshot* crm_table::get(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::string_view crm_name, bool reciprocal) const {
-    const auto found = snapshots_.find(key_of(instance_id, account_id,
-        party_id, crm_name, reciprocal));
-    return found == snapshots_.end() ? nullptr : &found->second;
+    return find_in(snapshots_,
+        key_of(instance_id, account_id, party_id, crm_name, reciprocal));
 }
 
 void crm_table::set_names(std::string_view instance_id,
     std::string_view account_id, std::string_view party_id,
     std::vector<std::string> names) {
-    names_[key_of(instance_id, account_id, party_id, "names", false)]
-        = std::move(names);
+    slot_in(names_, {instance_id, account_id, party_id}) = std::move(names);
 }
 
 const std::vector<std::string>* crm_table::names(
     std::string_view instance_id, std::string_view account_id,
     std::string_view party_id) const {
-    const auto found = names_.find(key_of(instance_id, account_id, party_id,
-        "names", false));
-    return found == names_.end() ? nullptr : &found->second;
+    return find_in(names_, {instance_id, account_id, party_id});
 }
 
 void crm_table::clear() {

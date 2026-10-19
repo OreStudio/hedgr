@@ -22,25 +22,9 @@
 
 namespace hedgr::model::state {
 
-namespace {
-constexpr char separator = '\x1f';
-
-[[nodiscard]] std::string key_of(std::string_view instance_id,
-    std::string_view account_id, std::string_view curve) {
-    std::string key;
-    key.reserve(instance_id.size() + account_id.size() + curve.size() + 2);
-    key.append(instance_id);
-    key.push_back(separator);
-    key.append(account_id);
-    key.push_back(separator);
-    key.append(curve);
-    return key;
-}
-}
-
 void term_structure_table::begin(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string label) {
-    auto& entry = structures_[key_of(instance_id, account_id, key)];
+    auto& entry = slot_in(structures_, {instance_id, account_id, key});
     entry.key = std::string{key};
     entry.label = std::move(label);
     entry.reading = true;
@@ -50,7 +34,7 @@ void term_structure_table::begin(std::string_view instance_id,
 void term_structure_table::set(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string label,
     std::vector<domain::term_curve> curves) {
-    auto& entry = structures_[key_of(instance_id, account_id, key)];
+    auto& entry = slot_in(structures_, {instance_id, account_id, key});
     entry.key = std::string{key};
     entry.label = std::move(label);
     entry.curves = std::move(curves);
@@ -60,7 +44,7 @@ void term_structure_table::set(std::string_view instance_id,
 
 void term_structure_table::fail(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string message) {
-    auto& entry = structures_[key_of(instance_id, account_id, key)];
+    auto& entry = slot_in(structures_, {instance_id, account_id, key});
     entry.key = std::string{key};
     entry.reading = false;
     entry.error = std::move(message);
@@ -68,8 +52,7 @@ void term_structure_table::fail(std::string_view instance_id,
 
 const term_structure* term_structure_table::get(std::string_view instance_id,
     std::string_view account_id, std::string_view key) const {
-    const auto found = structures_.find(key_of(instance_id, account_id, key));
-    return found == structures_.end() ? nullptr : &found->second;
+    return find_in(structures_, {instance_id, account_id, key});
 }
 
 void term_structure_table::clear() {
