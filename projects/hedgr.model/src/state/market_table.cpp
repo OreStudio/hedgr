@@ -150,6 +150,7 @@ void market_table::set_points(std::string_view instance_id,
         domain::market_coarse_capacity);
     snapshot.observed_at_ns = std::max(snapshot.observed_at_ns, observed_at_ns);
     snapshot.failure.clear();
+    snapshot.version = ++version_;
 }
 
 void market_table::append_point(std::string_view instance_id,
@@ -170,6 +171,7 @@ void market_table::append_point(std::string_view instance_id,
     }
     snapshot.observed_at_ns = std::max(snapshot.observed_at_ns, observed_at_ns);
     snapshot.failure.clear();
+    snapshot.version = ++version_;
 }
 
 void market_table::fail_points(std::string_view instance_id,
@@ -178,6 +180,7 @@ void market_table::fail_points(std::string_view instance_id,
     auto& snapshot = slot_in(points_, {instance_id, account_id, series_id});
     snapshot.observed_at_ns = observed_at_ns;
     snapshot.failure = std::move(message);
+    snapshot.version = ++version_;
 }
 
 const domain::market_series_snapshot* market_table::points(

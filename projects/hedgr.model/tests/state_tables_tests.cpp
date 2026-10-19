@@ -903,6 +903,47 @@ TEST_CASE("the market table keeps a catalogue per session and points per chart",
     REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
 }
 
+TEST_CASE("every change to a chart stamps a version no chart held before",
+    "[market]") {
+    using hedgr::model::domain::market_level;
+    using hedgr::model::domain::market_point;
+    using hedgr::model::state::market_table;
+
+    market_table market;
+    market.set_points("i", "a", "s-1",
+        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
+    const auto* one = market.points("i", "a", "s-1");
+    const auto seeded = one->version;
+    CHECK(seeded != 0);
+
+    market.set_points("i", "a", "s-2",
+        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
+    const auto other = market.points("i", "a", "s-2")->version;
+    CHECK(other != seeded);
+    CHECK(one->version == seeded);
+
+    market.append_point("i", "a", "s-1", market_level::fine,
+        market_point{.at_ns = 2'000'000'000, .value = 1.2}, 2);
+    const auto appended = one->version;
+    CHECK(appended != seeded);
+    CHECK(appended != other);
+
+    /* A replaced newest bucket changes no size and no time, only the value. */
+    market.append_point("i", "a", "s-1", market_level::fine,
+        market_point{.at_ns = 2'000'000'000, .value = 1.3}, 3);
+    CHECK(one->version != appended);
+
+    const auto before_failure = one->version;
+    market.fail_points("i", "a", "s-1", "no responder", 4);
+    CHECK(one->version != before_failure);
+
+    const auto last = one->version;
+    market.clear();
+    market.set_points("i", "a", "s-1",
+        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
+    CHECK(market.points("i", "a", "s-1")->version > last);
+}
+
 TEST_CASE("a backfill fills all three levels and live points win",
     "[market]") {
     using hedgr::model::domain::market_level;

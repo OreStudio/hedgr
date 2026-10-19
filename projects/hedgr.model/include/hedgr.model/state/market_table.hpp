@@ -116,6 +116,8 @@ public:
 private:
     composite_map<2, market_catalogue> catalogues_;
     composite_map<3, domain::market_series_snapshot> points_;
+    /** @brief The last version stamped; never reset, so none repeats. */
+    std::uint64_t version_ = 0;
 };
 
 }
