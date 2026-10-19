@@ -41,6 +41,10 @@ struct term_structure final {
     /** @brief The recent curves, oldest first. */
     std::vector<domain::term_curve> curves;
 
+    /** @brief Whether a read is in flight while the last good curves stay on
+     * screen. */
+    bool reading = false;
+
     /** @brief Why the read failed, or empty. */
     std::string error;
 };
@@ -49,13 +53,13 @@ struct term_structure final {
  * @brief The term structures a session has read, keyed by session and curve.
  *
  * A curve is read only while an operator is looking at it, so it lives beside
- * the catalogue rather than in the chart's point rings. It is rebuilt whole on
- * every read: a node that did not move keeps the value it last held, and a
- * curve with no node is a different thing from a curve that failed.
+ * the catalogue rather than in the chart's point rings. Each completed read
+ * replaces the curves it holds, and a read in flight or a read that failed
+ * leaves the last good curves in place, so the window never blanks.
  */
 class HEDGR_MODEL_EXPORT term_structure_table final {
 public:
-    /** @brief Marks a curve read as started. */
+    /** @brief Marks a curve read as started, keeping the curves on screen. */
     void begin(std::string_view instance_id, std::string_view account_id,
         std::string_view key, std::string label);
 

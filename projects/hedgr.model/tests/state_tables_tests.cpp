@@ -1034,6 +1034,7 @@ TEST_CASE("a term structure read replaces the previous curve", "[rates]") {
     REQUIRE(curves.get("i", "a", "k") == nullptr);
     curves.begin("i", "a", "k", "IR GBP IR_SWAP");
     REQUIRE(curves.get("i", "a", "k")->curves.empty());
+    REQUIRE(curves.get("i", "a", "k")->reading == true);
 
     curves.set("i", "a", "k", "IR GBP IR_SWAP",
         {hedgr::model::domain::term_curve{.at_ns = 10,
@@ -1044,10 +1045,23 @@ TEST_CASE("a term structure read replaces the previous curve", "[rates]") {
     REQUIRE(curve->label == "IR GBP IR_SWAP");
     REQUIRE(curve->curves.size() == 2);
     REQUIRE(curve->curves.back().at_ns == 12);
+    REQUIRE(curve->reading == false);
+    REQUIRE(curve->error.empty());
+
+    curves.begin("i", "a", "k", "IR USD IR_SWAP");
+    curve = curves.get("i", "a", "k");
+    REQUIRE(curve->label == "IR USD IR_SWAP");
+    REQUIRE(curve->curves.size() == 2);
+    REQUIRE(curve->curves.back().at_ns == 12);
+    REQUIRE(curve->reading == true);
+    REQUIRE(curve->error.empty());
 
     curves.fail("i", "a", "k", "no observations");
-    REQUIRE(curves.get("i", "a", "k")->curves.empty());
-    REQUIRE(curves.get("i", "a", "k")->error == "no observations");
+    curve = curves.get("i", "a", "k");
+    REQUIRE(curve->reading == false);
+    REQUIRE(curve->error == "no observations");
+    REQUIRE(curve->curves.size() == 2);
+    REQUIRE(curve->curves.back().at_ns == 12);
 }
 
 TEST_CASE("the image cache keeps tenants apart and evicts least recently used",

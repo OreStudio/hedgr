@@ -41,24 +41,29 @@ constexpr char separator = '\x1f';
 void term_structure_table::begin(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string label) {
     auto& entry = structures_[key_of(instance_id, account_id, key)];
-    entry = term_structure{.key = std::string{key}, .label = std::move(label)};
+    entry.key = std::string{key};
+    entry.label = std::move(label);
+    entry.reading = true;
+    entry.error.clear();
 }
 
 void term_structure_table::set(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string label,
     std::vector<domain::term_curve> curves) {
     auto& entry = structures_[key_of(instance_id, account_id, key)];
-    entry = term_structure{.key = std::string{key},
-        .label = std::move(label),
-        .curves = std::move(curves)};
+    entry.key = std::string{key};
+    entry.label = std::move(label);
+    entry.curves = std::move(curves);
+    entry.reading = false;
+    entry.error.clear();
 }
 
 void term_structure_table::fail(std::string_view instance_id,
     std::string_view account_id, std::string_view key, std::string message) {
     auto& entry = structures_[key_of(instance_id, account_id, key)];
     entry.key = std::string{key};
+    entry.reading = false;
     entry.error = std::move(message);
-    entry.curves.clear();
 }
 
 const term_structure* term_structure_table::get(std::string_view instance_id,
