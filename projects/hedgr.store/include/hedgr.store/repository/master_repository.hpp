@@ -68,6 +68,23 @@ public:
     [[nodiscard]] result<void> create(std::string_view password);
 
     /**
+     * @brief Seals the verification blob under @p password without touching the
+     * store.
+     *
+     * The derivation is slow and the store is frame-thread state, so a caller
+     * seals on a worker and hands the blob to @c store_verification on the
+     * frame thread. Static because it reads nothing from the connection.
+     */
+    [[nodiscard]] static result<std::string> seal(std::string_view password);
+
+    /**
+     * @brief Stores a blob made by @c seal, refusing when a master row exists.
+     *
+     * The write half of @c create, with the same refusal.
+     */
+    [[nodiscard]] result<void> store_verification(std::string sealed);
+
+    /**
      * @brief Whether @p password opens the stored verification blob.
      *
      * @return @c true when it does, @c false when it does not, and an error

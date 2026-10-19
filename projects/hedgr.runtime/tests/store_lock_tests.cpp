@@ -290,6 +290,66 @@ TEST_CASE("locking drops the password and returns the store to locked",
     REQUIRE(right);
 }
 
+TEST_CASE("setting a master password when one exists is refused and keeps it",
+    "[store_lock]") {
+    const temporary_database database;
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        REQUIRE(run_until(manager, command_kind::set_master_password,
+            std::string{master_password},
+            [&manager] { return manager.store_lock() == store_lock::unlocked; }));
+    }
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(manager.store_lock() == store_lock::locked);
+
+    command request;
+    request.kind = command_kind::set_master_password;
+    request.password = secret_string{std::string{"a-different-password"}};
+    manager.commands().push(std::move(request));
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.store_lock() != store_lock::locked; },
+        std::chrono::milliseconds(300)));
+
+    REQUIRE(manager.store_lock() == store_lock::locked);
+    REQUIRE_FALSE(manager.is_unlocking());
+    REQUIRE(manager.last_error().find("already has a master password")
+        != std::string::npos);
+
+    REQUIRE(run_until(manager, command_kind::unlock_store,
+        "a-different-password",
+        [&manager] { return manager.store_lock() == store_lock::failed; }));
+    REQUIRE(run_until(manager, command_kind::unlock_store,
+        std::string{master_password},
+        [&manager] { return manager.store_lock() == store_lock::unlocked; }));
+}
+
+TEST_CASE("a refused unlock leaves no password held for the next attempt",
+    "[store_lock]") {
+    const temporary_database database;
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        REQUIRE(run_until(manager, command_kind::set_master_password,
+            std::string{master_password},
+            [&manager] { return manager.store_lock() == store_lock::unlocked; }));
+    }
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(run_until(manager, command_kind::unlock_store, "wrong-one",
+        [&manager] { return manager.store_lock() == store_lock::failed; }));
+
+    command request;
+    request.kind = command_kind::lock_store;
+    manager.commands().push(std::move(request));
+    manager.pump();
+    REQUIRE(manager.store_lock() == store_lock::locked);
+    REQUIRE_FALSE(manager.is_unlocking());
+}
+
 TEST_CASE("a credential typed for an attempt is used without a stored one",
     "[store_lock]") {
     const temporary_database database;

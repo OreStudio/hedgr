@@ -581,18 +581,6 @@ private:
      */
     model::domain::secret_string master_password_;
 
-    /**
-     * @brief The password a pool thread has verified and is handing over.
-     *
-     * Written by the unlock coroutine and picked up by @c apply on the frame
-     * loop, and never both at once: only one unlock runs at a time and the
-     * frame loop is the only reader. It exists because @c master_password_
-     * itself may not be assigned from a pool thread -- the frame loop reads it
-     * on every connect -- so the handover needs a slot that is written once,
-     * before the event that announces it, and read once, after.
-     */
-    model::domain::secret_string pending_master_password_;
-
     model::domain::store_lock store_lock_ = model::domain::store_lock::absent;
 
     /** @brief Whether a derivation is running on the pool right now. */

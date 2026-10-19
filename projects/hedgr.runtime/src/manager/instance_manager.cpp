@@ -1648,7 +1648,6 @@ void instance_manager::report_store_failure(const std::string& instance_id,
     fact.kind = event::event_kind::store_lock_failed;
     fact.instance_id = instance_id;
     fact.account_id = account_id;
-    fact.lock = store_lock_;
     fact.message = std::move(message);
     events_.push(std::move(fact));
 }
@@ -1753,9 +1752,8 @@ void instance_manager::do_set_master_password(const command::command& cmd) {
 
     /*
      * The sealing is a derivation and therefore slow, so it happens on the pool
-     * like every other slow call and reports through the same two events an
-     * unlock does. The store ends up unlocked either way: the operator has just
-     * chosen the password and holding it is what they asked for.
+     * like every other slow call. The pool only seals: the row is written and
+     * the password held when @c master_sealed is applied on the frame thread.
      */
     auto password = cmd.password;
 
@@ -1766,26 +1764,17 @@ void instance_manager::do_set_master_password(const command::command& cmd) {
             co_await boost::asio::post(co_await boost::asio::this_coro::executor,
                 boost::asio::use_awaitable);
 
-            auto created = master_repo_->create(password.view());
+            auto sealed = store::repository::master_repository::seal(password.view());
 
             event::event fact;
-            if (!created) {
+            if (!sealed) {
                 fact.kind = event::event_kind::store_lock_failed;
-                fact.lock = store_lock_;
                 fact.message = store_failure(
-                    "the master password could not be created", created.error());
+                    "the master password could not be created", sealed.error());
             } else {
-                fact.kind = event::event_kind::store_unlocked;
-                fact.lock = domain::store_lock::unlocked;
-
-                /*
-                 * The password is left in the handover slot, not written to the
-                 * held secret: assigning that one from here would race the
-                 * frame loop, which reads it on every connect. It is written
-                 * into the slot before the event is pushed, so the frame loop
-                 * cannot see the event without seeing the secret.
-                 */
-                pending_master_password_ = std::move(password);
+                fact.kind = event::event_kind::master_sealed;
+                fact.payload = std::move(sealed).value();
+                fact.master_password = std::move(password);
             }
             events_.push(std::move(fact));
         },
@@ -1847,17 +1836,12 @@ void instance_manager::do_unlock_store(const command::command& cmd) {
                 fact.lock = domain::store_lock::unlocked;
 
                 /*
-                 * The password that worked is left in the handover slot rather
-                 * than written to the held secret, because this runs on a pool
-                 * thread and the frame loop reads the held secret on every
-                 * connect. See the note on @c pending_master_password_.
-                 *
                  * The plaintext that came out of the verification blob is the
                  * known sentence and is not needed; it is dropped here, and the
                  * derivation's own buffers are wiped by @c open before it
                  * returns.
                  */
-                pending_master_password_ = std::move(password);
+                fact.master_password = std::move(password);
             } else if (opened.error().code
                 == store_crypto::box_errc::wrong_master_password) {
                 /*
@@ -1871,7 +1855,6 @@ void instance_manager::do_unlock_store(const command::command& cmd) {
                 fact.message = "the master password is not correct";
             } else {
                 fact.kind = event::event_kind::store_lock_failed;
-                fact.lock = store_lock_;
                 fact.message = std::format("the store could not be unlocked: {}",
                     opened.error().message);
             }
@@ -2708,17 +2691,30 @@ void instance_manager::apply(const event::event& ev) {
      * applied before the session lookup for the same reason a probe result is:
      * an unlock has no session to be found by.
      */
+    if (ev.kind == event::event_kind::master_sealed) {
+        unlocking_ = false;
+        auto stored = master_repo_->store_verification(ev.payload);
+        if (!stored) {
+            store_lock_ = domain::store_lock::failed;
+            lock_error_ = store_failure(
+                "the master password could not be created", stored.error());
+            return;
+        }
+        master_password_ = ev.master_password;
+        store_lock_ = domain::store_lock::unlocked;
+        conditions_.clear(condition_source::store_lock);
+        lock_error_.clear();
+        return;
+    }
     if (ev.kind == event::event_kind::store_unlocked) {
         /*
          * The derivation succeeded on the pool, so the password that opened it
          * is now held and every surface that reads the catalogue can be drawn.
-         * The password itself never travelled on the event: what arrives is the
-         * fact that it was accepted, and the secret is collected from the slot
-         * the coroutine left it in.
+         * It arrives on the event and is assigned here, on the frame thread,
+         * which is the only one that reads the held secret.
          */
         unlocking_ = false;
-        if (!pending_master_password_.empty())
-            master_password_ = std::move(pending_master_password_);
+        master_password_ = ev.master_password;
         store_lock_ = domain::store_lock::unlocked;
         conditions_.clear(condition_source::store_lock);
         lock_error_.clear();
@@ -2726,12 +2722,6 @@ void instance_manager::apply(const event::event& ev) {
     }
     if (ev.kind == event::event_kind::store_lock_failed) {
         unlocking_ = false;
-
-        /*
-         * A password that did not verify is dropped rather than kept, so a
-         * refused attempt leaves nothing behind to be retried by accident.
-         */
-        pending_master_password_.clear();
 
         /*
          * @c failed only when the attempt was an unlock, which is the one case
@@ -2888,6 +2878,7 @@ void instance_manager::apply(const event::event& ev) {
          */
         break;
     case event::event_kind::store_unlocked:
+    case event::event_kind::master_sealed:
     case event::event_kind::store_lock_failed:
     case event::event_kind::password_policy_fetched:
     case event::event_kind::series_catalogue:
