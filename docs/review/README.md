@@ -33,10 +33,10 @@ Each bundle is one pull request, merged before the next starts.
 | 5 | Build hygiene and warnings | UW-2, UW-3, UW-8, UW-9, UW-5 | merged (#24) |
 | 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | merged (#26) |
 | 7 | Backfill through the time-ordered endpoint | SR-9, C-4, SR-10 | merged (#28) |
-| 8 | Data health has one owner | UR-1, UR-2, UR-OS-2, AR-14 | open |
+| 8 | Data health has one owner | UR-1, UR-2, UR-OS-2, AR-14 | merged (#31, #32, #33) |
 | 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | merged (#25), partly deferred |
 | 10 | Frame loop idle and minimised policy | UW-4, AR-2 | merged (#27), minimise only |
-| 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | in review |
+| 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | merged (#30), partly deferred |
 
 Structural work that follows the bundles above, in the order Part D of
 `architecture.md` gives: version-stamped series table, `instance_manager`
@@ -50,5 +50,6 @@ split, session actor. Each needs its own plan and is not scheduled here.
 - Bundle 10: no redraw predicate, which needs version stamps first. GLFW on Wayland never reports a minimised window.
 - Bundle 3: folder ids in `browser.cpp` have the same rename-then-create collision the instance and account ids had.
 - Bundle 4: `domain::credential::password`, worker job tokens and `market_stream_options::token` are still `std::string`.
-- Bundle 8 waits for the `crm_window.cpp` footer work to be committed.
+- Bundle 8: UR-OS-4 and UR-OS-6 need parsed URI fields and `asset_class` on `market_series_row`. Typed clocks and the age and time formatting are not in the model. Charts keep the FX thresholds because they hold only a series id. A disconnected CRM cell is still drawn grey. A collapsed CRM window keeps reading because the runtime cannot see collapse. AR-11 is done for the CRM only.
+- Bundle 11: UR-8 (term-structure ladder copy and sort), UR-10 (series browser filter and sort), SR-11 and SR-14 (per-frame save and watch work) need version stamps on the window and session tables or a transactional `save_all`.
 - Side finding: the X11 fallback fails to initialise the OpenGL loader without an EGL hint.
