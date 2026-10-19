@@ -42,7 +42,7 @@ namespace model_state = hedgr::model::state;
 namespace sqlite = hedgr::store::sqlite;
 
 /**
- * @brief This manager's logger.
+ * @brief The logger the manager, the seeder and the services share.
  *
  * A warning that nothing reads is not a warning, so a checkout the scan could
  * not use is reported the way the rest of OreStudio reports one: through the
