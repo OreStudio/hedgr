@@ -10,6 +10,7 @@
 set(files
     "market/series_label.cpp"
     "market/tick_stream.cpp"
+    "transport/observation_page.cpp"
     "transport/session_client.cpp"
     "transport/session_error.cpp"
 )
@@ -19,6 +20,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/export.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/hedgr.session.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/hedgr.session.transport.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/observation_page.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_account.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_error.hpp"
