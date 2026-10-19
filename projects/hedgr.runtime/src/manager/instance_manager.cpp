@@ -258,8 +258,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     shortcut_repo_ = std::make_unique<store::repository::shortcut_repository>(
         *database_);
     window_service_.attach(*database_);
-    master_repo_ = std::make_unique<store::repository::master_repository>(
-        *database_);
+    lock_service_.attach(*database_, *account_repo_);
 
     /*
      * The lock is read before anything else, because it says whether the rows
@@ -270,15 +269,11 @@ instance_manager::start(const std::filesystem::path& database_path,
      * here before and is asked for the password. Neither is a failure, and
      * neither stops the start.
      */
-    auto has_master = master_repo_->has_master();
-    if (!has_master) {
-        startup_failure_ = store_failure("cannot read the store's master password",
-            has_master.error());
+    if (auto read = lock_service_.load(); !read) {
+        startup_failure_ = std::move(read.error());
         raise({condition_source::startup, {}}, startup_failure_);
         return std::unexpected(startup_failure_);
     }
-    store_lock_ = has_master.value() ? model::domain::store_lock::locked
-                                     : model::domain::store_lock::absent;
 
     /*
      * The seed carries what is the same for every instance -- the timeouts, and
@@ -551,7 +546,8 @@ void instance_manager::handle(command::command& cmd) {
         do_connect_session(cmd);
         break;
     case command::command_kind::store_credential:
-        do_store_credential(cmd);
+        if (auto refused = lock_service_.store_credential(cmd))
+            raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::load_image:
         do_load_image(cmd);
@@ -587,13 +583,15 @@ void instance_manager::handle(command::command& cmd) {
         probe_service_.do_probe_all();
         break;
     case command::command_kind::set_master_password:
-        do_set_master_password(cmd);
+        if (auto refused = lock_service_.set_master_password(cmd))
+            raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::unlock_store:
-        do_unlock_store(cmd);
+        if (auto refused = lock_service_.unlock_store(cmd))
+            raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::lock_store:
-        do_lock_store();
+        lock_service_.lock_store();
         break;
     case command::command_kind::shutdown:
         /*
@@ -1448,9 +1446,9 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * a lie.
      */
     if (!cmd.password.empty()) {
-        if (cmd.remember && store_lock_ == domain::store_lock::unlocked) {
-            start_credential_store(cmd.account_id,
-                std::string{cmd.password.view()}, master_password_);
+        if (cmd.remember && lock_service_.store_lock() == domain::store_lock::unlocked) {
+            lock_service_.remember(cmd.account_id,
+                std::string{cmd.password.view()});
         } else if (cmd.remember) {
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "Not remembering the password for '" << cmd.account_id
@@ -1467,12 +1465,13 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * nothing was tried, and an operator who is told their password is bad will
      * retype a password that was never the problem.
      */
-    if (store_lock_ != domain::store_lock::unlocked) {
+    if (lock_service_.store_lock() != domain::store_lock::unlocked) {
         raise({condition_source::store_lock, cmd.account_id},
             std::format(
                 "cannot connect to {}: the store is {}, so no password is "
                 "available and none was supplied",
-                instance_row->name, domain::to_string(store_lock_)));
+                instance_row->name,
+                domain::to_string(lock_service_.store_lock())));
         return;
     }
 
@@ -1543,7 +1542,7 @@ void instance_manager::start_session_for(const command::command& cmd,
      */
     if (!sealed_credential.empty()) {
         job.sealed_credential = std::move(sealed_credential);
-        job.master_password = master_password_;
+        job.master_password = lock_service_.master_password();
     }
 
     const auto key = running_key(cmd.instance_id, cmd.account_id);
@@ -1576,7 +1575,7 @@ void instance_manager::start_stored_connect(const command::command& cmd,
      * second and last copy that exists: the interface never sees one, the
      * session table never holds one, and no event carries one.
      */
-    auto password = master_password_;
+    auto password = lock_service_.master_password();
 
     const auto instance_id = cmd.instance_id;
     const auto account_id = cmd.account_id;
@@ -1650,233 +1649,6 @@ void instance_manager::report_store_failure(const std::string& instance_id,
     fact.account_id = account_id;
     fact.message = std::move(message);
     events_.push(std::move(fact));
-}
-
-void instance_manager::do_store_credential(const command::command& cmd) {
-    if (!account_repo_) {
-        raise({condition_source::credential, cmd.account_id},
-            "cannot store a password: the store is not open");
-        return;
-    }
-    if (cmd.payload.empty()) {
-        raise({condition_source::credential, cmd.account_id},
-            "cannot store an empty credential");
-        return;
-    }
-
-    if (auto saved = account_repo_->set_credential(cmd.account_id, cmd.payload);
-        !saved) {
-        raise({condition_source::credential, cmd.account_id},
-            store_failure(
-                std::format("cannot store the password for account {}",
-                    cmd.account_id),
-                saved.error()));
-        return;
-    }
-
-    if (const auto handle = accounts_.find(cmd.account_id)) {
-        auto row = *accounts_.get(*handle);
-        row.has_credential = true;
-        static_cast<void>(accounts_.upsert(row));
-    }
-
-    BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Stored a password for account '" << cmd.account_id << "'";
-}
-
-void instance_manager::start_credential_store(std::string account_id,
-    std::string password, domain::secret_string master_password) {
-    boost::asio::co_spawn(pool_.context(),
-        [this, account_id = std::move(account_id),
-            password = std::move(password),
-            master_password = std::move(master_password)]() mutable
-        -> boost::asio::awaitable<void> {
-            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-                boost::asio::use_awaitable);
-
-            auto sealed =
-                store_crypto::secret_box::seal(master_password.view(), password);
-
-            std::fill(password.begin(), password.end(), '\0');
-            password.clear();
-            password.shrink_to_fit();
-            master_password.clear();
-
-            if (!sealed) {
-                BOOST_LOG_SEV(lg(), ores::logging::error)
-                    << "Could not seal the password for account '"
-                    << account_id << "'";
-                co_return;
-            }
-
-            command::command store;
-            store.kind = command::command_kind::store_credential;
-            store.account_id = account_id;
-            store.payload = std::move(sealed).value();
-            commands_.push(std::move(store));
-        },
-        boost::asio::detached);
-}
-
-void instance_manager::do_set_master_password(const command::command& cmd) {
-    if (!master_repo_) {
-        raise({condition_source::store_lock, {}},
-            "cannot set a master password: the store is not open");
-        return;
-    }
-
-    /*
-     * Refused when one already exists. Replacing it would be worse than
-     * useless: the credentials in the store were sealed under the old password,
-     * so the store would look healthy and open nothing.
-     */
-    auto existing = master_repo_->has_master();
-    if (!existing) {
-        raise({condition_source::store_lock, {}},
-            store_failure("cannot read the store's master password",
-                existing.error()));
-        return;
-    }
-    if (existing.value()) {
-        raise({condition_source::store_lock, {}},
-            
-                "this store already has a master password; unlock it instead");
-        return;
-    }
-
-    if (cmd.password.empty()) {
-        raise({condition_source::store_lock, {}},
-            "the master password cannot be empty");
-        return;
-    }
-
-    /*
-     * The sealing is a derivation and therefore slow, so it happens on the pool
-     * like every other slow call. The pool only seals: the row is written and
-     * the password held when @c master_sealed is applied on the frame thread.
-     */
-    auto password = cmd.password;
-
-    unlocking_ = true;
-    boost::asio::co_spawn(pool_.context(),
-        [this, password = std::move(password)]() mutable
-        -> boost::asio::awaitable<void> {
-            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-                boost::asio::use_awaitable);
-
-            auto sealed = store::repository::master_repository::seal(password.view());
-
-            event::event fact;
-            if (!sealed) {
-                fact.kind = event::event_kind::store_lock_failed;
-                fact.message = store_failure(
-                    "the master password could not be created", sealed.error());
-            } else {
-                fact.kind = event::event_kind::master_sealed;
-                fact.payload = std::move(sealed).value();
-                fact.master_password = std::move(password);
-            }
-            events_.push(std::move(fact));
-        },
-        boost::asio::detached);
-}
-
-void instance_manager::do_unlock_store(const command::command& cmd) {
-    if (!master_repo_) {
-        raise({condition_source::store_lock, {}},
-            "cannot unlock: the store is not open");
-        return;
-    }
-
-    if (cmd.password.empty()) {
-        lock_error_ = "no master password was supplied";
-        store_lock_ = domain::store_lock::failed;
-        return;
-    }
-
-    /*
-     * The row is read here, on the frame loop, because it is a cheap query, and
-     * the derivation that uses it runs on the pool. Reading it here also means
-     * the blob is taken from the store as it is now rather than as it was when
-     * the coroutine happened to start.
-     */
-    auto blob = master_repo_->verification();
-    if (!blob) {
-        raise({condition_source::store_lock, {}},
-            store_failure("cannot read the master password",
-                blob.error()));
-        return;
-    }
-    if (blob.value().empty()) {
-        store_lock_ = domain::store_lock::absent;
-        lock_error_ = "this store has no master password yet";
-        return;
-    }
-
-    auto password = cmd.password;
-    const auto sealed = std::move(blob).value();
-
-    /*
-     * The previous refusal is cleared as the new attempt starts, so the prompt
-     * does not show last time's sentence beside this time's password.
-     */
-    lock_error_.clear();
-    unlocking_ = true;
-    boost::asio::co_spawn(pool_.context(),
-        [this, password = std::move(password), sealed]() mutable
-        -> boost::asio::awaitable<void> {
-            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-                boost::asio::use_awaitable);
-
-            auto opened = store_crypto::secret_box::open(password.view(), sealed);
-
-            event::event fact;
-            if (opened) {
-                fact.kind = event::event_kind::store_unlocked;
-                fact.lock = domain::store_lock::unlocked;
-
-                /*
-                 * The plaintext that came out of the verification blob is the
-                 * known sentence and is not needed; it is dropped here, and the
-                 * derivation's own buffers are wiped by @c open before it
-                 * returns.
-                 */
-                fact.master_password = std::move(password);
-            } else if (opened.error().code
-                == store_crypto::box_errc::wrong_master_password) {
-                /*
-                 * The one refusal an operator can act on, and the one the
-                 * prompt shows inline. It is not @c last_error: that field
-                 * feeds a general failure banner, and a mistyped password is
-                 * not a store failure.
-                 */
-                fact.kind = event::event_kind::store_lock_failed;
-                fact.lock = domain::store_lock::failed;
-                fact.message = "the master password is not correct";
-            } else {
-                fact.kind = event::event_kind::store_lock_failed;
-                fact.message = std::format("the store could not be unlocked: {}",
-                    opened.error().message);
-            }
-            events_.push(std::move(fact));
-        },
-        boost::asio::detached);
-}
-
-void instance_manager::do_lock_store() {
-    /*
-     * Locking is the interest of the operator and never of a failure path, so
-     * it always lands on @c locked. Everything sealed under the password becomes
-     * unreadable the moment this returns, which is the point of the action.
-     */
-    lock_error_.clear();
-    drop_master_password(true);
-}
-
-void instance_manager::drop_master_password(bool deliberate) {
-    master_password_.clear();
-    store_lock_ = deliberate ? domain::store_lock::locked
-                             : domain::store_lock::failed;
 }
 
 void instance_manager::do_disconnect_session(const command::command& cmd) {
@@ -2691,61 +2463,15 @@ void instance_manager::apply(const event::event& ev) {
      * applied before the session lookup for the same reason a probe result is:
      * an unlock has no session to be found by.
      */
-    if (ev.kind == event::event_kind::master_sealed) {
-        unlocking_ = false;
-        auto stored = master_repo_->store_verification(ev.payload);
-        if (!stored) {
-            store_lock_ = domain::store_lock::failed;
-            lock_error_ = store_failure(
-                "the master password could not be created", stored.error());
-            return;
+    if (service::is_lock_event(ev.kind)) {
+        const auto effect = lock_service_.apply(ev);
+        if (effect.unlocked)
+            conditions_.clear(condition_source::store_lock);
+        if (effect.credential) {
+            if (const auto handle = sessions_.find(effect.credential->instance_id,
+                    effect.credential->account_id))
+                sessions_.set_last_error(*handle, effect.credential->message);
         }
-        master_password_ = ev.master_password;
-        store_lock_ = domain::store_lock::unlocked;
-        conditions_.clear(condition_source::store_lock);
-        lock_error_.clear();
-        return;
-    }
-    if (ev.kind == event::event_kind::store_unlocked) {
-        /*
-         * The derivation succeeded on the pool, so the password that opened it
-         * is now held and every surface that reads the catalogue can be drawn.
-         * It arrives on the event and is assigned here, on the frame thread,
-         * which is the only one that reads the held secret.
-         */
-        unlocking_ = false;
-        master_password_ = ev.master_password;
-        store_lock_ = domain::store_lock::unlocked;
-        conditions_.clear(condition_source::store_lock);
-        lock_error_.clear();
-        return;
-    }
-    if (ev.kind == event::event_kind::store_lock_failed) {
-        unlocking_ = false;
-
-        /*
-         * @c failed only when the attempt was an unlock, which is the one case
-         * an operator is waiting on an answer. An event naming an account is a
-         * credential that would not open during a connect, which is a fact
-         * about that session; the lock itself has not been refused, because
-         * nobody asked it to be. Leaving the lock alone there is what stops a
-         * single unreadable credential from throwing the operator back to the
-         * unlock prompt mid-run.
-         */
-        if (ev.account_id.empty()) {
-            store_lock_ = domain::store_lock::failed;
-            /*
-             * Beside the prompt and not in the banner. The distinction is the
-             * reason @c lock_error exists separately from @c last_error: a
-             * refusal is answered by typing something else, and a banner is
-             * answered by an administrator.
-             */
-            lock_error_ = ev.message;
-            return;
-        }
-
-        if (const auto handle = sessions_.find(ev.instance_id, ev.account_id))
-            sessions_.set_last_error(*handle, ev.message);
         return;
     }
 
