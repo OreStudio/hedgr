@@ -151,6 +151,24 @@ TEST_CASE("a store the build cannot read is reported, not left to a log",
 
     /* The same sentence is the one the runtime's running note carries. */
     REQUIRE(refused.last_error() == reason);
+
+    /*
+     * And it stays. A startup failure is a standing condition, not a verdict
+     * on a command: nothing this process does can open the store it refused,
+     * so the next thing the operator tries must not take the sentence down.
+     * The one-line note moves on to that attempt's own refusal, which is the
+     * newer of the two, and the startup row is still in the table beside it.
+     */
+    command attempted;
+    attempted.kind = command_kind::open_window;
+    attempted.new_window_kind = hedgr::model::domain::window_kind::chart;
+    push_command(refused, attempted);
+
+    REQUIRE(refused.last_error() == "cannot open a window: the store is not open");
+    const auto rows = refused.conditions().rows();
+    REQUIRE(rows.size() == 2);
+    REQUIRE(rows[0].key.source == hedgr::model::state::condition_source::startup);
+    REQUIRE(rows[0].message == reason);
 }
 
 TEST_CASE("the reported failure is the last attempt's, not an old one",

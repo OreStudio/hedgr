@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
+#include "hedgr.model/state/condition_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
@@ -240,20 +241,40 @@ public:
         return events_;
     }
 
-    /** @brief The last store or startup failure, for the interface to show. */
+    /**
+     * @brief Every failure the runtime has raised and not yet seen resolved.
+     *
+     * Keyed by cause, so a reader that wants more than one line, or the
+     * condition about one window, finds it here. @c last_error is the one-line
+     * view of the same table.
+     */
+    [[nodiscard]] const model::state::condition_table&
+    conditions() const noexcept {
+        return conditions_;
+    }
+
+    /**
+     * @brief The one failure a single-line surface shows, or empty.
+     *
+     * The gravest condition in the table, and the newest among those, which
+     * is the rule @c condition_table::current pins. The reference is to the
+     * table's row and holds until the next raise or clear on the frame thread.
+     */
     [[nodiscard]] const std::string& last_error() const noexcept {
-        return last_error_;
+        static const std::string none;
+        const auto* shown = conditions_.current();
+        return shown == nullptr ? none : shown->message;
     }
 
     /**
      * @brief Why the store could not be brought up, or empty.
      *
-     * Kept apart from @c last_error, which every command that fails writes and
-     * which a successful unlock clears: that one is the runtime's running note
-     * about whatever it last did, and this one is the reason this process has
-     * no store at all. Both are worth reading, and only this one decides
-     * whether the interface draws the startup notice, so a command that fails
-     * later cannot be shown as a store that never opened.
+     * Kept apart from @c last_error, which is the newest of the conditions a
+     * failed command raises and the next command takes down: that one is the
+     * runtime's running note about whatever it last did, and this one is the
+     * reason this process has no store at all. Both are worth reading, and
+     * only this one decides whether the interface draws the startup notice, so
+     * a command that fails later cannot be shown as a store that never opened.
      *
      * Nothing clears it. A process whose store was refused has no way back --
      * the remedy is to delete the file and start again -- so a notice that
@@ -317,6 +338,15 @@ private:
      */
     void handle(model::command::command& cmd);
     void apply(const model::event::event& ev);
+
+    /**
+     * @brief Records @p message as an error condition for @p key, now.
+     *
+     * The one call every failure in this class goes through. A repeat of the
+     * same cause updates its row, and the sentence is the one the operator
+     * reads, so it says what went wrong and what to do about it.
+     */
+    void raise(model::state::condition_key key, std::string message);
 
     void do_save_instance(const model::command::command& cmd);
     void do_remove_instance(const model::command::command& cmd);
@@ -523,7 +553,7 @@ private:
      *
      * It only writes a row whose id carries the seeder's prefix and whose
      * derived key has an asset behind it, so a hand-typed row is never given a
-     * picture. A refused write is reported through @c last_error_.
+     * picture. A refused write is raised as a condition on the instance.
      */
     void backfill_seeded_icon_keys();
 
@@ -824,7 +854,8 @@ private:
      */
     session::transport::session_options seed_options_;
 
-    std::string last_error_;
+    /** @brief The failures raised and not yet resolved. See @c conditions(). */
+    model::state::condition_table conditions_;
 
     /** @brief Why the store could not be brought up. See @c startup_failure(). */
     std::string startup_failure_;

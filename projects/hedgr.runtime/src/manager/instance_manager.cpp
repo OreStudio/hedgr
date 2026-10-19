@@ -81,6 +81,8 @@ namespace sqlite = hedgr::store::sqlite;
 namespace store_crypto = hedgr::store::crypto;
 namespace transport = hedgr::session::transport;
 
+using condition_source = model_state::condition_source;
+
 /**
  * @brief This manager's logger.
  *
@@ -703,6 +705,12 @@ instance_manager::~instance_manager() {
     stop();
 }
 
+void instance_manager::raise(model_state::condition_key key,
+    std::string message) {
+    conditions_.raise(std::move(key), model_state::condition_severity::error,
+        std::move(message), steady_now_ns());
+}
+
 void instance_manager::stop() noexcept {
     if (!started_ && running_.empty() && probing_.empty())
         return;
@@ -776,21 +784,21 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto opened = sqlite::database::open(database_path);
     if (!opened) {
-        last_error_ = store_failure(
+        startup_failure_ = store_failure(
             std::format("cannot open the store at {}", database_path.string()),
             opened.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     database_ = std::make_unique<sqlite::database>(std::move(opened).value());
     BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Opened the store at " << database_path.string();
 
     if (auto applied = database_->apply_schema(); !applied) {
-        last_error_ = store_failure("cannot bring the store up to date",
+        startup_failure_ = store_failure("cannot bring the store up to date",
             applied.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
 
     instance_repo_ = std::make_unique<store::repository::instance_repository>(
@@ -821,10 +829,10 @@ instance_manager::start(const std::filesystem::path& database_path,
      */
     auto has_master = master_repo_->has_master();
     if (!has_master) {
-        last_error_ = store_failure("cannot read the store's master password",
+        startup_failure_ = store_failure("cannot read the store's master password",
             has_master.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     store_lock_ = has_master.value() ? model::domain::store_lock::locked
                                      : model::domain::store_lock::absent;
@@ -839,10 +847,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto instances = instance_repo_->list();
     if (!instances) {
-        last_error_ = store_failure("cannot read the stored instances",
+        startup_failure_ = store_failure("cannot read the stored instances",
             instances.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     instances_.clear();
     for (const auto& row : instances.value())
@@ -859,10 +867,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto accounts = account_repo_->list();
     if (!accounts) {
-        last_error_ = store_failure("cannot read the stored accounts",
+        startup_failure_ = store_failure("cannot read the stored accounts",
             accounts.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     accounts_.clear();
 
@@ -873,10 +881,10 @@ instance_manager::start(const std::filesystem::path& database_path,
      */
     const auto with_credentials = account_repo_->ids_with_credential();
     if (!with_credentials) {
-        last_error_ = store_failure("cannot read the stored credentials",
+        startup_failure_ = store_failure("cannot read the stored credentials",
             with_credentials.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     const std::unordered_set<std::string> credential_ids(
         with_credentials->begin(), with_credentials->end());
@@ -888,10 +896,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto folders = folder_repo_->list();
     if (!folders) {
-        last_error_ = store_failure("cannot read the stored folders",
+        startup_failure_ = store_failure("cannot read the stored folders",
             folders.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     folders_.clear();
     for (const auto& row : folders.value())
@@ -899,10 +907,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto labels = label_repo_->list();
     if (!labels) {
-        last_error_ = store_failure("cannot read the stored labels",
+        startup_failure_ = store_failure("cannot read the stored labels",
             labels.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     labels_.clear();
     for (const auto& row : labels.value())
@@ -910,10 +918,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto labellings = labelling_repo_->list();
     if (!labellings) {
-        last_error_ = store_failure("cannot read the stored label attachments",
+        startup_failure_ = store_failure("cannot read the stored label attachments",
             labellings.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     labellings_.clear();
     for (const auto& row : labellings.value())
@@ -926,10 +934,10 @@ instance_manager::start(const std::filesystem::path& database_path,
      */
     auto shortcuts = shortcut_repo_->list();
     if (!shortcuts) {
-        last_error_ = store_failure("cannot read the stored shortcuts",
+        startup_failure_ = store_failure("cannot read the stored shortcuts",
             shortcuts.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     shortcuts_.clear();
     for (const auto& row : shortcuts.value())
@@ -937,10 +945,10 @@ instance_manager::start(const std::filesystem::path& database_path,
 
     auto windows = window_repo_->list();
     if (!windows) {
-        last_error_ = store_failure("cannot read the stored windows",
+        startup_failure_ = store_failure("cannot read the stored windows",
             windows.error());
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+        raise({condition_source::startup, {}}, startup_failure_);
+        return std::unexpected(startup_failure_);
     }
     windows_.clear();
     for (const auto& spec : windows.value()) {
@@ -990,9 +998,9 @@ instance_manager::start(const std::filesystem::path& database_path,
      * would not find the instance and would seed it again, so reporting it now
      * is what stops the interface from showing an instance that no store has.
      */
-    if (!last_error_.empty()) {
-        startup_failure_ = last_error_;
-        return std::unexpected(last_error_);
+    if (const auto* refused = conditions_.current()) {
+        startup_failure_ = refused->message;
+        return std::unexpected(startup_failure_);
     }
 
     started_ = true;
@@ -1026,9 +1034,10 @@ void instance_manager::backfill_seeded_icon_keys() {
          */
         row->icon_key = label;
         if (auto saved = instance_repo_->save(*row); !saved) {
-            last_error_ = store_failure(std::format(
-                "cannot restore the illustration of the seeded instance {}",
-                row->id), saved.error());
+            raise({condition_source::instance, row->id},
+                store_failure(std::format(
+                    "cannot restore the illustration of the seeded instance {}",
+                    row->id), saved.error()));
         } else {
             /*
              * A row is only worth a line when it changed, which is what makes
@@ -1091,8 +1100,9 @@ void instance_manager::seed_first_run() {
         static_cast<void>(instances_.upsert(row));
 
         if (auto saved = instance_repo_->save(row); !saved) {
-            last_error_ = store_failure(std::format(
-                "cannot save the seeded instance {}", row.id), saved.error());
+            raise({condition_source::instance, row.id},
+                store_failure(std::format(
+                    "cannot save the seeded instance {}", row.id), saved.error()));
         }
         return;
     }
@@ -1144,8 +1154,9 @@ void instance_manager::seed_first_run() {
         static_cast<void>(instances_.upsert(row));
 
         if (auto saved = instance_repo_->save(row); !saved) {
-            last_error_ = store_failure(std::format(
-                "cannot save the seeded instance {}", row.id), saved.error());
+            raise({condition_source::instance, row.id},
+                store_failure(std::format(
+                    "cannot save the seeded instance {}", row.id), saved.error()));
             continue;
         }
 
@@ -1156,8 +1167,9 @@ void instance_manager::seed_first_run() {
         labellings_.add(attachment.owner, attachment.owner_id,
             attachment.label_id);
         if (auto saved = labelling_repo_->save(attachment); !saved) {
-            last_error_ = store_failure(std::format(
-                "cannot label the seeded instance {}", row.id), saved.error());
+            raise({condition_source::labelling, row.id},
+                store_failure(std::format(
+                    "cannot label the seeded instance {}", row.id), saved.error()));
         }
     }
 }
@@ -1183,9 +1195,10 @@ std::string instance_manager::ensure_development_folder() {
 
     if (folder_repo_) {
         if (auto saved = folder_repo_->save(row); !saved) {
-            last_error_ = store_failure(
-                std::format("cannot save the Development folder {}", id),
-                saved.error());
+            raise({condition_source::folder, id},
+                store_failure(
+                    std::format("cannot save the Development folder {}", id),
+                    saved.error()));
         }
     }
     return id;
@@ -1218,9 +1231,10 @@ std::string instance_manager::ensure_development_label() {
 
     if (label_repo_) {
         if (auto saved = label_repo_->save(row); !saved) {
-            last_error_ = store_failure(
-                std::format("cannot save the development label {}", row.id),
-                saved.error());
+            raise({condition_source::label, row.id},
+                store_failure(
+                    std::format("cannot save the development label {}", row.id),
+                    saved.error()));
         }
     }
     return row.id;
@@ -1244,9 +1258,10 @@ void instance_manager::ensure_roots() {
 
         if (folder_repo_) {
             if (auto saved = folder_repo_->save(root); !saved) {
-                last_error_ = store_failure(
-                    std::format("cannot save the instances root {}", root.id),
-                    saved.error());
+                raise({condition_source::folder, root.id},
+                    store_failure(
+                        std::format("cannot save the instances root {}", root.id),
+                        saved.error()));
             }
         }
     }
@@ -1282,8 +1297,9 @@ void instance_manager::ensure_accounts_root(const std::string& instance_id) {
     if (!folder_repo_)
         return;
     if (auto saved = folder_repo_->save(root); !saved) {
-        last_error_ = store_failure(
-            std::format("cannot save the accounts root {}", id), saved.error());
+        raise({condition_source::folder, id},
+            store_failure(
+                std::format("cannot save the accounts root {}", id), saved.error()));
     }
 }
 
@@ -1324,9 +1340,10 @@ std::string instance_manager::ensure_privileged_folder(
     if (!folder_repo_)
         return id;
     if (auto saved = folder_repo_->save(row); !saved) {
-        last_error_ = store_failure(
-            std::format("cannot save the Privileged folder {}", id),
-            saved.error());
+        raise({condition_source::folder, id},
+            store_failure(
+                std::format("cannot save the Privileged folder {}", id),
+                saved.error()));
     }
     return id;
 }
@@ -1351,7 +1368,7 @@ void instance_manager::seed_accounts_for_instance(
      * can see apart from the people they add. The folder is made sure of
      * rather than pointed at blindly, because an account whose folder is
      * missing must not be written silently into the root; a folder the store
-     * refused leaves last_error_ set, exactly as a refused account write does.
+     * refused raises a condition, exactly as a refused account write does.
      */
     const std::string folder_id = ensure_privileged_folder(instance.id);
 
@@ -1398,8 +1415,9 @@ void instance_manager::seed_accounts_for_instance(
         static_cast<void>(accounts_.upsert(row));
 
         if (auto saved = account_repo_->save(row); !saved) {
-            last_error_ = store_failure(std::format(
-                "cannot save the seeded account {}", row.id), saved.error());
+            raise({condition_source::account, row.id},
+                store_failure(std::format(
+                    "cannot save the seeded account {}", row.id), saved.error()));
         }
     }
 }
@@ -1487,20 +1505,22 @@ std::string instance_manager::open_accounts_window(const std::string& instance_i
 
 void instance_manager::handle(command::command& cmd) {
     /*
-     * The previous failure is cleared as the next request starts, so what the
-     * interface shows is the outcome of the last thing the operator asked for
-     * and not the outcome of something they asked for a minute ago. Without
-     * this the note would only ever be written and never read back down: a
-     * removal that succeeded after one that was refused would leave the bar
-     * reporting the refusal, which is a failure the store did not have.
+     * The verdicts on the previous command go as the next request starts, so
+     * what the interface shows is the outcome of the last thing the operator
+     * asked for and not the outcome of something they asked for a minute ago.
+     * Without this a note would only ever be written and never read back
+     * down: a removal that succeeded after one that was refused would leave
+     * the bar reporting the refusal, which is a failure the store did not have.
      *
      * Cleared for every command and not only for the ones that can fail, so a
      * command that cannot fail -- a window opening, a probe -- also takes down
-     * a stale note. An error the handler then sets lands after this line and
-     * survives, which is what makes the bar's red mean "the last thing you did
-     * did not work".
+     * a stale note. A condition the handler then raises lands after this line
+     * and survives, which is what makes the bar's red mean "the last thing you
+     * did did not work". What stays is a standing condition, such as a wall
+     * the store would not save: that is still true whatever the operator does
+     * next, and only the save that succeeds clears it.
      */
-    last_error_.clear();
+    conditions_.clear_verdicts();
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Command: " << hedgr::model::command::to_string(cmd.kind)
@@ -1642,7 +1662,8 @@ void instance_manager::handle(command::command& cmd) {
 void instance_manager::do_save_instance(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Save instance " << cmd.instance_row.name << "";
     if (!instance_repo_) {
-        last_error_ = "cannot save an instance: the store is not open";
+        raise({condition_source::instance, cmd.instance_row.id},
+            "cannot save an instance: the store is not open");
         return;
     }
 
@@ -1673,8 +1694,9 @@ void instance_manager::do_save_instance(const command::command& cmd) {
             static_cast<void>(instances_.upsert(*previous));
         else
             instances_.remove(handle);
-        last_error_ = store_failure(
-            std::format("cannot save instance {}", row.id), saved.error());
+        raise({condition_source::instance, row.id},
+            store_failure(
+                std::format("cannot save instance {}", row.id), saved.error()));
         return;
     }
 
@@ -1702,7 +1724,8 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
     const std::string id = cmd.instance_id.empty() ? cmd.instance_row.id
                                                    : cmd.instance_id;
     if (id.empty()) {
-        last_error_ = "cannot remove an instance: no instance was named";
+        raise({condition_source::instance, id},
+            "cannot remove an instance: no instance was named");
         return;
     }
 
@@ -1758,9 +1781,10 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
         if (auto removed = folder_repo_->remove_tree(
                 domain::folder_tree::accounts, id);
             !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove the folders of instance {}", id),
-                removed.error());
+            raise({condition_source::instance, id},
+                store_failure(
+                    std::format("cannot remove the folders of instance {}", id),
+                    removed.error()));
         }
     }
 
@@ -1770,9 +1794,10 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
         if (auto removed = labelling_repo_->remove_owner(
                 domain::labelling_owner::instance, id);
             !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove the labels of instance {}", id),
-                removed.error());
+            raise({condition_source::instance, id},
+                store_failure(
+                    std::format("cannot remove the labels of instance {}", id),
+                    removed.error()));
         }
     }
 
@@ -1807,25 +1832,27 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
 
     if (instance_repo_) {
         if (auto removed = instance_repo_->remove(id); !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove instance {}", id), removed.error());
+            raise({condition_source::instance, id},
+                store_failure(
+                    std::format("cannot remove instance {}", id), removed.error()));
         }
     }
     if (account_repo_) {
         if (auto removed = account_repo_->remove_for_instance(id); !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove the accounts of instance {}", id),
-                removed.error());
+            raise({condition_source::instance, id},
+                store_failure(
+                    std::format("cannot remove the accounts of instance {}", id),
+                    removed.error()));
         }
     }
-    if (auto saved = save_windows(); !saved)
-        last_error_ = saved.error();
+    static_cast<void>(save_windows());
 }
 
 void instance_manager::do_save_account(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Save account " << cmd.account_row.principal << "";
     if (!account_repo_) {
-        last_error_ = "cannot save an account: the store is not open";
+        raise({condition_source::account, cmd.account_row.id},
+            "cannot save an account: the store is not open");
         return;
     }
 
@@ -1858,8 +1885,9 @@ void instance_manager::do_save_account(const command::command& cmd) {
             static_cast<void>(accounts_.upsert(*previous));
         else
             accounts_.remove(handle);
-        last_error_ = store_failure(
-            std::format("cannot save account {}", row.id), saved.error());
+        raise({condition_source::account, row.id},
+            store_failure(
+                std::format("cannot save account {}", row.id), saved.error()));
     }
 }
 
@@ -1868,7 +1896,8 @@ void instance_manager::do_remove_account(const command::command& cmd) {
     const std::string id = cmd.account_id.empty() ? cmd.account_row.id
                                                   : cmd.account_id;
     if (id.empty()) {
-        last_error_ = "cannot remove an account: no account was named";
+        raise({condition_source::account, id},
+            "cannot remove an account: no account was named");
         return;
     }
 
@@ -1905,35 +1934,39 @@ void instance_manager::do_remove_account(const command::command& cmd) {
 
     if (account_repo_) {
         if (auto removed = account_repo_->remove(id); !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove account {}", id), removed.error());
+            raise({condition_source::account, id},
+                store_failure(
+                    std::format("cannot remove account {}", id), removed.error()));
         }
     }
-    if (auto saved = save_windows(); !saved)
-        last_error_ = saved.error();
+    static_cast<void>(save_windows());
 }
 
 void instance_manager::do_save_folder(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Save folder " << cmd.folder_row.name << "";
     if (!folder_repo_) {
-        last_error_ = "cannot save a folder: the store is not open";
+        raise({condition_source::folder, cmd.folder_row.id},
+            "cannot save a folder: the store is not open");
         return;
     }
 
     const auto& incoming = cmd.folder_row;
     if (incoming.id.empty()) {
-        last_error_ = "cannot save a folder: no folder was named";
+        raise({condition_source::folder, incoming.id},
+            "cannot save a folder: no folder was named");
         return;
     }
     if (incoming.id == domain::instances_root_id) {
-        last_error_ = std::format(
-            "cannot re-parent folder {}: it is the root of the instances tree",
-            incoming.id);
+        raise({condition_source::folder, incoming.id},
+            std::format(
+                "cannot re-parent folder {}: it is the root of the instances tree",
+                incoming.id));
         return;
     }
     if (incoming.name.empty()) {
-        last_error_ = std::format("cannot save folder {}: it has no name",
-            incoming.id);
+        raise({condition_source::folder, incoming.id},
+            std::format("cannot save folder {}: it has no name",
+                incoming.id));
         return;
     }
 
@@ -1958,14 +1991,16 @@ void instance_manager::do_save_folder(const command::command& cmd) {
         row.tree = previous->tree;
         row.owner_id = previous->owner_id;
     } else {
-        last_error_ = std::format(
-            "cannot save folder {}: no parent folder {}", incoming.id,
-            incoming.parent_id.empty() ? "<none>" : incoming.parent_id);
+        raise({condition_source::folder, incoming.id},
+            std::format(
+                "cannot save folder {}: no parent folder {}", incoming.id,
+                incoming.parent_id.empty() ? "<none>" : incoming.parent_id));
         return;
     }
     if (row.parent_id.empty()) {
-        last_error_ = std::format(
-            "cannot save folder {}: only a root has no parent", incoming.id);
+        raise({condition_source::folder, incoming.id},
+            std::format(
+                "cannot save folder {}: only a root has no parent", incoming.id));
         return;
     }
 
@@ -1975,13 +2010,14 @@ void instance_manager::do_save_folder(const command::command& cmd) {
      * the folder the operator asked about rather than the id the table saw.
      */
     if (row.id == row.parent_id) {
-        last_error_ = std::format("cannot parent folder {} to itself", row.id);
+        raise({condition_source::folder, row.id},
+            std::format("cannot parent folder {} to itself", row.id));
         return;
     }
 
     auto handle = folders_.upsert(row);
     if (!handle) {
-        last_error_ = handle.error();
+        raise({condition_source::folder, row.id}, handle.error());
         return;
     }
 
@@ -1990,22 +2026,25 @@ void instance_manager::do_save_folder(const command::command& cmd) {
             static_cast<void>(folders_.upsert(*previous));
         else
             folders_.remove(*handle);
-        last_error_ = store_failure(
-            std::format("cannot save folder {}", row.id), saved.error());
+        raise({condition_source::folder, row.id},
+            store_failure(
+                std::format("cannot save folder {}", row.id), saved.error()));
     }
 }
 
 void instance_manager::do_remove_folder(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove folder " << cmd.folder_row.id << "";
     if (!folder_repo_) {
-        last_error_ = "cannot remove a folder: the store is not open";
+        raise({condition_source::folder, cmd.folder_row.id},
+            "cannot remove a folder: the store is not open");
         return;
     }
 
     const std::string id = cmd.folder_row.id.empty() ? cmd.payload
                                                     : cmd.folder_row.id;
     if (id.empty()) {
-        last_error_ = "cannot remove a folder: no folder was named";
+        raise({condition_source::folder, id},
+            "cannot remove a folder: no folder was named");
         return;
     }
 
@@ -2015,14 +2054,16 @@ void instance_manager::do_remove_folder(const command::command& cmd) {
      * runtime and not only in whatever surfaced the request.
      */
     if (id == domain::instances_root_id) {
-        last_error_ = std::format(
-            "cannot remove folder {}: it is the root of the instances tree", id);
+        raise({condition_source::folder, id},
+            std::format(
+                "cannot remove folder {}: it is the root of the instances tree", id));
         return;
     }
     if (const auto handle = folders_.find(id)) {
         if (folders_.get(*handle)->parent_id.empty()) {
-            last_error_ = std::format(
-                "cannot remove folder {}: it is a root of its tree", id);
+            raise({condition_source::folder, id},
+                std::format(
+                    "cannot remove folder {}: it is a root of its tree", id));
             return;
         }
     }
@@ -2058,14 +2099,16 @@ void instance_manager::do_remove_folder(const command::command& cmd) {
      * then depend on the order the rows were walked in.
      */
     if (auto removed = folder_repo_->remove(id); !removed) {
-        last_error_ = store_failure(
-            std::format("cannot remove folder {}", id), removed.error());
+        raise({condition_source::folder, id},
+            store_failure(
+                std::format("cannot remove folder {}", id), removed.error()));
     }
     for (const auto& folder_id : doomed) {
         if (auto removed = folder_repo_->remove(folder_id); !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove folder {}", folder_id),
-                removed.error());
+            raise({condition_source::folder, folder_id},
+                store_failure(
+                    std::format("cannot remove folder {}", folder_id),
+                    removed.error()));
         }
     }
 }
@@ -2094,21 +2137,23 @@ void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids)
 
         const auto root = root_of(domain::folder_tree::instances, {});
         if (!root) {
-            last_error_ = std::format(
-                "the instances tree has no root, so {} cannot be moved out of "
-                "the folder being removed",
-                row->id);
+            raise({condition_source::instance, row->id},
+                std::format(
+                    "the instances tree has no root, so {} cannot be moved out of "
+                    "the folder being removed",
+                    row->id));
             continue;
         }
 
         instances_.set_folder(handle, *root);
         if (instance_repo_) {
             if (auto moved = instance_repo_->set_parent(row->id, *root); !moved) {
-                last_error_ = store_failure(
-                    std::format("cannot move instance {} out of a removed "
-                                "folder",
-                        row->id),
-                    moved.error());
+                raise({condition_source::instance, row->id},
+                    store_failure(
+                        std::format("cannot move instance {} out of a removed "
+                                    "folder",
+                            row->id),
+                        moved.error()));
             }
         }
     }
@@ -2122,21 +2167,23 @@ void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids)
 
         const auto root = root_of(domain::folder_tree::accounts, row->instance_id);
         if (!root) {
-            last_error_ = std::format(
-                "instance {} has no accounts root, so account {} cannot be "
-                "moved out of the folder being removed",
-                row->instance_id, row->id);
+            raise({condition_source::account, row->id},
+                std::format(
+                    "instance {} has no accounts root, so account {} cannot be "
+                    "moved out of the folder being removed",
+                    row->instance_id, row->id));
             continue;
         }
 
         accounts_.set_folder(handle, *root);
         if (account_repo_) {
             if (auto moved = account_repo_->set_parent(row->id, *root); !moved) {
-                last_error_ = store_failure(
-                    std::format("cannot move account {} out of a removed "
-                                "folder",
-                        row->id),
-                    moved.error());
+                raise({condition_source::account, row->id},
+                    store_failure(
+                        std::format("cannot move account {} out of a removed "
+                                    "folder",
+                            row->id),
+                        moved.error()));
             }
         }
     }
@@ -2145,18 +2192,21 @@ void instance_manager::rehome_leaves(const std::vector<std::string>& folder_ids)
 void instance_manager::do_save_label(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Save label " << cmd.label_row.name << "";
     if (!label_repo_) {
-        last_error_ = "cannot save a label: the store is not open";
+        raise({condition_source::label, cmd.label_row.id},
+            "cannot save a label: the store is not open");
         return;
     }
 
     const auto& row = cmd.label_row;
     if (row.id.empty()) {
-        last_error_ = "cannot save a label: no label was named";
+        raise({condition_source::label, row.id},
+            "cannot save a label: no label was named");
         return;
     }
     if (row.name.empty()) {
-        last_error_ = std::format("cannot save label {}: it has no name",
-            row.id);
+        raise({condition_source::label, row.id},
+            std::format("cannot save label {}: it has no name",
+                row.id));
         return;
     }
 
@@ -2172,22 +2222,25 @@ void instance_manager::do_save_label(const command::command& cmd) {
             static_cast<void>(labels_.upsert(*previous));
         else
             labels_.remove(handle);
-        last_error_ = store_failure(
-            std::format("cannot save label {}", row.id), saved.error());
+        raise({condition_source::label, row.id},
+            store_failure(
+                std::format("cannot save label {}", row.id), saved.error()));
     }
 }
 
 void instance_manager::do_remove_label(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove label " << cmd.label_row.id << "";
     if (!label_repo_) {
-        last_error_ = "cannot remove a label: the store is not open";
+        raise({condition_source::label, cmd.label_row.id},
+            "cannot remove a label: the store is not open");
         return;
     }
 
     const std::string id = cmd.label_row.id.empty() ? cmd.payload
                                                    : cmd.label_row.id;
     if (id.empty()) {
-        last_error_ = "cannot remove a label: no label was named";
+        raise({condition_source::label, id},
+            "cannot remove a label: no label was named");
         return;
     }
 
@@ -2205,28 +2258,32 @@ void instance_manager::do_remove_label(const command::command& cmd) {
             continue;
         labellings_.remove(row.owner, row.owner_id, row.label_id);
         if (auto detached = labelling_repo_->remove(row); !detached) {
-            last_error_ = store_failure(
-                std::format("cannot detach label {} from {}", id, row.owner_id),
-                detached.error());
+            raise({condition_source::label, id},
+                store_failure(
+                    std::format("cannot detach label {} from {}", id, row.owner_id),
+                    detached.error()));
         }
     }
 
     if (auto removed = label_repo_->remove(id); !removed) {
-        last_error_ = store_failure(
-            std::format("cannot remove label {}", id), removed.error());
+        raise({condition_source::label, id},
+            store_failure(
+                std::format("cannot remove label {}", id), removed.error()));
     }
 }
 
 void instance_manager::do_attach_label(const command::command& cmd) {
     if (!labelling_repo_) {
-        last_error_ = "cannot attach a label: the store is not open";
+        raise({condition_source::labelling, cmd.labelling_row.owner_id},
+            "cannot attach a label: the store is not open");
         return;
     }
 
     const auto& row = cmd.labelling_row;
     if (row.owner_id.empty() || row.label_id.empty()) {
-        last_error_ = "cannot attach a label: the owner and the label must be "
-                      "named";
+        raise({condition_source::labelling, row.owner_id},
+            "cannot attach a label: the owner and the label must be "
+                          "named");
         return;
     }
 
@@ -2237,18 +2294,21 @@ void instance_manager::do_attach_label(const command::command& cmd) {
      */
     if (row.owner == domain::labelling_owner::instance) {
         if (!instances_.find(row.owner_id)) {
-            last_error_ = std::format("cannot attach a label: no instance {}",
-                row.owner_id);
+            raise({condition_source::labelling, row.owner_id},
+                std::format("cannot attach a label: no instance {}",
+                    row.owner_id));
             return;
         }
     } else if (!accounts_.find(row.owner_id)) {
-        last_error_ = std::format("cannot attach a label: no account {}",
-            row.owner_id);
+        raise({condition_source::labelling, row.owner_id},
+            std::format("cannot attach a label: no account {}",
+                row.owner_id));
         return;
     }
     if (!labels_.find(row.label_id)) {
-        last_error_ = std::format("cannot attach a label: no label {}",
-            row.label_id);
+        raise({condition_source::labelling, row.owner_id},
+            std::format("cannot attach a label: no label {}",
+                row.label_id));
         return;
     }
 
@@ -2256,46 +2316,52 @@ void instance_manager::do_attach_label(const command::command& cmd) {
 
     if (auto saved = labelling_repo_->save(row); !saved) {
         labellings_.remove(row.owner, row.owner_id, row.label_id);
-        last_error_ = store_failure(
-            std::format("cannot attach label {} to {}", row.label_id,
-                row.owner_id),
-            saved.error());
+        raise({condition_source::labelling, row.owner_id},
+            store_failure(
+                std::format("cannot attach label {} to {}", row.label_id,
+                    row.owner_id),
+                saved.error()));
     }
 }
 
 void instance_manager::do_detach_label(const command::command& cmd) {
     if (!labelling_repo_) {
-        last_error_ = "cannot detach a label: the store is not open";
+        raise({condition_source::labelling, cmd.labelling_row.owner_id},
+            "cannot detach a label: the store is not open");
         return;
     }
 
     const auto& row = cmd.labelling_row;
     if (row.owner_id.empty() || row.label_id.empty()) {
-        last_error_ = "cannot detach a label: the owner and the label must be "
-                      "named";
+        raise({condition_source::labelling, row.owner_id},
+            "cannot detach a label: the owner and the label must be "
+                          "named");
         return;
     }
 
     labellings_.remove(row.owner, row.owner_id, row.label_id);
 
     if (auto removed = labelling_repo_->remove(row); !removed) {
-        last_error_ = store_failure(
-            std::format("cannot detach label {} from {}", row.label_id,
-                row.owner_id),
-            removed.error());
+        raise({condition_source::labelling, row.owner_id},
+            store_failure(
+                std::format("cannot detach label {} from {}", row.label_id,
+                    row.owner_id),
+                removed.error()));
     }
 }
 
 void instance_manager::do_save_shortcut(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Save shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
-        last_error_ = "cannot save a shortcut: the store is not open";
+        raise({condition_source::shortcut, cmd.shortcut_row.id},
+            "cannot save a shortcut: the store is not open");
         return;
     }
 
     const auto& row = cmd.shortcut_row;
     if (row.id.empty()) {
-        last_error_ = "cannot save a shortcut: no shortcut was named";
+        raise({condition_source::shortcut, row.id},
+            "cannot save a shortcut: no shortcut was named");
         return;
     }
 
@@ -2320,30 +2386,34 @@ void instance_manager::do_save_shortcut(const command::command& cmd) {
             shortcuts_.upsert(*previous);
         else
             shortcuts_.remove(row.id);
-        last_error_ = store_failure(
-            std::format("cannot save shortcut {}", row.id), saved.error());
+        raise({condition_source::shortcut, row.id},
+            store_failure(
+                std::format("cannot save shortcut {}", row.id), saved.error()));
     }
 }
 
 void instance_manager::do_remove_shortcut(const command::command& cmd) {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Remove shortcut " << cmd.shortcut_row.id << "";
     if (!shortcut_repo_) {
-        last_error_ = "cannot remove a shortcut: the store is not open";
+        raise({condition_source::shortcut, cmd.shortcut_row.id},
+            "cannot remove a shortcut: the store is not open");
         return;
     }
 
     const std::string id = cmd.shortcut_row.id.empty() ? cmd.payload
                                                        : cmd.shortcut_row.id;
     if (id.empty()) {
-        last_error_ = "cannot remove a shortcut: no shortcut was named";
+        raise({condition_source::shortcut, id},
+            "cannot remove a shortcut: no shortcut was named");
         return;
     }
 
     shortcuts_.remove(id);
 
     if (auto removed = shortcut_repo_->remove(id); !removed) {
-        last_error_ = store_failure(
-            std::format("cannot remove shortcut {}", id), removed.error());
+        raise({condition_source::shortcut, id},
+            store_failure(
+                std::format("cannot remove shortcut {}", id), removed.error()));
     }
 }
 
@@ -2363,9 +2433,10 @@ void instance_manager::drop_target_shortcuts(domain::window_kind kind,
         return;
     if (auto removed = shortcut_repo_->remove_for_target(kind, target_id);
         !removed) {
-        last_error_ = store_failure(
-            std::format("cannot remove the shortcuts for target {}", target_id),
-            removed.error());
+        raise({condition_source::shortcut, target_id},
+            store_failure(
+                std::format("cannot remove the shortcuts for target {}", target_id),
+                removed.error()));
     }
 }
 
@@ -2382,15 +2453,17 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      */
     const auto instance = instances_.find(cmd.instance_id);
     if (!instance) {
-        last_error_ = std::format("cannot connect: no instance {}",
-            cmd.instance_id);
+        raise({condition_source::session, cmd.account_id},
+            std::format("cannot connect: no instance {}",
+                cmd.instance_id));
         return;
     }
     const auto* instance_row = instances_.get(*instance);
 
     if (!accounts_.find(cmd.account_id)) {
-        last_error_ = std::format("cannot connect: no account {}",
-            cmd.account_id);
+        raise({condition_source::session, cmd.account_id},
+            std::format("cannot connect: no account {}",
+                cmd.account_id));
         return;
     }
 
@@ -2421,24 +2494,27 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * retype a password that was never the problem.
      */
     if (store_lock_ != domain::store_lock::unlocked) {
-        last_error_ = std::format(
-            "cannot connect to {}: the store is {}, so no password is "
-            "available and none was supplied",
-            instance_row->name, domain::to_string(store_lock_));
+        raise({condition_source::store_lock, cmd.account_id},
+            std::format(
+                "cannot connect to {}: the store is {}, so no password is "
+                "available and none was supplied",
+                instance_row->name, domain::to_string(store_lock_)));
         return;
     }
 
     auto sealed = account_repo_->credential_of(cmd.account_id);
     if (!sealed) {
-        last_error_ = store_failure("cannot read the stored credential",
-            sealed.error());
+        raise({condition_source::credential, cmd.account_id},
+            store_failure("cannot read the stored credential",
+                sealed.error()));
         return;
     }
     if (!sealed.value()) {
-        last_error_ = std::format(
-            "cannot connect to {}: the account has no stored credential and "
-            "no password was supplied",
-            instance_row->name);
+        raise({condition_source::credential, cmd.account_id},
+            std::format(
+                "cannot connect to {}: the account has no stored credential and "
+                "no password was supplied",
+                instance_row->name));
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Cannot sign in to '" << instance_row->name
             << "': account '" << cmd.account_id
@@ -2605,20 +2681,23 @@ void instance_manager::report_store_failure(const std::string& instance_id,
 
 void instance_manager::do_store_credential(const command::command& cmd) {
     if (!account_repo_) {
-        last_error_ = "cannot store a password: the store is not open";
+        raise({condition_source::credential, cmd.account_id},
+            "cannot store a password: the store is not open");
         return;
     }
     if (cmd.payload.empty()) {
-        last_error_ = "cannot store an empty credential";
+        raise({condition_source::credential, cmd.account_id},
+            "cannot store an empty credential");
         return;
     }
 
     if (auto saved = account_repo_->set_credential(cmd.account_id, cmd.payload);
         !saved) {
-        last_error_ = store_failure(
-            std::format("cannot store the password for account {}",
-                cmd.account_id),
-            saved.error());
+        raise({condition_source::credential, cmd.account_id},
+            store_failure(
+                std::format("cannot store the password for account {}",
+                    cmd.account_id),
+                saved.error()));
         return;
     }
 
@@ -2668,7 +2747,8 @@ void instance_manager::start_credential_store(std::string account_id,
 
 void instance_manager::do_set_master_password(const command::command& cmd) {
     if (!master_repo_) {
-        last_error_ = "cannot set a master password: the store is not open";
+        raise({condition_source::store_lock, {}},
+            "cannot set a master password: the store is not open");
         return;
     }
 
@@ -2679,18 +2759,21 @@ void instance_manager::do_set_master_password(const command::command& cmd) {
      */
     auto existing = master_repo_->has_master();
     if (!existing) {
-        last_error_ = store_failure("cannot read the store's master password",
-            existing.error());
+        raise({condition_source::store_lock, {}},
+            store_failure("cannot read the store's master password",
+                existing.error()));
         return;
     }
     if (existing.value()) {
-        last_error_ =
-            "this store already has a master password; unlock it instead";
+        raise({condition_source::store_lock, {}},
+            
+                "this store already has a master password; unlock it instead");
         return;
     }
 
     if (cmd.password.empty()) {
-        last_error_ = "the master password cannot be empty";
+        raise({condition_source::store_lock, {}},
+            "the master password cannot be empty");
         return;
     }
 
@@ -2737,7 +2820,8 @@ void instance_manager::do_set_master_password(const command::command& cmd) {
 
 void instance_manager::do_unlock_store(const command::command& cmd) {
     if (!master_repo_) {
-        last_error_ = "cannot unlock: the store is not open";
+        raise({condition_source::store_lock, {}},
+            "cannot unlock: the store is not open");
         return;
     }
 
@@ -2755,8 +2839,9 @@ void instance_manager::do_unlock_store(const command::command& cmd) {
      */
     auto blob = master_repo_->verification();
     if (!blob) {
-        last_error_ = store_failure("cannot read the master password",
-            blob.error());
+        raise({condition_source::store_lock, {}},
+            store_failure("cannot read the master password",
+                blob.error()));
         return;
     }
     if (blob.value().empty()) {
@@ -2856,13 +2941,13 @@ void instance_manager::do_disconnect_session(const command::command& cmd) {
     }
 
     sessions_.remove(*handle);
-    if (auto saved = save_windows(); !saved)
-        last_error_ = saved.error();
+    static_cast<void>(save_windows());
 }
 
 void instance_manager::do_open_window(const command::command& cmd) {
     if (!window_repo_) {
-        last_error_ = "cannot open a window: the store is not open";
+        raise({condition_source::window, {}},
+            "cannot open a window: the store is not open");
         return;
     }
 
@@ -2982,8 +3067,9 @@ void instance_manager::do_open_window(const command::command& cmd) {
         start_term_structure_read(handle);
 
     if (auto saved = window_repo_->save(windows_.spec(handle, sessions_)); !saved) {
-        last_error_ = store_failure(
-            std::format("cannot save window {}", spec.id), saved.error());
+        raise({condition_source::window, spec.id},
+            store_failure(
+                std::format("cannot save window {}", spec.id), saved.error()));
     }
 
     BOOST_LOG_SEV(lg(), ores::logging::info)
@@ -2996,7 +3082,8 @@ void instance_manager::do_close_window(const command::command& cmd) {
         << "Closing window '" << cmd.window_id << "'";
     const auto handle = windows_.find(cmd.window_id);
     if (!handle) {
-        last_error_ = std::format("cannot close: no window {}", cmd.window_id);
+        raise({condition_source::window, cmd.window_id},
+            std::format("cannot close: no window {}", cmd.window_id));
         return;
     }
 
@@ -3004,9 +3091,10 @@ void instance_manager::do_close_window(const command::command& cmd) {
 
     if (window_repo_) {
         if (auto removed = window_repo_->remove(cmd.window_id); !removed) {
-            last_error_ = store_failure(
-                std::format("cannot remove window {}", cmd.window_id),
-                removed.error());
+            raise({condition_source::window, cmd.window_id},
+                store_failure(
+                    std::format("cannot remove window {}", cmd.window_id),
+                    removed.error()));
         }
     }
 }
@@ -3026,8 +3114,7 @@ void instance_manager::do_configure_crm(const command::command& cmd) {
     crm->party_id = cmd.party_id;
     crm->crm_name = cmd.crm_name;
     crm->reciprocal = cmd.crm_reciprocal;
-    if (auto saved = save_windows(); !saved)
-        last_error_ = saved.error();
+    static_cast<void>(save_windows());
 }
 
 void instance_manager::do_refresh_window(const command::command& cmd) {
@@ -3154,7 +3241,8 @@ void instance_manager::rebind_restored_windows(std::string_view instance_id,
 
 void instance_manager::start_deployment_read(std::string_view window_id) {
     if (!database_) {
-        last_error_ = "cannot read the deployment: the store is not open";
+        raise({condition_source::read, std::string{window_id}},
+            "cannot read the deployment: the store is not open");
         return;
     }
 
@@ -3222,7 +3310,8 @@ void instance_manager::start_market_points_read(std::string_view window_id,
 void instance_manager::start_market_read(std::string_view window_id,
     std::string_view series_id) {
     if (!database_) {
-        last_error_ = "cannot read the market: the store is not open";
+        raise({condition_source::read, std::string{window_id}},
+            "cannot read the market: the store is not open");
         return;
     }
 
@@ -3298,7 +3387,8 @@ void instance_manager::do_probe_instance(const command::command& cmd) {
      */
     const auto handle = instances_.find(cmd.instance_id);
     if (!handle) {
-        last_error_ = std::format("cannot probe: no instance {}", cmd.instance_id);
+        raise({condition_source::probe, cmd.instance_id},
+            std::format("cannot probe: no instance {}", cmd.instance_id));
         return;
     }
 
@@ -4164,7 +4254,7 @@ void instance_manager::apply(const event::event& ev) {
         if (!pending_master_password_.empty())
             master_password_ = std::move(pending_master_password_);
         store_lock_ = domain::store_lock::unlocked;
-        last_error_.clear();
+        conditions_.clear(condition_source::store_lock);
         lock_error_.clear();
         return;
     }
@@ -4361,11 +4451,13 @@ std::expected<void, std::string> instance_manager::save_windows() {
 
     for (const auto& spec : windows_.specs(sessions_)) {
         if (auto saved = window_repo_->save(spec); !saved) {
-            last_error_ = store_failure(
+            auto failure = store_failure(
                 std::format("cannot save window {}", spec.id), saved.error());
-            return std::unexpected(last_error_);
+            raise({condition_source::window_wall, {}}, failure);
+            return std::unexpected(std::move(failure));
         }
     }
+    conditions_.clear({condition_source::window_wall, {}});
     return {};
 }
 
