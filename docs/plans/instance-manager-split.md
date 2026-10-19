@@ -189,6 +189,22 @@ exists.
 Risk is medium. It is the second largest group, but most of it is the repeated
 preamble that prerequisite C removes.
 
+Status: done. `read_service` takes the pool, the event channel and the instance,
+account, session and window tables by reference and holds no manager. The facade
+routes a window's `read_request` to `start()`, and forwards the table accessors.
+The market table stays one object that the feed will also write, so the service
+hands out a non-const `market()` for it until step 6. It landed as the tests
+first, a pure move, and the registry as its own commit. `pending_reads` keys the
+five in-flight sets by a typed `request_id` and clears the mark from the answer
+event, so a handler cannot forget to. The registry also fixed one omission, that
+`stop()` never cleared the deployment marks.
+
+Two groups are not covered by a test. `start_market_backfill` and the feed's
+call to the catalogue starter need a live feed, which is step 6's seam, so they
+were converted by reading. The term structure and CRM reads keep their `reading`
+flag on the table row and not in the registry, because their rows already say
+they are running.
+
 ### 6. Market feed
 
 Move `start_market_stream`, `stop_market_stream`, `pump_market_streams` and the

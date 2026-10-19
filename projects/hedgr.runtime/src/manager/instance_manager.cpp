@@ -24,14 +24,7 @@
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/seed/seeder.hpp"
 #include "hedgr.runtime/service/window_traits.hpp"
-#include "hedgr.runtime/worker/crm_names_worker.hpp"
-#include "hedgr.runtime/worker/crm_worker.hpp"
-#include "hedgr.runtime/worker/deployment_worker.hpp"
-#include "hedgr.runtime/worker/image_map_worker.hpp"
-#include "hedgr.runtime/worker/image_worker.hpp"
-#include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
-#include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
@@ -76,25 +69,9 @@ using condition_source = model_state::condition_source;
 using support::lg;
 using support::live_indices;
 using support::live_windows;
+using support::running_key;
 using support::steady_now_ns;
 using support::store_failure;
-
-/**
- * @brief The key a running worker is registered under.
- *
- * The id separator is the one the session table uses internally to join a pair
- * as well, so a key here can never collide with either half of another pair:
- * "a" + "bc" and "ab" + "c" have to be two workers, not one.
- */
-[[nodiscard]] std::string running_key(std::string_view instance_id,
-    std::string_view account_id) {
-    std::string result;
-    result.reserve(instance_id.size() + account_id.size() + 1);
-    result.append(instance_id);
-    result.push_back('\x1f');
-    result.append(account_id);
-    return result;
-}
 
 /** @brief Every live session row, holes skipped, for a whole-table walk. */
 [[nodiscard]] std::vector<model_state::session_handle>
@@ -127,14 +104,6 @@ live_accounts(const model_state::account_table& accounts) {
     }
     return result;
 }
-
-/**
- * @brief How often an open CRM matrix is read again.
- *
- * The deployment computes the batch on demand, so this is a request rate on a
- * party's rate engine, paid once per matrix however many windows show it.
- */
-constexpr std::chrono::milliseconds crm_cadence{5000};
 
 /**
  * @brief How many probes may be in flight at once.
@@ -179,16 +148,7 @@ void instance_manager::stop() noexcept {
     }
     market_streams_.clear();
     retired_market_streams_.clear();
-    market_.clear();
-    currency_images_.clear();
-    currency_images_reading_.clear();
-    images_.clear();
-    images_reading_.clear();
-    failed_images_.clear();
-    term_structures_.clear();
-    crm_.clear();
-    catalogues_reading_.clear();
-    points_reading_.clear();
+    read_service_.clear();
 
     /*
      * The probes are cancelled before the pools are stopped, so a probe
@@ -259,6 +219,7 @@ instance_manager::start(const std::filesystem::path& database_path,
         *database_);
     window_service_.attach(*database_);
     lock_service_.attach(*database_, *account_repo_);
+    read_service_.attach(database_->path());
 
     /*
      * The lock is read before anything else, because it says whether the rows
@@ -437,7 +398,7 @@ void instance_manager::pump() {
     probe_service_.pump_probes(started_, [this](const domain::instance& row) {
         return connection_options_for(row, seed_options_, database_->path());
     });
-    pump_crm_reads();
+    read_service_.pump_crm_reads();
 
     /*
      * Then the policy read, once per process. The create prompt is drawn from
@@ -550,10 +511,10 @@ void instance_manager::handle(command::command& cmd) {
             raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::load_image:
-        do_load_image(cmd);
+        read_service_.load_image(cmd);
         break;
     case command::command_kind::load_term_structure:
-        do_load_term_structure(cmd);
+        read_service_.load_term_structure(cmd);
         break;
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
@@ -573,7 +534,7 @@ void instance_manager::handle(command::command& cmd) {
             static_cast<void>(save_windows());
         break;
     case command::command_kind::load_crm_names:
-        do_load_crm_names(cmd);
+        read_service_.load_crm_names(cmd);
         break;
     case command::command_kind::probe_instance:
         if (auto refused = probe_service_.do_probe_instance(cmd))
@@ -1670,36 +1631,19 @@ void instance_manager::do_disconnect_session(const command::command& cmd) {
     static_cast<void>(save_windows());
 }
 
-void instance_manager::do_load_crm_names(const command::command& cmd) {
-    start_crm_names_read(cmd.instance_id, cmd.account_id, cmd.party_id);
-}
-
 void instance_manager::do_refresh_window(const command::command& cmd) {
     const auto request = window_service_.refresh(cmd);
     if (!request)
         return;
 
-    /*
-     * A refresh is also the operator's chance to retry the currency image map
-     * when its first read failed; flags fall back to the drawn ones until it
-     * answers.
-     */
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id);
-        session && sessions_.status(*session)
-            == domain::session_status::authenticated) {
-        const auto tenant = std::string{sessions_.tenant_id(*session)};
-        const auto* map = currency_images_.get(tenant);
-        if (map == nullptr
-            || map->state == model::state::image_map_state::failed) {
-            model::event::event retry;
-            retry.instance_id = cmd.instance_id;
-            retry.account_id = cmd.account_id;
-            retry.tenant_id = tenant;
-            start_currency_image_map(retry);
-        }
-    }
+    read_service_.retry_currency_image_map(cmd.instance_id, cmd.account_id);
 
     start_read(*request);
+}
+
+void instance_manager::start_read(const service::read_request& request) {
+    if (auto refused = read_service_.start(request))
+        raise(std::move(refused->key), std::move(refused->message));
 }
 
 void instance_manager::complete_open(service::open_outcome outcome) {
@@ -1707,372 +1651,6 @@ void instance_manager::complete_open(service::open_outcome outcome) {
         start_read(*outcome.read);
     if (outcome.refused)
         raise(std::move(outcome.refused->key), std::move(outcome.refused->message));
-}
-
-void instance_manager::start_read(const service::read_request& request) {
-    switch (request.kind) {
-    case service::read_kind::term_structure:
-        start_term_structure_read(request.window);
-        return;
-    case service::read_kind::crm_batch:
-        start_crm_read(request.window);
-        return;
-    case service::read_kind::deployment:
-        start_deployment_read(windows().id(request.window));
-        return;
-    case service::read_kind::market_catalogue:
-        start_market_catalogue_read(windows().id(request.window));
-        return;
-    case service::read_kind::market_points:
-        if (const auto* chart = std::get_if<domain::chart_state>(
-                &windows().state(request.window));
-            chart != nullptr && !chart->series_id.empty()) {
-            start_market_points_read(windows().id(request.window),
-                chart->series_id);
-        }
-        return;
-    case service::read_kind::placeholder: {
-        /*
-         * A refresh has nothing real to ask for yet, so the request is turned
-         * into an event carrying the window id and nothing else, which is
-         * enough to exercise the path from a command through the event
-         * channel and back into apply(). The real handler replaces the
-         * payload, not the shape.
-         */
-        event::event fact;
-        fact.kind = event::event_kind::window_data;
-        fact.payload = std::string{windows().id(request.window)};
-        events_.push(std::move(fact));
-        return;
-    }
-    }
-}
-
-std::optional<worker::session_read> instance_manager::session_read_for(
-    model::state::session_handle session, read_gate gate) const {
-    if (!database_)
-        return std::nullopt;
-    if (gate != read_gate::token_only
-        && sessions_.status(session) != domain::session_status::authenticated)
-        return std::nullopt;
-
-    worker::session_read read;
-    read.token = std::string{sessions_.token(session)};
-    if (read.token.empty() && gate != read_gate::signed_in)
-        return std::nullopt;
-
-    read.instance_id = std::string{sessions_.instance_id(session)};
-    read.account_id = std::string{sessions_.account_id(session)};
-    read.tenant_id = std::string{sessions_.tenant_id(session)};
-    const auto instance = instances_.find(read.instance_id);
-    if (!instance)
-        return std::nullopt;
-
-    const auto account = accounts_.find(read.account_id);
-    read.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
-    read.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    return read;
-}
-
-std::optional<worker::session_read> instance_manager::session_read_for(
-    std::string_view instance_id, std::string_view account_id,
-    read_gate gate) const {
-    const auto session = sessions_.find(instance_id, account_id);
-    if (!session)
-        return std::nullopt;
-    return session_read_for(*session, gate);
-}
-
-void instance_manager::start_deployment_read(std::string_view window_id) {
-    if (!database_) {
-        raise({condition_source::read, std::string{window_id}},
-            "cannot read the deployment: the store is not open");
-        return;
-    }
-
-    const auto window = windows().find(window_id);
-    if (!window)
-        return;
-
-    const auto session = windows().session_of(*window);
-    if (!session)
-        return;
-
-    auto read = session_read_for(*session, read_gate::signed_in_with_token);
-    if (!read)
-        return;
-
-    const auto key = running_key(read->instance_id, read->account_id);
-    if (deployment_reads_.contains(key))
-        return;
-
-    worker::deployment_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{read->instance_id, read->account_id};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
-
-    deployment_reads_.insert(key);
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Starting a deployment read for '" << read->instance_id << "' / '"
-        << read->account_id << "'";
-    worker::spawn_deployment_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::start_market_catalogue_read(
-    std::string_view window_id) {
-    start_market_read(window_id, {});
-}
-
-void instance_manager::start_market_points_read(std::string_view window_id,
-    std::string_view series_id) {
-    start_market_read(window_id, series_id);
-}
-
-void instance_manager::start_market_read(std::string_view window_id,
-    std::string_view series_id) {
-    if (!database_) {
-        raise({condition_source::read, std::string{window_id}},
-            "cannot read the market: the store is not open");
-        return;
-    }
-
-    const auto window = windows().find(window_id);
-    if (!window)
-        return;
-
-    const auto session = windows().session_of(*window);
-    if (!session)
-        return;
-
-    auto read = session_read_for(*session, read_gate::signed_in_with_token);
-    if (!read)
-        return;
-
-    const bool catalogue = series_id.empty();
-    const auto session_key = running_key(read->instance_id, read->account_id);
-    const auto points_key =
-        std::format("{}\x1f{}", session_key, series_id);
-    if (catalogue) {
-        if (catalogues_reading_.contains(session_key))
-            return;
-    } else if (points_reading_.contains(points_key)) {
-        return;
-    }
-
-    worker::market_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{read->instance_id, read->account_id};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
-    job.catalogue = catalogue;
-    job.series_id = std::string{series_id};
-
-    if (catalogue) {
-        catalogues_reading_.insert(session_key);
-        market_.begin_catalogue(read->instance_id, read->account_id);
-    } else {
-        points_reading_.insert(points_key);
-    }
-
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Starting a market " << (catalogue ? "catalogue" : "points")
-        << " read for '" << read->instance_id << "' / '" << read->account_id
-        << "'"
-        << (catalogue ? std::string{}
-                      : std::format(" series '{}'", series_id));
-    worker::spawn_market_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::start_currency_image_map(const model::event::event& ev) {
-    if (ev.tenant_id.empty() || !database_)
-        return;
-    if (const auto* existing = currency_images_.get(ev.tenant_id);
-        existing != nullptr
-        && (existing->state == model::state::image_map_state::ready
-            || existing->state == model::state::image_map_state::reading))
-        return;
-    if (currency_images_reading_.contains(ev.tenant_id))
-        return;
-    auto read = session_read_for(ev.instance_id, ev.account_id,
-        read_gate::token_only);
-    if (!read)
-        return;
-
-    worker::image_map_job job;
-    job.session = std::move(*read);
-    job.session.tenant_id = ev.tenant_id;
-    currency_images_reading_.insert(ev.tenant_id);
-    currency_images_.begin(ev.tenant_id);
-    worker::spawn_image_map_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::start_crm_names_read(std::string_view instance_id,
-    std::string_view account_id, std::string_view party_id) {
-    auto read = session_read_for(instance_id, account_id, read_gate::signed_in);
-    if (!read)
-        return;
-    worker::crm_names_job job;
-    job.session = std::move(*read);
-    job.party_id = std::string{party_id};
-    worker::spawn_crm_names_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::start_crm_read(
-    model::state::window_handle handle) {
-    if (!database_ || !windows().contains(handle))
-        return;
-    const auto spec = windows().spec(handle, sessions_);
-    const auto* state = std::get_if<domain::crm_matrix_state>(&spec.state);
-    if (state == nullptr || !spec.session || state->party_id.empty())
-        return;
-    auto read = session_read_for(spec.session->instance_id,
-        spec.session->account_id, read_gate::signed_in);
-    if (!read)
-        return;
-    worker::crm_job job;
-    job.session = std::move(*read);
-    job.party_id = state->party_id;
-    job.crm_name = state->crm_name;
-    job.reciprocal = state->reciprocal;
-    if (const auto* current = crm_.get(job.session.instance_id,
-            job.session.account_id, state->party_id, state->crm_name,
-            state->reciprocal);
-        current != nullptr && current->reading)
-        return;
-    crm_.begin(job.session.instance_id, job.session.account_id,
-        state->party_id, state->crm_name, state->reciprocal);
-    worker::spawn_crm_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::pump_crm_reads() {
-    if (!database_)
-        return;
-    const auto now = steady_now_ns();
-    const auto& layout = windows().layout();
-    const auto kinds = windows().kind_column();
-    const auto open = windows().open_column();
-    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
-        if (layout.alive[index] == 0 || open[index] == 0
-            || static_cast<domain::window_kind>(kinds[index])
-                != domain::window_kind::crm_matrix)
-            continue;
-        const model_state::window_handle window{index,
-            layout.generation[index]};
-        const auto session = windows().session_of(window);
-        if (!session || sessions_.status(*session)
-                != domain::session_status::authenticated)
-            continue;
-        const auto* crm =
-            std::get_if<domain::crm_matrix_state>(&windows().state(window));
-        if (crm == nullptr || crm->party_id.empty() || crm->crm_name.empty())
-            continue;
-        const auto* batch = crm_.get(sessions_.instance_id(*session),
-            sessions_.account_id(*session), crm->party_id, crm->crm_name,
-            crm->reciprocal);
-        if (batch != nullptr && (batch->reading || now < batch->next_read_ns))
-            continue;
-        start_crm_read(window);
-    }
-}
-
-void instance_manager::start_term_structure_read(
-    model::state::window_handle handle) {
-    if (!database_ || !windows().contains(handle))
-        return;
-    const auto spec = windows().spec(handle, sessions_);
-    const auto* st = std::get_if<domain::term_structure_state>(&spec.state);
-    if (st == nullptr || st->curve_key.empty() || st->member_ids.empty()
-        || st->member_ids.size() != st->member_tenors.size())
-        return;
-    if (!spec.session)
-        return;
-    auto read = session_read_for(spec.session->instance_id,
-        spec.session->account_id, read_gate::signed_in);
-    if (!read)
-        return;
-
-    worker::term_structure_job job;
-    job.session = std::move(*read);
-    job.key = st->curve_key;
-    job.label = st->label;
-    job.member_ids = st->member_ids;
-    job.member_tenors = st->member_tenors;
-    term_structures_.begin(job.session.instance_id, job.session.account_id,
-        st->curve_key, st->label);
-    worker::spawn_term_structure_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::do_load_term_structure(
-    const model::command::command& cmd) {
-    if (cmd.curve_key.empty()
-        || cmd.member_ids.size() != cmd.member_tenors.size()
-        || cmd.member_ids.empty())
-        return;
-    auto read = session_read_for(cmd.instance_id, cmd.account_id,
-        read_gate::signed_in);
-    if (!read)
-        return;
-
-    worker::term_structure_job job;
-    job.session = std::move(*read);
-    job.key = cmd.curve_key;
-    job.label = cmd.curve_label;
-    job.member_ids = cmd.member_ids;
-    job.member_tenors = cmd.member_tenors;
-    term_structures_.begin(cmd.instance_id, cmd.account_id, cmd.curve_key,
-        cmd.curve_label);
-    worker::spawn_term_structure_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::do_load_image(const model::command::command& cmd) {
-    auto read = session_read_for(cmd.instance_id, cmd.account_id,
-        read_gate::signed_in_with_token);
-    if (!read || read->tenant_id.empty() || cmd.image_id.empty())
-        return;
-    const auto key = model::state::make_tenant_key(read->tenant_id,
-        cmd.image_id);
-    if (images_reading_.contains(key)
-        || images_.contains(read->tenant_id, cmd.image_id)
-        || failed_images_.contains(key))
-        return;
-
-    worker::image_job job;
-    job.session = std::move(*read);
-    job.image_id = cmd.image_id;
-    images_reading_.insert(key);
-    worker::spawn_image_read(pool_.context(), std::move(job), events_);
-}
-
-void instance_manager::start_market_backfill(std::string_view instance_id,
-    std::string_view account_id, std::string_view series_id) {
-    auto read = session_read_for(instance_id, account_id,
-        read_gate::signed_in_with_token);
-    if (!read)
-        return;
-
-    const auto points_key = std::format("{}\x1f{}",
-        running_key(instance_id, account_id), series_id);
-    if (points_reading_.contains(points_key))
-        return;
-
-    worker::market_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{std::string{instance_id},
-        std::string{account_id}};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
-    job.catalogue = false;
-    job.series_id = std::string{series_id};
-    job.limit = 2000;
-
-    points_reading_.insert(points_key);
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Seeding live history for series '" << series_id << "' on '"
-        << instance_id << "' / '" << account_id << "'";
-    worker::spawn_market_read(pool_.context(), std::move(job), events_);
 }
 
 void instance_manager::start_market_stream(const model::event::event& ev) {
@@ -2145,7 +1723,8 @@ void instance_manager::pump_market_streams() {
 
         const auto instance_id = sessions_.instance_id(*session);
         const auto account_id = sessions_.account_id(*session);
-        const auto* catalogue = market_.catalogue(instance_id, account_id);
+        const auto* catalogue =
+            read_service_.market().catalogue(instance_id, account_id);
         if (catalogue == nullptr
             || catalogue->state
                 == model_state::catalogue_state::failed) {
@@ -2157,8 +1736,11 @@ void instance_manager::pump_market_streams() {
              * failed read is left to the browser's cadence rather than retried
              * on every frame.
              */
-            if (catalogue == nullptr)
-                start_market_catalogue_read(windows().id(window));
+            if (catalogue == nullptr) {
+                if (auto refused = read_service_.start_market_catalogue_read(
+                        windows().id(window)))
+                    raise(std::move(refused->key), std::move(refused->message));
+            }
             continue;
         }
 
@@ -2208,8 +1790,8 @@ void instance_manager::pump_market_streams() {
                 continue;
             entry.stream->watch(series_id, uri);
             entry.watched.emplace(series_id, uri);
-            start_market_backfill(entry.instance_id, entry.account_id,
-                series_id);
+            read_service_.start_market_backfill(entry.instance_id,
+                entry.account_id, series_id);
         }
         for (auto watch = entry.watched.begin(); watch != entry.watched.end();) {
             if (desired.contains(watch->first)) {
@@ -2223,14 +1805,14 @@ void instance_manager::pump_market_streams() {
         if (entry.stream->take_reconnected()) {
             for (const auto& [series_id, uri] : entry.watched) {
                 static_cast<void>(uri);
-                start_market_backfill(entry.instance_id, entry.account_id,
-                    series_id);
+                read_service_.start_market_backfill(entry.instance_id,
+                    entry.account_id, series_id);
             }
         }
 
         entry.stream->drain(buckets);
         for (const auto& bucket : buckets) {
-            market_.append_point(entry.instance_id, entry.account_id,
+            read_service_.market().append_point(entry.instance_id, entry.account_id,
                 bucket.series_id, bucket.level, bucket.point, now);
         }
 
@@ -2239,101 +1821,6 @@ void instance_manager::pump_market_streams() {
 
     std::erase_if(retired_market_streams_,
         [](const auto& stream) { return stream->finished(); });
-}
-
-bool instance_manager::apply_read_answer(const event::event& ev) {
-    switch (ev.kind) {
-    case event::event_kind::series_catalogue: {
-        catalogues_reading_.erase(
-            running_key(ev.instance_id, ev.account_id));
-        if (ev.message.empty()) {
-            market_.set_catalogue(ev.instance_id, ev.account_id,
-                ev.series);
-        } else {
-            market_.fail_catalogue(ev.instance_id, ev.account_id,
-                ev.message);
-        }
-        return true;
-    }
-    case event::event_kind::crm_names: {
-        crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
-            ev.crm_names);
-        return true;
-    }
-    case event::event_kind::crm_rates: {
-        if (ev.message.empty())
-            crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-                ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
-                ev.crm_as_of_ns, ev.crm_latency_ns);
-        else
-            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-                ev.crm_reciprocal, ev.message);
-        crm_.schedule(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-            ev.crm_reciprocal, steady_now_ns()
-                + std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    crm_cadence).count());
-        return true;
-    }
-    case event::event_kind::term_structure: {
-        if (ev.message.empty()) {
-            term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.curve_label, ev.term_curves);
-        } else {
-            term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.message);
-        }
-        return true;
-    }
-    case event::event_kind::image_loaded: {
-        const auto key = model::state::make_tenant_key(ev.tenant_id,
-            ev.image_id);
-        images_reading_.erase(key);
-        if (ev.message.empty()) {
-            if (images_.put(ev.tenant_id, ev.image_id,
-                    model::state::image_content{.mime_type = ev.mime_type,
-                        .data = ev.bytes})) {
-                failed_images_.erase(key);
-            } else {
-                failed_images_.insert(key);
-            }
-        } else {
-            failed_images_.insert(key);
-        }
-        return true;
-    }
-    case event::event_kind::currency_image_map: {
-        currency_images_reading_.erase(ev.tenant_id);
-        if (ev.message.empty()) {
-            std::vector<std::pair<std::string, std::string>> mapped;
-            for (const auto& image : ev.image_refs) {
-                mapped.emplace_back(image.currency, image.image_id);
-            }
-            currency_images_.set(ev.tenant_id, std::move(mapped));
-        } else {
-            currency_images_.fail(ev.tenant_id, ev.message);
-        }
-        return true;
-    }
-    case event::event_kind::series_points: {
-        const auto key = std::format("{}\x1f{}",
-            running_key(ev.instance_id, ev.account_id), ev.series_id);
-        points_reading_.erase(key);
-        if (ev.message.empty()) {
-            market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.points, ev.observed_at_ns);
-        } else {
-            market_.fail_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.message, ev.observed_at_ns);
-        }
-        return true;
-    }
-    case event::event_kind::deployment_snapshot:
-        /* The snapshot itself belongs on the session row, applied below. */
-        deployment_reads_.erase(running_key(ev.instance_id, ev.account_id));
-        return false;
-    default:
-        return false;
-    }
 }
 
 void instance_manager::apply(const event::event& ev) {
@@ -2389,7 +1876,7 @@ void instance_manager::apply(const event::event& ev) {
      * because the operator signed out meanwhile would leave the read marked as
      * running, and refuse it again after the next sign-in.
      */
-    if (apply_read_answer(ev))
+    if (read_service_.apply(ev))
         return;
 
     /*
@@ -2427,7 +1914,7 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
         start_market_stream(ev);
-        start_currency_image_map(ev);
+        read_service_.start_currency_image_map(ev);
 
         /*
          * Stamped here rather than by the worker, so the time says when the

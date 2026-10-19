@@ -38,6 +38,7 @@
 #include "hedgr.runtime/service/lock_service.hpp"
 #include "hedgr.runtime/service/password_policy_service.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
+#include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
@@ -179,44 +180,44 @@ public:
 
     /** @brief The market series and the points each chart holds. */
     [[nodiscard]] const model::state::market_table& market() const noexcept {
-        return market_;
+        return read_service_.market();
     }
 
     /** @brief Which image each tenant currency names. */
     [[nodiscard]] const model::state::tenant_image_map&
     currency_images() const noexcept {
-        return currency_images_;
+        return read_service_.currency_images();
     }
 
     /** @brief The latest CRM batch each session and party read. */
     [[nodiscard]] const model::state::crm_table& crm() const noexcept {
-        return crm_;
+        return read_service_.crm();
     }
 
     /** @brief The latest curve each browser session read. */
     [[nodiscard]] const model::state::term_structure_table&
     term_structures() const noexcept {
-        return term_structures_;
+        return read_service_.term_structures();
     }
 
     /** @brief The bounded cache of tenant images by identifier. */
     [[nodiscard]] model::state::image_cache& images() noexcept {
-        return images_;
+        return read_service_.images();
     }
     [[nodiscard]] const model::state::image_cache& images() const noexcept {
-        return images_;
+        return read_service_.images();
     }
 
     /** @brief Images whose reads failed, keyed as the cache keys them. */
     [[nodiscard]] const std::unordered_set<std::string>&
     failed_images() const noexcept {
-        return failed_images_;
+        return read_service_.failed_images();
     }
 
     /** @brief Images whose reads are in flight, keyed as the cache keys them. */
     [[nodiscard]] const std::unordered_set<std::string>&
     pending_images() const noexcept {
-        return images_reading_;
+        return read_service_.pending_images();
     }
 
     /**
@@ -375,87 +376,6 @@ private:
     /** @brief Routes a window's read request to the starter that serves it. */
     void start_read(const service::read_request& request);
 
-    void do_load_crm_names(const model::command::command& cmd);
-
-    /** @brief What a read needs of a session before it may start. */
-    enum class read_gate {
-        signed_in,
-        signed_in_with_token,
-        token_only,
-    };
-
-    /**
-     * @brief The identity, token and connection a read on @p session presents.
-     *
-     * Empty when the session fails @p gate or its instance row is gone. Every
-     * refusal is silent: a window over a session that cannot read draws its own
-     * session-loss state.
-     */
-    [[nodiscard]] std::optional<worker::session_read> session_read_for(
-        model::state::session_handle session, read_gate gate) const;
-
-    /** @brief The same, for the session signed in as one instance and account. */
-    [[nodiscard]] std::optional<worker::session_read> session_read_for(
-        std::string_view instance_id, std::string_view account_id,
-        read_gate gate) const;
-
-    /**
-     * @brief Asks for one command centre's deployment read.
-     *
-     * One read at a time per session. A read already in flight means the
-     * cadence asked again before the deployment answered, and a second read
-     * would queue behind the first for no new information.
-     */
-    void start_deployment_read(std::string_view window_id);
-
-    /** @brief Asks for the market series catalogue, on the window's session. */
-    void start_market_catalogue_read(std::string_view window_id);
-
-    /**
-     * @brief Asks for one market read on the window's session.
-     *
-     * An empty @p series_id is the catalogue; anything else is that series'
-     * points. One path because the connection, token and in-flight rules are
-     * the same for both.
-     */
-    void start_market_read(std::string_view window_id,
-        std::string_view series_id);
-
-    /** @brief Asks for one series' points, on the window's session. */
-    void start_market_points_read(std::string_view window_id,
-        std::string_view series_id);
-
-    /** @brief Reads a tenant's currency-to-image map. */
-    void start_currency_image_map(const model::event::event& ev);
-
-    /** @brief Reads one tenant image by identifier for a session. */
-    void do_load_image(const model::command::command& cmd);
-
-    /** @brief Reads the latest curve named by a set of tenor series. */
-    void do_load_term_structure(const model::command::command& cmd);
-
-    /** @brief Reads the curve a term-structure window shows. */
-    void start_term_structure_read(model::state::window_handle handle);
-
-    /** @brief Reads the CRM batch a cross-rates window shows. */
-    void start_crm_read(model::state::window_handle handle);
-
-    /**
-     * @brief Reads each CRM batch an open cross-rates window shows, when due.
-     *
-     * The deadline belongs to the batch rather than the window, so any number
-     * of windows over one matrix cost one read per cadence. Whether a window is
-     * collapsed or drawn plays no part, because the interface never asks.
-     */
-    void pump_crm_reads();
-
-    void start_crm_names_read(std::string_view instance_id,
-        std::string_view account_id, std::string_view party_id);
-
-    /** @brief Seeds one watched series' history on a fresh connection. */
-    void start_market_backfill(std::string_view instance_id,
-        std::string_view account_id, std::string_view series_id);
-
     /** @brief Opens the live stream for one authenticated session. */
     void start_market_stream(const model::event::event& ev);
 
@@ -478,14 +398,6 @@ private:
      */
     void drop_target_shortcuts(model::domain::window_kind kind,
                                const std::string& target_id);
-
-    /**
-     * @brief Clears a read's in-flight mark and applies its answer.
-     *
-     * @return true when the event was wholly a read answer, false when the
-     * session row still has something to apply.
-     */
-    [[nodiscard]] bool apply_read_answer(const model::event::event& ev);
 
     /**
      * @brief Moves every leaf out of @p folder_ids and into its tree's root.
@@ -573,44 +485,6 @@ private:
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
 
     /**
-     * @brief The deployment reads in flight, by the session they serve.
-     *
-     * A read is short-lived and has no cancellation of its own, so a set of
-     * keys is all the state it needs: an entry means one read is out, and the
-     * snapshot event removes it whatever the read found.
-     */
-    std::unordered_set<std::string> deployment_reads_;
-
-    /** @brief The market series and the points each chart holds. */
-    model::state::market_table market_;
-
-    /** @brief Which image each tenant currency names. */
-    model::state::tenant_image_map currency_images_;
-
-    /** @brief Tenants whose currency image map read is out. */
-    std::unordered_set<std::string> currency_images_reading_;
-
-    /** @brief The bounded cache of tenant images by identifier. */
-    model::state::image_cache images_;
-
-    /** @brief The latest curve each browser session read. */
-    model::state::term_structure_table term_structures_;
-
-    model::state::crm_table crm_;
-
-    /** @brief Tenant-and-image whose read is out. */
-    std::unordered_set<std::string> images_reading_;
-
-    /** @brief Tenant-and-image whose read failed, so it is not asked again. */
-    std::unordered_set<std::string> failed_images_;
-
-    /** @brief The sessions whose catalogue read is out, by running key. */
-    std::unordered_set<std::string> catalogues_reading_;
-
-    /** @brief The session-and-series whose points read is out. */
-    std::unordered_set<std::string> points_reading_;
-
-    /**
      * @brief One authenticated session's live prices.
      *
      * The stream owns the connection and its thread; the manager owns the
@@ -675,6 +549,8 @@ private:
         probe_pool_.context(), events_};
     service::window_service window_service_{sessions_};
     service::lock_service lock_service_{pool_.context(), commands_, events_, accounts_};
+    service::read_service read_service_{pool_.context(), events_, instances_,
+        accounts_, sessions_, window_service_.windows(), seed_options_};
 };
 
 }

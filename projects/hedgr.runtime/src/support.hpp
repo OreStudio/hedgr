@@ -54,6 +54,23 @@ namespace sqlite = hedgr::store::sqlite;
     return instance;
 }
 
+/**
+ * @brief The key a running worker is registered under.
+ *
+ * The id separator is the one the session table uses internally to join a pair
+ * as well, so a key here can never collide with either half of another pair:
+ * "a" + "bc" and "ab" + "c" have to be two workers, not one.
+ */
+[[nodiscard]] inline std::string running_key(std::string_view instance_id,
+    std::string_view account_id) {
+    std::string result;
+    result.reserve(instance_id.size() + account_id.size() + 1);
+    result.append(instance_id);
+    result.push_back('\x1f');
+    result.append(account_id);
+    return result;
+}
+
 /** @brief Every live window row, holes skipped, for a whole-table walk. */
 [[nodiscard]] inline std::vector<model_state::window_handle>
 live_windows(const model_state::window_table& windows) {
