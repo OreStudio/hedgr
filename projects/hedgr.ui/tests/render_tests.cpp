@@ -1073,3 +1073,33 @@ TEST_CASE("a flag request asks for the image the map names", "[flags]") {
     request_flags(input, session, "FX GBP/USD");
     CHECK(state.commands.size() == 0);
 }
+
+TEST_CASE("a dragged row's id outlives the row it was copied from",
+    "[browser]") {
+    using hedgr::ui::widget::decode_drag_payload;
+    using hedgr::ui::widget::encode_drag_payload;
+    using hedgr::ui::widget::node_kind;
+
+    /*
+     * ImGui keeps a byte copy of the payload and hands it back on the drop
+     * frame, after the source's strings are gone. A uuid-length id is long
+     * enough to live on the heap, which is the case a byte copy of a
+     * std::string would leave dangling.
+     */
+    const std::string expected = "folder:0190a5c2-7e4b-7c1d-9a3f-1b2c3d4e5f60";
+    std::vector<char> held;
+    {
+        const std::string source = expected;
+        const std::string bytes = encode_drag_payload(node_kind::folder, source);
+        held.assign(bytes.begin(), bytes.end());
+    }
+
+    const auto dragged =
+        decode_drag_payload(held.data(), static_cast<int>(held.size()));
+    REQUIRE(dragged);
+    CHECK(dragged->kind == node_kind::folder);
+    CHECK(dragged->id == expected);
+
+    CHECK_FALSE(decode_drag_payload(held.data(), 0));
+    CHECK_FALSE(decode_drag_payload(nullptr, 0));
+}
