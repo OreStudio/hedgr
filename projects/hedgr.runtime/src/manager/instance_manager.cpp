@@ -4249,11 +4249,18 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_token_refreshed:
         /*
          * A refresh replaces the credential, not the session. Reads that start
-         * from here on take the new token, and the tick stream is reopened on
-         * it so a reconnect after the next expiry still carries a live one.
+         * from here on take the new token, and the tick stream keeps it for
+         * its next resume. The stream itself stays, with its subscription and
+         * its open buckets.
          */
         sessions_.set_token(*handle, ev.token);
-        start_market_stream(ev);
+        if (const auto stream = market_streams_.find(
+                running_key(ev.instance_id, ev.account_id));
+            stream != market_streams_.end() && stream->second.stream) {
+            stream->second.stream->set_token(std::string{ev.token.view()});
+        } else {
+            start_market_stream(ev);
+        }
         break;
     case event::event_kind::deployment_snapshot:
         sessions_.set_deployment(*handle, ev.deployment);
