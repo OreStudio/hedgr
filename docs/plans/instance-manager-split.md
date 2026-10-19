@@ -223,6 +223,22 @@ factory. Three of these are already named in `docs/plans/market-eventing.md`.
 Risk is medium to high. The code moved is 162 lines, but the group has three
 threads and no behavioural tests.
 
+Status: done. The seam is a `worker::tick_feed` interface that `market_stream`
+implements and a `tick_feed_factory` the manager takes as a defaulted second
+constructor argument, so production builds a real stream and a test builds a
+fake. Every call across it is the frame thread's once per frame. Ticks still go
+through the stream's own sink on the NATS thread, so no virtual call is paid per
+tick. `market_feed` takes the instance, session and window tables by const
+reference, the market table by reference and the two reads as callbacks, and
+holds no manager. Supervision calls `open`, `retoken_or_open` and `close`.
+`pump()` returns the refused catalogue reads for the facade to raise. The tests
+landed first against the unmoved code, and each was mutated and killed except
+the stop in the disconnect and remove-account hooks, which the pump's sweep
+makes unobservable within a frame. They also cover `start_market_backfill` and
+the feed's catalogue call, which step 5 converted without tests. No defect was
+found. One quirk is pinned, that a refresh following a failure in one frame
+opens a stream that the same frame retires.
+
 ### 7. Catalogue
 
 Move the fourteen catalogue handlers, `rehome_leaves`, `drop_target_shortcuts`
@@ -298,4 +314,3 @@ where the table moves.
   status bar collapses two errors in one frame.
 - Whether the seeder keeps `.env` parsing or uses an `ores.utility` helper if one
   fits.
-- Whether the market stream test seam is a fake or an injectable factory.

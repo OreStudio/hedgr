@@ -119,16 +119,16 @@ constexpr std::size_t probe_thread_count = 2;
 instance_manager::instance_manager(std::size_t pool_threads,
     worker::tick_feed_factory market_feeds)
     : pool_(pool_threads), probe_pool_(probe_thread_count)
-    , market_feeds_(std::move(market_feeds)) {
-    if (!market_feeds_) {
-        market_feeds_ = [](worker::market_stream_options options)
-            -> std::unique_ptr<worker::tick_feed> {
-            auto stream =
-                std::make_unique<worker::market_stream>(std::move(options));
-            stream->start();
-            return stream;
-        };
-    }
+    , market_feed_(instances_, sessions_, window_service_.windows(),
+          read_service_.market(), seed_options_, std::move(market_feeds),
+          [this](std::string_view window_id) {
+              return read_service_.start_market_catalogue_read(window_id);
+          },
+          [this](std::string_view instance_id, std::string_view account_id,
+                 std::string_view series_id) {
+              read_service_.start_market_backfill(instance_id, account_id,
+                  series_id);
+          }) {
 }
 
 instance_manager::~instance_manager() {
@@ -153,12 +153,7 @@ void instance_manager::stop() noexcept {
     }
     running_.clear();
     attempts_.clear();
-    for (auto& [key, entry] : market_streams_) {
-        static_cast<void>(key);
-        retire_market_stream(std::move(entry.stream));
-    }
-    market_streams_.clear();
-    retired_market_streams_.clear();
+    market_feed_.cancel();
     read_service_.clear();
 
     /*
@@ -231,6 +226,7 @@ instance_manager::start(const std::filesystem::path& database_path,
     window_service_.attach(*database_);
     lock_service_.attach(*database_, *account_repo_);
     read_service_.attach(database_->path());
+    market_feed_.attach(database_->path());
 
     /*
      * The lock is read before anything else, because it says whether the rows
@@ -426,7 +422,8 @@ void instance_manager::pump() {
      * closed since the last frame are applied here. Both happen after the
      * events, so a session that authenticated this frame has its stream.
      */
-    pump_market_streams();
+    for (auto& refused : market_feed_.pump())
+        raise(std::move(refused.key), std::move(refused.message));
 }
 
 std::string instance_manager::open_accounts_window(const std::string& instance_id) {
@@ -871,7 +868,7 @@ void instance_manager::do_remove_account(const command::command& cmd) {
 
     if (const auto session = sessions_.find(instance_id, id)) {
         stop_session(running_key(instance_id, id));
-        stop_market_stream(instance_id, id);
+        market_feed_.close(instance_id, id);
         window_service_.unbind(*session);
         sessions_.remove(*session);
     }
@@ -1625,7 +1622,7 @@ void instance_manager::report_store_failure(const std::string& instance_id,
 
 void instance_manager::do_disconnect_session(const command::command& cmd) {
     stop_session(running_key(cmd.instance_id, cmd.account_id));
-    stop_market_stream(cmd.instance_id, cmd.account_id);
+    market_feed_.close(cmd.instance_id, cmd.account_id);
 
     const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
     if (!handle)
@@ -1662,175 +1659,6 @@ void instance_manager::complete_open(service::open_outcome outcome) {
         start_read(*outcome.read);
     if (outcome.refused)
         raise(std::move(outcome.refused->key), std::move(outcome.refused->message));
-}
-
-void instance_manager::start_market_stream(const model::event::event& ev) {
-    stop_market_stream(ev.instance_id, ev.account_id);
-    if (!database_)
-        return;
-    const auto instance = instances_.find(ev.instance_id);
-    if (!instance)
-        return;
-
-    worker::market_stream_options options;
-    options.options = connection_options_for(*instances_.get(*instance),
-        seed_options_, database_->path());
-    options.token = std::string{ev.token.view()};
-    options.principal = ev.payload;
-    options.tenant_id = ev.tenant_id;
-    options.party_id = ev.party_id;
-
-    auto stream = market_feeds_(std::move(options));
-
-    market_stream_entry entry;
-    entry.instance_id = ev.instance_id;
-    entry.account_id = ev.account_id;
-    entry.stream = std::move(stream);
-    market_streams_.insert_or_assign(
-        running_key(ev.instance_id, ev.account_id), std::move(entry));
-    BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Market tick stream opened for '" << ev.instance_id << "' / '"
-        << ev.account_id << "' in party '" << ev.party_id << "'";
-}
-
-void instance_manager::stop_market_stream(std::string_view instance_id,
-    std::string_view account_id) {
-    const auto key = running_key(instance_id, account_id);
-    const auto found = market_streams_.find(key);
-    if (found == market_streams_.end())
-        return;
-    retire_market_stream(std::move(found->second.stream));
-    market_streams_.erase(found);
-}
-
-void instance_manager::retire_market_stream(
-    std::unique_ptr<worker::tick_feed> stream) {
-    if (!stream)
-        return;
-    stream->request_stop();
-    retired_market_streams_.push_back(std::move(stream));
-}
-
-void instance_manager::pump_market_streams() {
-    /*
-     * What the open charts need, by session. A watch is only possible once the
-     * catalogue names the series' URI, so a chart opened before the catalogue
-     * read is watched on a later frame.
-     */
-    std::unordered_map<std::string,
-        std::vector<std::pair<std::string, std::string>>> wanted;
-
-    for (const auto window : live_windows(windows())) {
-        if (windows().kind(window) != domain::window_kind::chart)
-            continue;
-        const auto session = windows().session_of(window);
-        if (!session)
-            continue;
-        const auto* chart =
-            std::get_if<domain::chart_state>(&windows().state(window));
-        if (chart == nullptr || chart->series_id.empty())
-            continue;
-
-        const auto instance_id = sessions_.instance_id(*session);
-        const auto account_id = sessions_.account_id(*session);
-        const auto* catalogue =
-            read_service_.market().catalogue(instance_id, account_id);
-        if (catalogue == nullptr
-            || catalogue->state
-                == model_state::catalogue_state::failed) {
-            /*
-             * A restored chart has a series id and no catalogue to turn it into
-             * the URI a subscription needs. Reading the catalogue is what the
-             * series browser does; doing it here as well is what lets a chart
-             * that outlived the process come back to life without one. A
-             * failed read is left to the browser's cadence rather than retried
-             * on every frame.
-             */
-            if (catalogue == nullptr) {
-                if (auto refused = read_service_.start_market_catalogue_read(
-                        windows().id(window)))
-                    raise(std::move(refused->key), std::move(refused->message));
-            }
-            continue;
-        }
-
-        const auto row = std::find_if(catalogue->series.begin(),
-            catalogue->series.end(), [&chart](const auto& series) {
-                return series.id == chart->series_id;
-            });
-        if (row == catalogue->series.end())
-            continue;
-
-        /*
-         * The tick subject is party scoped and the token is for the session's
-         * party. A chart looking at another party through the picker keeps its
-         * backfill and manual refresh, not a live stream.
-         */
-        if (row->party_id != sessions_.party_id(*session))
-            continue;
-
-        wanted[running_key(instance_id, account_id)]
-            .emplace_back(row->id, row->uri);
-    }
-
-    std::vector<model::state::market_bucket> buckets;
-    const auto now = steady_now_ns();
-
-    for (auto it = market_streams_.begin(); it != market_streams_.end();) {
-        auto& entry = it->second;
-        const auto session = sessions_.find(entry.instance_id,
-            entry.account_id);
-        if (!session
-            || sessions_.status(*session)
-                != domain::session_status::authenticated) {
-            retire_market_stream(std::move(entry.stream));
-            it = market_streams_.erase(it);
-            continue;
-        }
-
-        const auto needed = wanted.find(it->first);
-        std::unordered_map<std::string, std::string> desired;
-        if (needed != wanted.end()) {
-            for (const auto& [series_id, uri] : needed->second)
-                desired.emplace(series_id, uri);
-        }
-
-        for (const auto& [series_id, uri] : desired) {
-            if (entry.watched.contains(series_id))
-                continue;
-            entry.stream->watch(series_id, uri);
-            entry.watched.emplace(series_id, uri);
-            read_service_.start_market_backfill(entry.instance_id,
-                entry.account_id, series_id);
-        }
-        for (auto watch = entry.watched.begin(); watch != entry.watched.end();) {
-            if (desired.contains(watch->first)) {
-                ++watch;
-                continue;
-            }
-            entry.stream->unwatch(watch->first);
-            watch = entry.watched.erase(watch);
-        }
-
-        if (entry.stream->take_reconnected()) {
-            for (const auto& [series_id, uri] : entry.watched) {
-                static_cast<void>(uri);
-                read_service_.start_market_backfill(entry.instance_id,
-                    entry.account_id, series_id);
-            }
-        }
-
-        entry.stream->drain(buckets);
-        for (const auto& bucket : buckets) {
-            read_service_.market().append_point(entry.instance_id, entry.account_id,
-                bucket.series_id, bucket.level, bucket.point, now);
-        }
-
-        ++it;
-    }
-
-    std::erase_if(retired_market_streams_,
-        [](const auto& stream) { return stream->finished(); });
 }
 
 void instance_manager::apply(const event::event& ev) {
@@ -1923,7 +1751,7 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_parties(*handle, ev.parties);
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
-        start_market_stream(ev);
+        market_feed_.open(ev);
         read_service_.start_currency_image_map(ev);
 
         /*
@@ -1962,13 +1790,7 @@ void instance_manager::apply(const event::event& ev) {
          * its open buckets.
          */
         sessions_.set_token(*handle, ev.token);
-        if (const auto stream = market_streams_.find(
-                running_key(ev.instance_id, ev.account_id));
-            stream != market_streams_.end() && stream->second.stream) {
-            stream->second.stream->set_token(std::string{ev.token.view()});
-        } else {
-            start_market_stream(ev);
-        }
+        market_feed_.retoken_or_open(ev);
         break;
     case event::event_kind::deployment_snapshot:
         sessions_.set_deployment(*handle, ev.deployment);
@@ -1978,7 +1800,7 @@ void instance_manager::apply(const event::event& ev) {
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);
-        stop_market_stream(ev.instance_id, ev.account_id);
+        market_feed_.close(ev.instance_id, ev.account_id);
 
         /*
          * The sentence a person reads stays first and the code follows it in
