@@ -221,6 +221,30 @@ TEST_CASE("an empty sealed value is refused", "[secret_box]") {
     REQUIRE(opened.error().code == box_errc::wrong_master_password);
 }
 
+/*
+ * Sealed outside Hedgr, with OpenSSL called directly: salt 00..0f, nonce a0..ab,
+ * PBKDF2-SHA256 at 600,000 rounds, AES-256-GCM, then standard base64. It pins
+ * the stored format, so a change of codec cannot strand a credential already
+ * on disk. The 58 bytes end in "==" padding on purpose.
+ */
+constexpr std::string_view known_sealed =
+    "AAECAwQFBgcICQoLDA0OD6ChoqOkpaanqKmqq+mcmqttNe1SVZ9ko4MiBVoImFKJBU4U63qob7Xa8Q==";
+
+TEST_CASE("a value sealed outside Hedgr opens", "[secret_box]") {
+    const auto opened = secret_box::open("correct horse", known_sealed);
+    REQUIRE(opened.has_value());
+    REQUIRE(opened.value() == "nats-secret-42");
+}
+
+TEST_CASE("a sealed value outside the base64 alphabet is refused", "[secret_box]") {
+    std::string url_safe{known_sealed};
+    url_safe[url_safe.find('+')] = '-';
+
+    const auto opened = secret_box::open("correct horse", url_safe);
+    REQUIRE_FALSE(opened.has_value());
+    REQUIRE(opened.error().code == box_errc::wrong_master_password);
+}
+
 TEST_CASE("sealing under an empty master password is refused", "[secret_box]") {
     /*
      * A file that looks protected and is not is worse than no protection, and
