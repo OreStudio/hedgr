@@ -29,6 +29,7 @@
 #include <sqlgen/transpilation/to_insert_or_write.hpp>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -64,6 +65,35 @@ template <class Rows>
     if (!rows)
         return std::unexpected(query_failed(rows.error()));
     return rows.value();
+}
+
+/** @brief Logs a row that could not be mapped and is being left out. */
+HEDGR_STORE_EXPORT void skip_corrupt_row(std::string_view table,
+    const sqlite::store_error& error);
+
+/**
+ * @brief The rows that map through @p map, skipping and logging the rest.
+ *
+ * One row this build cannot read must not hide every row beside it: a window
+ * whose saved state no longer parses would otherwise take the whole wall down
+ * at startup.
+ */
+template <class Row, class Map>
+[[nodiscard]] auto valid_rows(const std::vector<Row>& rows,
+    std::string_view table, Map map) {
+    using value_type =
+        typename std::invoke_result_t<Map&, const Row&>::value_type;
+    std::vector<value_type> values;
+    values.reserve(rows.size());
+    for (const auto& row : rows) {
+        auto value = map(row);
+        if (!value) {
+            skip_corrupt_row(table, value.error());
+            continue;
+        }
+        values.push_back(std::move(value).value());
+    }
+    return values;
 }
 
 /** @brief The outcome of a write, or the failure it produced. */

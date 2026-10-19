@@ -99,15 +99,7 @@ sqlite::result<std::vector<dom::label>> label_repository::list() const {
     if (!rows)
         return std::unexpected(rows.error());
 
-    std::vector<dom::label> values;
-    values.reserve(rows.value().size());
-    for (const auto& row : rows.value()) {
-        auto value = to_domain(row);
-        if (!value)
-            return std::unexpected(value.error());
-        values.push_back(std::move(value).value());
-    }
-    return values;
+    return valid_rows(rows.value(), label_entity::tablename, to_domain);
 }
 
 sqlite::result<void> label_repository::save(const dom::label& row) {

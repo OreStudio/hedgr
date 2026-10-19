@@ -95,15 +95,7 @@ sqlite::result<std::vector<dom::folder>> folder_repository::list() const {
     if (!rows)
         return std::unexpected(rows.error());
 
-    std::vector<dom::folder> values;
-    values.reserve(rows.value().size());
-    for (const auto& row : rows.value()) {
-        auto value = to_domain(row);
-        if (!value)
-            return std::unexpected(value.error());
-        values.push_back(std::move(value).value());
-    }
-    return values;
+    return valid_rows(rows.value(), folder_entity::tablename, to_domain);
 }
 
 sqlite::result<void> folder_repository::save(const dom::folder& row) {
