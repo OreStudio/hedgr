@@ -265,17 +265,9 @@ void add_unreachable_instance(instance_manager& manager, std::string id,
     push_command(manager, save);
 }
 
-/**
- * @brief Signs @p account_id in on an unreachable instance, as far as the
- * frame loop can tell.
- *
- * The worker's own sign-in is refused, and only then is the authenticated fact
- * pushed by hand: pushing it earlier would let the refusal land on top of it.
- * Every read the session starts afterwards connects to the same refused port,
- * so it fails fast and its answer exercises the real event path.
- */
-void sign_in_unreachable(instance_manager& manager,
-    const std::string& instance_id, const std::string& account_id) {
+/** @brief Runs the worker's sign-in to its refusal, leaving the session failed. */
+void refuse_sign_in(instance_manager& manager, const std::string& instance_id,
+    const std::string& account_id) {
     command connect;
     connect.kind = command_kind::connect_session;
     connect.instance_id = instance_id;
@@ -291,12 +283,28 @@ void sign_in_unreachable(instance_manager& manager,
             && manager.sessions().status(*handle) == session_status::failed;
     }, std::chrono::seconds(10));
     REQUIRE(refused);
+}
+
+/**
+ * @brief Signs @p account_id in on an unreachable instance, as far as the
+ * frame loop can tell.
+ *
+ * The worker's own sign-in is refused, and only then is the authenticated fact
+ * pushed by hand: pushing it earlier would let the refusal land on top of it.
+ * Every read the session starts afterwards connects to the same refused port,
+ * so it fails fast and its answer exercises the real event path.
+ */
+void sign_in_unreachable(instance_manager& manager,
+    const std::string& instance_id, const std::string& account_id,
+    std::string token = "a-token-nobody-checks", std::string tenant_id = {}) {
+    refuse_sign_in(manager, instance_id, account_id);
 
     event fact;
     fact.kind = event_kind::session_authenticated;
     fact.instance_id = instance_id;
     fact.account_id = account_id;
-    fact.token = secret_string{std::string{"a-token-nobody-checks"}};
+    fact.tenant_id = std::move(tenant_id);
+    fact.token = secret_string{std::move(token)};
     manager.events().push(fact);
     manager.pump();
 
@@ -2202,4 +2210,199 @@ TEST_CASE("a wall the store refuses to save is a standing condition",
     REQUIRE(manager.conditions().empty());
 
     manager.stop();
+}
+
+namespace {
+
+enum class read_scenario {
+    signed_out,
+    sign_in_refused,
+    failed_after_sign_in,
+    authenticated_without_token,
+    authenticated,
+};
+
+constexpr auto read_instance = "inst-refused";
+constexpr auto read_account = "ident-1";
+constexpr auto read_tenant = "tenant-1";
+
+/** @brief One store, one unreachable instance, and a session in @p scenario. */
+void set_up_read_scenario(instance_manager& manager, read_scenario scenario) {
+    add_unreachable_instance(manager, read_instance);
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account(read_account, read_instance);
+    push_command(manager, save_account);
+    switch (scenario) {
+    case read_scenario::signed_out:
+        return;
+    case read_scenario::sign_in_refused:
+        refuse_sign_in(manager, read_instance, read_account);
+        return;
+    case read_scenario::failed_after_sign_in: {
+        sign_in_unreachable(manager, read_instance, read_account, "a-token",
+            read_tenant);
+        event lost;
+        lost.kind = event_kind::session_failed;
+        lost.instance_id = read_instance;
+        lost.account_id = read_account;
+        lost.message = "the connection dropped";
+        manager.events().push(lost);
+        manager.pump();
+        const auto handle =
+            manager.sessions().find(read_instance, read_account);
+        REQUIRE(handle.has_value());
+        REQUIRE(manager.sessions().status(*handle) == session_status::failed);
+        return;
+    }
+    case read_scenario::authenticated_without_token:
+        sign_in_unreachable(manager, read_instance, read_account, {},
+            read_tenant);
+        return;
+    case read_scenario::authenticated:
+        sign_in_unreachable(manager, read_instance, read_account, "a-token",
+            read_tenant);
+        return;
+    }
+}
+
+/**
+ * @brief One read starter, how to ask for its read and how to see it began.
+ *
+ * A synchronous starter marks its table before it spawns, so the mark is
+ * visible at once. The others only show their read through its answer.
+ */
+struct read_starter final {
+    const char* name;
+    bool needs_token;
+    bool synchronous;
+    std::function<void(instance_manager&)> ask;
+    std::function<bool(const instance_manager&)> began;
+};
+
+[[nodiscard]] std::vector<read_starter> read_starters() {
+    const auto open = [](window_kind kind, std::string series = {},
+                          std::string refresh_id = {}) {
+        return [kind, series = std::move(series),
+                   refresh_id = std::move(refresh_id)](
+                   instance_manager& manager) {
+            push_command(manager,
+                open_window(kind, read_instance, read_account, series));
+            if (!refresh_id.empty())
+                push_command(manager, refresh(refresh_id));
+        };
+    };
+    const auto load = [](command_kind kind) {
+        return [kind](instance_manager& manager) {
+            command request;
+            request.kind = kind;
+            request.instance_id = read_instance;
+            request.account_id = read_account;
+            request.party_id = "p";
+            request.image_id = "img-1";
+            request.curve_key = "curve-1";
+            request.curve_label = "Curve";
+            request.member_ids = {"m-1y", "m-2y"};
+            request.member_tenors = {"1Y", "2Y"};
+            push_command(manager, request);
+        };
+    };
+    return {
+        {"series browser catalogue", true, true,
+            open(window_kind::series_browser, {},
+                "series-browser:inst-refused:ident-1"),
+            [](const instance_manager& m) {
+                return m.market().catalogue(read_instance, read_account)
+                    != nullptr;
+            }},
+        {"command centre deployment", true, false,
+            open(window_kind::command_centre, {},
+                "command-centre:inst-refused:ident-1"),
+            [](const instance_manager& m) {
+                const auto handle =
+                    m.sessions().find(read_instance, read_account);
+                return handle && !m.sessions().deployment(*handle).failure.empty();
+            }},
+        {"term structure window", false, true,
+            open(window_kind::term_structure, "curve-1"),
+            [](const instance_manager& m) {
+                return m.term_structures().get(read_instance, read_account,
+                    "curve-1") != nullptr;
+            }},
+        {"crm matrix window", false, true, open(window_kind::crm_matrix),
+            [](const instance_manager& m) {
+                return m.crm().get(read_instance, read_account, "p", "majors",
+                    false) != nullptr;
+            }},
+        {"load_term_structure command", false, true,
+            load(command_kind::load_term_structure),
+            [](const instance_manager& m) {
+                return m.term_structures().get(read_instance, read_account,
+                    "curve-1") != nullptr;
+            }},
+        {"load_crm_names command", false, false,
+            load(command_kind::load_crm_names),
+            [](const instance_manager& m) {
+                return m.crm().names(read_instance, read_account, "p")
+                    != nullptr;
+            }},
+        {"load_image command", true, true, load(command_kind::load_image),
+            [](const instance_manager& m) {
+                return !m.pending_images().empty()
+                    || !m.failed_images().empty();
+            }},
+    };
+}
+
+}
+
+TEST_CASE("a read starter refuses a session that cannot read and starts one that can",
+    "[runtime][reads]") {
+    for (const auto scenario : {read_scenario::signed_out,
+             read_scenario::sign_in_refused,
+             read_scenario::failed_after_sign_in,
+             read_scenario::authenticated_without_token,
+             read_scenario::authenticated}) {
+        for (const auto& starter : read_starters()) {
+            const bool expected = scenario == read_scenario::authenticated
+                || (scenario == read_scenario::authenticated_without_token
+                    && !starter.needs_token);
+            CAPTURE(starter.name, static_cast<int>(scenario), expected);
+
+            const temporary_database database("read-preamble");
+            instance_manager manager;
+            REQUIRE(manager.start(database.path(), seed_options()).has_value());
+            set_up_read_scenario(manager, scenario);
+
+            starter.ask(manager);
+            manager.pump();
+
+            bool began = starter.began(manager);
+            if (!starter.synchronous) {
+                began = wait_until([&] {
+                    manager.pump();
+                    return starter.began(manager);
+                }, expected ? std::chrono::seconds(10)
+                            : std::chrono::milliseconds(400));
+            }
+            CHECK(began == expected);
+            manager.stop();
+        }
+    }
+}
+
+TEST_CASE("the currency image map is read for a token and refused without one",
+    "[runtime][reads]") {
+    for (const bool with_token : {true, false}) {
+        CAPTURE(with_token);
+        const temporary_database database("image-map-preamble");
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        set_up_read_scenario(manager, with_token
+            ? read_scenario::authenticated
+            : read_scenario::authenticated_without_token);
+        CHECK((manager.currency_images().get(read_tenant) != nullptr)
+            == with_token);
+        manager.stop();
+    }
 }
