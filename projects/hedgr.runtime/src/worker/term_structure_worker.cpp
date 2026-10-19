@@ -49,11 +49,16 @@ void spawn_term_structure_read(boost::asio::io_context& context,
          * curves are rebuilt by carrying each term's last value forward to
          * every instant: the newest curve is complete, and the history is a
          * continuous curve at each step rather than a handful of segments.
+         *
+         * The newest max_history points per pillar are enough. An instant
+         * among the newest max_history overall has fewer than max_history
+         * newer instants, so each pillar's value at it is within that page.
          */
+        constexpr std::uint32_t max_history = 20;
         std::map<std::string, std::map<std::int64_t, double>> by_term;
         std::set<std::int64_t> times;
         for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
-            const auto read = client.market_series_points(ids[i], 10000);
+            const auto read = client.market_series_points(ids[i], max_history);
             if (!read) {
                 /*
                  * A failed pillar is not a curve with no observations. Saying
@@ -71,7 +76,6 @@ void spawn_term_structure_read(boost::asio::io_context& context,
             }
         }
 
-        constexpr std::size_t max_history = 20;
         std::vector<std::int64_t> instants(times.begin(), times.end());
         if (instants.size() > max_history)
             instants.erase(instants.begin(),
