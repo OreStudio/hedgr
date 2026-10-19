@@ -11,6 +11,7 @@ set(files
     "account_seed_tests.cpp"
     "connection_options_tests.cpp"
     "environment_seed_tests.cpp"
+    "market_stream_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"
     "seed_store_tests.cpp"

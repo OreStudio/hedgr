@@ -420,6 +420,9 @@ private:
     void stop_market_stream(std::string_view instance_id,
         std::string_view account_id);
 
+    /** @brief Asks one stream to stop without waiting for it. */
+    void retire_market_stream(std::unique_ptr<worker::market_stream> stream);
+
     /** @brief Reconciles watches, drains buckets and applies them to the model. */
     void pump_market_streams();
     void do_probe_instance(const model::command::command& cmd);
@@ -755,12 +758,18 @@ private:
         std::string account_id;
         std::unique_ptr<worker::market_stream> stream;
         std::unordered_map<std::string, std::string> watched;
-
-        /** @brief Series refused by the watch cap, logged only once. */
-        std::unordered_set<std::string> refused;
     };
 
     std::unordered_map<std::string, market_stream_entry> market_streams_;
+
+    /**
+     * @brief Streams asked to stop, joined once each says it has finished.
+     *
+     * A stream's thread can be inside a connect, so the frame thread never
+     * joins one that is still running. The pump joins the finished ones,
+     * which costs nothing, and shutdown joins the rest.
+     */
+    std::vector<std::unique_ptr<worker::market_stream>> retired_market_streams_;
 
     /**
      * @brief The attempt each pair is on, by the pair's running key.

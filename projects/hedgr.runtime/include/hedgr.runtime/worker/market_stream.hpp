@@ -20,20 +20,19 @@
 #ifndef HEDGR_RUNTIME_WORKER_MARKET_STREAM_HPP
 #define HEDGR_RUNTIME_WORKER_MARKET_STREAM_HPP
 
-#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/tick_sink.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 namespace hedgr::runtime::worker {
@@ -59,13 +58,16 @@ struct market_stream_options final {
  * interval passes, the previous bucket is published to the ring the frame loop
  * drains. Tick rate therefore costs the frame loop nothing; only bucket rate
  * crosses the thread boundary.
+ *
+ * The thread can sit inside a connect for the connect timeout, so the frame
+ * thread asks it to stop with @c request_stop and joins it only once
+ * @c finished says the connection is closed.
  */
 class HEDGR_RUNTIME_EXPORT market_stream final {
 public:
-    /** @brief The most series one session may watch at once. */
-    static constexpr std::size_t max_watched_series = 512;
-
     explicit market_stream(market_stream_options options);
+
+    /** @brief Stops and joins the thread. Blocks for a connect in flight. */
     ~market_stream();
 
     market_stream(const market_stream&) = delete;
@@ -74,11 +76,29 @@ public:
     /** @brief Starts the connection thread. */
     void start();
 
-    /** @brief Stops the thread and closes the connection. */
-    void stop();
+    /**
+     * @brief Asks the thread to close the connection and exit.
+     *
+     * Returns at once. The thread closes the connection when its current
+     * connect attempt, if any, returns, and @c finished then answers true.
+     */
+    void request_stop();
+
+    /** @brief Whether the thread has closed the connection and is exiting. */
+    [[nodiscard]] bool finished() const noexcept {
+        return finished_.load(std::memory_order_acquire);
+    }
 
     /**
-     * @brief Watches one series, subscribing to its ticks.
+     * @brief The token the next connect resumes with. Thread safe.
+     *
+     * A refresh changes the credential and nothing else. The subscription
+     * stays, and so do the open buckets.
+     */
+    void set_token(std::string token);
+
+    /**
+     * @brief Watches one series, keeping its ticks.
      *
      * Thread safe. The series is watched until @c unwatch, whether or not the
      * connection is open at the time.
@@ -93,7 +113,9 @@ public:
      *
      * Called from the frame thread only.
      */
-    std::size_t drain(std::vector<model::state::market_bucket>& out);
+    std::size_t drain(std::vector<model::state::market_bucket>& out) {
+        return sink_->drain(out);
+    }
 
     /**
      * @brief Whether the stream reconnected since the last call.
@@ -103,24 +125,22 @@ public:
      */
     bool take_reconnected();
 
-    /** @brief Ticks decoded since construction. */
+    /** @brief Ticks bucketed since construction. */
     [[nodiscard]] std::size_t ticks() const noexcept {
-        return ticks_.load(std::memory_order_relaxed);
+        return sink_->ticks();
     }
 
-    /** @brief Series currently subscribed. */
-    [[nodiscard]] std::size_t subscriptions() const noexcept {
-        return subscriptions_.load(std::memory_order_relaxed);
+    /** @brief Series currently watched. */
+    [[nodiscard]] std::size_t watched() const {
+        return sink_->watched();
     }
 
     /** @brief Buckets dropped because the frame loop was too far behind. */
     [[nodiscard]] std::size_t dropped() const noexcept {
-        return ring_.dropped();
+        return sink_->dropped();
     }
 
 private:
-    struct series_state;
-
     /** @brief A watch change posted from the frame thread. */
     struct command final {
         bool add = true;
@@ -129,22 +149,20 @@ private:
     };
 
     void run();
-    void apply_commands(
-        std::unordered_map<std::string, std::string>& desired,
-        bool& changed);
+    void stop();
     void wait_for_retry();
 
     market_stream_options options_;
-    model::state::bucket_ring ring_;
+    std::shared_ptr<tick_sink> sink_;
 
     std::thread thread_;
     std::mutex mu_;
     std::condition_variable cv_;
     std::vector<command> commands_;
+    std::optional<std::string> new_token_;
     bool stopping_ = false;
 
-    std::atomic<std::size_t> ticks_{0};
-    std::atomic<std::size_t> subscriptions_{0};
+    std::atomic<bool> finished_{false};
     std::atomic<bool> reconnected_{false};
 };
 
