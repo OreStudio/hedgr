@@ -110,6 +110,15 @@ workspace::workspace() = default;
 
 workspace::~workspace() = default;
 
+void workspace::load_market_view(const std::filesystem::path& path) {
+    static_cast<void>(hedgr::ui::render::load_market_view(path, market_view_));
+}
+
+void workspace::save_market_view(const std::filesystem::path& path) const {
+    static_cast<void>(
+        hedgr::ui::render::save_market_view(path, market_view_));
+}
+
 void workspace::unlock_with(std::string_view master_password) {
     /*
      * The buffer is the prompt's own, so an unattended launch sets exactly what
@@ -419,7 +428,15 @@ void workspace::render(const render_input& input) {
         }
 
         const auto key = std::string{input.windows.id(handle)};
-        window_ui_state& state = ui_state_[key];
+        auto [entry, inserted] = ui_state_.try_emplace(key);
+        if (inserted) {
+            /*
+             * A window that has not been seen before opens on the choices the
+             * last window left, while the windows already open keep their own.
+             */
+            entry->second.market_view = market_view_;
+        }
+        window_ui_state& state = entry->second;
         if (const auto draw = renderer_for(kind))
             draw(handle, input, state, status_, lock_control_);
 

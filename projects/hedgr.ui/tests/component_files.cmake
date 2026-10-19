@@ -14,6 +14,7 @@ set(files
     "data_health_tests.cpp"
     "ema_tests.cpp"
     "flags_tests.cpp"
+    "market_view_tests.cpp"
     "render_tests.cpp"
     "shortcut_bar_tests.cpp"
     "sound_tests.cpp"

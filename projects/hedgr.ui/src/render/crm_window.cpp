@@ -19,6 +19,8 @@
  */
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/crm_rate.hpp"
+#include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -45,21 +47,6 @@ namespace {
 [[nodiscard]] std::string pair_text(const std::string& base,
     const std::string& quote) {
     return base + "/" + quote;
-}
-
-[[nodiscard]] std::string as_of_text(std::string_view iso) {
-    if (iso.empty())
-        return "\u2014";
-    std::string text;
-    for (const char c : iso) {
-        if (c == 'T')
-            text += ' ';
-        else if (c == 'Z')
-            text += " UTC";
-        else
-            text += c;
-    }
-    return text;
 }
 
 }
@@ -95,8 +82,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     if (state.crm_name.empty()) {
         ImGui::TextDisabled("No CRM selected.");
-        foot.word = "No CRM";
-        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        foot.word = std::string{data_health_word(data_health::unavailable)};
+        foot.colour = health_colour(data_health::unavailable);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -104,6 +91,15 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     const auto* snapshot = input.crm.get(instance_id, account_id,
         state.crm_party_id, state.crm_name, state.crm_reciprocal);
+
+    const auto as_of_ns = snapshot != nullptr
+        ? parse_iso8601_utc(snapshot->observed_as_of) : 0;
+    const auto health = assess_data_health(as_of_ns, input.wall_now_ns,
+        crm_health_thresholds);
+    foot.word = std::string{data_health_word(health.state)};
+    foot.colour = health_colour(health.state);
+    foot.as_of = as_of_text(as_of_ns);
+    foot.updating = snapshot != nullptr && snapshot->reading;
 
     auto configure_scope = [&] {
         model::command::command request;
@@ -181,14 +177,14 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
             "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
             stale.size(), unavailable.size());
-        ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 as of %s",
-            as_of_text(snapshot->observed_as_of).c_str());
+        if (snapshot->latency_ns > 0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("\u00b7 %.0f ms",
+                static_cast<double>(snapshot->latency_ns) / 1.0e6);
+        }
     }
 
     if (snapshot == nullptr || snapshot->cells.empty()) {
-        foot.word = snapshot == nullptr ? "Reading" : "No rates";
-        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -215,8 +211,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         currencies.insert(currency);
     if (currencies.size() < 2) {
         ImGui::TextDisabled("No pairs for this CRM.");
-        foot.word = "No pairs";
-        foot.colour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -420,20 +414,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         ImGui::EndTable();
     }
     ImGui::PopStyleVar();
-
-    std::size_t fresh = 0;
-    for (const auto& [pair, cell] : cells) {
-        static_cast<void>(pair);
-        if (cell->status == "fresh")
-            ++fresh;
-    }
-    const auto latency_ms = snapshot->latency_ns > 0
-        ? static_cast<double>(snapshot->latency_ns) / 1.0e6 : 0.0;
-    foot.word = snapshot->error.empty()
-        ? std::format("{} fresh \u00b7 {:.0f} ms", fresh, latency_ms)
-        : "read failed";
-    foot.colour = snapshot->error.empty()
-        ? theme::health_live_colour : theme::failure_colour;
 
     widget::draw_status_foot(status, input.now_ns, foot);
     ImGui::PopID();

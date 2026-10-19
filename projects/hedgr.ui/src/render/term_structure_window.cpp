@@ -21,17 +21,16 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
-#include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
 #include <cctype>
-#include <ctime>
 #include <format>
 #include <limits>
 #include <map>
@@ -46,20 +45,8 @@ using hedgr::model::state::window_handle;
 
 namespace {
 
-namespace domain = hedgr::model::domain;
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
-using hedgr::model::command::command;
-
-/** @brief The date the curve was observed, in the reader's local zone. */
-[[nodiscard]] std::string format_timestamp(std::int64_t at_ns) {
-    const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
-    std::tm local{};
-    localtime_r(&seconds, &local);
-    char buffer[40]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S", &local);
-    return buffer;
-}
 
 [[nodiscard]] int tenor_rank(std::string_view tenor) {
     if (tenor.empty())
@@ -118,40 +105,12 @@ void render_term_structure(window_handle handle, const render_input& input,
             input.sessions.account_id(*session), terms->curve_key)
         : nullptr;
 
-    if (widget::icon_button("refresh", icon::refresh,
-            "Read the curve again")) {
-        input.commands.push(command{
-            .kind = hedgr::model::command::command_kind::refresh_window,
-            .window_id = std::string{input.windows.id(handle)}});
-    }
-    ImGui::SameLine();
-
-    const auto currencies = widget::currencies_of(terms->label);
-    if (!currencies.base.empty()) {
-        auto* draw = ImGui::GetWindowDrawList();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        constexpr float flag_scale = 2.0f;
-        widget::draw_flag(draw, p, currencies.base, flag_scale,
-            session ? image_texture(input, *session, currencies.base) : 0);
-        ImGui::Dummy(ImVec2(widget::flag_width * flag_scale + 4.0f,
-            widget::flag_height * flag_scale));
-        ImGui::SameLine();
-    }
-    ImGui::TextUnformatted(terms->label.c_str());
-    ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
-
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-    ImGui::TextDisabled("History");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(80.0f);
-    ImGui::InputInt("##history", &state.term_history, 1, 1);
-    state.term_history = std::clamp(state.term_history, 1, 20);
-    ImGui::SetItemTooltip("%s",
-        "How many recent curves to overlay; the newest is green and the "
-        "earlier ones fade with age");
-
+    const auto history = std::clamp(state.market_view.term_history,
+        term_history_min, term_history_max);
+    int history_index = history - 1;
     int first = 0;
     int primary = -1;
+    std::int64_t newest_at_ns = 0;
     if (curve != nullptr && !curve->curves.empty()) {
         /*
          * The live stream publishes a few pillars at a time, so the newest
@@ -166,58 +125,55 @@ void render_term_structure(window_handle handle, const render_input& input,
                 primary = c;
             }
         }
-        first = std::max(0, primary - state.term_history + 1);
-        if (primary >= 0 && !curve->curves[primary].nodes.empty()) {
-            ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-            ImGui::TextDisabled("%zu terms",
-                curve->curves[primary].nodes.size());
-        }
+        first = std::max(0, primary - history + 1);
+        if (primary >= 0 && curve->curves[primary].at_ns > 0)
+            newest_at_ns = curve->curves[primary].at_ns;
     }
-    ImGui::NewLine();
 
-    if (!session.has_value()) {
-        ImGui::TextDisabled("Sign in to read this curve.");
-    } else if (curve != nullptr && primary >= 0
-        && curve->curves[primary].at_ns > 0) {
-        const auto& newest_curve = curve->curves[primary];
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextDisabled("%s", format_timestamp(newest_curve.at_ns).c_str());
-        ImGui::PopFont();
-        ImGui::SameLine();
-        ImGui::TextDisabled("\u00b7 %zu terms", newest_curve.nodes.size());
-        const auto age_ns = assess_data_health(
-            newest_curve.at_ns, input.now_ns).age_ns;
-        ImGui::SameLine();
-        if (age_ns > 15 * 60'000'000'000LL) {
-            ImGui::TextColored(
-                ImGui::ColorConvertU32ToFloat4(
-                    theme::readiness_colour(
-                        domain::readiness::bootstrapping)),
-                "\u00b7 as of %s ago", age_text(age_ns).c_str());
-        } else {
-            ImGui::TextDisabled("\u00b7 as of %s ago",
-                age_text(age_ns).c_str());
-        }
-    } else if (curve != nullptr) {
-        ImGui::TextDisabled("Reading the curve...");
+    const auto health = assess_data_health(newest_at_ns, input.wall_now_ns,
+        ir_health_thresholds);
+    foot.word = std::string{data_health_word(health.state)};
+    foot.colour = health_colour(health.state);
+    foot.as_of = as_of_text(newest_at_ns);
+    foot.updating = curve != nullptr && curve->reading;
+    foot.controls.push_back(widget::foot_combo{
+        .id = "history",
+        .tooltip = "How many recent curves to overlay",
+        .options = term_history_labels.data(),
+        .option_count = static_cast<int>(term_history_labels.size()),
+        .selected = &history_index});
+
+    ImGui::TextUnformatted(terms->label.c_str());
+    ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
+    if (primary >= 0 && !curve->curves[primary].nodes.empty()) {
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        ImGui::TextDisabled("%zu terms",
+            curve->curves[primary].nodes.size());
     }
+    if (session.has_value()) {
+        ImGui::SameLine();
+        draw_series_flags(input, *session, terms->label);
+    }
+
     if (curve != nullptr && !curve->error.empty()) {
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
             "%s", curve->error.c_str());
     }
 
-    const float foot_height = widget::status_foot_height(status);
+    const float foot_height = widget::status_foot_height(status, foot);
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float plot_height = std::max(
         available.y - foot_height - ImGui::GetStyle().ItemSpacing.y, 80.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (curve == nullptr
+        if (!session.has_value()) {
+            ImGui::TextDisabled("Sign in to read this curve.");
+        } else if (curve == nullptr
             || (curve->curves.empty() && curve->error.empty())) {
             ImGui::TextDisabled("Reading the curve...");
-        } else if (!curve->error.empty()) {
+        } else if (curve->curves.empty()) {
             ImGui::TextWrapped("%s", curve->error.c_str());
         } else {
             const auto& all_curves = curve->curves;
@@ -335,7 +291,10 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::EndChild();
     ImGui::PopStyleVar();
 
-    widget::draw_status_foot(status, input.now_ns, foot);
+    const bool changed = widget::draw_status_foot(status, input.now_ns, foot);
+    state.market_view.term_history = history_index + 1;
+    if (changed)
+        input.market_view.term_history = state.market_view.term_history;
     ImGui::PopID();
 }
 

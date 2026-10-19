@@ -43,6 +43,29 @@ TEST_CASE("a future observation is live and no observation is unavailable",
     CHECK(assess_data_health(0, 100).state == data_health::unavailable);
 }
 
+TEST_CASE("every market screen spells a freshness state the same way",
+    "[health]") {
+    using hedgr::ui::render::data_health_word;
+    CHECK(data_health_word(data_health::live) == "LIVE");
+    CHECK(data_health_word(data_health::delayed) == "DELAYED");
+    CHECK(data_health_word(data_health::stale) == "STALE");
+    CHECK(data_health_word(data_health::unavailable) == "NO DATA");
+}
+
+TEST_CASE("an as-of instant carries the date, the time and the zone",
+    "[health]") {
+    using hedgr::ui::render::as_of_text;
+    using hedgr::ui::render::parse_iso8601_utc;
+
+    const auto instant = parse_iso8601_utc("2026-10-18T21:52:25Z");
+    REQUIRE(instant > 0);
+    CHECK(as_of_text(instant) == "18 Oct 2026 21:52:25 UTC");
+
+    CHECK(as_of_text(0).empty());
+    CHECK(parse_iso8601_utc("") == 0);
+    CHECK(parse_iso8601_utc("not a time") == 0);
+}
+
 TEST_CASE("an age reads in the largest useful unit", "[health]") {
     using hedgr::ui::render::age_text;
     CHECK(age_text(12'000'000'000) == "12s");

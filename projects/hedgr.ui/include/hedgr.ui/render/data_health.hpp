@@ -21,8 +21,11 @@
 #define HEDGR_UI_RENDER_DATA_HEALTH_HPP
 
 #include <cstdint>
+#include <cstdio>
+#include <ctime>
 #include <format>
 #include <string>
+#include <string_view>
 
 namespace hedgr::ui::render {
 
@@ -50,6 +53,24 @@ inline constexpr health_thresholds fx_health_thresholds{
     .delayed_ns = 30'000'000'000,
 };
 
+/**
+ * @brief The thresholds for a term-structure curve.
+ *
+ * A curve is read on a slow cadence and its pillars are published a little
+ * apart, so a two-minute live window keeps a healthy curve from reading as
+ * delayed on the frame after every read.
+ */
+inline constexpr health_thresholds ir_health_thresholds{
+    .live_ns = 120'000'000'000,
+    .delayed_ns = 900'000'000'000,
+};
+
+/** @brief The thresholds for a cross-rates batch. */
+inline constexpr health_thresholds crm_health_thresholds{
+    .live_ns = 300'000'000'000,
+    .delayed_ns = 900'000'000'000,
+};
+
 /** @brief The health of a plot, and the age it was judged on. */
 struct data_health_state final {
     data_health state = data_health::unavailable;
@@ -74,6 +95,71 @@ struct data_health_state final {
     if (age <= thresholds.delayed_ns)
         return {.state = data_health::delayed, .age_ns = age};
     return {.state = data_health::stale, .age_ns = age};
+}
+
+/** @brief The word a freshness state carries on every market-data screen. */
+[[nodiscard]] inline std::string_view data_health_word(data_health state) {
+    switch (state) {
+    case data_health::live:
+        return "LIVE";
+    case data_health::delayed:
+        return "DELAYED";
+    case data_health::stale:
+        return "STALE";
+    case data_health::unavailable:
+        return "NO DATA";
+    }
+    return "NO DATA";
+}
+
+/**
+ * @brief The instant a plot is as of, in the one form every screen shares.
+ *
+ * The date, the time and the zone are all needed: a timestamp without a zone is
+ * a different claim on every machine, and a reader comparing two windows has no
+ * way to know which one is ahead.
+ */
+[[nodiscard]] inline std::string as_of_text(std::int64_t at_ns) {
+    if (at_ns <= 0)
+        return {};
+    const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
+    std::tm utc{};
+    gmtime_r(&seconds, &utc);
+    char buffer[48]{};
+    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S UTC", &utc);
+    return buffer;
+}
+
+/**
+ * @brief Reads an ISO-8601 UTC instant, or returns zero when it cannot.
+ *
+ * The CRM service reports its batch time as text rather than as an instant on
+ * the wire. This is the one place that text becomes nanoseconds, so every
+ * screen can judge and draw the same value instead of parsing it twice.
+ */
+[[nodiscard]] inline std::int64_t parse_iso8601_utc(std::string_view text) {
+    const std::string value{text};
+    std::tm utc{};
+    int year = 0;
+    int month = 0;
+    int day = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    if (std::sscanf(value.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month,
+            &day, &hour, &minute, &second)
+        != 6)
+        return 0;
+    utc.tm_year = year - 1900;
+    utc.tm_mon = month - 1;
+    utc.tm_mday = day;
+    utc.tm_hour = hour;
+    utc.tm_min = minute;
+    utc.tm_sec = second;
+    const auto seconds = timegm(&utc);
+    return seconds > 0
+        ? static_cast<std::int64_t>(seconds) * 1'000'000'000
+        : 0;
 }
 
 /** @brief A short age, in seconds, minutes, hours or days. */

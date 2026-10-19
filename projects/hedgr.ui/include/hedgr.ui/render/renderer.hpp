@@ -32,6 +32,7 @@
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
@@ -206,9 +207,6 @@ struct window_ui_state final {
     /** @brief The selected row of the window's primary table, or -1. */
     int selected_row = -1;
 
-    /** @brief How many recent curves a term-structure window overlays. */
-    int term_history = 5;
-
     /** @brief The party whose CRM rates are shown. */
     std::string crm_party_id;
 
@@ -336,19 +334,14 @@ struct window_ui_state final {
     std::string market_asset_class;
 
     /**
-     * @brief The span a chart plots, in nanoseconds.
+     * @brief This window's market-data choices.
      *
-     * Five minutes is what a live series is read for. The header's 1M to All
-     * buttons change it, and each chart window keeps its own choice.
+     * A window keeps its own choices. They are seeded from the frame's
+     * remembered defaults when the window first draws, and a change here
+     * updates those defaults for the next window without disturbing the
+     * windows already open.
      */
-    std::int64_t market_chart_span_ns =
-        std::int64_t{5} * 60 * 1'000'000'000;
-
-    /** @brief Whether a chart draws candles rather than a line. */
-    bool market_candles = false;
-
-    /** @brief Whether a chart overlays its exponential moving average. */
-    bool market_ema = false;
+    market_view_state market_view;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
@@ -561,6 +554,25 @@ struct render_input final {
      * a null table, so no caller has to write the guard.
      */
     const instance_icon_textures* instance_icons = nullptr;
+
+    /**
+     * @brief The choices the market-data screens share and remember.
+     *
+     * A reference rather than a value because the frame owns it: the choices
+     * outlive a window, and the next chart or curve window opens with the ones
+     * the last window left. It is interface scratch, not domain state, so a
+     * renderer may write it in place.
+     */
+    market_view_state& market_view;
+
+    /**
+     * @brief The wall clock for judging how old an observation is.
+     *
+     * The frame's @c now_ns is monotonic, which is the right clock for deadlines
+     * and fades and the wrong one for comparing against an observation stamped
+     * on the market's own clock.
+     */
+    std::int64_t wall_now_ns = 0;
 };
 
 /**

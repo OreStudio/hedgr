@@ -66,7 +66,16 @@ TEST_CASE("a principal and a tenant read as one line", "[identity]") {
     state.party = "System Party";
 
     REQUIRE(hedgr::ui::render::identity_text(state)
-        == "super_admin @ Root Tenant [System Party]");
+        == "super_admin \u00b7 Root Tenant \u00b7 System Party");
+}
+
+TEST_CASE("the identity keeps the tenant and party placeholders", "[identity]") {
+    hedgr::ui::render::identity_bar_state state;
+    state.signed_in = true;
+    state.principal = "tenant_admin@acme_corporation";
+
+    REQUIRE(hedgr::ui::render::identity_text(state)
+        == "tenant_admin@acme_corporation \u00b7 no tenant \u00b7 no party");
 }
 
 TEST_CASE("a window with no session says so rather than going blank", "[identity]") {

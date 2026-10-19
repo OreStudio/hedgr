@@ -195,6 +195,7 @@ using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
 using hedgr::model::state::shortcut_table;
 using hedgr::model::state::window_table;
+using hedgr::ui::render::market_view_state;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shows_instances;
 
@@ -218,6 +219,7 @@ struct empty_state final {
     command_queue commands;
     std::unordered_set<std::string> failed_images;
     std::unordered_set<std::string> pending_images;
+    market_view_state market_view;
 };
 
 /** @brief A render_input over empty tables, carrying @p lock. */
@@ -243,6 +245,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .shortcuts = state.shortcuts,
         .commands = state.commands,
         .store_lock = lock,
+        .market_view = state.market_view,
     };
 }
 

@@ -128,7 +128,13 @@ identity_of(const render_input& input,
     hedgr::model::state::window_handle handle);
 
 /**
- * @brief The identity as one line, "principal @ tenant [party]".
+ * @brief The identity as one line, "principal · tenant · party".
+ *
+ * All three parts are always shown. The principal names the login, the tenant
+ * names the deployment's tenant, and the party names the context the session
+ * acts in; a window that dropped one of them would be asking a reader to
+ * remember which of the other two implied it. The dot separators keep the line
+ * shorter than the older form while leaving every part readable.
  *
  * The windows put this on their status foot rather than in a bar of its own.
  * Who you are and where you are is a fact a reader checks occasionally and a
@@ -152,6 +158,29 @@ HEDGR_UI_EXPORT void request_flags(const render_input& input,
 [[nodiscard]] HEDGR_UI_EXPORT ImTextureID
 image_texture(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view currency);
+
+/**
+ * @brief The scale every market-data screen draws currency flags at.
+ *
+ * One value rather than a local constant per window, so an FX pair and an IR
+ * curve show flags of the same size. The natural size is the series list's; a
+ * screen's heading wants them twice that.
+ */
+inline constexpr float series_flag_scale = 2.0f;
+
+/**
+ * @brief Draws a label's currency flags at the right edge of the current line.
+ *
+ * Both market-data screens put their flags at the right of the heading rather
+ * than in front of its name: the name is what the reader came for, and a flag
+ * in front of it pushes the name along by an amount that changes with the
+ * pair. Drawing them here is also what keeps the two screens on one scale.
+ *
+ * The session names the tenant whose images are used. A currency with no
+ * uploaded image falls back to the client's own flag primitives.
+ */
+HEDGR_UI_EXPORT void draw_series_flags(const render_input& input,
+    const hedgr::model::state::session_handle session, std::string_view label);
 
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;

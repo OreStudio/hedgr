@@ -243,11 +243,48 @@ std::string identity_text(const identity_bar_state& state) {
     if (!state.signed_in)
         return "Not signed in";
 
-    std::string text = state.principal;
-    if (!state.tenant.empty())
-        text += " @ " + state.tenant;
-    text += state.party.empty() ? " [no party]" : " [" + state.party + "]";
+    std::string text = state.principal.empty()
+        ? "no principal" : state.principal;
+    text += " \u00b7 ";
+    text += state.tenant.empty() ? "no tenant" : state.tenant;
+    text += " \u00b7 ";
+    text += state.party.empty() ? "no party" : state.party;
     return text;
+}
+
+void draw_series_flags(const render_input& input,
+    const hedgr::model::state::session_handle session,
+    std::string_view label) {
+    request_flags(input, session, label);
+
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    const float flag_w = hedgr::ui::widget::flag_width * series_flag_scale;
+    const float flag_h = hedgr::ui::widget::flag_height * series_flag_scale;
+    const auto flags = static_cast<int>(!pair.base.empty())
+        + static_cast<int>(!pair.quote.empty());
+    if (flags == 0)
+        return;
+
+    const float gap = 3.0f;
+    const float flags_width = flag_w * static_cast<float>(flags)
+        + gap * static_cast<float>(flags - 1);
+    const float right = ImGui::GetWindowContentRegionMax().x;
+    if (ImGui::GetCursorPosX() < right - flags_width)
+        ImGui::SetCursorPosX(right - flags_width);
+
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    float x = origin.x;
+    if (!pair.base.empty()) {
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.base,
+            series_flag_scale, image_texture(input, session, pair.base));
+        x += flag_w + gap;
+    }
+    if (!pair.quote.empty()) {
+        hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote,
+            series_flag_scale, image_texture(input, session, pair.quote));
+    }
+    ImGui::Dummy(ImVec2(flags_width, flag_h));
 }
 
 bool sign_in_needs_password(domain::store_lock lock,

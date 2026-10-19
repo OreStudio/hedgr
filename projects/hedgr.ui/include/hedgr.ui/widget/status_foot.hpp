@@ -25,8 +25,35 @@
 #include "imgui.h"
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace hedgr::ui::widget {
+
+/**
+ * @brief One choice on the foot, drawn as the value it currently holds.
+ *
+ * The market-data screens put their period, style and overlay choices here
+ * rather than in a row above the plot. A value and a list rather than a string
+ * label, so the control writes the caller's choice in place and the two never
+ * disagree about what is selected. The options are borrowed for the frame,
+ * which is why the caller owns the arrays and the foot only reads them.
+ */
+struct foot_combo final {
+    /** @brief ImGui id, unique among the controls of one foot. */
+    const char* id;
+
+    /** @brief The control's name, shown on hover. */
+    const char* tooltip;
+
+    /** @brief The option labels, in menu order. */
+    const char* const* options;
+
+    /** @brief How many entries @c options holds. */
+    int option_count = 0;
+
+    /** @brief The selected index, which the control writes. */
+    int* selected = nullptr;
+};
 
 /**
  * @brief The state a window's foot reports, at its right end and as its dot.
@@ -56,6 +83,21 @@ struct foot_state final {
      * takes the line when it comes.
      */
     std::string identity;
+
+    /**
+     * @brief The instant the data is as of, or empty when there is none.
+     *
+     * Drawn after the state word as "as of ...". The state and the instant are
+     * one statement rather than two: a freshness word without a time is a
+     * claim the reader cannot check.
+     */
+    std::string as_of;
+
+    /** @brief Whether the data behind the foot is being read again. */
+    bool updating = false;
+
+    /** @brief The choices drawn to the left of the state, in order. */
+    std::vector<foot_combo> controls;
 };
 
 /**
@@ -66,6 +108,16 @@ struct foot_state final {
  */
 [[nodiscard]] HEDGR_UI_EXPORT float status_foot_height(
     const status_bar& status);
+
+/**
+ * @brief How tall a window's foot is once its controls are accounted for.
+ *
+ * A foot carrying a combo needs the combo's frame height; a foot carrying only
+ * a sentence keeps the text line it had. Every other window sees the same foot
+ * it did before.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT float status_foot_height(
+    const status_bar& status, const foot_state& state);
 
 /**
  * @brief Measures the foot of the window and draws the line into it.
@@ -85,9 +137,10 @@ struct foot_state final {
  * @param status The bar whose message is drawn, advanced to this frame.
  * @param now_ns The frame's clock, for the fade.
  * @param state The selected thing's state, or an empty one for no state.
+ * @return Whether one of the foot's controls changed its choice this frame.
  */
-HEDGR_UI_EXPORT void draw_status_foot(status_bar& status, std::int64_t now_ns,
-    const foot_state& state);
+HEDGR_UI_EXPORT bool draw_status_foot(status_bar& status,
+    std::int64_t now_ns, const foot_state& state);
 
 }
 

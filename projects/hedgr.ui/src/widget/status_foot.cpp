@@ -23,6 +23,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include <algorithm>
+#include <string>
 
 namespace hedgr::ui::widget {
 
@@ -38,6 +39,95 @@ constexpr int status_row_lines = 1;
 
 /** @brief An error gets the same single row; its glyph and colour carry it. */
 constexpr int status_error_row_lines = 1;
+
+/** @brief The status and its as-of time, split where their colours change. */
+struct status_text final {
+    std::string head;
+    std::string suffix;
+};
+
+/**
+ * @brief Builds "LIVE · as of ..." as one statement from two colours.
+ *
+ * The word and its dot are the state's colour; the instant is the quiet text a
+ * reader checks. Keeping them in one build is what stops a screen from showing
+ * a state without the time it was judged on.
+ */
+[[nodiscard]] status_text build_status_text(const foot_state& state) {
+    status_text text;
+    if (!state.word.empty())
+        text.head = "\u25cf " + state.word;
+    if (!state.as_of.empty())
+        text.suffix = " \u00b7 as of " + state.as_of;
+    if (state.updating) {
+        if (text.suffix.empty())
+            text.suffix = " \u00b7 updating";
+        else
+            text.suffix += " \u00b7 updating";
+    }
+    return text;
+}
+
+/** @brief The width a combo needs for its widest option and its arrow. */
+[[nodiscard]] float combo_width(const foot_combo& control) {
+    float widest = 0.0f;
+    for (int i = 0; i < control.option_count; ++i)
+        widest = std::max(widest,
+            ImGui::CalcTextSize(control.options[i]).x);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    return widest + style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
+}
+
+/** @brief The width of every control plus the gaps between them. */
+[[nodiscard]] float controls_width(const foot_state& state) {
+    if (state.controls.empty())
+        return 0.0f;
+    float width = 0.0f;
+    for (const auto& control : state.controls)
+        width += combo_width(control);
+    return width
+        + ImGui::GetStyle().ItemSpacing.x
+            * static_cast<float>(state.controls.size() - 1);
+}
+
+/**
+ * @brief Draws one control at an absolute position and writes its choice.
+ *
+ * The option list is borrowed rather than copied. The selected index is
+ * clamped before it is used, so a preference file that named a choice this
+ * build no longer offers still opens on a choice that exists.
+ *
+ * @return whether the choice changed this frame.
+ */
+[[nodiscard]] bool draw_control(const foot_combo& control, float x,
+    float y) {
+    if (control.selected == nullptr || control.option_count <= 0
+        || control.options == nullptr)
+        return false;
+    *control.selected = std::clamp(*control.selected, 0,
+        control.option_count - 1);
+
+    bool changed = false;
+    ImGui::SetCursorPos(ImVec2(x, y));
+    ImGui::PushID(control.id);
+    ImGui::SetNextItemWidth(combo_width(control));
+    if (ImGui::BeginCombo("##combo",
+            control.options[*control.selected])) {
+        for (int i = 0; i < control.option_count; ++i) {
+            const bool selected = i == *control.selected;
+            if (ImGui::Selectable(control.options[i], selected)) {
+                *control.selected = i;
+                changed = true;
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("%s", control.tooltip);
+    ImGui::PopID();
+    return changed;
+}
 
 /**
  * @brief Draws the window's status line: the last thing that happened.
@@ -114,17 +204,30 @@ void draw_status_line(status_bar& status, std::int64_t now_ns,
 
 }
 
-float status_foot_height(const status_bar& status) {
+float status_foot_height(const status_bar& status, const foot_state& state) {
     const int rows = status.severity() == status_severity::error
         ? status_error_row_lines
         : status_row_lines;
-    /* One text row and a hair of air: the foot is chrome, not content. */
-    return ImGui::GetTextLineHeight() * static_cast<float>(rows) + 2.0f;
+    const float text_height =
+        ImGui::GetTextLineHeight() * static_cast<float>(rows) + 2.0f;
+    if (state.controls.empty())
+        return text_height;
+
+    /*
+     * A control is a frame, not a line of text. The foot keeps the extra height
+     * only on a window that put a control there, so the tables and the lock
+     * prompt keep the compact line they had.
+     */
+    return std::max(text_height, ImGui::GetFrameHeight() + 4.0f);
 }
 
-void draw_status_foot(status_bar& status, std::int64_t now_ns,
+float status_foot_height(const status_bar& status) {
+    return status_foot_height(status, foot_state{});
+}
+
+bool draw_status_foot(status_bar& status, std::int64_t now_ns,
     const foot_state& state) {
-    const float height = status_foot_height(status);
+    const float height = status_foot_height(status, state);
 
     /*
      * The reservation: an empty child of exactly the foot's height, which
@@ -161,69 +264,74 @@ void draw_status_foot(status_bar& status, std::int64_t now_ns,
         ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
 
     const ImGuiStyle& style = ImGui::GetStyle();
-    const bool has_state = !state.word.empty();
     const float gap = style.ItemSpacing.x;
+    const float left = ImGui::GetCursorPosX();
+    const float right = left + ImGui::GetContentRegionAvail().x;
 
-    /*
-     * The disc is the state's colour and belongs with the state's word, so both
-     * live at the right end of the foot rather than one at each end. Its
-     * diameter is one text line, twice the half line it was, which is large
-     * enough to read at a glance and still inside the foot: the foot reserves
-     * two text rows and the disc is centred on the first of them, so it spans
-     * that row exactly and is never clipped.
-     */
-    const float dot_side = ImGui::GetTextLineHeight();
-    const float state_width = !has_state
+    const auto text = build_status_text(state);
+    const float status_width = text.head.empty() && text.suffix.empty()
         ? 0.0f
-        : dot_side + gap + ImGui::CalcTextSize(state.word.c_str()).x;
+        : ImGui::CalcTextSize(text.head.c_str()).x
+            + ImGui::CalcTextSize(text.suffix.c_str()).x;
+    const float controls = controls_width(state);
+    const float controls_reservation =
+        controls > 0.0f ? controls + gap * 2.0f : 0.0f;
+    const float reserved = status_width + controls_reservation;
 
     /*
-     * The state is put against the foot's right edge, and the message is
-     * wrapped short of the room it takes, so the two share the bar without
-     * either being written over. The disc and its gap are counted in that room
-     * as well, so the message stops before the colour as it stops before the
-     * words.
+     * The state and its time go against the foot's right edge, and the controls
+     * sit immediately to their left. The identity is clipped short of that
+     * room, because it is a fact a reader checks occasionally and the controls
+     * are the ones they came to use.
      */
-    const float state_y = ImGui::GetCursorPosY();
-    const float state_x = ImGui::GetCursorPosX()
-        + ImGui::GetContentRegionAvail().x - state_width;
+    const float state_x = std::max(left, right - status_width);
+    const float controls_x = controls > 0.0f
+        ? std::max(left, state_x - gap * 2.0f - controls)
+        : state_x;
+    const float identity_right = std::max(left, controls_x - gap);
+
     if (!status.empty()) {
-        draw_status_line(status, now_ns, state_width);
-    } else if (!state.identity.empty()) {
-        /*
-         * The identity is clipped rather than wrapped: a long principal and a
-         * long party name on a narrow window would take the second row and
-         * change the foot's height, and the foot never changes height.
-         */
+        draw_status_line(status, now_ns, reserved + gap);
+    } else if (!state.identity.empty() && identity_right > left) {
         const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const float right = ImGui::GetWindowPos().x
-            + ImGui::GetWindowContentRegionMax().x - state_width;
         ImGui::PushClipRect(origin,
-            ImVec2(right, origin.y + ImGui::GetTextLineHeight()), true);
+            ImVec2(origin.x + identity_right - left,
+                origin.y + ImGui::GetTextLineHeight()),
+            true);
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::TextUnformatted(state.identity.c_str());
         ImGui::PopStyleColor();
         ImGui::PopClipRect();
+        ImGui::SetItemTooltip("%s", state.identity.c_str());
     }
 
-    if (has_state) {
-        ImGui::SetCursorPos(ImVec2(state_x, state_y));
-        const ImVec2 origin = ImGui::GetCursorScreenPos();
-        const float centre_y = origin.y + ImGui::GetTextLineHeight() * 0.5f;
-        ImGui::GetWindowDrawList()->AddCircleFilled(
-            ImVec2(origin.x + dot_side * 0.5f, centre_y), dot_side * 0.5f,
-            state.colour, 32);
+    const float line_y = (height - ImGui::GetTextLineHeight()) * 0.5f;
+    const float combo_y = (height - ImGui::GetFrameHeight()) * 0.5f;
 
-        ImGui::SetCursorPosX(state_x + dot_side + gap);
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::ColorConvertU32ToFloat4(state.colour));
-        ImGui::TextUnformatted(state.word.c_str());
-        ImGui::PopStyleColor();
+    bool changed = false;
+    float x = controls_x;
+    for (const auto& control : state.controls) {
+        changed = draw_control(control, x, combo_y) || changed;
+        x += combo_width(control) + gap;
+    }
+
+    if (!text.head.empty() || !text.suffix.empty()) {
+        ImGui::SetCursorPos(ImVec2(state_x, line_y));
+        if (!text.head.empty()) {
+            ImGui::TextColored(
+                ImGui::ColorConvertU32ToFloat4(state.colour), "%s",
+                text.head.c_str());
+        }
+        if (!text.suffix.empty()) {
+            ImGui::SameLine(0.0f, 0.0f);
+            ImGui::TextDisabled("%s", text.suffix.c_str());
+        }
     }
 
     ImGui::EndChild();
     ImGui::PopStyleColor();
+    return changed;
 }
 
 }

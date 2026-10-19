@@ -89,6 +89,19 @@ std::int64_t now_ns() {
         .count();
 }
 
+/**
+ * @brief The market's own clock, which is what an observation is stamped on.
+ *
+ * The frame's steady clock measures durations and never jumps. An observation
+ * carries a wall-clock instant, so judging its age against the steady clock
+ * would compare two different origins and call every curve live.
+ */
+std::int64_t wall_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
 }
 
 application::application(config::options cfg, std::filesystem::path capture_path,
@@ -121,6 +134,15 @@ void application::run() {
         BOOST_LOG_SEV(lg(), error)
             << "Could not open the store: " << started.error();
     }
+
+    /*
+     * The market-data choices sit beside the store they belong to rather than
+     * in the window layout: a capture gets its own directory, and a preference
+     * file that travelled with the layout would let one run change the next.
+     */
+    const auto market_view_path =
+        cfg_.database_path.parent_path() / "market-view.ini";
+    workspace_.load_market_view(market_view_path);
 
     /*
      * The player is started once, before the first frame. It opens an output
@@ -248,6 +270,7 @@ void application::run() {
     if (auto saved = manager_.save_windows(); !saved)
         BOOST_LOG_SEV(lg(), warn)
             << "Could not save the window wall: " << saved.error();
+    workspace_.save_market_view(market_view_path);
     manager_.stop();
     shutdown_graphics(window);
 
@@ -735,6 +758,8 @@ void application::render_loop(GLFWwindow* window) {
             .startup_failure = manager_.startup_failure(),
             .runtime_error = manager_.last_error(),
             .instance_icons = &instance_icons_,
+            .market_view = workspace_.market_view(),
+            .wall_now_ns = wall_now_ns(),
         };
         textures_.begin_frame();
         workspace_.render(input);

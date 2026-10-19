@@ -25,6 +25,7 @@
 #include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 
@@ -83,6 +84,23 @@ public:
      */
     void render(const render_input& input);
 
+    /**
+     * @brief The market-data choices every such window reads and writes.
+     *
+     * The frame owns them because they outlive the window that made them. The
+     * application hands this reference to the frame's render input so a chart
+     * or curve window can change the choice in place.
+     */
+    [[nodiscard]] market_view_state& market_view() noexcept {
+        return market_view_;
+    }
+
+    /** @brief Reads the remembered choices, leaving them on failure. */
+    void load_market_view(const std::filesystem::path& path);
+
+    /** @brief Writes the remembered choices to @p path. */
+    void save_market_view(const std::filesystem::path& path) const;
+
 private:
     /**
      * @brief Draws the notice that says the store could not be opened.
@@ -132,6 +150,9 @@ private:
      * keeps whatever the person had typed into it.
      */
     std::unordered_map<std::string, window_ui_state> ui_state_;
+
+    /** @brief The choices the market-data screens share across windows. */
+    market_view_state market_view_;
 
     /*
      * The master password prompt's own scratch state.
