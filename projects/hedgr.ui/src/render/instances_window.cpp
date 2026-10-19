@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
@@ -66,6 +67,7 @@ using hedgr::model::domain::probe_result;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
 using hedgr::model::domain::window_kind;
+using hedgr::ui::render::age_text;
 using hedgr::ui::render::instance_icon_texture;
 using hedgr::ui::render::instance_edit_state;
 using hedgr::ui::render::render_input;
@@ -1912,9 +1914,7 @@ void draw_read_only_topics(const render_input& input, const instance& row,
     if (status.result.observed_at_ns > 0
         && input.now_ns >= status.result.observed_at_ns) {
         add(diagnostics, "observed", icon::clock, "Observed",
-            std::format("{:.0f} s ago",
-                static_cast<double>(
-                    input.now_ns - status.result.observed_at_ns) / 1.0e9),
+            age_text(input.now_ns - status.result.observed_at_ns),
             "when the last probe ran");
     }
     topics.push_back(std::move(diagnostics));

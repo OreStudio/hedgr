@@ -78,7 +78,8 @@ void parse_market_view(std::string_view text, market_view_state& state) {
 
         if (key == "period") {
             for (std::size_t i = 0; i < chart_spans.size(); ++i) {
-                if (value == chart_spans[i].label)
+                if (value == chart_spans[i].token
+                    || value == chart_spans[i].legacy_token)
                     state.chart_span = static_cast<int>(i);
             }
         } else if (key == "style") {
@@ -113,7 +114,7 @@ std::string serialize_market_view(const market_view_state& state) {
 
     std::string text;
     text += "period=";
-    text += chart_spans[static_cast<std::size_t>(span)].label;
+    text += chart_spans[static_cast<std::size_t>(span)].token;
     text += "\nstyle=";
     text += style_name(style);
     text += "\nema=";

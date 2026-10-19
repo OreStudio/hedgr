@@ -50,6 +50,9 @@ target_link_libraries(${lib_target_name}
         # is the seam ADR 6 describes, and no consumer of this component has to
         # know which library does the cryptography.
         OpenSSL::Crypto
+        # The sealed value's base64 is OreStudio's codec, called from the same
+        # translation unit and named by no public header.
+        ores::utility
 )
 
 install(TARGETS ${lib_target_name} LIBRARY DESTINATION lib)

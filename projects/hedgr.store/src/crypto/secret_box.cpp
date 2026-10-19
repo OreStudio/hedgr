@@ -18,9 +18,10 @@
  *
  */
 #include "hedgr.store/crypto/secret_box.hpp"
+#include "ores.utility/convert/base64_converter.hpp"
 #include <algorithm>
 #include <array>
-#include <limits>
+#include <exception>
 #include <memory>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -99,42 +100,28 @@ box_result<std::vector<unsigned char>> derive_key(std::string_view password,
     return key;
 }
 
-/** @brief Base64, standard alphabet with padding, and no line breaks. */
+/**
+ * @brief Base64 through OreStudio's codec, with its exceptions as box errors.
+ *
+ * The codec is the server's, so the stored text is the server's base64. It
+ * throws on failure, and nothing may escape this file as an exception.
+ */
 box_result<std::string> base64_encode(const std::vector<unsigned char>& bytes) {
-    if (bytes.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
-        return std::unexpected(crypto_failure("the sealed value is too large to encode"));
-
-    /*
-     * The cast is a conversion, not a truncation: the guard above has already
-     * refused anything an int cannot hold, and EVP_EncodeBlock needs one.
-     */
-    const auto input_length = static_cast<int>(bytes.size());
-    std::string encoded(
-        static_cast<std::size_t>(4) * ((bytes.size() + 2) / 3), '\0');
-
-    const auto written = EVP_EncodeBlock(
-        reinterpret_cast<unsigned char*>(encoded.data()), bytes.data(),
-        input_length);
-    if (written < 0)
+    try {
+        return ores::utility::convert::base64_converter::convert(bytes);
+    } catch (const std::exception&) {
         return std::unexpected(crypto_failure("the sealed value could not be encoded"));
-    encoded.resize(static_cast<std::size_t>(written));
-    return encoded;
+    }
 }
 
 /**
  * @brief Decodes base64, refusing anything that is not this alphabet.
  *
- * Padding is checked by hand rather than left to OpenSSL, because
- * @c EVP_DecodeBlock accepts a padded input and returns a count that includes
- * the padding, so a decoder that trusts it reads one to two bytes of garbage
- * past the end of the real ciphertext. Trimming here is what makes the
- * salt/iv/tag split below land on the right offsets.
+ * The alphabet and length are checked before the codec runs, so a damaged
+ * value fails here rather than on how leniently OpenSSL's reader treats it.
  */
 box_result<std::vector<unsigned char>> base64_decode(std::string_view text) {
-    if (text.empty())
-        return std::unexpected(wrong_password());
-
-    if (text.size() % 4 != 0
+    if (text.empty() || text.size() % 4 != 0
         || !std::all_of(text.begin(), text.end(), [](char character) {
                return (character >= 'A' && character <= 'Z')
                    || (character >= 'a' && character <= 'z')
@@ -142,28 +129,12 @@ box_result<std::vector<unsigned char>> base64_decode(std::string_view text) {
                    || character == '+' || character == '/' || character == '=';
            }))
         return std::unexpected(wrong_password());
-    if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
-        return std::unexpected(wrong_password());
 
-    std::size_t padding = 0;
-    if (text.ends_with("=="))
-        padding = 2;
-    else if (text.ends_with("="))
-        padding = 1;
-
-    std::string buffer{text};
-    std::vector<unsigned char> decoded(buffer.size());
-    const auto written = EVP_DecodeBlock(decoded.data(),
-        reinterpret_cast<const unsigned char*>(buffer.data()),
-        static_cast<int>(buffer.size()));
-    if (written < 0)
+    try {
+        return ores::utility::convert::base64_converter::convert(std::string{text});
+    } catch (const std::exception&) {
         return std::unexpected(wrong_password());
-
-    const auto decoded_length = static_cast<std::size_t>(written);
-    if (decoded_length < padding)
-        return std::unexpected(wrong_password());
-    decoded.resize(decoded_length - padding);
-    return decoded;
+    }
 }
 
 /**

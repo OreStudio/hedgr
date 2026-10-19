@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
@@ -43,6 +44,7 @@ namespace theme = hedgr::ui::theme;
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::session_status;
+using hedgr::ui::render::age_text;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::session_facts;
@@ -260,9 +262,7 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
          */
         fact_row(icon::clock, "Established",
             facts.opened_at_ns > 0 && input.now_ns >= facts.opened_at_ns
-                ? std::format("{:.0f} s ago",
-                      static_cast<double>(input.now_ns - facts.opened_at_ns)
-                          / 1.0e9)
+                ? age_text(input.now_ns - facts.opened_at_ns)
                 : std::string{});
 
         ImGui::EndTable();

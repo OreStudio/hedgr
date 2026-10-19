@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -29,25 +30,39 @@
 
 namespace hedgr::ui::render {
 
-/** @brief One span a live chart can be cropped to. */
+/**
+ * @brief One span a live chart can be cropped to.
+ *
+ * The label is lower case because in OreStudio's term grammar "1M" is a month.
+ * The token is what the preferences file stores, kept apart from the label so
+ * a relabel never strands a saved choice; @c legacy_token is what builds
+ * before the relabel wrote.
+ */
 struct chart_span final {
     const char* label;
+    const char* token;
+    const char* legacy_token;
     std::int64_t ns;
 };
 
 /** @brief The spans the period combo offers, in the order it lists them. */
 inline constexpr std::array<chart_span, 6> chart_spans{{
-    {"1M", std::int64_t{1} * 60 * 1'000'000'000},
-    {"5M", std::int64_t{5} * 60 * 1'000'000'000},
-    {"15M", std::int64_t{15} * 60 * 1'000'000'000},
-    {"1H", std::int64_t{60} * 60 * 1'000'000'000},
-    {"1D", std::int64_t{24} * 60 * 60 * 1'000'000'000},
-    {"All", 0},
+    {"1m", "1m", "1M", std::int64_t{1} * 60 * 1'000'000'000},
+    {"5m", "5m", "5M", std::int64_t{5} * 60 * 1'000'000'000},
+    {"15m", "15m", "15M", std::int64_t{15} * 60 * 1'000'000'000},
+    {"1h", "1h", "1H", std::int64_t{60} * 60 * 1'000'000'000},
+    {"1d", "1d", "1D", std::int64_t{24} * 60 * 60 * 1'000'000'000},
+    {"All", "all", "All", 0},
 }};
 
 /** @brief The period combo's labels, index for index with @c chart_spans. */
-inline constexpr std::array<const char*, 6> chart_span_labels{
-    "1M", "5M", "15M", "1H", "1D", "All"};
+inline constexpr std::array<const char*, chart_spans.size()> chart_span_labels
+    = [] {
+          std::array<const char*, chart_spans.size()> labels{};
+          for (std::size_t i = 0; i < chart_spans.size(); ++i)
+              labels[i] = chart_spans[i].label;
+          return labels;
+      }();
 
 /** @brief The chart styles the style combo offers. */
 inline constexpr std::array<const char*, 2> chart_style_labels{

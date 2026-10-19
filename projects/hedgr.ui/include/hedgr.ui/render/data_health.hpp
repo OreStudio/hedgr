@@ -20,10 +20,9 @@
 #ifndef HEDGR_UI_RENDER_DATA_HEALTH_HPP
 #define HEDGR_UI_RENDER_DATA_HEALTH_HPP
 
+#include "hedgr.ui/export.hpp"
 #include <cstdint>
-#include <cstdio>
 #include <ctime>
-#include <format>
 #include <string>
 #include <string_view>
 
@@ -135,44 +134,16 @@ struct data_health_state final {
  *
  * The CRM service reports its batch time as text rather than as an instant on
  * the wire. This is the one place that text becomes nanoseconds, so every
- * screen can judge and draw the same value instead of parsing it twice.
+ * screen can judge and draw the same value instead of parsing it twice. The
+ * grammar is OreStudio's wire shape: either separator, an optional fraction,
+ * and a UTC designator. A non-zero offset or a missing designator reads as
+ * zero rather than as the wrong instant.
  */
-[[nodiscard]] inline std::int64_t parse_iso8601_utc(std::string_view text) {
-    const std::string value{text};
-    std::tm utc{};
-    int year = 0;
-    int month = 0;
-    int day = 0;
-    int hour = 0;
-    int minute = 0;
-    int second = 0;
-    if (std::sscanf(value.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d", &year, &month,
-            &day, &hour, &minute, &second)
-        != 6)
-        return 0;
-    utc.tm_year = year - 1900;
-    utc.tm_mon = month - 1;
-    utc.tm_mday = day;
-    utc.tm_hour = hour;
-    utc.tm_min = minute;
-    utc.tm_sec = second;
-    const auto seconds = timegm(&utc);
-    return seconds > 0
-        ? static_cast<std::int64_t>(seconds) * 1'000'000'000
-        : 0;
-}
+[[nodiscard]] HEDGR_UI_EXPORT std::int64_t parse_iso8601_utc(
+    std::string_view text);
 
-/** @brief A short age, in seconds, minutes, hours or days. */
-[[nodiscard]] inline std::string age_text(std::int64_t age_ns) {
-    const auto seconds = age_ns / 1'000'000'000;
-    if (seconds < 60)
-        return std::format("{}s", seconds);
-    if (seconds < 3600)
-        return std::format("{}m", seconds / 60);
-    if (seconds < 86'400)
-        return std::format("{}h", seconds / 3600);
-    return std::format("{}d", seconds / 86'400);
-}
+/** @brief An age as OreStudio words one, for example "5 minutes ago". */
+[[nodiscard]] HEDGR_UI_EXPORT std::string age_text(std::int64_t age_ns);
 
 }
 

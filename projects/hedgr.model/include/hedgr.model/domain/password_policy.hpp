@@ -86,9 +86,9 @@ struct password_policy final {
      * @brief The characters that satisfy the special-character rule.
      *
      * The deployment's own set, not a set of Hedgr's: a policy that lists
-     * different characters changes what the rule ticks on. Empty means the
-     * rule cannot be met at all, which is why the assessment checks it rather
-     * than trusting the flag alone.
+     * different characters changes what the rule ticks on. The assessment
+     * reads it the way the server's validator does, so an empty set is met by
+     * no printable character.
      */
     std::string special_chars;
 };
