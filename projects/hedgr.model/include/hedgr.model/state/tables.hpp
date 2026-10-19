@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/deployment.hpp"
@@ -422,7 +423,7 @@ struct session_columns final {
     std::vector<std::string> tenant_id;
     std::vector<std::string> party_name;
     std::vector<std::string> party_id;
-    std::vector<std::string> token;
+    std::vector<domain::secret_string> token;
     std::vector<std::string> parties;
     std::vector<domain::deployment_snapshot> deployment;
 };
@@ -466,7 +467,7 @@ public:
     /** @brief Records what IAM returned once the account was accepted. */
     void set_account_result(session_handle h, std::string tenant_name,
                              std::string party_name, std::string party_id,
-                             std::string token);
+                             domain::secret_string token);
 
     /** @brief Records the tenant's key, for reads scoped by tenant. */
     void set_tenant_id(session_handle h, std::string tenant_id);
@@ -491,7 +492,7 @@ public:
     [[nodiscard]] std::string_view token(session_handle h) const;
 
     /** @brief Replaces the token after IAM issues a fresh one. */
-    void set_token(session_handle h, std::string token);
+    void set_token(session_handle h, domain::secret_string token);
 
     /**
      * @brief The last deployment read for this session, if any.

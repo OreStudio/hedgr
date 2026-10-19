@@ -475,20 +475,28 @@ TEST_CASE("a chart window's state payload round-trips", "[store]") {
     REQUIRE(chart->max_points == 450);
 }
 
-TEST_CASE("an unknown window kind in a row is reported as a corrupt row",
+TEST_CASE("a window row that cannot be read is skipped and the rest load",
     "[store]") {
     auto db = fresh_store();
     window_repository repository(db);
 
-    const auto planted = db.execute(
+    window_spec good;
+    good.id = "win-good";
+    good.kind = window_kind::chart;
+    good.state = chart_state{.label = "Trades", .series_id = "trades"};
+    REQUIRE(repository.save(good).has_value());
+
+    REQUIRE(db.execute(
         "INSERT INTO window_spec (window_id, kind, cadence_ms, state_json) "
-        "VALUES ('win-bad', 'hologram', 1000, '{}')");
-    REQUIRE(planted.has_value());
+        "VALUES ('win-bad-kind', 'hologram', 1000, '{}')").has_value());
+    REQUIRE(db.execute(
+        "INSERT INTO window_spec (window_id, kind, cadence_ms, state_json) "
+        "VALUES ('win-bad-state', 'chart', 1000, 'not json')").has_value());
 
     const auto rows = repository.list();
-    REQUIRE_FALSE(rows.has_value());
-    REQUIRE(rows.error().code == store_errc::corrupt_row);
-    REQUIRE(rows.error().message.contains("win-bad"));
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 1);
+    REQUIRE(rows.value().front().id == "win-good");
 }
 
 TEST_CASE("a nested folder round-trips through save and list", "[store]") {
@@ -674,7 +682,7 @@ TEST_CASE("a label attachment is idempotent and detachable", "[store]") {
     REQUIRE(labellings.list().value().empty());
 }
 
-TEST_CASE("an unrecognised severity in a row is reported as a corrupt row",
+TEST_CASE("a label row with an unrecognised severity is skipped",
     "[store]") {
     auto db = fresh_store();
     label_repository repository(db);
@@ -685,13 +693,11 @@ TEST_CASE("an unrecognised severity in a row is reported as a corrupt row",
     REQUIRE(planted.has_value());
 
     const auto rows = repository.list();
-    REQUIRE_FALSE(rows.has_value());
-    REQUIRE(rows.error().code == store_errc::corrupt_row);
-    REQUIRE(rows.error().message.contains("lbl-bad"));
-    REQUIRE(rows.error().message.contains("catastrophic"));
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().empty());
 }
 
-TEST_CASE("an unrecognised tree in a folder row is reported as a corrupt row",
+TEST_CASE("a folder row with an unrecognised tree is skipped",
     "[store]") {
     auto db = fresh_store();
     folder_repository repository(db);
@@ -702,16 +708,21 @@ TEST_CASE("an unrecognised tree in a folder row is reported as a corrupt row",
     REQUIRE(planted.has_value());
 
     const auto rows = repository.list();
-    REQUIRE_FALSE(rows.has_value());
-    REQUIRE(rows.error().code == store_errc::corrupt_row);
-    REQUIRE(rows.error().message.contains("fold-bad"));
-    REQUIRE(rows.error().message.contains("hierarchy"));
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().empty());
 }
 
-TEST_CASE("an unrecognised colour in a label row is reported as a corrupt row",
+TEST_CASE("a label row with an unrecognised colour is skipped and the rest load",
     "[store]") {
     auto db = fresh_store();
     label_repository repository(db);
+
+    label good;
+    good.id = "lbl-good";
+    good.name = "production";
+    good.colour = label_colour::red;
+    good.severity = label_severity::danger;
+    REQUIRE(repository.save(good).has_value());
 
     const auto planted = db.execute(
         "INSERT INTO label (id, name, colour, severity) "
@@ -719,10 +730,9 @@ TEST_CASE("an unrecognised colour in a label row is reported as a corrupt row",
     REQUIRE(planted.has_value());
 
     const auto rows = repository.list();
-    REQUIRE_FALSE(rows.has_value());
-    REQUIRE(rows.error().code == store_errc::corrupt_row);
-    REQUIRE(rows.error().message.contains("lbl-bad"));
-    REQUIRE(rows.error().message.contains("chartreuse"));
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 1);
+    REQUIRE(rows.value().front().id == "lbl-good");
 }
 
 TEST_CASE("a file written with another schema version is refused", "[store]") {

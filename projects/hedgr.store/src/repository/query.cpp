@@ -19,12 +19,29 @@
  */
 #include "hedgr.store/repository/query.hpp"
 #include "hedgr.store/sqlite/database.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
 
 namespace hedgr::store::repository {
+
+namespace {
+
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.store.repository.query");
+    return instance;
+}
+
+}
+
+void skip_corrupt_row(std::string_view table, const sqlite::store_error& error) {
+    BOOST_LOG_SEV(lg(), ores::logging::warn)
+        << "Skipping a row of '" << table << "' that cannot be read: "
+        << error.message;
+}
 
 std::string timestamp_now() {
     const auto now =

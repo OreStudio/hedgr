@@ -23,6 +23,7 @@
 #include "hedgr.store/repository/entity.hpp"
 #include "hedgr.store/repository/query.hpp"
 #include <sqlgen/delete_from.hpp>
+#include <sqlgen/insert.hpp>
 #include <sqlgen/literals.hpp>
 #include <sqlgen/read.hpp>
 #include <sqlgen/where.hpp>
@@ -129,13 +130,12 @@ sqlite::result<void> master_repository::create(std::string_view password) {
      * sqlgen cannot express. The writer stamps it instead, which is also the
      * only place that knows the row is being created rather than replaced.
      */
-    return upsert(*db_,
-        master_entity{
-            .id = std::string{master_row_id},
-            .verification = std::move(sealed).value(),
-            .created_at = timestamp_now(),
-        },
-        {"id"});
+    const auto row = master_entity{
+        .id = std::string{master_row_id},
+        .verification = std::move(sealed).value(),
+        .created_at = timestamp_now(),
+    };
+    return done(sqlgen::insert(row)(db_->connection()));
 }
 
 sqlite::result<bool> master_repository::verify(std::string_view password) const {

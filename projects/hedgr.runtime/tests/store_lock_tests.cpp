@@ -42,6 +42,7 @@ namespace {
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
+using hedgr::model::domain::secret_string;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::store_lock;
 using hedgr::runtime::manager::instance_manager;
@@ -129,7 +130,7 @@ private:
     std::string password, const std::function<bool()>& ready) {
     command request;
     request.kind = kind;
-    request.password = std::move(password);
+    request.password = secret_string{std::move(password)};
     manager.commands().push(std::move(request));
     return pump_until(manager, ready, std::chrono::seconds(20));
 }
@@ -305,7 +306,7 @@ TEST_CASE("a credential typed for an attempt is used without a stored one",
     connect.instance_id = std::string{manager.instances().rows()[0].id};
     connect.account_id = "acct-1";
     connect.principal = "ops@host";
-    connect.password = "a-typed-password";
+    connect.password = secret_string{std::string{"a-typed-password"}};
 
     /* The account has to exist, so it is created first. */
     account row;

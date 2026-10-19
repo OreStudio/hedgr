@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/password_policy.hpp"
 #include "hedgr.model/domain/probe.hpp"
+#include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/export.hpp"
@@ -193,7 +194,7 @@ struct event final {
     std::string party_id;
 
     /** @brief Bearer token, for session_authenticated. */
-    std::string token;
+    domain::secret_string token;
 
     /** @brief Media type of the image, for image_loaded. */
     std::string mime_type;

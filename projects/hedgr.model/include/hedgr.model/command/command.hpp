@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
+#include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
@@ -172,7 +173,7 @@ struct command final {
     std::string principal;
 
     /** @brief Secret for connect_session. Never persisted, never logged. */
-    std::string password;
+    domain::secret_string password;
 
     /**
      * @brief Whether a typed password should also be remembered.

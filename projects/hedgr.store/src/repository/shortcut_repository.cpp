@@ -94,15 +94,7 @@ sqlite::result<std::vector<dom::shortcut>> shortcut_repository::list() const {
     if (!rows)
         return std::unexpected(rows.error());
 
-    std::vector<dom::shortcut> values;
-    values.reserve(rows.value().size());
-    for (const auto& row : rows.value()) {
-        auto value = to_domain(row);
-        if (!value)
-            return std::unexpected(value.error());
-        values.push_back(std::move(value).value());
-    }
-    return values;
+    return valid_rows(rows.value(), shortcut_entity::tablename, to_domain);
 }
 
 sqlite::result<void> shortcut_repository::save(const dom::shortcut& row) {

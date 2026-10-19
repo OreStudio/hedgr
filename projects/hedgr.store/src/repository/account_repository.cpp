@@ -21,6 +21,7 @@
 #include "hedgr.store/repository/ddl.hpp"
 #include "hedgr.store/repository/entity.hpp"
 #include "hedgr.store/repository/query.hpp"
+#include <format>
 #include <optional>
 #include <sqlgen/delete_from.hpp>
 #include <sqlgen/literals.hpp>
@@ -63,6 +64,35 @@ account_entity to_entity(const dom::account& row) {
         .principal = row.principal,
         .folder_id = row.folder_id,
     };
+}
+
+/**
+ * @brief The outcome of a credential UPDATE, or @c not_found when no account
+ * holds @p account_id afterwards.
+ *
+ * An UPDATE that matches nothing succeeds in SQL, so an account removed while a
+ * credential was being sealed would otherwise report a write that never
+ * happened.
+ */
+sqlite::result<void> updated(const auto& outcome, sqlite::database& db,
+    std::string_view account_id) {
+    if (auto written = done(outcome); !written)
+        return written;
+
+    const auto query = sqlgen::read<std::vector<account_entity>> |
+        sqlgen::where("id"_c == std::string{account_id});
+    auto rows = rows_of(query(db.connection()));
+    if (!rows)
+        return std::unexpected(rows.error());
+    if (rows.value().empty()) {
+        return std::unexpected(sqlite::store_error{
+            .code = sqlite::store_errc::not_found,
+            .message = std::format("no account '{}' to hold a credential",
+                account_id),
+            .sqlite_code = 0,
+        });
+    }
+    return {};
 }
 
 /** @brief The rows of a prepared account query, as domain values. */
@@ -136,7 +166,7 @@ sqlite::result<void> account_repository::set_credential(
         sqlgen::update<account_credential_entity>(
             "credential"_c.set(std::string{sealed})) |
         sqlgen::where("id"_c == std::string{account_id});
-    return done(query(db_->connection()));
+    return updated(query(db_->connection()), *db_, account_id);
 }
 
 sqlite::result<void>
@@ -150,7 +180,7 @@ account_repository::clear_credential(std::string_view account_id) {
         sqlgen::update<account_credential_entity>(
             "credential"_c.set(std::optional<std::string>{})) |
         sqlgen::where("id"_c == std::string{account_id});
-    return done(query(db_->connection()));
+    return updated(query(db_->connection()), *db_, account_id);
 }
 
 sqlite::result<std::vector<std::string>>

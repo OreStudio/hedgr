@@ -65,6 +65,7 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::chart_state;
 using hedgr::model::domain::account;
+using hedgr::model::domain::secret_string;
 using hedgr::model::domain::accounts_root_id_for;
 using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
@@ -800,7 +801,7 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     connect.instance_id = "inst-refused";
     connect.account_id = "ident-1";
     connect.principal = "alice@example.test";
-    connect.password = "not-a-real-secret";
+    connect.password = secret_string{std::string{"not-a-real-secret"}};
     push_command(manager, connect);
 
     REQUIRE(manager.sessions().find("inst-refused", "ident-1").has_value());
@@ -871,7 +872,7 @@ TEST_CASE("an instance whose certificate cannot be opened names the file",
     connect.instance_id = "inst-tls";
     connect.account_id = "ident-tls";
     connect.principal = "alice@example.test";
-    connect.password = "not-a-real-secret";
+    connect.password = secret_string{std::string{"not-a-real-secret"}};
     push_command(manager, connect);
 
     const auto settled = wait_until([&manager] {
@@ -1004,7 +1005,7 @@ TEST_CASE("a probe leaves the session table untouched", "[runtime]") {
     connect.instance_id = "inst-refused";
     connect.account_id = "ident-1";
     connect.principal = "alice@example.test";
-    connect.password = "not-a-real-secret";
+    connect.password = secret_string{std::string{"not-a-real-secret"}};
     push_command(manager, connect);
 
     const auto handle = manager.instances().find("inst-refused");

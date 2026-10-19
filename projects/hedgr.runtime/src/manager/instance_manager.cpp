@@ -1616,13 +1616,8 @@ void instance_manager::handle(command::command& cmd) {
      * a credential is handed to a worker during the dispatch above, not after
      * it -- so the only thing a surviving copy could do is be read by whoever
      * gets that allocation next.
-     *
-     * The same three steps the session worker uses, for the same reason: clear()
-     * alone leaves the bytes in the allocation.
      */
-    std::fill(cmd.password.begin(), cmd.password.end(), '\0');
     cmd.password.clear();
-    cmd.password.shrink_to_fit();
 
     /*
      * The sealed credential is ciphertext, and it is still not left in a buffer
@@ -2398,14 +2393,15 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      */
     if (!cmd.password.empty()) {
         if (cmd.remember && store_lock_ == domain::store_lock::unlocked) {
-            start_credential_store(cmd.account_id, cmd.password,
-                master_password_);
+            start_credential_store(cmd.account_id,
+                std::string{cmd.password.view()}, master_password_);
         } else if (cmd.remember) {
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "Not remembering the password for '" << cmd.account_id
                 << "': the store is not unlocked";
         }
-        start_session_for(cmd, domain::credential{cmd.principal, cmd.password});
+        start_session_for(cmd,
+            domain::credential{cmd.principal, std::string{cmd.password.view()}});
         return;
     }
 
@@ -2581,7 +2577,7 @@ void instance_manager::start_stored_connect(const command::command& cmd,
              * command's, and the worker wipes that the moment the sign-in
              * resolves.
              */
-            retry.password = std::move(opened).value();
+            retry.password = domain::secret_string{std::move(opened).value()};
             commands_.push(std::move(retry));
         },
         boost::asio::detached);
@@ -2695,7 +2691,7 @@ void instance_manager::do_set_master_password(const command::command& cmd) {
      * unlock does. The store ends up unlocked either way: the operator has just
      * chosen the password and holding it is what they asked for.
      */
-    auto password = domain::secret_string{cmd.password};
+    auto password = cmd.password;
 
     unlocking_ = true;
     boost::asio::co_spawn(pool_.context(),
@@ -2760,7 +2756,7 @@ void instance_manager::do_unlock_store(const command::command& cmd) {
         return;
     }
 
-    auto password = domain::secret_string{cmd.password};
+    auto password = cmd.password;
     const auto sealed = std::move(blob).value();
 
     /*
@@ -3584,7 +3580,7 @@ void instance_manager::start_market_stream(const model::event::event& ev) {
     worker::market_stream_options options;
     options.options = connection_options_for(*instances_.get(*instance),
         seed_options_, database_->path());
-    options.token = ev.token;
+    options.token = std::string{ev.token.view()};
     options.principal = ev.payload;
     options.tenant_id = ev.tenant_id;
     options.party_id = ev.party_id;

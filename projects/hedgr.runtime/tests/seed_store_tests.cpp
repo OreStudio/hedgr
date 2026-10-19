@@ -40,6 +40,7 @@ namespace {
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
+using hedgr::model::domain::secret_string;
 using hedgr::model::domain::folder;
 using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
@@ -162,7 +163,7 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
 
     command create;
     create.kind = command_kind::set_master_password;
-    create.password = std::string{seed_password()};
+    create.password = secret_string{std::string{seed_password()}};
     REQUIRE(run_until(manager, std::move(create),
         [&manager] { return manager.store_lock() == store_lock::unlocked; }));
 

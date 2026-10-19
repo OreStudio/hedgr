@@ -30,8 +30,11 @@ secret in the file.
   blob, exactly as the Qt manager's `verify_master_password` did.
 - The store has a locked state and an unlocked state. Locked is a state the
   interface renders, not an error it reports. The whole store is behind the
-  password, so the Instances window is drawn only while the store is unlocked
-  and is replaced by the prompt otherwise. An earlier revision of this ADR said
+  password in the interface, so the Instances window is drawn only while the
+  store is unlocked and is replaced by the prompt otherwise. The gate is in the
+  interface only. On disk only the credential is encrypted, and the catalogue
+  (instances with their broker URLs and TLS paths, folders, labels and account
+  principals) is stored in the clear. An earlier revision of this ADR said
   the Instances window would work while locked because instances carry no
   credential. The operator chose the whole-store gate instead, because an
   instance list names real hosts and tiers and is not public either.
@@ -53,12 +56,15 @@ one way, and the component still talks to SQLite directly.
 The first launch on a new store has no master password, so the first surface an
 operator meets is the create prompt. Startup is gated on it. An operator may
 still store no credentials at all, but they set a master password regardless,
-because it guards the instance catalogue and the folders too.
+because the interface gates the instance catalogue and the folders behind it
+too. That gate does not protect the file. A copy of the database reveals the
+catalogue without the master password, and only the credentials stay sealed.
 
-Losing the master password loses everything the store holds: the credentials,
-the instances, the folders and the labels. There is no recovery and there should
-not be one. This is wider than the original decision, which bounded the loss to
-the secrets, and it is the price of the whole-store gate.
+Losing the master password loses the credentials, and it locks Hedgr out of the
+instances, the folders and the labels, which the interface no longer shows.
+Those rows are still in the file in the clear. There is no recovery inside Hedgr
+and there should not be one. This is wider than the original decision, which
+bounded the loss to the secrets, and it is the price of the whole-store gate.
 
 Key derivation cost becomes a real number in the budget. Unlocking on a slow
 machine takes a noticeable fraction of a second, and the interface must show

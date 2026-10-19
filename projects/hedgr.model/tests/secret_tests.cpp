@@ -82,6 +82,41 @@ TEST_CASE("a secret is move-only in spirit and keeps its value across a move",
     REQUIRE(source.size() == 0);
 }
 
+TEST_CASE("moving a short secret wipes the source's in-object buffer",
+    "[secret]") {
+    /*
+     * A secret short enough for the small-string buffer is copied by a move,
+     * and libstdc++ only zeroes the first byte of the source. The source lives
+     * in this test's storage, so its buffer can be read after the move.
+     */
+    alignas(secret_string) unsigned char storage[sizeof(secret_string)]{};
+
+    const std::string password = "short-secret";
+    auto* source = new (storage) secret_string{password};
+
+    const char* const buffer = source->view().data();
+    const auto begin = reinterpret_cast<std::uintptr_t>(storage);
+    const auto position = reinterpret_cast<std::uintptr_t>(buffer);
+    REQUIRE(position >= begin);
+    REQUIRE(position + password.size() <= begin + sizeof(storage));
+
+    const secret_string moved{std::move(*source)};
+    REQUIRE(moved.view() == password);
+
+    const std::string bytes(buffer, password.size());
+    REQUIRE(bytes.find_first_not_of('\0') == std::string::npos);
+
+    secret_string assigned_from{password};
+    const char* const assigned_buffer = assigned_from.view().data();
+    secret_string target;
+    target = std::move(assigned_from);
+    REQUIRE(target.view() == password);
+    REQUIRE(std::string(assigned_buffer, password.size())
+                .find_first_not_of('\0') == std::string::npos);
+
+    source->~secret_string();
+}
+
 TEST_CASE("the secret's buffer is wiped when it is destroyed", "[secret]") {
     /*
      * The point of the whole type, and it needs a real look at the bytes to be

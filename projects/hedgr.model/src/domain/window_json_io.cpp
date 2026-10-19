@@ -42,7 +42,7 @@ std::expected<std::string, std::string> write_shape(const window_state& state) {
 
 template <typename Shape>
 std::expected<window_state, std::string> read_shape(std::string_view json) {
-    auto parsed = rfl::json::read<Shape>(json);
+    auto parsed = rfl::json::read<Shape, rfl::DefaultIfMissing>(json);
     if (!parsed)
         return std::unexpected(
             std::format("could not read window state: {}", parsed.error().what()));

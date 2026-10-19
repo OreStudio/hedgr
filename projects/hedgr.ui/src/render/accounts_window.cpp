@@ -377,7 +377,9 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
         request.instance_id = row->instance_id;
         request.account_id = row->id;
         request.principal = row->principal;
-        request.password = browser.credential.data();
+        request.password =
+            hedgr::model::domain::secret_string{
+                std::string{browser.credential.data()}};
         request.remember = browser.remember;
         input.commands.push(std::move(request));
 
