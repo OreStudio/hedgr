@@ -43,6 +43,29 @@ TEST_CASE("a chart preference names a span rather than a position",
     CHECK(chart_span_index(1234) == 1);
 }
 
+TEST_CASE("a chart period reads in minutes, not in term months",
+    "[market-view]") {
+    using hedgr::ui::render::chart_span_labels;
+
+    /* In OreStudio's term grammar "1M" is one month; the combo means a minute. */
+    CHECK(std::string{chart_span_labels[0]} == "1m");
+    CHECK(std::string{chart_span_labels[3]} == "1h");
+
+    market_view_state state;
+    state.chart_span = 0;
+    CHECK(serialize_market_view(state).starts_with("period=1m\n"));
+}
+
+TEST_CASE("a period saved before the relabel still reads", "[market-view]") {
+    market_view_state state;
+    parse_market_view("period=15M\n", state);
+    CHECK(state.chart_span == 2);
+    parse_market_view("period=1H\n", state);
+    CHECK(state.chart_span == 3);
+    parse_market_view("period=All\n", state);
+    CHECK(state.chart_span == 5);
+}
+
 TEST_CASE("market view preferences survive the text form", "[market-view]") {
     market_view_state state;
     state.chart_span = 3;
