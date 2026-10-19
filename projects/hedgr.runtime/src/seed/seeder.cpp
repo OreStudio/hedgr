@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/seed/seeder.hpp"
+#include "support.hpp"
 #include "hedgr.store/sqlite/error.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -51,30 +52,9 @@ namespace transport = hedgr::session::transport;
 
 using condition_source = model_state::condition_source;
 
-/**
- * @brief This manager's logger.
- *
- * A warning that nothing reads is not a warning, so a checkout the scan could
- * not use is reported the way the rest of OreStudio reports one: through the
- * process log, which the application sets up before it starts anything.
- */
-[[nodiscard]] auto& lg() {
-    using namespace ores::logging;
-    static auto instance = make_logger("hedgr.runtime.manager.instance_manager");
-    return instance;
-}
-
-/** @brief The live slot index of every row of a table, holes skipped. */
-[[nodiscard]] std::vector<std::uint32_t>
-live_indices(const model_state::slab& layout) {
-    std::vector<std::uint32_t> result;
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
-        result.push_back(index);
-    }
-    return result;
-}
+using support::lg;
+using support::live_indices;
+using support::store_failure;
 
 /**
  * @brief The current UTC instant as ISO-8601, for a creation timestamp.
@@ -90,15 +70,6 @@ live_indices(const model_state::slab& layout) {
     std::ostringstream out;
     out << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
     return out.str();
-}
-
-/** @brief A store failure as one sentence naming the operation that failed. */
-[[nodiscard]] std::string store_failure(std::string_view what,
-    const sqlite::store_error& error) {
-    const auto message = std::format("{}: {} ({})", what, error.message,
-        sqlite::to_string(error.code));
-    BOOST_LOG_SEV(lg(), ores::logging::error) << "Store failure: " << message;
-    return message;
 }
 
 /**

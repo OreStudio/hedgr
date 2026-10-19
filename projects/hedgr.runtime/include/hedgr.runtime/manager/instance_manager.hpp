@@ -35,6 +35,8 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/service/password_policy_service.hpp"
+#include "hedgr.runtime/service/probe_service.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
@@ -167,7 +169,7 @@ public:
      * single writer the concurrency model requires.
      */
     [[nodiscard]] const model::state::probe_table& probes() const noexcept {
-        return probes_;
+        return probe_service_.probes();
     }
 
     [[nodiscard]] const model::state::window_table& windows() const noexcept {
@@ -228,7 +230,7 @@ public:
      */
     [[nodiscard]] const model::state::password_policy_state&
     password_policy() const noexcept {
-        return password_policy_;
+        return policy_service_.password_policy();
     }
 
     /** @brief Where the interface pushes its commands. */
@@ -464,9 +466,6 @@ private:
 
     /** @brief Reconciles watches, drains buckets and applies them to the model. */
     void pump_market_streams();
-    void do_probe_instance(const model::command::command& cmd);
-    void do_probe_all();
-
     /**
      * @brief Drops every shortcut pointing at a target that is going away.
      *
@@ -479,44 +478,12 @@ private:
                                const std::string& target_id);
 
     /**
-     * @brief Spawns a probe for every instance whose deadline has passed.
-     *
-     * Run at the end of pump(), after the commands and the events have been
-     * applied, so a probe asked for this frame or an answer that landed this
-     * frame is already reflected in the deadline it reads. An instance with a
-     * probe in flight is skipped: an instance is never probed twice at once,
-     * because two probes racing on one instance would report two results for
-     * one moment and would spend two of the pool's two threads doing it.
-     */
-    void pump_probes();
-
-    /**
-     * @brief Asks the deployment the process was pointed at for its policy.
-     *
-     * Run once at start. Not from the create prompt's own frame and not per
-     * frame: the read blocks on the transport, so the interface asks for it by
-     * starting the process and then reads whatever came back. Asking once is
-     * also what keeps a refused read from becoming a poll loop against a
-     * deployment that is already not answering.
-     */
-    void fetch_password_policy();
-
-    /** @brief Applies one policy read's answer. */
-    void apply_password_policy(const model::event::event& ev);
-
-    /**
      * @brief Clears a read's in-flight mark and applies its answer.
      *
      * @return true when the event was wholly a read answer, false when the
      * session row still has something to apply.
      */
     [[nodiscard]] bool apply_read_answer(const model::event::event& ev);
-
-    /** @brief Starts one probe, and remembers that it is in flight. */
-    void spawn_probe_for(const model::domain::instance& row);
-
-    /** @brief Applies one probe's answer: the result, then the next deadline. */
-    void apply_probe_result(const model::event::event& ev);
 
     /**
      * @brief Moves every leaf out of @p folder_ids and into its tree's root.
@@ -528,15 +495,6 @@ private:
      * runtime reports that the tree is broken instead of silently detaching it.
      */
     void rehome_leaves(const std::vector<std::string>& folder_ids);
-
-    /**
-     * @brief Drops everything the schedule holds for one instance.
-     *
-     * Called when an instance is removed, so no deadline, no interval and no
-     * running probe outlives the row they describe.
-     */
-    void forget_probe(model::state::instance_handle handle,
-                      const std::string& instance_id);
 
     void ensure_instance_manager_window();
 
@@ -611,8 +569,6 @@ private:
     model::state::shortcut_table shortcuts_;
     model::state::session_table sessions_;
     model::state::window_table windows_;
-    model::state::probe_table probes_;
-    model::state::password_policy_state password_policy_;
     model::command::command_queue commands_;
     model::command::event_queue events_;
 
@@ -656,15 +612,6 @@ private:
     bool unlocking_ = false;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
-
-    /**
-     * @brief The probes that are in flight, by the instance they measure.
-     *
-     * An entry is what stops an instance being probed twice at once, and the
-     * stop source beside it is what cancels a probe whose instance has gone or
-     * whose application is stopping.
-     */
-    std::unordered_map<std::string, std::shared_ptr<std::stop_source>> probing_;
 
     /**
      * @brief The deployment reads in flight, by the session they serve.
@@ -741,27 +688,6 @@ private:
     std::uint64_t next_attempt_ = 0;
 
     /**
-     * @brief The policy read, once it has been asked for.
-     *
-     * Held apart from the sessions' cancellations because it is not one: it
-     * belongs to the deployment rather than to a session or an instance, and a
-     * key is not something it has. It exists so that a stop cancels a read
-     * still waiting on a connect, rather than leaving a pool thread holding a
-     * socket for a process that is going away.
-     */
-    std::shared_ptr<std::stop_source> policy_read_;
-
-    /**
-     * @brief The cadence each instance currently polls on, by instance id.
-     *
-     * The deadline itself lives in the probe table, beside the result; this is
-     * the other half of the same schedule, because doubling a backoff needs to
-     * know what the previous one was. An instance with no entry is on the
-     * default cadence, which is the state every instance starts in.
-     */
-    std::unordered_map<std::string, std::chrono::milliseconds> probe_intervals_;
-
-    /**
      * @brief The options the process was seeded with.
      *
      * An instance row carries what differs between deployments: the address,
@@ -784,14 +710,13 @@ private:
     std::uint64_t next_window_serial_ = 1;
     bool started_ = false;
 
-    /**
-     * @brief Whether the policy read has been asked for.
-     *
-     * The read starts on the first pump rather than in @c start, because the
-     * answer arrives as an event and the frame loop is the only thing that
-     * applies one.
+    /*
+     * Last, so both are built after and destroyed before the tables, the
+     * channel and the options they hold references to.
      */
-    bool policy_requested_ = false;
+    service::probe_service probe_service_{instances_, probe_pool_.context(), events_};
+    service::password_policy_service policy_service_{seed_options_,
+        probe_pool_.context(), events_};
 };
 
 }

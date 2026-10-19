@@ -39,6 +39,8 @@
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/market_table.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
@@ -59,6 +61,7 @@
 #include <thread>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace {
 
@@ -246,10 +249,12 @@ void push_command(instance_manager& manager, command request) {
  * meet needs a daemon, and a suite that needs a daemon is a suite that fails
  * on a developer's machine for no reason.
  */
-void add_unreachable_instance(instance_manager& manager, std::string id) {
+void add_unreachable_instance(instance_manager& manager, std::string id,
+    std::string name = "Refused") {
     command save;
     save.kind = command_kind::save_instance;
-    save.instance_row = make_instance(std::move(id), "Refused", "ores.test.refused");
+    save.instance_row = make_instance(std::move(id), std::move(name),
+        "ores.test.refused");
     save.instance_row.nats_url = "nats://127.0.0.1:1";
     save.instance_id = save.instance_row.id;
     push_command(manager, save);
@@ -1179,6 +1184,182 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
     const auto after_reset = steady_now_ns();
     REQUIRE(reset_deadline - after_reset > 4'000'000'000);
     REQUIRE(reset_deadline - after_reset <= 5'000'000'000);
+
+    manager.stop();
+}
+
+TEST_CASE("a probe result for a removed instance is dropped", "[runtime]") {
+    const temporary_database database("probe-removed");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-gone");
+    const auto gone = manager.instances().find("inst-gone");
+    REQUIRE(gone.has_value());
+
+    command remove;
+    remove.kind = command_kind::remove_instance;
+    remove.instance_id = "inst-gone";
+    push_command(manager, remove);
+    REQUIRE_FALSE(manager.instances().find("inst-gone").has_value());
+
+    /*
+     * The next row takes the freed slot, so a result applied by slot rather
+     * than by id would land on it.
+     */
+    add_unreachable_instance(manager, "inst-next", "Refused next");
+    const auto next = manager.instances().find("inst-next");
+    REQUIRE(next.has_value());
+
+    event fact;
+    fact.kind = event_kind::probe_result;
+    fact.instance_id = "inst-gone";
+    fact.reach = reachability::reachable;
+    fact.ready = readiness::ready;
+    fact.detail = "answer for the removed instance";
+    manager.events().push(fact);
+    manager.pump();
+
+    REQUIRE(manager.probes().get(*gone) == nullptr);
+    const auto* result = manager.probes().get(*next);
+    REQUIRE((result == nullptr || result->detail != fact.detail));
+
+    manager.stop();
+}
+
+TEST_CASE("probe_all moves every deadline and never doubles a probe in flight",
+    "[runtime]") {
+    const temporary_database database("probe-all");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    add_unreachable_instance(manager, "inst-a");
+    add_unreachable_instance(manager, "inst-b", "Refused too");
+    const auto a = manager.instances().find("inst-a");
+    const auto b = manager.instances().find("inst-b");
+    REQUIRE(a.has_value());
+    REQUIRE(b.has_value());
+
+    const auto first = wait_until([&] {
+        manager.pump();
+        return manager.probes().get(*a) != nullptr
+            && manager.probes().get(*b) != nullptr;
+    }, std::chrono::seconds(10));
+    REQUIRE(first);
+    const auto a_observed = manager.probes().get(*a)->observed_at_ns;
+    const auto b_observed = manager.probes().get(*b)->observed_at_ns;
+    REQUIRE(manager.probes().next_probe_ns(*a) > steady_now_ns());
+    REQUIRE(manager.probes().next_probe_ns(*b) > steady_now_ns());
+
+    command all;
+    all.kind = command_kind::probe_all;
+    push_command(manager, all);
+
+    /*
+     * The sweep spawned both probes in the same pump, and a deadline stays
+     * where probe_all put it until the answer moves it.
+     */
+    REQUIRE(manager.probes().next_probe_ns(*a) == 0);
+    REQUIRE(manager.probes().next_probe_ns(*b) == 0);
+
+    /*
+     * Pumped again at once, with both deadlines still due: only the in-flight
+     * entries stop a second probe of each.
+     */
+    for (int pass = 0; pass < 50; ++pass)
+        manager.pump();
+
+    const auto second = wait_until([&] {
+        manager.pump();
+        return manager.probes().get(*a)->observed_at_ns != a_observed
+            && manager.probes().get(*b)->observed_at_ns != b_observed;
+    }, std::chrono::seconds(10));
+    REQUIRE(second);
+
+    /*
+     * A duplicate answer would be a third failure and push the deadline out to
+     * forty seconds. Given time to arrive, it must not have.
+     */
+    const auto settle_until = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < settle_until) {
+        manager.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    const auto now = steady_now_ns();
+    REQUIRE(manager.probes().next_probe_ns(*a) - now > 15'000'000'000);
+    REQUIRE(manager.probes().next_probe_ns(*a) - now <= 20'000'000'000);
+    REQUIRE(manager.probes().next_probe_ns(*b) - now > 15'000'000'000);
+    REQUIRE(manager.probes().next_probe_ns(*b) - now <= 20'000'000'000);
+
+    manager.stop();
+}
+
+TEST_CASE("a change of reachability raises one named signal", "[runtime]") {
+    const temporary_database database("probe-signal");
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    static_cast<void>(hedgr::model::signal::bus().drain());
+    add_unreachable_instance(manager, "inst-signal", "Signalled");
+    const auto handle = manager.instances().find("inst-signal");
+    REQUIRE(handle.has_value());
+
+    const auto first = wait_until([&] {
+        manager.pump();
+        return manager.probes().get(*handle) != nullptr;
+    }, std::chrono::seconds(10));
+    REQUIRE(first);
+
+    /*
+     * The bus is the process's, and the seeded instance is probed too, so only
+     * the signals that name this instance are counted. A first result has
+     * nothing to differ from and raises nothing.
+     */
+    const auto about_this = [] {
+        std::vector<hedgr::model::signal::signal> result;
+        for (auto& value : hedgr::model::signal::bus().drain()) {
+            if (value.detail.starts_with("Signalled "))
+                result.push_back(std::move(value));
+        }
+        return result;
+    };
+    REQUIRE(about_this().empty());
+
+    /*
+     * Readiness moved as well, and only reachability is announced: one fact,
+     * one signal.
+     */
+    event restored;
+    restored.kind = event_kind::probe_result;
+    restored.instance_id = "inst-signal";
+    restored.reach = reachability::reachable;
+    restored.ready = readiness::ready;
+    manager.events().push(restored);
+    manager.pump();
+
+    const auto up = about_this();
+    REQUIRE(up.size() == 1);
+    REQUIRE(up.front().name ==
+        hedgr::model::signal::names::instance_reachability_restored);
+    REQUIRE(up.front().detail == "Signalled answers its broker again");
+
+    event lost;
+    lost.kind = event_kind::probe_result;
+    lost.instance_id = "inst-signal";
+    lost.reach = reachability::unreachable;
+    manager.events().push(lost);
+    manager.pump();
+
+    const auto down = about_this();
+    REQUIRE(down.size() == 1);
+    REQUIRE(down.front().name ==
+        hedgr::model::signal::names::instance_reachability_lost);
+    REQUIRE(down.front().detail == "Signalled no longer answers its broker");
 
     manager.stop();
 }
