@@ -26,18 +26,29 @@ Each bundle is one pull request, merged before the next starts.
 
 | # | Bundle | Findings | Status |
 |---|---|---|---|
-| 1 | Architecture document and review record | AR-20 (docs part) | in review |
-| 2 | Session state corruption on failed or interrupted reads | SR-1, SR-3 | open |
-| 3 | UI memory safety and identity | UW-1, UR-14, UR-15, UR-4, UR-19, UR-20, UR-21 | open |
-| 4 | Secret handling and store robustness | MS-1, MS-2, MS-4, MS-12, MS-8, MS-9, MS-16, MS-17 | open |
-| 5 | Build hygiene and warnings | UW-2, UW-3, UW-8, UW-9, UW-5 | in review (#24) |
-| 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | in review (#26) |
-| 7 | Backfill through the time-ordered endpoint | SR-9, C-4, SR-10 | open |
+| 1 | Architecture document and review record | AR-20 (docs part) | merged (#20) |
+| 2 | Session state corruption on failed or interrupted reads | SR-1, SR-3 | merged (#23) |
+| 3 | UI memory safety and identity | UW-1, UR-14, UR-15, UR-4, UR-19, UR-20, UR-21 | merged (#21) |
+| 4 | Secret handling and store robustness | MS-1, MS-2, MS-4, MS-12, MS-8, MS-9, MS-16, MS-17 | merged (#22) |
+| 5 | Build hygiene and warnings | UW-2, UW-3, UW-8, UW-9, UW-5 | merged (#24) |
+| 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | merged (#26) |
+| 7 | Backfill through the time-ordered endpoint | SR-9, C-4, SR-10 | merged (#28) |
 | 8 | Data health has one owner | UR-1, UR-2, UR-OS-2, AR-14 | open |
-| 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | in review (#25) |
-| 10 | Frame loop idle and minimised policy | UW-4, AR-2 | open |
-| 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | open |
+| 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | merged (#25), partly deferred |
+| 10 | Frame loop idle and minimised policy | UW-4, AR-2 | merged (#27), minimise only |
+| 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | in review |
 
 Structural work that follows the bundles above, in the order Part D of
 `architecture.md` gives: version-stamped series table, `instance_manager`
 split, session actor. Each needs its own plan and is not scheduled here.
+
+## Deferred from merged bundles
+
+- Bundle 6: SR-6, reconnect detection. `ores.nats` exposes no connection state, so it needs an upstream accessor or a reconnect callback with a closure.
+- Bundle 7: the deadline-policy half of SR-10, in `instance_manager.cpp`.
+- Bundle 9: UR-OS-1 and C-10 (CRM rate formatting through `currency_pair_rate_formatter`) need an edit at `crm_window.cpp:337-344`. UR-OS-3 needs `in_term_order` moved into an ores api library. UR-OS-4, 5, 6, C-8 and C-9 need session URI parsing or the core codec.
+- Bundle 10: no redraw predicate, which needs version stamps first. GLFW on Wayland never reports a minimised window.
+- Bundle 3: folder ids in `browser.cpp` have the same rename-then-create collision the instance and account ids had.
+- Bundle 4: `domain::credential::password`, worker job tokens and `market_stream_options::token` are still `std::string`.
+- Bundle 8 waits for the `crm_window.cpp` footer work to be committed.
+- Side finding: the X11 fallback fails to initialise the OpenGL loader without an EGL hint.
