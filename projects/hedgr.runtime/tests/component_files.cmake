@@ -13,6 +13,7 @@ set(files
     "crm_worker_tests.cpp"
     "environment_seed_tests.cpp"
     "hermetic_environment.cpp"
+    "market_feed_tests.cpp"
     "market_stream_tests.cpp"
     "read_service_tests.cpp"
     "reported_error_tests.cpp"
