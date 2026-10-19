@@ -37,13 +37,18 @@ namespace hedgr::model::domain {
 namespace {
 
 void wipe(std::string& value) noexcept {
-    if (!value.empty())
-        OPENSSL_cleanse(value.data(), value.size());
+    /*
+     * By capacity, not size: a moved-from short string has size zero but keeps
+     * the password in its in-object buffer after the first byte.
+     */
+    OPENSSL_cleanse(value.data(), value.capacity());
 }
 
 }
 
-secret_string::secret_string(std::string value) : value_(std::move(value)) {}
+secret_string::secret_string(std::string value) : value_(std::move(value)) {
+    wipe(value);
+}
 
 secret_string::~secret_string() {
     /*
