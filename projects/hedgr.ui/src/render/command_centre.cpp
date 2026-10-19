@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
@@ -48,6 +49,7 @@ namespace theme = hedgr::ui::theme;
 
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
+using hedgr::ui::render::age_text;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
@@ -282,8 +284,7 @@ void draw_overview(const render_input& input, const domain::deployment_snapshot&
     deployment.cards.push_back(widget::card_spec{.id = "cc-observed",
         .glyph = icon::clock,
         .title = "Read",
-        .value = std::format("{:.0f} s ago",
-            static_cast<double>(input.now_ns - snapshot.observed_at_ns) / 1.0e9),
+        .value = age_text(input.now_ns - snapshot.observed_at_ns),
         .caption = "one snapshot, all counts"});
     topics.push_back(std::move(deployment));
 
