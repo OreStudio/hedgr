@@ -27,6 +27,10 @@ target_link_libraries(${name}.tests
         magic_enum::magic_enum
         Catch2::Catch2WithMain
         Threads::Threads
+        # Only the tests link it: the password assessment is checked against
+        # the server's own validator, and hedgr.model itself stays free of
+        # OreStudio.
+        ores::security
 )
 
 install(TARGETS ${name}.tests RUNTIME DESTINATION bin)

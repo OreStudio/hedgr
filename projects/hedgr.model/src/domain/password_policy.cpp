@@ -45,15 +45,16 @@ template <typename Predicate>
 /**
  * @brief Whether @p password carries one of @p accepted's characters.
  *
- * A search of the policy's own set rather than a test against a character
- * class, because the set is the deployment's to choose. A set it left empty
- * cannot be satisfied by anything, which is why the caller checks that too.
+ * Matches the server's test, @c std::strchr over the set's C string: the set
+ * ends at its first NUL, and a NUL in the password always matches, because
+ * strchr finds the terminator. A set left empty is therefore met only by a NUL.
  */
 [[nodiscard]] bool carries_any_of(std::string_view password,
-    std::string_view accepted) {
+    const std::string& accepted) {
+    const std::string_view set{accepted.c_str()};
     return std::any_of(password.begin(), password.end(),
-        [accepted](char character) {
-            return accepted.find(character) != std::string_view::npos;
+        [set](char character) {
+            return character == '\0' || set.find(character) != std::string_view::npos;
         });
 }
 
@@ -114,7 +115,7 @@ password_assessment assess_password(std::string_view password,
     if (policy.require_digit
         && carries(password, [](int character) { return std::isdigit(character); }))
         result.met.push_back(password_rule::digit);
-    if (policy.require_special && !policy.special_chars.empty()
+    if (policy.require_special
         && carries_any_of(password, policy.special_chars))
         result.met.push_back(password_rule::special);
 
