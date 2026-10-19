@@ -31,6 +31,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/capture.hpp"
 #include "ores.logging/make_logger.hpp"
+#include "ores.nats/domain/wire_format.hpp"
 
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
@@ -126,6 +127,7 @@ void application::run() {
         seed.tls_ca = cfg_.connection->tls_ca_cert;
         seed.tls_cert = cfg_.connection->tls_client_cert;
         seed.tls_key = cfg_.connection->tls_client_key;
+        seed.wire_format = ores::nats::to_string(cfg_.connection->format);
     }
 
     BOOST_LOG_SEV(lg(), info)
