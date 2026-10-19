@@ -22,10 +22,10 @@
 
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/composite_key.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace hedgr::model::state {
@@ -114,8 +114,10 @@ public:
     void clear();
 
 private:
-    std::unordered_map<std::string, market_catalogue> catalogues_;
-    std::unordered_map<std::string, domain::market_series_snapshot> points_;
+    composite_map<2, market_catalogue> catalogues_;
+    composite_map<3, domain::market_series_snapshot> points_;
+    /** @brief The last version stamped; never reset, so none repeats. */
+    std::uint64_t version_ = 0;
 };
 
 }

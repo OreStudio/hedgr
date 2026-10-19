@@ -191,6 +191,15 @@ struct market_series_snapshot final {
     /** @brief Why the last read failed, or empty. */
     std::string failure;
 
+    /**
+     * @brief Changes whenever anything above changes, and never repeats.
+     *
+     * The table stamps it from one counter for every chart, so a window that
+     * kept plot data derived from a snapshot rebuilds exactly when the stamp
+     * it kept differs, including after it switched to another chart.
+     */
+    std::uint64_t version = 0;
+
     /** @brief The buckets of one level, oldest first. */
     [[nodiscard]] const std::deque<market_point>&
     level(market_level which) const noexcept {

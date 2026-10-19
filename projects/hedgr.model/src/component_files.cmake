@@ -69,6 +69,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/signal/names.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/signal/signal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/estate_history.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/composite_key.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/handle.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/market_table.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/state/bucket_ring.hpp"

@@ -21,8 +21,8 @@
 #include "hedgr.model/domain/probe.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/data_health.hpp"
-#include "hedgr.ui/render/ema.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
@@ -154,90 +154,6 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
     return domain::market_level::coarse;
 }
 
-/** @brief The first index of the points that fall in @p span_ns. */
-[[nodiscard]] std::size_t live_window_start(
-    const std::deque<domain::market_point>& points, std::int64_t span_ns) {
-    if (points.size() < 2 || span_ns <= 0)
-        return 0;
-    const auto cutoff = points.back().at_ns - span_ns;
-    std::size_t first = 0;
-    while (first + 1 < points.size() && points[first].at_ns < cutoff)
-        ++first;
-    /* Two points are the least a line needs; a sparse series keeps it all. */
-    return points.size() - first < 2 ? 0 : first;
-}
-
-/** @brief One candle, built from the points of its interval. */
-struct candle final {
-    std::int64_t at_ns = 0;
-    double open = 0.0;
-    double high = 0.0;
-    double low = 0.0;
-    double close = 0.0;
-};
-
-/** @brief How wide a candle is, and which ring it is built from. */
-struct candle_plan final {
-    std::int64_t width_ns = 0;
-    domain::market_level level = domain::market_level::fine;
-};
-
-/**
- * @brief The candle width a span reads best at.
- *
- * Around sixty candles fill the width without turning into a smear. The
- * finer rings carry one second buckets, the medium ring one minute and the
- * coarse ring one hour, so a wider candle combines the ring beneath it.
- */
-[[nodiscard]] candle_plan candle_plan_for(std::int64_t span_ns) {
-    if (span_ns <= 60 * domain::market_fine_ns)
-        return {.width_ns = domain::market_fine_ns,
-            .level = domain::market_level::fine};
-    if (span_ns <= 300 * domain::market_fine_ns)
-        return {.width_ns = 5 * domain::market_fine_ns,
-            .level = domain::market_level::fine};
-    if (span_ns <= 900 * domain::market_fine_ns)
-        return {.width_ns = 15 * domain::market_fine_ns,
-            .level = domain::market_level::fine};
-    if (span_ns <= 3600 * domain::market_fine_ns)
-        return {.width_ns = domain::market_medium_ns,
-            .level = domain::market_level::medium};
-    if (span_ns <= 24 * 3600 * domain::market_fine_ns)
-        return {.width_ns = 15 * domain::market_medium_ns,
-            .level = domain::market_level::medium};
-    return {.width_ns = 24 * domain::market_coarse_ns,
-        .level = domain::market_level::coarse};
-}
-
-/** @brief Combines ring points into candles of @p width_ns. */
-[[nodiscard]] std::vector<candle> build_candles(
-    const std::deque<domain::market_point>& points, std::size_t start,
-    std::int64_t width_ns) {
-    std::vector<candle> candles;
-    if (width_ns <= 0)
-        return candles;
-    for (std::size_t i = start; i < points.size(); ++i) {
-        const auto& point = points[i];
-        const double open = point.open != 0.0 || point.high != 0.0
-                || point.low != 0.0
-            ? point.open
-            : point.value;
-        const double high = point.high != 0.0 ? point.high : point.value;
-        const double low = point.low != 0.0 ? point.low : point.value;
-        const auto bucket = point.at_ns / width_ns;
-        if (candles.empty() || candles.back().at_ns / width_ns != bucket) {
-            candles.push_back(candle{.at_ns = bucket * width_ns,
-                .open = open, .high = high, .low = low, .close = point.value});
-            continue;
-        }
-        auto& last = candles.back();
-        last.high = std::max(last.high, high);
-        last.low = std::min(last.low, low);
-        last.close = point.value;
-    }
-    return candles;
-}
-
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -285,14 +201,19 @@ void render_chart(window_handle handle, const render_input& input,
     const std::int64_t newest_at_ns =
         points.empty() ? 0 : points.back().at_ns;
     const auto health = assess_data_health(newest_at_ns, input.wall_now_ns);
-    const std::size_t start = live_window_start(points, span_ns);
+    auto& plot = state.plot;
+    update_chart_plot(plot,
+        chart_plot_key{.version = snapshot != nullptr ? snapshot->version : 0,
+            .span_ns = span_ns,
+            .candles = state.market_view.chart_style == 0,
+            .ema = state.market_view.chart_ema != 0},
+        points);
+    const std::size_t start = plot.start;
     const double first = points.empty() ? 0.0 : points[start].value;
     const double last = points.empty() ? 0.0 : points.back().value;
     const double change = last - first;
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
-    const bool candles = state.market_view.chart_style == 0;
-    const bool ema_enabled = state.market_view.chart_ema != 0;
 
     foot.word = std::string{data_health_word(health.state)};
     foot.colour = health_colour(health.state);
@@ -366,39 +287,16 @@ void render_chart(window_handle handle, const render_input& input,
         } else if (points.empty()) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
-            /*
-             * The selected span sizes the candles. All means the whole series,
-             * so the width comes from the points actually in view.
-             */
-            const auto candle_span = span_ns == 0
-                ? points.back().at_ns - points[start].at_ns : span_ns;
-            const auto plan = candle_plan_for(candle_span);
-            const auto candle_points = candles
-                ? build_candles(points, start, plan.width_ns)
-                : std::vector<candle>{};
-            const bool use_candles = candles && !candle_points.empty();
-
-            std::vector<double> xs;
-            std::vector<double> ys;
-            xs.reserve(points.size() - start);
-            ys.reserve(points.size() - start);
-            double low = last;
-            double high = last;
-            for (std::size_t i = start; i < points.size(); ++i) {
-                const auto& point = points[i];
-                xs.push_back(static_cast<double>(point.at_ns) / 1.0e9);
-                ys.push_back(point.value);
-                low = std::min(low, point.value);
-                high = std::max(high, point.value);
-            }
+            const auto& xs = plot.xs;
+            const auto& ys = plot.ys;
+            const auto& candle_points = plot.candles;
+            const bool use_candles = !candle_points.empty();
+            const double low = plot.low;
+            const double high = plot.high;
             const double span = high - low > 0.0
                 ? high - low
                 : std::max(std::abs(high) * 0.005, 1e-6);
             const double floor = low - span * 0.08;
-
-            std::vector<double> ema;
-            if (ema_enabled && ys.size() > 1)
-                ema = exponential_moving_average(ys);
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
@@ -450,7 +348,7 @@ void render_chart(window_handle handle, const render_input& input,
                     }
                     const double pad = (candle_high - candle_low) * 0.08;
                     const double width_s =
-                        static_cast<double>(plan.width_ns) / 1.0e9;
+                        static_cast<double>(plot.candle_width_ns) / 1.0e9;
                     ImPlot::SetupAxisLimits(ImAxis_X1,
                         static_cast<double>(candle_points.front().at_ns) / 1.0e9
                             - width_s,
@@ -527,8 +425,8 @@ void render_chart(window_handle handle, const render_input& input,
                         static_cast<int>(xs.size()), line);
                 }
 
-                if (!ema.empty() && ema.size() == xs.size()) {
-                    plot_dashed(xs, ema,
+                if (!plot.ema.empty() && plot.ema.size() == xs.size()) {
+                    plot_dashed(xs, plot.ema,
                         ImGui::ColorConvertU32ToFloat4(
                             theme::moving_average_colour));
                 }

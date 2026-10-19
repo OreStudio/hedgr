@@ -21,9 +21,9 @@
 #define HEDGR_MODEL_STATE_IMAGE_CACHE_HPP
 
 #include "hedgr.model/export.hpp"
-#include "hedgr.model/state/tenant_key.hpp"
+#include "hedgr.model/state/composite_key.hpp"
 #include <boost/multi_index/hashed_index.hpp>
-#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/mem_fun.hpp>
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index_container.hpp>
 #include <cstddef>
@@ -116,16 +116,21 @@ private:
      * a client of a few hundred images needs.
      */
     struct entry final {
-        std::string key;
         std::string tenant_id;
         std::string image_id;
         image_content image;
+
+        [[nodiscard]] key_parts<2> key() const noexcept {
+            return {tenant_id, image_id};
+        }
     };
 
     using container = boost::multi_index_container<entry,
         boost::multi_index::indexed_by<
-            boost::multi_index::hashed_unique<boost::multi_index::member<
-                entry, std::string, &entry::key>>,
+            boost::multi_index::hashed_unique<
+                boost::multi_index::const_mem_fun<entry, key_parts<2>,
+                    &entry::key>,
+                composite_hash<2>, composite_equal<2>>,
             boost::multi_index::sequenced<>>>;
 
     container entries_;

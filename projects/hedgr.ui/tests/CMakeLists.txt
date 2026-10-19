@@ -18,7 +18,12 @@ endif()
 
 set(name "hedgr.ui")
 
-add_executable(${name}.tests ${files})
+# The allocation counter replaces operator new for the whole binary, so it is
+# compiled once per test executable from the one copy the model tests own.
+set(allocation_counter_dir ${CMAKE_CURRENT_SOURCE_DIR}/../../hedgr.model/tests)
+add_executable(${name}.tests ${files}
+    ${allocation_counter_dir}/allocation_counter.cpp)
+target_include_directories(${name}.tests PRIVATE ${allocation_counter_dir})
 
 target_link_libraries(${name}.tests
     PRIVATE

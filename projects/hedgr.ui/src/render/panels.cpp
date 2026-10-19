@@ -28,6 +28,7 @@
 
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,27 +40,42 @@ namespace domain = hedgr::model::domain;
 using hedgr::ui::render::render_input;
 
 /** @brief An instance's name by key, falling back to the key itself. */
-[[nodiscard]] std::string instance_name(const render_input& input,
+[[nodiscard]] std::string_view instance_name(const render_input& input,
     std::string_view id) {
     if (const auto handle = input.instances.find(id))
         return input.instances.get(*handle)->name;
-    return std::string{id};
+    return id;
 }
 
 /** @brief An account's principal by key, which is what a workspace titles. */
-[[nodiscard]] std::string account_principal(const render_input& input,
+[[nodiscard]] std::string_view account_principal(const render_input& input,
     std::string_view id) {
     if (const auto handle = input.accounts.find(id))
         return input.accounts.get(*handle)->principal;
-    return std::string{id};
+    return id;
+}
+
+
+/** @brief @p text, or @p fallback when it is empty. */
+[[nodiscard]] std::string_view or_else(std::string_view text,
+    std::string_view fallback) {
+    return text.empty() ? fallback : text;
+}
+
+template<class... Args>
+void put_format(std::string& out, std::format_string<Args...> format,
+    Args&&... args) {
+    std::format_to(std::back_inserter(out), format,
+        std::forward<Args>(args)...);
 }
 
 }
 
 namespace hedgr::ui::render {
 
-std::string window_title(domain::window_kind kind,
+void append_window_title(std::string& out, domain::window_kind kind,
     const domain::window_state& state, const render_input& input) {
+    const auto put = [&out](std::string_view text) { out += text; };
     /*
      * Read one alternative at a time rather than switching over the kind and
      * then reading the state: the kind and the state's alternative are set from
@@ -69,25 +85,25 @@ std::string window_title(domain::window_kind kind,
      */
     if (const auto* chart = std::get_if<domain::chart_state>(&state)) {
         if (kind == domain::window_kind::chart)
-            return chart->label.empty() ? std::string{"Chart"} : chart->label;
+            return put(or_else(chart->label, "Chart"));
     }
     if (const auto* grid = std::get_if<domain::grid_state>(&state)) {
         if (kind == domain::window_kind::grid)
-            return grid->resource.empty() ? std::string{"Grid"} : grid->resource;
+            return put(or_else(grid->resource, "Grid"));
     }
     if (const auto* notice = std::get_if<domain::notice_state>(&state)) {
         if (kind == domain::window_kind::notice)
-            return notice->title.empty() ? std::string{"Notice"} : notice->title;
+            return put(or_else(notice->title, "Notice"));
     }
     if (const auto* accounts = std::get_if<domain::accounts_state>(&state)) {
         if (kind == domain::window_kind::accounts) {
-            return std::format("Accounts: {}",
+            return put_format(out, "Accounts: {}",
                 instance_name(input, accounts->instance_id));
         }
     }
     if (const auto* centre = std::get_if<domain::command_centre_state>(&state)) {
         if (kind == domain::window_kind::command_centre) {
-            return std::format("Command centre: {}",
+            return put_format(out, "Command centre: {}",
                 instance_name(input, centre->instance_id));
         }
     }
@@ -100,42 +116,42 @@ std::string window_title(domain::window_kind kind,
              * the session the window is bound to, which the frame loop knows
              * and this function does not: see the renderer, which appends it.
              */
-            return account_principal(input, session->account_id);
+            return put(account_principal(input, session->account_id));
         }
     }
 
     switch (kind) {
     case domain::window_kind::chart:
-        return "Chart";
+        return put("Chart");
     case domain::window_kind::grid:
-        return "Grid";
+        return put("Grid");
     case domain::window_kind::notice:
-        return "Notice";
+        return put("Notice");
     case domain::window_kind::instance_manager:
-        return "Instances";
+        return put("Instances");
     case domain::window_kind::accounts:
-        return "Accounts";
+        return put("Accounts");
     case domain::window_kind::workspace:
-        return "Workspace";
+        return put("Workspace");
     case domain::window_kind::command_centre:
-        return "Command centre";
+        return put("Command centre");
     case domain::window_kind::series_browser:
-        return "Market data";
+        return put("Market data");
     case domain::window_kind::crm_matrix: {
         if (const auto* crm = std::get_if<domain::crm_matrix_state>(&state))
             if (!crm->crm_name.empty())
-                return std::format("Cross rates \u00b7 {}", crm->crm_name);
-        return "Cross rates";
+                return put_format(out, "Cross rates \u00b7 {}", crm->crm_name);
+        return put("Cross rates");
     }
     case domain::window_kind::term_structure: {
         if (const auto* terms =
                 std::get_if<domain::term_structure_state>(&state)) {
-            return terms->label.empty() ? "Term structure" : terms->label;
+            return put(or_else(terms->label, "Term structure"));
         }
-        return "Term structure";
+        return put("Term structure");
     }
     }
-    return "Window";
+    return put("Window");
 }
 
 bool shows_instances(const render_input& input) noexcept {

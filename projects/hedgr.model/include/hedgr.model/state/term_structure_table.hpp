@@ -22,10 +22,10 @@
 
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/composite_key.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace hedgr::model::state {
@@ -79,7 +79,7 @@ public:
     void clear();
 
 private:
-    std::unordered_map<std::string, term_structure> structures_;
+    composite_map<3, term_structure> structures_;
 };
 
 }

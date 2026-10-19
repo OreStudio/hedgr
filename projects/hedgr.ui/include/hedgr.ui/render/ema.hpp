@@ -33,13 +33,11 @@ inline constexpr std::size_t ema_period = 20;
  *
  * Seeded with the first value: each next value moves 2/(period+1) of the way to
  * the new one, so the line starts where the series starts rather than at zero.
+ * It replaces what @p result held and reuses its storage.
  */
-[[nodiscard]] inline std::vector<double> exponential_moving_average(
-    const std::vector<double>& values,
-    std::size_t period = ema_period) {
-    std::vector<double> result;
-    if (values.empty())
-        return result;
+inline void exponential_moving_average(const std::vector<double>& values,
+    std::vector<double>& result, std::size_t period = ema_period) {
+    result.clear();
     result.reserve(values.size());
     const double alpha = 2.0 / static_cast<double>(period + 1);
     for (const double value : values) {
@@ -47,7 +45,6 @@ inline constexpr std::size_t ema_period = 20;
                 ? value
                 : result.back() + alpha * (value - result.back()));
     }
-    return result;
 }
 
 }

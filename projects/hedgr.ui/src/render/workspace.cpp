@@ -295,9 +295,6 @@ void workspace::render(const render_input& input) {
             input.commands.push(std::move(request));
         }
 
-        const std::string title =
-            window_title(kind, input.windows.state(handle), input);
-
         /*
          * A capture names the one window it is about, and ImGui brings it to
          * the front for that frame. Windows here float over one another, and a
@@ -341,9 +338,15 @@ void workspace::render(const render_input& input) {
          * retitled window would be a different window to ImGui, and would
          * lose its position, size and collapsed state.
          */
-        const std::string begin_label = std::format("{}  {}###{}",
-            hedgr::ui::theme::window_kind_icon(kind), title,
-            input.windows.id(handle));
+        begin_label_.clear();
+        begin_label_ += hedgr::ui::theme::window_kind_icon(kind);
+        begin_label_ += "  ";
+        const auto title_start = begin_label_.size();
+        append_window_title(begin_label_, kind, input.windows.state(handle),
+            input);
+        const auto title_size = begin_label_.size() - title_start;
+        begin_label_ += "###";
+        begin_label_ += input.windows.id(handle);
 
         ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f),
             ImVec2(FLT_MAX, FLT_MAX));
@@ -396,7 +399,7 @@ void workspace::render(const render_input& input) {
                 || kind == hedgr::model::domain::window_kind::workspace
             ? ImGuiWindowFlags_MenuBar
             : ImGuiWindowFlags_None;
-        if (!ImGui::Begin(begin_label.c_str(), closable ? &keep_open : nullptr,
+        if (!ImGui::Begin(begin_label_.c_str(), closable ? &keep_open : nullptr,
                 window_flags)) {
             /*
              * Collapsed or fully clipped: ImGui still wants its End, and
@@ -422,14 +425,17 @@ void workspace::render(const render_input& input) {
              */
             hedgr::model::signal::signal closed;
             closed.name = std::string(hedgr::model::signal::names::window_closed);
-            closed.detail = std::format("{} closed", title);
+            closed.detail = std::format("{} closed",
+                std::string_view{begin_label_}.substr(title_start, title_size));
             closed.at_ns = input.now_ns;
             hedgr::model::signal::bus().raise(std::move(closed));
         }
 
-        const auto key = std::string{input.windows.id(handle)};
-        auto [entry, inserted] = ui_state_.try_emplace(key);
-        if (inserted) {
+        const hedgr::model::state::key_parts<1> key{input.windows.id(handle)};
+        auto entry = ui_state_.find(key);
+        if (entry == ui_state_.end()) {
+            entry = ui_state_.try_emplace(
+                hedgr::model::state::composite_key<1>{key}).first;
             /*
              * A window that has not been seen before opens on the choices the
              * last window left, while the windows already open keep their own.

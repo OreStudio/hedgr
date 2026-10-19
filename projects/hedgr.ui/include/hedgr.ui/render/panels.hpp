@@ -31,7 +31,10 @@
 namespace hedgr::ui::render {
 
 /**
- * @brief The visible name of a window: what it shows, not what it is.
+ * @brief Appends the visible name of a window: what it shows, not what it is.
+ *
+ * It appends rather than returns because the frame loop builds every window's
+ * ImGui label in one reused buffer.
  *
  * A title is read from the window's kind-specific state, which is cold, and
  * only for a window that survived the frame loop's culling gates. The layers
@@ -43,7 +46,7 @@ namespace hedgr::ui::render {
  * own kind, so a restored window whose subject has since been removed still has
  * a title rather than an empty one.
  */
-[[nodiscard]] HEDGR_UI_EXPORT std::string window_title(
+HEDGR_UI_EXPORT void append_window_title(std::string& out,
     hedgr::model::domain::window_kind kind,
     const hedgr::model::domain::window_state& state,
     const render_input& input);

@@ -32,6 +32,7 @@
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -342,6 +343,9 @@ struct window_ui_state final {
      * windows already open.
      */
     market_view_state market_view;
+
+    /** @brief A chart window's plot arrays, rebuilt when its points change. */
+    chart_plot plot;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;

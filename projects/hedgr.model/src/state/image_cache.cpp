@@ -29,7 +29,7 @@ image_cache::image_cache(std::size_t max_bytes)
 const image_content* image_cache::get(std::string_view tenant_id,
     std::string_view image_id) {
     auto& by_key = entries_.get<0>();
-    const auto found = by_key.find(make_tenant_key(tenant_id, image_id));
+    const auto found = by_key.find(key_parts<2>{tenant_id, image_id});
     if (found == by_key.end()) {
         ++misses_;
         return nullptr;
@@ -42,7 +42,7 @@ const image_content* image_cache::get(std::string_view tenant_id,
 
 bool image_cache::contains(std::string_view tenant_id,
     std::string_view image_id) const {
-    return entries_.get<0>().contains(make_tenant_key(tenant_id, image_id));
+    return entries_.get<0>().contains(key_parts<2>{tenant_id, image_id});
 }
 
 bool image_cache::put(std::string_view tenant_id, std::string_view image_id,
@@ -55,15 +55,14 @@ bool image_cache::put(std::string_view tenant_id, std::string_view image_id,
     }
 
     auto& by_key = entries_.get<0>();
-    const auto key = make_tenant_key(tenant_id, image_id);
-    if (const auto found = by_key.find(key); found != by_key.end()) {
+    if (const auto found = by_key.find(key_parts<2>{tenant_id, image_id});
+        found != by_key.end()) {
         bytes_ -= found->image.data.size();
         by_key.erase(found);
     }
 
     auto& by_recency = entries_.get<1>();
-    by_recency.push_front(entry{.key = key,
-        .tenant_id = std::string{tenant_id},
+    by_recency.push_front(entry{.tenant_id = std::string{tenant_id},
         .image_id = std::string{image_id},
         .image = std::move(image)});
     bytes_ += by_recency.front().image.data.size();

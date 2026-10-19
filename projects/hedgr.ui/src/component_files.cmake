@@ -10,6 +10,7 @@
 set(files
     "icon/fonts.cpp"
     "render/accounts_window.cpp"
+    "render/chart_plot.cpp"
     "render/chart_window.cpp"
     "render/crm_window.cpp"
     "render/data_health.cpp"
@@ -50,6 +51,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/fonts.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/hedgr.ui.icon.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/icons.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/chart_plot.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/hedgr.ui.render.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/market_status.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/market_view.hpp"

@@ -22,10 +22,10 @@
 
 #include "hedgr.model/domain/crm.hpp"
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/composite_key.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace hedgr::model::state {
@@ -93,8 +93,8 @@ public:
     void clear();
 
 private:
-    std::unordered_map<std::string, crm_snapshot> snapshots_;
-    std::unordered_map<std::string, std::vector<std::string>> names_;
+    composite_map<5, crm_snapshot> snapshots_;
+    composite_map<3, std::vector<std::string>> names_;
 };
 
 }

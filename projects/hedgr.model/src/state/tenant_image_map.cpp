@@ -23,7 +23,7 @@
 namespace hedgr::model::state {
 
 void tenant_image_map::begin(std::string_view tenant_id) {
-    auto& entry = tenants_[std::string{tenant_id}];
+    auto& entry = slot_in(tenants_, {tenant_id});
     entry.state = image_map_state::reading;
     entry.currencies.clear();
     entry.error.clear();
@@ -31,7 +31,7 @@ void tenant_image_map::begin(std::string_view tenant_id) {
 
 void tenant_image_map::set(std::string_view tenant_id,
     std::vector<std::pair<std::string, std::string>> currencies) {
-    auto& entry = tenants_[std::string{tenant_id}];
+    auto& entry = slot_in(tenants_, {tenant_id});
     entry.state = image_map_state::ready;
     entry.currencies.clear();
     for (auto& [currency, image_id] : currencies)
@@ -41,14 +41,13 @@ void tenant_image_map::set(std::string_view tenant_id,
 }
 
 void tenant_image_map::fail(std::string_view tenant_id, std::string message) {
-    auto& entry = tenants_[std::string{tenant_id}];
+    auto& entry = slot_in(tenants_, {tenant_id});
     entry.state = image_map_state::failed;
     entry.error = std::move(message);
 }
 
 const tenant_images* tenant_image_map::get(std::string_view tenant_id) const {
-    const auto found = tenants_.find(std::string{tenant_id});
-    return found == tenants_.end() ? nullptr : &found->second;
+    return find_in(tenants_, {tenant_id});
 }
 
 const std::string* tenant_image_map::image_for(std::string_view tenant_id,

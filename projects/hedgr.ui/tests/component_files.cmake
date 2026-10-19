@@ -9,11 +9,13 @@
 #
 set(files
     "capture_tests.cpp"
+    "chart_plot_tests.cpp"
     "controls_tests.cpp"
     "crm_rate_tests.cpp"
     "data_health_tests.cpp"
     "ema_tests.cpp"
     "flags_tests.cpp"
+    "frame_cost_tests.cpp"
     "market_view_tests.cpp"
     "render_tests.cpp"
     "shortcut_bar_tests.cpp"
