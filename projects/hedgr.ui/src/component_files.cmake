@@ -12,6 +12,7 @@ set(files
     "render/accounts_window.cpp"
     "render/chart_plot.cpp"
     "render/chart_window.cpp"
+    "render/crm_grid.cpp"
     "render/crm_window.cpp"
     "render/time_text.cpp"
     "render/command_centre.cpp"

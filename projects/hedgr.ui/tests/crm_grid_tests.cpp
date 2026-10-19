@@ -1,0 +1,105 @@
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+ *
+ * Copyright (C) 2026 Marco Craveiro <marco.craveiro@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU General Public License as published by the Free Software
+ * Foundation; either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc., 51
+ * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ *
+ */
+#include "hedgr.ui/render/crm_grid.hpp"
+#include <catch2/catch_all.hpp>
+#include <set>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+namespace {
+
+namespace domain = hedgr::model::domain;
+using hedgr::ui::render::build_crm_grid;
+using hedgr::ui::render::crm_delta_is_zero;
+using hedgr::ui::render::crm_grid;
+
+domain::crm_cell cell(std::string base, std::string quote, double rate,
+    std::string status = "fresh") {
+    return domain::crm_cell{.crm_name = "majors",
+        .base_currency_code = std::move(base),
+        .quote_currency_code = std::move(quote), .rate = rate,
+        .status = std::move(status)};
+}
+
+crm_grid grid_of(std::vector<domain::crm_cell> cells,
+    std::vector<domain::crm_convention> conventions = {}) {
+    hedgr::model::state::crm_snapshot batch;
+    batch.cells = std::move(cells);
+    batch.conventions = std::move(conventions);
+    batch.version = 7;
+    std::set<std::string> seen;
+    return build_crm_grid(batch, "majors", seen);
+}
+
+std::string rate_at(const crm_grid& grid, std::string_view pair) {
+    for (const auto& entry : grid.cells)
+        if (entry.pair == pair)
+            return entry.rate;
+    return "missing";
+}
+
+const domain::crm_convention usd_jpy{.pair_code = "USD/JPY",
+    .decimal_places = 3, .pip_factor = 0.01, .tick_size = 0.1};
+const domain::crm_convention eur_usd_half_pip{.pair_code = "EUR/USD",
+    .decimal_places = 5, .pip_factor = 0.0001, .tick_size = 0.5};
+
+}
+
+TEST_CASE("a reciprocal CRM cell takes its convention from the reverse pair",
+    "[crm]") {
+    auto reciprocal = cell("JPY", "USD", 0.00666134);
+    reciprocal.reciprocal = true;
+    const auto grid = grid_of({cell("USD", "JPY", 150.1234), reciprocal},
+        {usd_jpy});
+    CHECK(rate_at(grid, "USD/JPY") == "150.123");
+    CHECK(rate_at(grid, "JPY/USD") == "0.00666134");
+}
+
+TEST_CASE("a direct CRM rate snaps to its pair's tick", "[crm]") {
+    const auto grid = grid_of({cell("EUR", "USD", 1.10287)},
+        {eur_usd_half_pip});
+    CHECK(rate_at(grid, "EUR/USD") == "1.10285");
+}
+
+TEST_CASE("a CRM rate with no convention shows five places", "[crm]") {
+    const auto grid = grid_of({cell("GBP", "USD", 1.2)});
+    CHECK(rate_at(grid, "GBP/USD") == "1.20000");
+    CHECK(rate_at(grid, "USD/GBP").empty());
+}
+
+TEST_CASE("a CRM headline counts the cells the grid draws", "[crm]") {
+    const auto grid = grid_of({cell("EUR", "USD", 0.0, "unavailable"),
+        cell("EUR", "USD", 1.1), cell("GBP", "USD", 0.0, "disconnected")});
+    CHECK(grid.version == 7);
+    CHECK(grid.currencies == std::vector<std::string>{"EUR", "GBP", "USD"});
+    CHECK(grid.counts.fresh == 1);
+    CHECK(grid.counts.unavailable == 0);
+    CHECK(grid.counts.disconnected == 1);
+    CHECK(rate_at(grid, "EUR/USD") == "1.10000");
+}
+
+TEST_CASE("a CRM delta that rounds to zero is neutral", "[crm]") {
+    CHECK(crm_delta_is_zero(0.0));
+    CHECK(crm_delta_is_zero(0.0049));
+    CHECK(crm_delta_is_zero(-0.0049));
+    CHECK_FALSE(crm_delta_is_zero(0.005));
+}

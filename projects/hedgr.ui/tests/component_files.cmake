@@ -11,7 +11,7 @@ set(files
     "capture_tests.cpp"
     "chart_plot_tests.cpp"
     "controls_tests.cpp"
-    "crm_rate_tests.cpp"
+    "crm_grid_tests.cpp"
     "time_text_tests.cpp"
     "ema_tests.cpp"
     "flags_tests.cpp"

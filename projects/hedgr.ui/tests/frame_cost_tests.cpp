@@ -145,6 +145,36 @@ void hold_crm(desk& desk, std::size_t count) {
     desk.crm.set("i", "a", "p", "majors", false, std::move(cells), {}, 1, 0);
 }
 
+/** @brief Allocations of one steady CRM frame over @p count currencies. */
+std::size_t crm_frame_allocations(std::size_t count) {
+    headless_imgui imgui;
+    desk desk;
+    hold_crm(desk, count);
+    const auto handle = desk.open(model::domain::window_kind::crm_matrix,
+        model::domain::crm_matrix_state{.party_id = "p", .crm_name = "majors"});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    const auto draw = [&] {
+        frame([&] {
+            render::render_crm_matrix(handle, input, state, status, lock);
+        });
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const auto before = hedgr::testing::allocations();
+    draw();
+    return hedgr::testing::allocations() - before;
+}
+
+}
+
+TEST_CASE("a steady CRM frame costs nothing per cell", "[frame][crm]") {
+    const auto small = crm_frame_allocations(3);
+    const auto large = crm_frame_allocations(12);
+    INFO("allocations over 3 currencies: " << small << ", over 12: " << large);
+    CHECK(large == small);
 }
 
 TEST_CASE("drawing a CRM window never asks for a read", "[frame][crm]") {
@@ -166,4 +196,31 @@ TEST_CASE("drawing a CRM window never asks for a read", "[frame][crm]") {
         });
     for (const auto& request : desk.commands.drain())
         CHECK(request.kind != model::command::command_kind::refresh_window);
+}
+
+TEST_CASE("a CRM asks for the flag of any currency the tenant has an image for",
+    "[frame][crm]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"THB", "img-th"}, {"USD", "img-us"}});
+    desk.crm.set("i", "a", "p", "majors", false,
+        {model::domain::crm_cell{.crm_name = "majors",
+            .base_currency_code = "THB", .quote_currency_code = "USD",
+            .rate = 0.03, .status = "fresh"}},
+        {}, 1, 0);
+    const auto handle = desk.open(model::domain::window_kind::crm_matrix,
+        model::domain::crm_matrix_state{.party_id = "p", .crm_name = "majors"});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    frame([&] {
+        render::render_crm_matrix(handle, input, state, status, lock);
+    });
+
+    std::vector<std::string> asked;
+    for (const auto& request : desk.commands.drain())
+        if (request.kind == model::command::command_kind::load_image)
+            asked.push_back(request.image_id);
+    CHECK(asked == std::vector<std::string>{"img-th"});
 }

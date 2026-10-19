@@ -33,6 +33,7 @@
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
+#include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -225,6 +226,9 @@ struct window_ui_state final {
 
     /** @brief Every currency seen since the party was chosen. */
     std::set<std::string> crm_currencies;
+
+    /** @brief The matrix as last derived from the CRM batch. */
+    crm_grid crm_view;
 
     /** @brief Whether the CRM picker popup is open. */
     bool crm_picker_open = false;
