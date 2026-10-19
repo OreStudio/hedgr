@@ -58,8 +58,9 @@ enum class event_kind : std::uint8_t {
     /**
      * @brief The master password was derived and verified, and is now held.
      *
-     * Carries no secret: the password that was accepted stays in the runtime
-     * and never travels here. See the note on @c event below.
+     * The password that was accepted travels in @c master_password, a
+     * @c secret_string that wipes itself, and the frame thread moves it into
+     * the held secret.
      */
     store_unlocked = 6,
     /**
@@ -105,6 +106,14 @@ enum class event_kind : std::uint8_t {
     crm_names = 16,
     /** @brief IAM issued a replacement token for a live session. */
     session_token_refreshed = 17,
+    /**
+     * @brief A pool thread sealed a new master password's verification blob.
+     *
+     * The blob is in @c payload and the password that produced it in
+     * @c master_password. The frame thread writes the row and then holds the
+     * password, so the store write never happens on the pool.
+     */
+    master_sealed = 18,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -195,6 +204,9 @@ struct event final {
 
     /** @brief Bearer token, for session_authenticated. */
     domain::secret_string token;
+
+    /** @brief The master password to hold, for store_unlocked and master_sealed. */
+    domain::secret_string master_password;
 
     /** @brief Media type of the image, for image_loaded. */
     std::string mime_type;

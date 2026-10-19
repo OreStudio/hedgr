@@ -103,6 +103,20 @@ sqlite::result<bool> master_repository::has_master() const {
 }
 
 sqlite::result<void> master_repository::create(std::string_view password) {
+    auto sealed = seal(password);
+    if (!sealed)
+        return std::unexpected(sealed.error());
+    return store_verification(std::move(sealed).value());
+}
+
+sqlite::result<std::string> master_repository::seal(std::string_view password) {
+    auto sealed = crypto::secret_box::seal(password, verification_plaintext);
+    if (!sealed)
+        return std::unexpected(to_store_error(sealed.error()));
+    return std::move(sealed).value();
+}
+
+sqlite::result<void> master_repository::store_verification(std::string sealed) {
     /*
      * Refused rather than replaced. Every stored credential was sealed under
      * whichever password is in this row, so quietly overwriting it would leave
@@ -121,10 +135,6 @@ sqlite::result<void> master_repository::create(std::string_view password) {
         });
     }
 
-    auto sealed = crypto::secret_box::seal(password, verification_plaintext);
-    if (!sealed)
-        return std::unexpected(to_store_error(sealed.error()));
-
     /*
      * The creation stamp used to come from a DEFAULT on the column, which
      * sqlgen cannot express. The writer stamps it instead, which is also the
@@ -132,7 +142,7 @@ sqlite::result<void> master_repository::create(std::string_view password) {
      */
     const auto row = master_entity{
         .id = std::string{master_row_id},
-        .verification = std::move(sealed).value(),
+        .verification = std::move(sealed),
         .created_at = timestamp_now(),
     };
     return done(sqlgen::insert(row)(db_->connection()));
