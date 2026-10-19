@@ -50,20 +50,38 @@ TEST_CASE("every market screen spells a freshness state the same way",
     CHECK(data_health_word(data_health::delayed) == "DELAYED");
     CHECK(data_health_word(data_health::stale) == "STALE");
     CHECK(data_health_word(data_health::unavailable) == "NO DATA");
+    CHECK(data_health_word(data_health::historical) == "HISTORICAL");
 }
 
-TEST_CASE("an as-of instant carries the date, the time and the zone",
-    "[health]") {
+TEST_CASE("an as-of instant is ISO 8601 in UTC", "[health]") {
     using hedgr::ui::render::as_of_text;
     using hedgr::ui::render::parse_iso8601_utc;
 
     const auto instant = parse_iso8601_utc("2026-10-18T21:52:25Z");
     REQUIRE(instant > 0);
-    CHECK(as_of_text(instant) == "18 Oct 2026 21:52:25 UTC");
+    CHECK(as_of_text(instant) == "2026-10-18T21:52:25Z");
 
     CHECK(as_of_text(0).empty());
     CHECK(parse_iso8601_utc("") == 0);
     CHECK(parse_iso8601_utc("not a time") == 0);
+}
+
+TEST_CASE("a series older than its history window is historical, not stale",
+    "[health]") {
+    using hedgr::ui::render::assess_data_health;
+    using hedgr::ui::render::data_health;
+    using hedgr::ui::render::fx_health_thresholds;
+    using hedgr::ui::render::fx_history_ns;
+
+    constexpr auto now = 10'000'000'000'000LL;
+    CHECK(assess_data_health(now - 60'000'000'000LL, now,
+              fx_health_thresholds, fx_history_ns)
+              .state
+        == data_health::stale);
+    CHECK(assess_data_health(now - 11 * 60'000'000'000LL, now,
+              fx_health_thresholds, fx_history_ns)
+              .state
+        == data_health::historical);
 }
 
 TEST_CASE("an age reads in the largest useful unit", "[health]") {

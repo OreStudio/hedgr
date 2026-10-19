@@ -39,6 +39,8 @@ enum class data_health : std::uint8_t {
     stale = 2,
     /** @brief The plot has no observation to judge. */
     unavailable = 3,
+    /** @brief The newest observation predates the live feed itself. */
+    historical = 4,
 };
 
 /** @brief The ages at which a feed moves from live to delayed to stale. */
@@ -65,6 +67,20 @@ inline constexpr health_thresholds ir_health_thresholds{
     .delayed_ns = 900'000'000'000,
 };
 
+/**
+ * @brief How old a series has to be before it is history rather than stale.
+ *
+ * Imported vendor series end years ago and are read as history. Calling them
+ * stale would make a healthy chart look like a broken feed every time it is
+ * opened.
+ */
+inline constexpr std::int64_t fx_history_ns =
+    std::int64_t{10} * 60 * 1'000'000'000;
+
+/** @brief How old a curve has to be before it is history rather than stale. */
+inline constexpr std::int64_t ir_history_ns =
+    std::int64_t{60} * 60 * 1'000'000'000;
+
 /** @brief The thresholds for a cross-rates batch. */
 inline constexpr health_thresholds crm_health_thresholds{
     .live_ns = 300'000'000'000,
@@ -86,7 +102,8 @@ struct data_health_state final {
  */
 [[nodiscard]] inline data_health_state assess_data_health(
     std::int64_t observed_at_ns, std::int64_t now_ns,
-    health_thresholds thresholds = fx_health_thresholds) {
+    health_thresholds thresholds = fx_health_thresholds,
+    std::int64_t history_ns = 0) {
     if (observed_at_ns <= 0)
         return {.state = data_health::unavailable, .age_ns = 0};
     const auto age = now_ns > observed_at_ns ? now_ns - observed_at_ns : 0;
@@ -94,6 +111,8 @@ struct data_health_state final {
         return {.state = data_health::live, .age_ns = age};
     if (age <= thresholds.delayed_ns)
         return {.state = data_health::delayed, .age_ns = age};
+    if (history_ns > 0 && age > history_ns)
+        return {.state = data_health::historical, .age_ns = age};
     return {.state = data_health::stale, .age_ns = age};
 }
 
@@ -108,6 +127,8 @@ struct data_health_state final {
         return "STALE";
     case data_health::unavailable:
         return "NO DATA";
+    case data_health::historical:
+        return "HISTORICAL";
     }
     return "NO DATA";
 }
@@ -115,9 +136,9 @@ struct data_health_state final {
 /**
  * @brief The instant a plot is as of, in the one form every screen shares.
  *
- * The date, the time and the zone are all needed: a timestamp without a zone is
- * a different claim on every machine, and a reader comparing two windows has no
- * way to know which one is ahead.
+ * ISO 8601 in UTC, because it is short, unambiguous and sorts lexically. A
+ * timestamp without a zone is a different claim on every machine, and a reader
+ * comparing two windows has no way to know which one is ahead.
  */
 [[nodiscard]] inline std::string as_of_text(std::int64_t at_ns) {
     if (at_ns <= 0)
@@ -125,8 +146,8 @@ struct data_health_state final {
     const auto seconds = static_cast<std::time_t>(at_ns / 1'000'000'000);
     std::tm utc{};
     gmtime_r(&seconds, &utc);
-    char buffer[48]{};
-    std::strftime(buffer, sizeof(buffer), "%d %b %Y %H:%M:%S UTC", &utc);
+    char buffer[32]{};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc);
     return buffer;
 }
 

@@ -295,7 +295,7 @@ void render_chart(window_handle handle, const render_input& input,
     const std::int64_t newest_at_ns =
         points.empty() ? 0 : points.back().at_ns;
     const auto health = assess_data_health(newest_at_ns,
-        input.wall_now_ns);
+        input.wall_now_ns, fx_health_thresholds, fx_history_ns);
     const bool recent = newest_at_ns != 0 && input.wall_now_ns >= newest_at_ns
         && input.wall_now_ns - newest_at_ns <= live_threshold_ns;
     const std::size_t start = live_window_start(points,
@@ -305,8 +305,6 @@ void render_chart(window_handle handle, const render_input& input,
     const double change = last - first;
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
-    const bool health_stale =
-        health.state == hedgr::ui::render::data_health::stale;
     const bool candles = state.market_view.chart_style == 0;
     const bool ema_enabled = state.market_view.chart_ema != 0;
 
@@ -426,14 +424,9 @@ void render_chart(window_handle handle, const render_input& input,
             constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite;
 
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
-            ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize,
-                health_stale ? 2.0f : 0.0f);
+            ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
                 ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
-            if (health_stale) {
-                ImPlot::PushStyleColor(ImPlotCol_PlotBorder,
-                    ImGui::ColorConvertU32ToFloat4(theme::failure_colour));
-            }
             ImGui::PushFont(icon::numeric_font());
             if (ImPlot::BeginPlot("##series", ImVec2(-1.0f, -1.0f),
                     plot_flags)) {
@@ -586,8 +579,6 @@ void render_chart(window_handle handle, const render_input& input,
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();
-            if (health_stale)
-                ImPlot::PopStyleColor();
             ImPlot::PopStyleColor();
             ImPlot::PopStyleVar(2);
         }

@@ -19,6 +19,7 @@
  */
 #include "hedgr.ui/widget/status_foot.hpp"
 
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -40,31 +41,30 @@ constexpr int status_row_lines = 1;
 /** @brief An error gets the same single row; its glyph and colour carry it. */
 constexpr int status_error_row_lines = 1;
 
-/** @brief The status and its as-of time, split where their colours change. */
+/** @brief The status and its timestamp, split where their colours change. */
 struct status_text final {
-    std::string head;
-    std::string suffix;
+    /** @brief The ISO instant, with the updating note after it. */
+    std::string timestamp;
+
+    /** @brief The freshness word, which is the last thing on the bar. */
+    std::string word;
 };
 
 /**
- * @brief Builds "LIVE · as of ..." as one statement from two colours.
+ * @brief Builds the timestamp and the freshness word as one statement.
  *
- * The word and its dot are the state's colour; the instant is the quiet text a
- * reader checks. Keeping them in one build is what stops a screen from showing
- * a state without the time it was judged on.
+ * The timestamp is the quiet text a reader checks; the dot and the word are
+ * the state's colour and sit at the far right. Keeping them in one build is
+ * what stops a screen from showing a state without the time it was judged on.
  */
 [[nodiscard]] status_text build_status_text(const foot_state& state) {
     status_text text;
-    if (!state.word.empty())
-        text.head = "\u25cf " + state.word;
     if (!state.as_of.empty())
-        text.suffix = " \u00b7 as of " + state.as_of;
-    if (state.updating) {
-        if (text.suffix.empty())
-            text.suffix = " \u00b7 updating";
-        else
-            text.suffix += " \u00b7 updating";
-    }
+        text.timestamp = state.as_of;
+    if (state.updating)
+        text.timestamp += text.timestamp.empty()
+            ? "updating" : " \u00b7 updating";
+    text.word = state.word;
     return text;
 }
 
@@ -171,7 +171,13 @@ void draw_status_line(status_bar& status, std::int64_t now_ns,
     if (error) {
         ImGui::PushStyleColor(ImGuiCol_Text,
             ImGui::ColorConvertU32ToFloat4(hedgr::ui::theme::failure_colour));
+        /*
+         * The glyph belongs to the base face, which is where the icon sheet is
+         * merged. The foot's numeric face carries digits and prose, not icons.
+         */
+        ImGui::PushFont(ImGui::GetIO().Fonts->Fonts[0]);
         ImGui::TextUnformatted(hedgr::ui::icon::error);
+        ImGui::PopFont();
         ImGui::PopStyleColor();
         glyph_width =
             ImGui::GetItemRectSize().x + ImGui::GetStyle().ItemSpacing.x;
@@ -227,6 +233,12 @@ float status_foot_height(const status_bar& status) {
 
 bool draw_status_foot(status_bar& status, std::int64_t now_ns,
     const foot_state& state) {
+    /*
+     * The foot is a fixed-width strip. Its identity, controls, timestamp and
+     * state all line up from one window to the next, and a changing digit does
+     * not move the word beside it.
+     */
+    ImGui::PushFont(hedgr::ui::icon::numeric_font());
     const float height = status_foot_height(status, state);
 
     /*
@@ -269,10 +281,17 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
     const float right = left + ImGui::GetContentRegionAvail().x;
 
     const auto text = build_status_text(state);
-    const float status_width = text.head.empty() && text.suffix.empty()
-        ? 0.0f
-        : ImGui::CalcTextSize(text.head.c_str()).x
-            + ImGui::CalcTextSize(text.suffix.c_str()).x;
+    const float dot_side = ImGui::GetTextLineHeight() * 0.55f;
+    const float dot_gap = style.ItemInnerSpacing.x;
+    const float timestamp_width = text.timestamp.empty()
+        ? 0.0f : ImGui::CalcTextSize(text.timestamp.c_str()).x;
+    const float word_width = text.word.empty()
+        ? 0.0f : ImGui::CalcTextSize(text.word.c_str()).x;
+    const float head_width = text.word.empty()
+        ? 0.0f : dot_side + dot_gap + word_width;
+    const bool has_both = timestamp_width > 0.0f && head_width > 0.0f;
+    const float status_width = timestamp_width + head_width
+        + (has_both ? gap : 0.0f);
     const float controls = controls_width(state);
     const float controls_reservation =
         controls > 0.0f ? controls + gap * 2.0f : 0.0f;
@@ -316,21 +335,30 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
         x += combo_width(control) + gap;
     }
 
-    if (!text.head.empty() || !text.suffix.empty()) {
+    if (!text.timestamp.empty()) {
         ImGui::SetCursorPos(ImVec2(state_x, line_y));
-        if (!text.head.empty()) {
-            ImGui::TextColored(
-                ImGui::ColorConvertU32ToFloat4(state.colour), "%s",
-                text.head.c_str());
-        }
-        if (!text.suffix.empty()) {
-            ImGui::SameLine(0.0f, 0.0f);
-            ImGui::TextDisabled("%s", text.suffix.c_str());
-        }
+        ImGui::TextDisabled("%s", text.timestamp.c_str());
+    }
+
+    if (!text.word.empty()) {
+        const float head_x = text.timestamp.empty()
+            ? state_x : state_x + timestamp_width + gap;
+        ImGui::SetCursorPos(ImVec2(head_x, line_y));
+        const ImVec2 dot_origin = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(dot_origin.x + dot_side * 0.5f,
+                dot_origin.y + ImGui::GetTextLineHeight() * 0.5f),
+            dot_side * 0.5f, state.colour, 24);
+        ImGui::Dummy(ImVec2(dot_side, ImGui::GetTextLineHeight()));
+        ImGui::SameLine(0.0f, dot_gap);
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(state.colour), "%s",
+            text.word.c_str());
     }
 
     ImGui::EndChild();
     ImGui::PopStyleColor();
+    ImGui::PopFont();
     return changed;
 }
 
