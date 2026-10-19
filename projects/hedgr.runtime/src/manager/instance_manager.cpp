@@ -3961,6 +3961,97 @@ void instance_manager::fetch_password_policy() {
     policy_requested_ = true;
 }
 
+bool instance_manager::apply_read_answer(const event::event& ev) {
+    switch (ev.kind) {
+    case event::event_kind::series_catalogue: {
+        catalogues_reading_.erase(
+            running_key(ev.instance_id, ev.account_id));
+        if (ev.message.empty()) {
+            market_.set_catalogue(ev.instance_id, ev.account_id,
+                ev.series);
+        } else {
+            market_.fail_catalogue(ev.instance_id, ev.account_id,
+                ev.message);
+        }
+        return true;
+    }
+    case event::event_kind::crm_names: {
+        crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
+            ev.crm_names);
+        return true;
+    }
+    case event::event_kind::crm_rates: {
+        if (ev.message.empty())
+            crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
+                ev.crm_as_of, ev.crm_latency_ns);
+        else
+            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
+                ev.crm_reciprocal, ev.message);
+        return true;
+    }
+    case event::event_kind::term_structure: {
+        if (ev.message.empty()) {
+            term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
+                ev.curve_label, ev.term_curves);
+        } else {
+            term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
+                ev.message);
+        }
+        return true;
+    }
+    case event::event_kind::image_loaded: {
+        const auto key = model::state::make_tenant_key(ev.tenant_id,
+            ev.image_id);
+        images_reading_.erase(key);
+        if (ev.message.empty()) {
+            if (images_.put(ev.tenant_id, ev.image_id,
+                    model::state::image_content{.mime_type = ev.mime_type,
+                        .data = ev.bytes})) {
+                failed_images_.erase(key);
+            } else {
+                failed_images_.insert(key);
+            }
+        } else {
+            failed_images_.insert(key);
+        }
+        return true;
+    }
+    case event::event_kind::currency_image_map: {
+        currency_images_reading_.erase(ev.tenant_id);
+        if (ev.message.empty()) {
+            std::vector<std::pair<std::string, std::string>> mapped;
+            for (const auto& image : ev.image_refs) {
+                mapped.emplace_back(image.currency, image.image_id);
+            }
+            currency_images_.set(ev.tenant_id, std::move(mapped));
+        } else {
+            currency_images_.fail(ev.tenant_id, ev.message);
+        }
+        return true;
+    }
+    case event::event_kind::series_points: {
+        const auto key = std::format("{}\x1f{}",
+            running_key(ev.instance_id, ev.account_id), ev.series_id);
+        points_reading_.erase(key);
+        if (ev.message.empty()) {
+            market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
+                ev.points, ev.observed_at_ns);
+        } else {
+            market_.fail_points(ev.instance_id, ev.account_id, ev.series_id,
+                ev.message, ev.observed_at_ns);
+        }
+        return true;
+    }
+    case event::event_kind::deployment_snapshot:
+        /* The snapshot itself belongs on the session row, applied below. */
+        deployment_reads_.erase(running_key(ev.instance_id, ev.account_id));
+        return false;
+    default:
+        return false;
+    }
+}
+
 void instance_manager::apply_password_policy(const event::event& ev) {
     policy_read_.reset();
 
@@ -4075,6 +4166,16 @@ void instance_manager::apply(const event::event& ev) {
     }
 
     /*
+     * A read's answer is applied before the session lookup. The caches it
+     * fills are keyed by name rather than by the session row, and the answer
+     * is the only thing that clears the read's in-flight mark: dropping it
+     * because the operator signed out meanwhile would leave the read marked as
+     * running, and refuse it again after the next sign-in.
+     */
+    if (apply_read_answer(ev))
+        return;
+
+    /*
      * A fact from a sign-in attempt that has since been replaced is not news
      * about the session that is live now. The stopped worker may still be
      * finishing, and its disconnect would otherwise land on top of the newer
@@ -4101,86 +4202,6 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_status_changed:
         sessions_.set_status(*handle, ev.status);
         break;
-    case event::event_kind::series_catalogue: {
-        catalogues_reading_.erase(
-            running_key(ev.instance_id, ev.account_id));
-        if (ev.message.empty()) {
-            market_.set_catalogue(ev.instance_id, ev.account_id,
-                ev.series);
-        } else {
-            market_.fail_catalogue(ev.instance_id, ev.account_id,
-                ev.message);
-        }
-        break;
-    }
-    case event::event_kind::crm_names: {
-        crm_.set_names(ev.instance_id, ev.account_id, ev.party_id,
-            ev.crm_names);
-        break;
-    }
-    case event::event_kind::crm_rates: {
-        if (ev.message.empty())
-            crm_.set(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-                ev.crm_reciprocal, ev.crm_cells, ev.crm_conventions,
-                ev.crm_as_of, ev.crm_latency_ns);
-        else
-            crm_.fail(ev.instance_id, ev.account_id, ev.party_id, ev.crm_name,
-                ev.crm_reciprocal, ev.message);
-        break;
-    }
-    case event::event_kind::term_structure: {
-        if (ev.message.empty()) {
-            term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.curve_label, ev.term_curves);
-        } else {
-            term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.message);
-        }
-        break;
-    }
-    case event::event_kind::image_loaded: {
-        const auto key = model::state::make_tenant_key(ev.tenant_id,
-            ev.image_id);
-        images_reading_.erase(key);
-        if (ev.message.empty()) {
-            if (images_.put(ev.tenant_id, ev.image_id,
-                    model::state::image_content{.mime_type = ev.mime_type,
-                        .data = ev.bytes})) {
-                failed_images_.erase(key);
-            } else {
-                failed_images_.insert(key);
-            }
-        } else {
-            failed_images_.insert(key);
-        }
-        break;
-    }
-    case event::event_kind::currency_image_map: {
-        currency_images_reading_.erase(ev.tenant_id);
-        if (ev.message.empty()) {
-            std::vector<std::pair<std::string, std::string>> mapped;
-            for (const auto& image : ev.image_refs) {
-                mapped.emplace_back(image.currency, image.image_id);
-            }
-            currency_images_.set(ev.tenant_id, std::move(mapped));
-        } else {
-            currency_images_.fail(ev.tenant_id, ev.message);
-        }
-        break;
-    }
-    case event::event_kind::series_points: {
-        const auto key = std::format("{}\x1f{}", 
-            running_key(ev.instance_id, ev.account_id), ev.series_id);
-        points_reading_.erase(key);
-        if (ev.message.empty()) {
-            market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.points, ev.observed_at_ns);
-        } else {
-            market_.fail_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.message, ev.observed_at_ns);
-        }
-        break;
-    }
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.party_id, ev.token);
@@ -4235,8 +4256,6 @@ void instance_manager::apply(const event::event& ev) {
         start_market_stream(ev);
         break;
     case event::event_kind::deployment_snapshot:
-        deployment_reads_.erase(
-            running_key(ev.instance_id, ev.account_id));
         sessions_.set_deployment(*handle, ev.deployment);
         BOOST_LOG_SEV(lg(), ores::logging::debug)
             << "Applied a deployment snapshot for '" << ev.instance_id
@@ -4276,10 +4295,16 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::store_unlocked:
     case event::event_kind::store_lock_failed:
     case event::event_kind::password_policy_fetched:
+    case event::event_kind::series_catalogue:
+    case event::event_kind::crm_names:
+    case event::event_kind::crm_rates:
+    case event::event_kind::term_structure:
+    case event::event_kind::image_loaded:
+    case event::event_kind::currency_image_map:
+    case event::event_kind::series_points:
         /*
-         * Never reached either, and for the same reason: all three are applied
-         * above where the store and the deployment are, because none of them
-         * belongs to a session.
+         * Never reached either, and for the same reason: each is applied above,
+         * because none of them needs the session row.
          */
         break;
     }

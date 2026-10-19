@@ -462,6 +462,14 @@ private:
     /** @brief Applies one policy read's answer. */
     void apply_password_policy(const model::event::event& ev);
 
+    /**
+     * @brief Clears a read's in-flight mark and applies its answer.
+     *
+     * @return true when the event was wholly a read answer, false when the
+     * session row still has something to apply.
+     */
+    [[nodiscard]] bool apply_read_answer(const model::event::event& ev);
+
     /** @brief Starts one probe, and remembers that it is in flight. */
     void spawn_probe_for(const model::domain::instance& row);
 
