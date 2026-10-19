@@ -113,6 +113,14 @@ message(STATUS "OreStudio build:  ${ORES_BUILD_DIR}")
 message(STATUS "OreStudio include dirs found: ${_ores_include_dirs}")
 
 #
+# The OreStudio libraries depend on each other, and the build-tree RUNPATH only
+# reaches them once the bundling step has copied them into publish/lib. Point
+# the linker at the OreStudio build so a target that links one of them before
+# bundling still resolves the rest.
+#
+set(_ores_rpath_link "$<$<PLATFORM_ID:Linux>:LINKER:-rpath-link,${ORES_BUILD_DIR}/publish/lib>")
+
+#
 # Create ores::client INTERFACE IMPORTED target
 #
 # OreStudio bakes its third-party dependencies statically into each shared
@@ -127,6 +135,7 @@ if(NOT TARGET ores::client)
     set_target_properties(ores::client PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${_ores_include_dirs}"
         INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib"
+        INTERFACE_LINK_OPTIONS "${_ores_rpath_link}"
     )
 
     target_link_libraries(ores::client INTERFACE
@@ -189,7 +198,8 @@ foreach(_ores_library IN LISTS _ores_libraries)
     add_library(ores::${_ores_library} INTERFACE IMPORTED)
     set_target_properties(ores::${_ores_library} PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${_ores_include_dirs}"
-        INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib")
+        INTERFACE_LINK_DIRECTORIES "${ORES_BUILD_DIR}/publish/lib"
+        INTERFACE_LINK_OPTIONS "${_ores_rpath_link}")
     target_link_libraries(ores::${_ores_library} INTERFACE
         ores.${_ores_library}
         reflectcpp::reflectcpp
