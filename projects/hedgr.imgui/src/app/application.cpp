@@ -695,7 +695,7 @@ void application::render_loop(GLFWwindow* window) {
          *
          * Both calls are inert unless the run was given a script.
          */
-        const std::uint32_t frame = ImGui::GetFrameCount() + 1;
+        const auto frame = static_cast<std::uint32_t>(ImGui::GetFrameCount() + 1);
         ui::widget::begin_capture_frame(frame);
         ui::widget::drive_capture_steps(frame);
 
@@ -826,7 +826,7 @@ void application::render_loop(GLFWwindow* window) {
          * has settled and ImGui has sized every window.
          */
         if (!capture_path_.empty()
-            && ImGui::GetFrameCount() == static_cast<unsigned int>(capture_frame_)) {
+            && ImGui::GetFrameCount() == capture_frame_) {
             /* Read the back buffer before it is swapped away, not after. */
             capture_frame(window);
             glfwSwapBuffers(window);

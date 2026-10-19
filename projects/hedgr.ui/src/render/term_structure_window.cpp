@@ -120,14 +120,14 @@ void render_term_structure(window_handle handle, const render_input& input,
         std::size_t best = 0;
         primary = 0;
         for (int c = 0; c < static_cast<int>(curve->curves.size()); ++c) {
-            if (curve->curves[c].nodes.size() >= best) {
-                best = curve->curves[c].nodes.size();
+            if (curve->curves[static_cast<std::size_t>(c)].nodes.size() >= best) {
+                best = curve->curves[static_cast<std::size_t>(c)].nodes.size();
                 primary = c;
             }
         }
         first = std::max(0, primary - history + 1);
-        if (primary >= 0 && curve->curves[primary].at_ns > 0)
-            newest_at_ns = curve->curves[primary].at_ns;
+        if (primary >= 0 && curve->curves[static_cast<std::size_t>(primary)].at_ns > 0)
+            newest_at_ns = curve->curves[static_cast<std::size_t>(primary)].at_ns;
     }
 
     const auto health = assess_data_health(newest_at_ns, input.wall_now_ns,
@@ -145,10 +145,10 @@ void render_term_structure(window_handle handle, const render_input& input,
 
     ImGui::TextUnformatted(terms->label.c_str());
     ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
-    if (primary >= 0 && !curve->curves[primary].nodes.empty()) {
+    if (primary >= 0 && !curve->curves[static_cast<std::size_t>(primary)].nodes.empty()) {
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         ImGui::TextDisabled("%zu terms",
-            curve->curves[primary].nodes.size());
+            curve->curves[static_cast<std::size_t>(primary)].nodes.size());
     }
     if (session.has_value()) {
         ImGui::SameLine();
@@ -180,7 +180,7 @@ void render_term_structure(window_handle handle, const render_input& input,
             const int end = primary + 1;
             const int count = end - first;
 
-            auto ladder = all_curves[primary].nodes;
+            auto ladder = all_curves[static_cast<std::size_t>(primary)].nodes;
             std::sort(ladder.begin(), ladder.end(),
                 [](const auto& a, const auto& b) {
                     return tenor_rank(a.tenor) < tenor_rank(b.tenor);
@@ -195,10 +195,10 @@ void render_term_structure(window_handle handle, const render_input& input,
                 index_of[ladder[i].tenor] = i;
             }
 
-            double low = all_curves[primary].nodes.front().value;
+            double low = all_curves[static_cast<std::size_t>(primary)].nodes.front().value;
             double high = low;
             for (int c = first; c < end; ++c) {
-                for (const auto& node : all_curves[c].nodes) {
+                for (const auto& node : all_curves[static_cast<std::size_t>(c)].nodes) {
                     low = std::min(low, node.value);
                     high = std::max(high, node.value);
                 }
@@ -234,7 +234,7 @@ void render_term_structure(window_handle handle, const render_input& input,
                 const ImVec4 newest_colour =
                     ImGui::ColorConvertU32ToFloat4(theme::curve_latest_colour);
                 for (int c = first; c < end; ++c) {
-                    const auto& history_curve = all_curves[c];
+                    const auto& history_curve = all_curves[static_cast<std::size_t>(c)];
                     const bool newest = c == primary;
                     std::vector<double> ys(xs.size(),
                         std::numeric_limits<double>::quiet_NaN());
