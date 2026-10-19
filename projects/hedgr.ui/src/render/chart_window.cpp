@@ -143,16 +143,6 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
     return std::format("{:.{}f}", value, decimals);
 }
 
-/**
- * @brief How old a series may be and still be read as a live feed.
- *
- * A series whose newest point is older than this is history, and history is
- * plotted whole whatever span is chosen: the imported vendor series end years
- * ago, and cropping one to five minutes would leave two points and a lie.
- */
-constexpr std::int64_t live_threshold_ns =
-    std::int64_t{10} * 60 * 1'000'000'000;
-
 /** @brief The history level a span reads from. */
 [[nodiscard]] domain::market_level level_for(std::int64_t span_ns) {
     if (span_ns == 0)
@@ -296,10 +286,7 @@ void render_chart(window_handle handle, const render_input& input,
         points.empty() ? 0 : points.back().at_ns;
     const auto health = assess_data_health(newest_at_ns,
         input.wall_now_ns, fx_health_thresholds, fx_history_ns);
-    const bool recent = newest_at_ns != 0 && input.wall_now_ns >= newest_at_ns
-        && input.wall_now_ns - newest_at_ns <= live_threshold_ns;
-    const std::size_t start = live_window_start(points,
-        recent ? span_ns : 0);
+    const std::size_t start = live_window_start(points, span_ns);
     const double first = points.empty() ? 0.0 : points[start].value;
     const double last = points.empty() ? 0.0 : points.back().value;
     const double change = last - first;
@@ -349,12 +336,11 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::PopFont();
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         ImGui::TextDisabled("%zu points", points.size() - start);
-        if (!recent) {
+        if (span_ns == 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 All points");
             ImGui::SetItemTooltip("%s",
-                "The newest point is older than ten minutes, so the series "
-                "is history and is plotted whole");
+                "The period is All, so every point in the series is plotted");
         }
     }
     if (session.has_value()) {
@@ -382,13 +368,11 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
             /*
-             * A historical series is plotted whole, so its candles are sized
-             * from the history it actually has rather than from a span that
-             * does not apply.
+             * The selected span sizes the candles. All means the whole series,
+             * so the width comes from the points actually in view.
              */
-            const auto candle_span = recent
-                ? span_ns
-                : points.back().at_ns - points[start].at_ns;
+            const auto candle_span = span_ns == 0
+                ? points.back().at_ns - points[start].at_ns : span_ns;
             const auto plan = candle_plan_for(candle_span);
             const auto candle_points = candles
                 ? build_candles(points, start, plan.width_ns)
