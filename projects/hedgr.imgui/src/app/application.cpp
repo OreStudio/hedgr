@@ -85,6 +85,22 @@ void glfw_error_callback(int code, const char* description) {
     BOOST_LOG_SEV(lg(), error) << "GLFW error " << code << ": " << description;
 }
 
+/*
+ * Long enough that a minimised client is idle, short enough that market
+ * streams, which fill their rings without pushing an event, are still drained
+ * well inside a second.
+ */
+constexpr double minimised_wait_s = 0.05;
+
+bool is_minimised(GLFWwindow* window) {
+    if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0)
+        return true;
+    int width = 0;
+    int height = 0;
+    glfwGetFramebufferSize(window, &width, &height);
+    return width == 0 || height == 0;
+}
+
 std::int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
                std::chrono::steady_clock::now().time_since_epoch())
@@ -266,6 +282,15 @@ void application::run() {
      * uploading textures.
      */
     splash_.started_ns = now_ns();
+
+    /*
+     * Both channels have writers off the frame thread, so either can end the
+     * minimised wait. The wake is cleared before GLFW is torn down, and
+     * clearing it waits out a wake in flight.
+     */
+    manager_.commands().set_wake(&glfwPostEmptyEvent);
+    manager_.events().set_wake(&glfwPostEmptyEvent);
+
     BOOST_LOG_SEV(lg(), debug) << "Entering the frame loop";
     render_loop(window);
     BOOST_LOG_SEV(lg(), debug) << "Left the frame loop";
@@ -275,6 +300,8 @@ void application::run() {
             << "Could not save the window wall: " << saved.error();
     workspace_.save_market_view(market_view_path);
     manager_.stop();
+    manager_.commands().set_wake(nullptr);
+    manager_.events().set_wake(nullptr);
     shutdown_graphics(window);
 
     BOOST_LOG_SEV(lg(), info) << "Hedgr finished.";
@@ -682,6 +709,23 @@ void application::render_loop(GLFWwindow* window) {
 
     while (glfwWindowShouldClose(window) == 0 && !exit_requested_) {
         glfwPollEvents();
+
+        /*
+         * A minimised window shows nothing, and some X11 drivers stop pacing
+         * the swap once the window is iconified, so drawing it can spin a core
+         * building frames nobody sees. The runtime still runs so the
+         * channels and rings do not back up and signals still sound, and the
+         * wait ends early when a worker pushes an event. The timeout bounds the
+         * delay for work that arrives without one. A capture is never paused
+         * because it counts frames. Wayland never reports a window iconified,
+         * so there only a zero sized framebuffer takes this path.
+         */
+        if (!capturing && is_minimised(window)) {
+            manager_.pump();
+            (void)sound_.submit(hedgr::model::signal::bus().drain());
+            glfwWaitEventsTimeout(minimised_wait_s);
+            continue;
+        }
 
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();

@@ -37,15 +37,44 @@ namespace hedgr::model::command {
  * and the runtime drains them, and the runtime pushes events and the interface
  * drains them. A single shared channel per direction is a real invariant
  * rather than incidental sharing, so access is serialized here and nowhere
- * else. The lock is held only for a swap.
+ * else. The lock is held only for a swap, or for a wake.
  */
 template <typename T>
 class channel final {
 public:
-    /** @brief Buffers a value for the reader. */
+    /**
+     * @brief Called when a push finds the channel empty, so a reader asleep
+     * waiting for work learns there is some.
+     */
+    using wake_fn = void (*)();
+
+    /**
+     * @brief Buffers a value for the reader, waking it if it may be asleep.
+     *
+     * Only the push into an empty channel wakes. The reader drains everything
+     * before it sleeps, so a channel that was already holding values has
+     * already woken it, and a busy writer costs one wake per drain rather than
+     * one per value.
+     */
     void push(T item) {
         const std::scoped_lock lock(mutex_);
+        const bool was_empty = buffer_.empty();
         buffer_.push_back(std::move(item));
+        if (was_empty && wake_ != nullptr)
+            wake_();
+    }
+
+    /**
+     * @brief Installs the wake a push calls, or removes it with nullptr.
+     *
+     * The wake runs under the lock, so once this returns no call to the old
+     * one is still in flight. That is what lets a host tear down whatever the
+     * wake talks to straight after clearing it. A wake must therefore not
+     * touch this channel.
+     */
+    void set_wake(wake_fn wake) {
+        const std::scoped_lock lock(mutex_);
+        wake_ = wake;
     }
 
     /**
@@ -70,6 +99,7 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<T> buffer_;
+    wake_fn wake_ = nullptr;
 };
 
 /** @brief The interface to runtime direction. */

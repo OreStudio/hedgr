@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "channel_tests.cpp"
     "password_policy_server_tests.cpp"
     "password_policy_tests.cpp"
     "secret_tests.cpp"
