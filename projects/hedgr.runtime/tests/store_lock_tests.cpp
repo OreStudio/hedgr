@@ -21,6 +21,7 @@
 #include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
@@ -45,6 +46,8 @@ using hedgr::model::domain::account;
 using hedgr::model::domain::secret_string;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::store_lock;
+using hedgr::model::event::event;
+using hedgr::model::event::event_kind;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::session::transport::session_options;
 
@@ -571,4 +574,234 @@ TEST_CASE("a stored credential is opened and used without a typed password",
     REQUIRE(manager.last_error().find(master_password) == std::string::npos);
     REQUIRE(manager.last_error().find("the-stored-credential")
         == std::string::npos);
+}
+
+namespace {
+
+/** @brief Starts a manager on @p database and unlocks it with a new master password. */
+void start_unlocked(instance_manager& manager, const temporary_database& database) {
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    REQUIRE(run_until(manager, command_kind::set_master_password,
+        std::string{master_password},
+        [&manager] { return manager.store_lock() == store_lock::unlocked; }));
+}
+
+/** @brief Saves an account on the seeded instance and returns the instance id. */
+std::string save_account_row(instance_manager& manager, bool has_credential = false) {
+    const auto instance_id = std::string{manager.instances().rows()[0].id};
+    account row;
+    row.id = "acct-1";
+    row.instance_id = instance_id;
+    row.name = "ops read-only";
+    row.principal = "ops@host";
+    row.has_credential = has_credential;
+    command save;
+    save.kind = command_kind::save_account;
+    save.account_row = row;
+    manager.commands().push(std::move(save));
+    manager.pump();
+    REQUIRE(manager.accounts().find("acct-1").has_value());
+    return instance_id;
+}
+
+[[nodiscard]] bool account_has_credential(instance_manager& manager) {
+    const auto handle = manager.accounts().find("acct-1");
+    return handle && manager.accounts().get(*handle)->has_credential;
+}
+
+}
+
+TEST_CASE("a lock failure naming an account leaves the lock alone", "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    start_unlocked(manager, database);
+    const auto instance_id = save_account_row(manager);
+
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = instance_id;
+    connect.account_id = "acct-1";
+    connect.principal = "ops@host";
+    connect.password = secret_string{std::string{"a-typed-password"}};
+    manager.commands().push(std::move(connect));
+
+    event fact;
+    fact.kind = event_kind::store_lock_failed;
+    fact.instance_id = instance_id;
+    fact.account_id = "acct-1";
+    fact.message = "the stored credential for account acct-1 could not be opened";
+    manager.events().push(std::move(fact));
+    manager.pump();
+
+    REQUIRE(manager.store_lock() == store_lock::unlocked);
+    REQUIRE(manager.lock_error().empty());
+
+    const auto session = manager.sessions().find(instance_id, "acct-1");
+    REQUIRE(session.has_value());
+    REQUIRE(manager.sessions().last_error(*session)
+        == "the stored credential for account acct-1 could not be opened");
+}
+
+TEST_CASE("a lock failure naming no account fails the lock and says why",
+    "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    start_unlocked(manager, database);
+
+    event fact;
+    fact.kind = event_kind::store_lock_failed;
+    fact.message = "the store could not be unlocked: disk on fire";
+    manager.events().push(std::move(fact));
+    manager.pump();
+
+    REQUIRE(manager.store_lock() == store_lock::failed);
+    REQUIRE(manager.lock_error() == "the store could not be unlocked: disk on fire");
+    REQUIRE_FALSE(manager.is_unlocking());
+}
+
+TEST_CASE("an unlock with no password fails without a derivation", "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    start_unlocked(manager, database);
+
+    command lock;
+    lock.kind = command_kind::lock_store;
+    manager.commands().push(std::move(lock));
+    manager.pump();
+    REQUIRE(manager.store_lock() == store_lock::locked);
+
+    command unlock;
+    unlock.kind = command_kind::unlock_store;
+    manager.commands().push(std::move(unlock));
+    manager.pump();
+
+    REQUIRE(manager.store_lock() == store_lock::failed);
+    REQUIRE(manager.lock_error() == "no master password was supplied");
+    REQUIRE_FALSE(manager.is_unlocking());
+}
+
+TEST_CASE("an unlock on a store with no master password says so", "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command empty;
+    empty.kind = command_kind::unlock_store;
+    manager.commands().push(std::move(empty));
+    manager.pump();
+    REQUIRE(manager.store_lock() == store_lock::failed);
+
+    command unlock;
+    unlock.kind = command_kind::unlock_store;
+    unlock.password = secret_string{std::string{"anything"}};
+    manager.commands().push(std::move(unlock));
+    manager.pump();
+
+    REQUIRE(manager.store_lock() == store_lock::absent);
+    REQUIRE(manager.lock_error() == "this store has no master password yet");
+    REQUIRE_FALSE(manager.is_unlocking());
+}
+
+TEST_CASE("an empty master password is refused and starts nothing", "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command request;
+    request.kind = command_kind::set_master_password;
+    manager.commands().push(std::move(request));
+    manager.pump();
+
+    REQUIRE(manager.store_lock() == store_lock::absent);
+    REQUIRE_FALSE(manager.is_unlocking());
+    REQUIRE(manager.last_error().find("cannot be empty") != std::string::npos);
+}
+
+TEST_CASE("an unlock clears the refusal raised while it ran", "[store_lock]") {
+    const temporary_database database;
+    {
+        instance_manager manager;
+        start_unlocked(manager, database);
+    }
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command unlock;
+    unlock.kind = command_kind::unlock_store;
+    unlock.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(unlock));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    command again;
+    again.kind = command_kind::set_master_password;
+    again.password = secret_string{std::string{"a-different-password"}};
+    manager.commands().push(std::move(again));
+    manager.pump();
+    REQUIRE(manager.last_error().find("already has a master password")
+        != std::string::npos);
+
+    REQUIRE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::unlocked; },
+        std::chrono::seconds(20)));
+    REQUIRE(manager.last_error().empty());
+}
+
+TEST_CASE("has_credential survives an account edit", "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    save_account_row(manager);
+    REQUIRE_FALSE(account_has_credential(manager));
+
+    command store;
+    store.kind = command_kind::store_credential;
+    store.account_id = "acct-1";
+    store.payload = "sealed-bytes";
+    manager.commands().push(std::move(store));
+    manager.pump();
+    REQUIRE(account_has_credential(manager));
+
+    save_account_row(manager, false);
+    REQUIRE(account_has_credential(manager));
+}
+
+TEST_CASE("an empty credential is refused and the account keeps none",
+    "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    save_account_row(manager);
+
+    command store;
+    store.kind = command_kind::store_credential;
+    store.account_id = "acct-1";
+    manager.commands().push(std::move(store));
+    manager.pump();
+
+    REQUIRE_FALSE(account_has_credential(manager));
+    REQUIRE(manager.last_error().find("empty credential") != std::string::npos);
+}
+
+TEST_CASE("a remembered password is sealed and stored on the account",
+    "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    start_unlocked(manager, database);
+    const auto instance_id = save_account_row(manager);
+    REQUIRE_FALSE(account_has_credential(manager));
+
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = instance_id;
+    connect.account_id = "acct-1";
+    connect.principal = "ops@host";
+    connect.password = secret_string{std::string{"a-typed-password"}};
+    connect.remember = true;
+    manager.commands().push(std::move(connect));
+
+    REQUIRE(pump_until(manager,
+        [&manager] { return account_has_credential(manager); },
+        std::chrono::seconds(20)));
 }
