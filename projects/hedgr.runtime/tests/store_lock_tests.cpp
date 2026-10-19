@@ -739,8 +739,7 @@ TEST_CASE("an unlock clears the refusal raised while it ran", "[store_lock]") {
     again.password = secret_string{std::string{"a-different-password"}};
     manager.commands().push(std::move(again));
     manager.pump();
-    REQUIRE(manager.last_error().find("already has a master password")
-        != std::string::npos);
+    REQUIRE_FALSE(manager.last_error().empty());
 
     REQUIRE(pump_until(manager,
         [&manager] { return manager.store_lock() == store_lock::unlocked; },
@@ -804,4 +803,107 @@ TEST_CASE("a remembered password is sealed and stored on the account",
     REQUIRE(pump_until(manager,
         [&manager] { return account_has_credential(manager); },
         std::chrono::seconds(20)));
+}
+
+namespace {
+
+/** @brief A store that already has a master password, closed and locked. */
+void create_locked_store(const temporary_database& database) {
+    instance_manager manager;
+    start_unlocked(manager, database);
+}
+
+}
+
+TEST_CASE("an unlock while one is running is refused", "[store_lock]") {
+    const temporary_database database;
+    create_locked_store(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command first;
+    first.kind = command_kind::unlock_store;
+    first.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(first));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    command second;
+    second.kind = command_kind::unlock_store;
+    second.password = secret_string{std::string{"a-wrong-second-password"}};
+    manager.commands().push(std::move(second));
+    manager.pump();
+    REQUIRE(manager.last_error().find("already running") != std::string::npos);
+
+    REQUIRE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::unlocked; },
+        std::chrono::seconds(20)));
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.store_lock() != store_lock::unlocked; },
+        std::chrono::milliseconds(1500)));
+    REQUIRE(manager.lock_error().empty());
+}
+
+TEST_CASE("a second master password while one is being created is refused",
+    "[store_lock]") {
+    const temporary_database database;
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command first;
+    first.kind = command_kind::set_master_password;
+    first.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(first));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    command second;
+    second.kind = command_kind::set_master_password;
+    second.password = secret_string{std::string{"a-different-password"}};
+    manager.commands().push(std::move(second));
+    manager.pump();
+    REQUIRE(manager.last_error().find("already running") != std::string::npos);
+
+    REQUIRE(pump_until(manager,
+        [&manager] { return manager.store_lock() == store_lock::unlocked; },
+        std::chrono::seconds(20)));
+    REQUIRE_FALSE(pump_until(manager,
+        [&manager] { return manager.is_unlocking(); },
+        std::chrono::milliseconds(1500)));
+
+    command lock;
+    lock.kind = command_kind::lock_store;
+    manager.commands().push(std::move(lock));
+    manager.pump();
+    REQUIRE(run_until(manager, command_kind::unlock_store,
+        std::string{master_password},
+        [&manager] { return manager.store_lock() == store_lock::unlocked; }));
+}
+
+TEST_CASE("a credential failure does not end an unlock that is running",
+    "[store_lock]") {
+    const temporary_database database;
+    create_locked_store(database);
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command unlock;
+    unlock.kind = command_kind::unlock_store;
+    unlock.password = secret_string{std::string{master_password}};
+    manager.commands().push(std::move(unlock));
+    manager.pump();
+    REQUIRE(manager.is_unlocking());
+
+    event fact;
+    fact.kind = event_kind::store_lock_failed;
+    fact.instance_id = "inst";
+    fact.account_id = "acct-1";
+    fact.message = "the stored credential could not be opened";
+    manager.events().push(std::move(fact));
+    manager.pump();
+
+    REQUIRE(manager.is_unlocking());
+    REQUIRE(manager.store_lock() == store_lock::locked);
 }

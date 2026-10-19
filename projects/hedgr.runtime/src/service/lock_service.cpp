@@ -150,6 +150,10 @@ lock_service::set_master_password(const command::command& cmd) {
         return refusal{{condition_source::store_lock, {}},
             "cannot set a master password: the store is not open"};
     }
+    if (unlocking_) {
+        return refusal{{condition_source::store_lock, {}},
+            "cannot set a master password: an unlock is already running"};
+    }
 
     /*
      * Refused when one already exists. Replacing it would be worse than
@@ -210,6 +214,10 @@ lock_service::unlock_store(const command::command& cmd) {
     if (!master_repo_) {
         return refusal{{condition_source::store_lock, {}},
             "cannot unlock: the store is not open"};
+    }
+    if (unlocking_) {
+        return refusal{{condition_source::store_lock, {}},
+            "cannot unlock: an unlock is already running"};
     }
 
     if (cmd.password.empty()) {
@@ -335,8 +343,6 @@ lock_effect lock_service::apply(const event::event& ev) {
         return effect;
     }
     if (ev.kind == event::event_kind::store_lock_failed) {
-        unlocking_ = false;
-
         /*
          * @c failed only when the attempt was an unlock, which is the one case
          * an operator is waiting on an answer. An event naming an account is a
@@ -347,6 +353,7 @@ lock_effect lock_service::apply(const event::event& ev) {
          * unlock prompt mid-run.
          */
         if (ev.account_id.empty()) {
+            unlocking_ = false;
             store_lock_ = domain::store_lock::failed;
             /*
              * Beside the prompt and not in the banner. The distinction is the
