@@ -21,6 +21,7 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
+#include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
@@ -158,14 +159,33 @@ bool shows_instances(const render_input& input) noexcept {
     return input.store_lock == domain::store_lock::unlocked;
 }
 
+std::optional<hedgr::model::state::session_handle> signed_in_session(
+    const render_input& input, hedgr::model::state::window_handle handle) {
+    const auto session = input.windows.session_of(handle);
+    if (session.has_value()
+        && input.sessions.status(*session)
+            == domain::session_status::authenticated
+        && !input.sessions.token(*session).empty())
+        return session;
+    return std::nullopt;
+}
+
+void draw_signed_out(const render_input& input,
+    hedgr::ui::widget::status_bar& status,
+    hedgr::ui::widget::foot_state& foot) {
+    ImGui::TextWrapped("%s",
+        "This window is not signed in. Sign in from the Accounts window to "
+        "read its data.");
+    set_health_foot(foot, domain::data_health::unavailable, 0, false);
+    hedgr::ui::widget::draw_status_foot(status, input.now_ns, foot);
+}
+
 identity_bar_state identity_of(const render_input& input,
     hedgr::model::state::window_handle handle) {
     identity_bar_state result;
 
     if (const auto session = input.windows.session_of(handle)) {
-        result.signed_in = input.sessions.status(*session)
-                == domain::session_status::authenticated
-            && !input.sessions.token(*session).empty();
+        result.signed_in = signed_in_session(input, handle).has_value();
         result.tenant = std::string{input.sessions.tenant_name(*session)};
         result.party = std::string{input.sessions.party_name(*session)};
         result.instance =

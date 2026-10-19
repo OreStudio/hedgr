@@ -17,7 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.ui/render/time_text.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/windows.hpp"
 
@@ -383,11 +383,7 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
         pending_capture_screen.clear();
     }
 
-    const auto session = input.windows.session_of(handle);
-    const bool live = session
-        && input.sessions.status(*session)
-            == domain::session_status::authenticated
-        && input.sessions.token(*session).size() > 0;
+    const auto session = hedgr::ui::render::signed_in_session(input, handle);
 
     widget::foot_state foot;
     foot.identity = hedgr::ui::render::identity_text(
@@ -409,17 +405,14 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
      * deployment but are no longer being kept up to date, and a reader would
      * have no way to tell.
      */
-    if (!live) {
+    if (!session) {
         if (!scratch.session_loss_reported) {
             BOOST_LOG_SEV(lg(), ores::logging::info)
                 << "Command centre for '" << instance_name
                 << "' has no signed-in session";
             scratch.session_loss_reported = true;
         }
-        ImGui::TextWrapped("%s",
-            "This command centre is not signed in. Sign in from the Accounts "
-            "window to read this deployment.");
-        widget::draw_status_foot(status, input.now_ns, foot);
+        hedgr::ui::render::draw_signed_out(input, status, foot);
         ImGui::PopID();
         return;
     }

@@ -20,8 +20,10 @@
 #ifndef HEDGR_MODEL_DOMAIN_MARKET_HPP
 #define HEDGR_MODEL_DOMAIN_MARKET_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -212,6 +214,23 @@ struct market_series_snapshot final {
             return coarse;
         }
         return fine;
+    }
+
+    /**
+     * @brief The newest observation at any level, on the market's clock.
+     *
+     * A level publishes a bucket only once the next bucket opens, so a coarse
+     * level trails the feed by up to its bucket width. Freshness and the as-of
+     * time read the newest point the feed has published, whichever level the
+     * plot happens to draw. Zero when there is none.
+     */
+    [[nodiscard]] std::int64_t newest_at_ns() const noexcept {
+        std::int64_t newest = 0;
+        for (const auto* points : {&fine, &medium, &coarse}) {
+            if (!points->empty())
+                newest = std::max(newest, points->back().at_ns);
+        }
+        return newest;
     }
 
     /** @brief Whether this snapshot holds a completed read or a tick. */

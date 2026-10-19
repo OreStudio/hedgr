@@ -19,7 +19,6 @@
  */
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/crm_rate.hpp"
-#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
@@ -61,10 +60,15 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     const auto& shape = input.windows.state(handle);
     const auto* crm = std::get_if<model::domain::crm_matrix_state>(&shape);
-    const auto session = input.windows.session_of(handle);
-    if (crm == nullptr || !session) {
+    if (crm == nullptr) {
         ImGui::TextWrapped("%s", "This window is not a CRM.");
         widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+        return;
+    }
+    const auto session = signed_in_session(input, handle);
+    if (!session) {
+        draw_signed_out(input, status, foot);
         ImGui::PopID();
         return;
     }
@@ -82,8 +86,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     if (state.crm_name.empty()) {
         ImGui::TextDisabled("No CRM selected.");
-        foot.word = std::string{data_health_word(data_health::unavailable)};
-        foot.colour = health_colour(data_health::unavailable);
+        set_health_foot(foot, model::domain::data_health::unavailable, 0,
+            false);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -94,10 +98,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     const auto as_of_ns = snapshot != nullptr
         ? parse_iso8601_utc(snapshot->observed_as_of) : 0;
-    foot.word = std::string{data_health_word(data_health::unavailable)};
-    foot.colour = health_colour(data_health::unavailable);
-    foot.as_of = as_of_text(as_of_ns);
-    foot.updating = snapshot != nullptr && snapshot->reading;
+    const bool reading = snapshot != nullptr && snapshot->reading;
+    set_health_foot(foot, model::domain::data_health::unavailable, as_of_ns,
+        reading);
 
     auto configure_scope = [&] {
         model::command::command request;
@@ -156,6 +159,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     } else {
         std::set<std::pair<std::string, std::string>> fresh;
         std::set<std::pair<std::string, std::string>> stale;
+        std::set<std::pair<std::string, std::string>> disconnected;
         std::set<std::pair<std::string, std::string>> unavailable;
         for (const auto& cell : snapshot->cells) {
             if (cell.crm_name != state.crm_name)
@@ -166,15 +170,11 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                 fresh.insert(pair);
             else if (cell.status == "stale")
                 stale.insert(pair);
+            else if (cell.status == "disconnected")
+                disconnected.insert(pair);
             else
                 unavailable.insert(pair);
         }
-        const ImU32 colour = !stale.empty() || !unavailable.empty()
-            ? theme::readiness_colour(model::domain::readiness::bootstrapping)
-            : theme::health_live_colour;
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
-            "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
-            stale.size(), unavailable.size());
 
         /*
          * The cells carry the deployment's own verdict on each pair, so the
@@ -182,18 +182,16 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          * again. A batch that keeps returning fresh cells is live even when
          * the observation time it quotes has not moved.
          */
-        const auto fresh_count = fresh.size();
-        const auto stale_count = stale.size();
-        if (fresh_count == 0 && stale_count == 0 && unavailable.empty()) {
-            foot.word = std::string{data_health_word(data_health::unavailable)};
-            foot.colour = health_colour(data_health::unavailable);
-        } else if (stale_count > 0 || !unavailable.empty()) {
-            foot.word = std::string{data_health_word(data_health::stale)};
-            foot.colour = health_colour(data_health::stale);
-        } else {
-            foot.word = std::string{data_health_word(data_health::live)};
-            foot.colour = health_colour(data_health::live);
-        }
+        const auto health = model::domain::assess_verdicts({
+            .fresh = fresh.size(),
+            .stale = stale.size(),
+            .disconnected = disconnected.size(),
+            .unavailable = unavailable.size()});
+        set_health_foot(foot, health, as_of_ns, reading);
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(health_colour(health)),
+            "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
+            stale.size(), disconnected.size() + unavailable.size());
         if (snapshot->latency_ns > 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %.0f ms",

@@ -17,7 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.ui/render/data_health.hpp"
+#include "hedgr.ui/render/time_text.hpp"
 #include "ores.platform/time/datetime.hpp"
 #include "ores.platform/time/relative_time_formatter.hpp"
 #include <chrono>

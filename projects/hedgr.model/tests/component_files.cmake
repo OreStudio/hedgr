@@ -10,6 +10,7 @@
 set(files
     "allocation_counter.cpp"
     "channel_tests.cpp"
+    "health_tests.cpp"
     "lookup_cost_tests.cpp"
     "password_policy_server_tests.cpp"
     "password_policy_tests.cpp"

@@ -48,6 +48,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/command/hedgr.model.command.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/account.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/folder.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/health.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/hedgr.model.domain.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/instance.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.model/domain/label.hpp"

@@ -22,7 +22,6 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
-#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
@@ -157,13 +156,11 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 }
 
 /** @brief The colour a value takes for the plot's data health. */
-[[nodiscard]] ImVec4 health_tint(
-    const hedgr::ui::render::data_health_state& health, ImVec4 live) {
-    if (health.state == hedgr::ui::render::data_health::stale)
+[[nodiscard]] ImVec4 health_tint(domain::data_health health, ImVec4 live) {
+    if (health == domain::data_health::stale)
         return ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
-    if (health.state == hedgr::ui::render::data_health::delayed)
-        return ImGui::ColorConvertU32ToFloat4(
-            theme::readiness_colour(domain::readiness::bootstrapping));
+    if (health == domain::data_health::delayed)
+        return ImGui::ColorConvertU32ToFloat4(health_colour(health));
     return live;
 }
 
@@ -187,20 +184,27 @@ void render_chart(window_handle handle, const render_input& input,
         return;
     }
 
-    const auto session = input.windows.session_of(handle);
-    const auto* snapshot = session.has_value()
-        ? input.market.points(input.sessions.instance_id(*session),
-            input.sessions.account_id(*session), chart->series_id)
-        : nullptr;
+    const auto session = signed_in_session(input, handle);
+    if (!session) {
+        draw_signed_out(input, status, foot);
+        ImGui::PopID();
+        return;
+    }
+    const auto* snapshot = input.market.points(
+        input.sessions.instance_id(*session),
+        input.sessions.account_id(*session), chart->series_id);
+    const bool reading = snapshot == nullptr
+        || (!snapshot->is_read() && snapshot->failure.empty());
 
     const auto span_ns = chart_span_ns(state.market_view.chart_span);
     static const std::deque<domain::market_point> no_points;
     const auto& points = snapshot != nullptr
         ? snapshot->level(level_for(span_ns))
         : no_points;
-    const std::int64_t newest_at_ns =
-        points.empty() ? 0 : points.back().at_ns;
-    const auto health = assess_data_health(newest_at_ns, input.wall_now_ns);
+    const std::int64_t as_of_ns =
+        snapshot != nullptr ? snapshot->newest_at_ns() : 0;
+    const auto health = domain::assess_data_health(as_of_ns,
+        input.wall_now_ns, domain::fx_health_thresholds);
     auto& plot = state.plot;
     update_chart_plot(plot,
         chart_plot_key{.version = snapshot != nullptr ? snapshot->version : 0,
@@ -215,9 +219,7 @@ void render_chart(window_handle handle, const render_input& input,
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
 
-    foot.word = std::string{data_health_word(health.state)};
-    foot.colour = health_colour(health.state);
-    foot.as_of = as_of_text(newest_at_ns);
+    set_health_foot(foot, health, as_of_ns, reading);
     foot.controls.push_back(widget::foot_combo{
         .id = "period",
         .tooltip = "The span the chart plots",
@@ -263,10 +265,8 @@ void render_chart(window_handle handle, const render_input& input,
                 "The period is All, so every point in the series is plotted");
         }
     }
-    if (session.has_value()) {
-        ImGui::SameLine();
-        draw_series_flags(input, *session, chart->label);
-    }
+    ImGui::SameLine();
+    draw_series_flags(input, *session, chart->label);
 
     if (snapshot != nullptr && !snapshot->failure.empty()) {
         ImGui::TextColored(
@@ -281,8 +281,7 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##plot-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (snapshot == nullptr
-            || (!snapshot->is_read() && snapshot->failure.empty())) {
+        if (reading) {
             ImGui::TextDisabled("Reading the series...");
         } else if (points.empty()) {
             ImGui::TextDisabled("No observations for this series yet.");
@@ -435,7 +434,7 @@ void render_chart(window_handle handle, const render_input& input,
                     ys.back());
                 auto* plot_draw = ImPlot::GetPlotDrawList();
                 ImPlot::PushPlotClipRect();
-                if (health.state == hedgr::ui::render::data_health::live) {
+                if (health == domain::data_health::live) {
                     const auto phase = static_cast<float>(
                         static_cast<double>(input.now_ns % 1'000'000'000) / 1.0e9);
                     const float pulse = 0.5f

@@ -20,7 +20,6 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
-#include "hedgr.ui/render/data_health.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
@@ -99,11 +98,15 @@ void render_term_structure(window_handle handle, const render_input& input,
         return;
     }
 
-    const auto session = input.windows.session_of(handle);
-    const auto* curve = session.has_value()
-        ? input.term_structures.get(input.sessions.instance_id(*session),
-            input.sessions.account_id(*session), terms->curve_key)
-        : nullptr;
+    const auto session = signed_in_session(input, handle);
+    if (!session) {
+        draw_signed_out(input, status, foot);
+        ImGui::PopID();
+        return;
+    }
+    const auto* curve = input.term_structures.get(
+        input.sessions.instance_id(*session),
+        input.sessions.account_id(*session), terms->curve_key);
 
     const auto history = std::clamp(state.market_view.term_history,
         term_history_min, term_history_max);
@@ -130,12 +133,10 @@ void render_term_structure(window_handle handle, const render_input& input,
             newest_at_ns = curve->curves[static_cast<std::size_t>(primary)].at_ns;
     }
 
-    const auto health = assess_data_health(newest_at_ns, input.wall_now_ns,
-        ir_health_thresholds);
-    foot.word = std::string{data_health_word(health.state)};
-    foot.colour = health_colour(health.state);
-    foot.as_of = as_of_text(newest_at_ns);
-    foot.updating = curve != nullptr && curve->reading;
+    set_health_foot(foot,
+        hedgr::model::domain::assess_data_health(newest_at_ns,
+            input.wall_now_ns, hedgr::model::domain::ir_health_thresholds),
+        newest_at_ns, curve != nullptr && curve->reading);
     foot.controls.push_back(widget::foot_combo{
         .id = "history",
         .tooltip = "How many recent curves to overlay",
@@ -150,10 +151,8 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::TextDisabled("%zu terms",
             curve->curves[static_cast<std::size_t>(primary)].nodes.size());
     }
-    if (session.has_value()) {
-        ImGui::SameLine();
-        draw_series_flags(input, *session, terms->label);
-    }
+    ImGui::SameLine();
+    draw_series_flags(input, *session, terms->label);
 
     if (curve != nullptr && !curve->error.empty()) {
         ImGui::TextColored(
@@ -168,9 +167,7 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (!session.has_value()) {
-            ImGui::TextDisabled("Sign in to read this curve.");
-        } else if (curve == nullptr
+        if (curve == nullptr
             || (curve->curves.empty() && curve->error.empty())) {
             ImGui::TextDisabled("Reading the curve...");
         } else if (curve->curves.empty()) {

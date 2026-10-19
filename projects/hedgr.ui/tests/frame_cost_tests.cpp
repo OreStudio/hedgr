@@ -18,6 +18,7 @@
  *
  */
 #include "allocation_counter.hpp"
+#include "headless_desk.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -34,131 +35,13 @@
 #include <unordered_set>
 #include <vector>
 
-/*
- * Frames drawn without a window: an ImGui context whose renderer is declared
- * to take textures itself, so the font atlas needs no backend and nothing is
- * ever uploaded. That is enough to run a window's whole frame path and count
- * what it does.
- */
-
 namespace {
 
 namespace model = hedgr::model;
 namespace render = hedgr::ui::render;
-
-/** @brief A texture source that hands out one texture and counts the asks. */
-struct counting_textures final : render::image_texture_source {
-    std::size_t gets = 0;
-
-    ImTextureID get(std::string_view, std::string_view, std::string_view,
-        const std::vector<std::uint8_t>&) override {
-        ++gets;
-        return static_cast<ImTextureID>(1);
-    }
-};
-
-/** @brief One ImGui and ImPlot context for the life of a test. */
-struct headless_imgui final {
-    headless_imgui() {
-        ImGui::CreateContext();
-        ImPlot::CreateContext();
-        auto& io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(1280.0f, 800.0f);
-        io.DeltaTime = 1.0f / 60.0f;
-        io.IniFilename = nullptr;
-        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
-    }
-    ~headless_imgui() {
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
-    }
-    headless_imgui(const headless_imgui&) = delete;
-    headless_imgui& operator=(const headless_imgui&) = delete;
-};
-
-/** @brief Every table a frame borrows, with one signed-in session. */
-struct desk final {
-    model::state::instance_table instances;
-    model::state::account_table accounts;
-    model::state::folder_table folders;
-    model::state::label_table labels;
-    model::state::labelling_table labellings;
-    model::state::session_table sessions;
-    model::state::market_table market;
-    model::state::term_structure_table term_structures;
-    model::state::crm_table crm;
-    model::state::tenant_image_map currency_images;
-    model::state::image_cache images;
-    model::state::probe_table probes;
-    model::state::password_policy_state password_policy;
-    model::state::window_table windows;
-    model::state::shortcut_table shortcuts;
-    model::command::command_queue commands;
-    std::unordered_set<std::string> failed_images;
-    std::unordered_set<std::string> pending_images;
-    render::market_view_state market_view;
-    counting_textures textures;
-    model::state::session_handle session;
-
-    desk() : session(sessions.insert("i", "a")) {
-        sessions.set_status(session, model::domain::session_status::authenticated);
-        sessions.set_tenant_id(session, "t");
-        currency_images.set("t", {{"GBP", "img-gb"}, {"USD", "img-us"}});
-        static_cast<void>(images.put("t", "img-gb", {.mime_type = "image/png",
-            .data = std::vector<std::uint8_t>(4, 1)}));
-        static_cast<void>(images.put("t", "img-us", {.mime_type = "image/png",
-            .data = std::vector<std::uint8_t>(4, 2)}));
-    }
-
-    [[nodiscard]] render::render_input input() {
-        return render::render_input{
-            .instances = instances,
-            .accounts = accounts,
-            .folders = folders,
-            .labels = labels,
-            .labellings = labellings,
-            .sessions = sessions,
-            .market = market,
-            .term_structures = term_structures,
-            .crm = crm,
-            .currency_images = currency_images,
-            .images = images,
-            .failed_images = failed_images,
-            .pending_images = pending_images,
-            .textures = &textures,
-            .probes = probes,
-            .password_policy = password_policy,
-            .windows = windows,
-            .shortcuts = shortcuts,
-            .commands = commands,
-            .store_lock = model::domain::store_lock::unlocked,
-            .market_view = market_view,
-        };
-    }
-
-    [[nodiscard]] model::state::window_handle open(model::domain::window_kind kind,
-        model::domain::window_state state, std::string id = "w") {
-        const auto handle = windows.insert(model::domain::window_spec{
-            .id = std::move(id), .kind = kind, .state = std::move(state)});
-        windows.bind_session(handle, session);
-        windows.set_open(handle, true);
-        windows.set_next_refresh_ns(handle,
-            std::numeric_limits<std::int64_t>::max());
-        return handle;
-    }
-};
-
-/** @brief Draws one frame of @p draw inside a fixed window. */
-template<class Draw>
-void frame(Draw&& draw) {
-    ImGui::NewFrame();
-    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2(1000.0f, 700.0f));
-    ImGui::Begin("frame");
-    draw();
-    ImGui::End();
-    ImGui::Render();
-}
+using hedgr::testing::desk;
+using hedgr::testing::frame;
+using hedgr::testing::headless_imgui;
 
 /** @brief The texture asks of one series browser frame over @p rows series. */
 std::size_t texture_asks_over(std::size_t rows) {
