@@ -37,6 +37,7 @@
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/service/password_policy_service.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
+#include "hedgr.runtime/service/window_service.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
@@ -48,7 +49,6 @@
 #include "hedgr.store/repository/labelling_repository.hpp"
 #include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/shortcut_repository.hpp"
-#include "hedgr.store/repository/window_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <chrono>
 #include <cstdint>
@@ -173,7 +173,7 @@ public:
     }
 
     [[nodiscard]] const model::state::window_table& windows() const noexcept {
-        return windows_;
+        return window_service_.windows();
     }
 
     /** @brief The market series and the points each chart holds. */
@@ -378,11 +378,13 @@ private:
     void do_set_master_password(const model::command::command& cmd);
     void do_unlock_store(const model::command::command& cmd);
     void do_lock_store();
-    void do_open_window(const model::command::command& cmd);
-    void do_close_window(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
 
-    void do_configure_crm(const model::command::command& cmd);
+    /** @brief Starts the read an open asked for, then raises what it refused. */
+    void complete_open(service::open_outcome outcome);
+
+    /** @brief Routes a window's read request to the starter that serves it. */
+    void start_read(const service::read_request& request);
 
     void do_load_crm_names(const model::command::command& cmd);
 
@@ -394,17 +396,6 @@ private:
      * would queue behind the first for no new information.
      */
     void start_deployment_read(std::string_view window_id);
-
-    /**
-     * @brief Binds every restored window saved against one session pair.
-     *
-     * A window wall is restored before any session exists, so its windows are
-     * unbound. The sign-in that creates the pair is the moment they can be
-     * bound, and the refresh deadlines move to now so each reads its data
-     * immediately rather than waiting a cadence.
-     */
-    void rebind_restored_windows(std::string_view instance_id,
-        std::string_view account_id, model::state::session_handle session);
 
     /** @brief Asks for the market series catalogue, on the window's session. */
     void start_market_catalogue_read(std::string_view window_id);
@@ -496,8 +487,6 @@ private:
      */
     void rehome_leaves(const std::vector<std::string>& folder_ids);
 
-    void ensure_instance_manager_window();
-
     /**
      * @brief Hands one connect attempt to the session pool.
      *
@@ -568,7 +557,6 @@ private:
     model::state::labelling_table labellings_;
     model::state::shortcut_table shortcuts_;
     model::state::session_table sessions_;
-    model::state::window_table windows_;
     model::command::command_queue commands_;
     model::command::event_queue events_;
 
@@ -579,7 +567,6 @@ private:
     std::unique_ptr<store::repository::label_repository> label_repo_;
     std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
     std::unique_ptr<store::repository::shortcut_repository> shortcut_repo_;
-    std::unique_ptr<store::repository::window_repository> window_repo_;
     std::unique_ptr<store::repository::master_repository> master_repo_;
 
     /**
@@ -707,7 +694,6 @@ private:
 
     /** @brief Why the last unlock was refused. See @c lock_error(). */
     std::string lock_error_;
-    std::uint64_t next_window_serial_ = 1;
     bool started_ = false;
 
     /*
@@ -717,6 +703,7 @@ private:
     service::probe_service probe_service_{instances_, probe_pool_.context(), events_};
     service::password_policy_service policy_service_{seed_options_,
         probe_pool_.context(), events_};
+    service::window_service window_service_{sessions_};
 };
 
 }
