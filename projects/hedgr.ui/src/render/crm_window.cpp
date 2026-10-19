@@ -94,10 +94,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     const auto as_of_ns = snapshot != nullptr
         ? parse_iso8601_utc(snapshot->observed_as_of) : 0;
-    const auto health = assess_data_health(as_of_ns, input.wall_now_ns,
-        crm_health_thresholds);
-    foot.word = std::string{data_health_word(health.state)};
-    foot.colour = health_colour(health.state);
+    foot.word = std::string{data_health_word(data_health::unavailable)};
+    foot.colour = health_colour(data_health::unavailable);
     foot.as_of = as_of_text(as_of_ns);
     foot.updating = snapshot != nullptr && snapshot->reading;
 
@@ -177,6 +175,25 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(colour),
             "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
             stale.size(), unavailable.size());
+
+        /*
+         * The cells carry the deployment's own verdict on each pair, so the
+         * footer uses the same answer rather than judging the batch's as-of
+         * again. A batch that keeps returning fresh cells is live even when
+         * the observation time it quotes has not moved.
+         */
+        const auto fresh_count = fresh.size();
+        const auto stale_count = stale.size();
+        if (fresh_count == 0 && stale_count == 0 && unavailable.empty()) {
+            foot.word = std::string{data_health_word(data_health::unavailable)};
+            foot.colour = health_colour(data_health::unavailable);
+        } else if (stale_count > 0 || !unavailable.empty()) {
+            foot.word = std::string{data_health_word(data_health::stale)};
+            foot.colour = health_colour(data_health::stale);
+        } else {
+            foot.word = std::string{data_health_word(data_health::live)};
+            foot.colour = health_colour(data_health::live);
+        }
         if (snapshot->latency_ns > 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %.0f ms",
