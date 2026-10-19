@@ -53,9 +53,13 @@ never a blocking sleep.
 **Two channels.** A worker never writes state. It builds a `model::event::event`
 and pushes it onto the event channel. The frame loop drains that channel at the
 start of a frame and applies the events. The interface does the symmetric thing
-with commands. Each channel is a `std::mutex` guarded by a swap, so the only
-shared mutable object in the process is a buffer whose lock is held for the
-duration of a `std::vector` swap.
+with commands. Each channel is a `std::mutex` guarded by a swap. A channel can carry an
+optional wake function, called when a push lands in an empty channel, so a
+minimised client can wait for events rather than poll.
+
+The channels are not the only shared objects. The process also shares the
+signal bus, the bucket ring between a session's tick thread and the frame
+thread, and the sound queue. A new shared object needs an ADR.
 
 ## Consequences
 
