@@ -47,6 +47,10 @@ set_target_properties(${lib_target_name}
 
 target_include_directories(${lib_target_name} PUBLIC
     ${CMAKE_SOURCE_DIR}/projects/hedgr.runtime/include)
+# The component's own src/ is on the include path for support.hpp, the helpers
+# the manager, the seeder and the services share and do not export.
+target_include_directories(${lib_target_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(${lib_target_name}
     PUBLIC

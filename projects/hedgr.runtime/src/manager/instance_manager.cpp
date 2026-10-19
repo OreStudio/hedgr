@@ -21,8 +21,6 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.model/signal/names.hpp"
-#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/seed/seeder.hpp"
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
@@ -31,15 +29,13 @@
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
-#include "hedgr.runtime/worker/policy_worker.hpp"
-#include "hedgr.runtime/worker/probe_worker.hpp"
 #include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
 #include "ores.logging/boost_severity.hpp"
-#include "ores.logging/make_logger.hpp"
+#include "support.hpp"
 #include <algorithm>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -71,25 +67,16 @@ namespace command = hedgr::model::command;
 namespace domain = hedgr::model::domain;
 namespace event = hedgr::model::event;
 namespace model_state = hedgr::model::state;
-namespace signal = hedgr::model::signal;
 namespace sqlite = hedgr::store::sqlite;
 namespace store_crypto = hedgr::store::crypto;
 namespace transport = hedgr::session::transport;
 
 using condition_source = model_state::condition_source;
 
-/**
- * @brief This manager's logger.
- *
- * A warning that nothing reads is not a warning, so a checkout the scan could
- * not use is reported the way the rest of OreStudio reports one: through the
- * process log, which the application sets up before it starts anything.
- */
-[[nodiscard]] auto& lg() {
-    using namespace ores::logging;
-    static auto instance = make_logger("hedgr.runtime.manager.instance_manager");
-    return instance;
-}
+using support::lg;
+using support::live_indices;
+using support::steady_now_ns;
+using support::store_failure;
 
 /**
  * @brief The key a running worker is registered under.
@@ -203,55 +190,6 @@ live_accounts(const model_state::account_table& accounts) {
     return result;
 }
 
-/** @brief The live slot index of every row of a table, holes skipped. */
-[[nodiscard]] std::vector<std::uint32_t>
-live_indices(const model_state::slab& layout) {
-    std::vector<std::uint32_t> result;
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
-        result.push_back(index);
-    }
-    return result;
-}
-
-/** @brief A store failure as one sentence naming the operation that failed. */
-[[nodiscard]] std::string store_failure(std::string_view what,
-    const sqlite::store_error& error) {
-    const auto message = std::format("{}: {} ({})", what, error.message,
-        sqlite::to_string(error.code));
-    BOOST_LOG_SEV(lg(), ores::logging::error) << "Store failure: " << message;
-    return message;
-}
-
-/**
- * @brief The monotonic clock in nanoseconds, which is what deadlines use.
- */
-[[nodiscard]] std::int64_t steady_now_ns() {
-    return std::chrono::duration_cast<std::chrono::nanoseconds>(
-        std::chrono::steady_clock::now().time_since_epoch())
-        .count();
-}
-
-/**
- * @brief How often an instance is probed when the last probe answered.
- *
- * A few seconds is a glance rather than a gate: often enough that the chart the
- * Instance Manager draws has a shape to show and a status is never stale when
- * somebody looks at it, rare enough that polling every instance costs the
- * deployment nothing worth measuring.
- */
-constexpr std::chrono::milliseconds probe_cadence{5000};
-
-/**
- * @brief The longest an unreachable instance waits between attempts.
- *
- * A deployment that is down is not brought back by being asked faster, and a
- * fixed retry against twenty unreachable instances is the retry storm the
- * backoff exists to prevent.
- */
-constexpr std::chrono::milliseconds probe_cadence_max{60000};
-
 /**
  * @brief How often an open CRM matrix is read again.
  *
@@ -358,7 +296,7 @@ void instance_manager::raise(model_state::condition_key key,
 }
 
 void instance_manager::stop() noexcept {
-    if (!started_ && running_.empty() && probing_.empty())
+    if (!started_ && running_.empty() && probe_service_.idle())
         return;
 
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Stopping the runtime";
@@ -391,20 +329,14 @@ void instance_manager::stop() noexcept {
      * waiting on a connect is told the application is going away and does not
      * report an outcome nobody is left to read.
      */
-    for (auto& [instance_id, source] : probing_) {
-        if (source)
-            source->request_stop();
-    }
-    probing_.clear();
+    probe_service_.cancel();
 
     /*
      * The policy read is cancelled with them: it blocks on the transport too,
      * so a process going away must not leave a pool thread waiting on an
      * answer nobody is left to read.
      */
-    if (policy_read_)
-        policy_read_->request_stop();
-    policy_read_.reset();
+    policy_service_.cancel();
 
     /*
      * The pool is stopped here and not in do_shutdown: pump() may still be
@@ -681,7 +613,9 @@ void instance_manager::pump() {
      * than on the next one, and so an answer applied above has already moved
      * the deadline the schedule reads.
      */
-    pump_probes();
+    probe_service_.pump_probes(started_, [this](const domain::instance& row) {
+        return connection_options_for(row, seed_options_, database_->path());
+    });
     pump_crm_reads();
 
     /*
@@ -691,8 +625,8 @@ void instance_manager::pump() {
      * the first pump rather than in start() keeps the answer on the same event
      * channel as every other worker's.
      */
-    if (!policy_requested_)
-        fetch_password_policy();
+    if (!policy_service_.requested())
+        policy_service_.fetch_password_policy();
 
     /*
      * Watches follow the open chart windows, and the buckets the subscriptions
@@ -820,10 +754,11 @@ void instance_manager::handle(command::command& cmd) {
         do_load_crm_names(cmd);
         break;
     case command::command_kind::probe_instance:
-        do_probe_instance(cmd);
+        if (auto refused = probe_service_.do_probe_instance(cmd))
+            raise(std::move(refused->key), std::move(refused->message));
         break;
     case command::command_kind::probe_all:
-        do_probe_all();
+        probe_service_.do_probe_all();
         break;
     case command::command_kind::set_master_password:
         do_set_master_password(cmd);
@@ -851,11 +786,7 @@ void instance_manager::handle(command::command& cmd) {
          * probe table is runtime state that dies with the process rather than
          * something a shutdown has to unwind.
          */
-        for (auto& [instance_id, source] : probing_) {
-            if (source)
-                source->request_stop();
-        }
-        probing_.clear();
+        probe_service_.cancel();
         started_ = false;
         break;
     }
@@ -959,7 +890,7 @@ void instance_manager::do_remove_instance(const command::command& cmd) {
          * instance would be applied to whatever takes its slot next, and the
          * deadline would keep a probe running for a row nobody can read.
          */
-        forget_probe(*handle, id);
+        probe_service_.forget_probe(*handle, id);
         instances_.remove(*handle);
     }
 
@@ -2599,40 +2530,6 @@ void instance_manager::start_market_read(std::string_view window_id,
     worker::spawn_market_read(pool_.context(), std::move(job), events_);
 }
 
-void instance_manager::do_probe_instance(const command::command& cmd) {
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Probe requested for '" << cmd.instance_id << "'";
-    /*
-     * Forcing a probe moves the deadline rather than starting the probe here:
-     * the schedule is then the one place that decides whether an instance is
-     * due, and an instance that is already being probed is not probed a second
-     * time by an operator who pressed the button twice.
-     */
-    const auto handle = instances_.find(cmd.instance_id);
-    if (!handle) {
-        raise({condition_source::probe, cmd.instance_id},
-            std::format("cannot probe: no instance {}", cmd.instance_id));
-        return;
-    }
-
-    probes_.set_next_probe_ns(*handle, 0);
-}
-
-void instance_manager::do_probe_all() {
-    /*
-     * Every instance, including the ones whose probe is in flight: moving a
-     * deadline is always safe, and the in-flight check in pump_probes() is
-     * what stops a sweep from doubling up on an instance.
-     */
-    const auto& layout = instances_.layout();
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
-        probes_.set_next_probe_ns(
-            model_state::instance_handle{index, layout.generation[index]}, 0);
-    }
-}
-
 void instance_manager::start_currency_image_map(const model::event::event& ev) {
     if (ev.tenant_id.empty() || !database_)
         return;
@@ -3082,232 +2979,6 @@ void instance_manager::pump_market_streams() {
         [](const auto& stream) { return stream->finished(); });
 }
 
-void instance_manager::pump_probes() {
-    /*
-     * A stopped manager starts no probes: shutting down cancels every probe it
-     * has, and a pump that outlives the shutdown command must not start a new
-     * one behind it.
-     */
-    if (!started_)
-        return;
-
-    const auto now = steady_now_ns();
-    const auto& layout = instances_.layout();
-    const auto rows = instances_.rows();
-
-    bool swept = false;
-    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
-        if (!layout.is_alive(index))
-            continue;
-
-        const auto& row = rows[index];
-        if (probing_.contains(row.id))
-            continue;
-
-        const model_state::instance_handle handle{index, layout.generation[index]};
-        if (probes_.next_probe_ns(handle) > now)
-            continue;
-
-        spawn_probe_for(row);
-        swept = true;
-    }
-
-    /*
-     * One sample per sweep and not one per probe, because the chart plots the
-     * estate once a poll rather than once an answer. The counts are taken as
-     * the sweep starts, so a bar shows the state the previous sweep left the
-     * estate in, and an instance removed since then is gone from the total
-     * because the total is read here rather than remembered.
-     */
-    if (swept)
-        probes_.record_snapshot(now, instances_.size());
-}
-
-void instance_manager::spawn_probe_for(const domain::instance& row) {
-    /*
-     * Built by the same call a session builds its own options with, because a
-     * probe asks exactly the question a session asks first -- can this client
-     * reach this deployment -- and an instance whose certificate path is wrong
-     * is unreachable from here for the same reason it is unreachable there.
-     * The probe is still not a session: what it borrows is the description of
-     * how to reach the deployment, and the client that uses it is its own.
-     */
-    transport::session_options options =
-        connection_options_for(row, seed_options_, database_->path());
-
-    worker::probe_job job;
-    job.options = std::move(options);
-    job.instance = row;
-
-    auto source = std::make_shared<std::stop_source>();
-    probing_[row.id] = source;
-
-    /*
-     * The deadline is left where it is while the probe is in flight. It is the
-     * answer that moves it, and an instance whose probe never answers is held
-     * back by the in-flight entry rather than by a deadline nobody ever
-     * clears: a deadline pushed forward on spawn would quietly retire an
-     * instance from the schedule if the probe were lost.
-     */
-    worker::spawn_probe(probe_pool_.context(), std::move(job), events_,
-        std::move(source));
-}
-
-void instance_manager::apply_probe_result(const event::event& ev) {
-    /*
-     * The probe is no longer in flight whatever happens next, and leaving the
-     * entry behind would retire the instance from the schedule for the rest of
-     * the run.
-     */
-    probing_.erase(ev.instance_id);
-
-    /*
-     * An instance that has gone since the probe started has nowhere to put the
-     * result, and the handles of the table have moved on. The event is dropped
-     * rather than reported: a fact about a removed instance is a fact about
-     * nothing, and its slot now belongs to somebody else.
-     */
-    const auto handle = instances_.find(ev.instance_id);
-    if (!handle)
-        return;
-
-    /*
-     * The previous answer is read before the new one overwrites it, because the
-     * row is the only place it lives and the signal is about the change rather
-     * than about the state. A first result has nothing to differ from and
-     * raises nothing, so a process that starts with six unreachable
-     * deployments does not announce six faults it has only just learned about.
-     */
-    const domain::probe_result* previous = probes_.get(*handle);
-    const bool had_previous = previous != nullptr;
-    const auto previous_reach = had_previous
-        ? previous->reach
-        : domain::reachability::unknown;
-    const auto previous_ready = had_previous
-        ? previous->ready
-        : domain::readiness::unknown;
-
-    domain::probe_result result;
-    result.reach = ev.reach;
-    result.ready = ev.ready;
-    result.latency_us = ev.latency_us;
-    result.observed_at_ns = steady_now_ns();
-    result.detail = ev.detail;
-    /*
-     * The flag is what keeps a deployment that answered from wearing the
-     * defaults of one that never did: only a probe that reached the read
-     * carries a structured answer, and everything else is the sentence in
-     * detail.
-     */
-    if (ev.bootstrap_answered)
-        result.bootstrap = ev.bootstrap;
-    probes_.set(*handle, std::move(result));
-
-    /*
-     * The change, if there was one, is raised as a named signal rather than
-     * acted on here. The sound and any later subscriber read the same name, and
-     * the runtime stays ignorant of both, which is the point of the name being
-     * the whole interface. Reachability is raised in preference to readiness
-     * when both moved, because a broker that stopped answering also stops
-     * reporting readiness and the operator would otherwise hear two faults for
-     * one fact.
-     */
-    if (had_previous) {
-        const domain::instance* row = instances_.get(*handle);
-        const std::string subject = row != nullptr ? row->name : ev.instance_id;
-        const std::int64_t at_ns = steady_now_ns();
-
-        auto announce = [&](std::string_view name, std::string detail) {
-            signal::signal value;
-            value.name = std::string(name);
-            value.detail = std::move(detail);
-            value.at_ns = at_ns;
-            signal::bus().raise(std::move(value));
-        };
-
-        if (ev.reach != previous_reach) {
-            if (ev.reach == domain::reachability::reachable)
-                announce(signal::names::instance_reachability_restored,
-                    std::format("{} answers its broker again", subject));
-            else
-                announce(signal::names::instance_reachability_lost,
-                    std::format("{} no longer answers its broker", subject));
-        } else if (ev.reach == domain::reachability::reachable
-            && ev.ready != previous_ready) {
-            if (ev.ready == domain::readiness::ready)
-                announce(signal::names::instance_readiness_recovered,
-                    std::format("{} is ready", subject));
-            else if (ev.ready == domain::readiness::bootstrapping)
-                announce(signal::names::instance_readiness_bootstrapping,
-                    std::format("{} is bootstrapping", subject));
-            else
-                announce(signal::names::instance_readiness_degraded,
-                    std::format("{} stopped being ready and is now {}",
-                        subject, domain::to_string(ev.ready)));
-        }
-    }
-
-    /*
-     * A probe that got no answer backs the next attempt off; a probe that got
-     * an answer -- whatever that answer was -- returns to the cadence. A
-     * deployment that is up but not bootstrapped is up, and polling it every
-     * five seconds is how the operator finds out the moment it is set up.
-     */
-    auto& interval = probe_intervals_[ev.instance_id];
-    if (ev.reach == domain::reachability::reachable)
-        interval = probe_cadence;
-    else
-        interval = std::min(interval.count() == 0
-                ? probe_cadence * 2
-                : interval * 2,
-            probe_cadence_max);
-
-    probes_.set_next_probe_ns(*handle,
-        steady_now_ns() +
-            std::chrono::duration_cast<std::chrono::nanoseconds>(interval).count());
-}
-
-void instance_manager::fetch_password_policy() {
-    /*
-     * The one place that builds options from the seed alone, because there is
-     * no row to read: the create prompt is drawn while the store is still shut,
-     * so the deployment the process was pointed at is the only one that can be
-     * asked. It is the right one to ask, since a first run seeds its single
-     * instance from exactly this description.
-     */
-    transport::session_options options;
-    options.nats_url = seed_options_.nats_url;
-    options.subject_prefix = seed_options_.subject_prefix;
-    options.wire_format = seed_options_.wire_format;
-    options.tls_ca = seed_options_.tls_ca;
-    options.tls_cert = seed_options_.tls_cert;
-    options.tls_key = seed_options_.tls_key;
-    options.request_timeout = seed_options_.request_timeout;
-    options.connect_timeout = seed_options_.connect_timeout;
-
-    worker::policy_job job;
-    job.options = std::move(options);
-    job.subject_prefix = seed_options_.subject_prefix;
-
-    /*
-     * A deployment nobody pointed this process at cannot be asked. The state
-     * is left stating that there is no policy rather than that one is coming,
-     * because waiting for an answer that was never requested is a lie the
-     * create prompt would tell for the rest of the run.
-     */
-    if (job.options.nats_url.empty()) {
-        password_policy_.fail("no deployment is configured to ask");
-        policy_requested_ = true;
-        return;
-    }
-
-    password_policy_.begin();
-    policy_read_ = std::make_shared<std::stop_source>();
-    worker::spawn_policy_read(probe_pool_.context(), std::move(job), events_,
-        policy_read_);
-    policy_requested_ = true;
-}
-
 bool instance_manager::apply_read_answer(const event::event& ev) {
     switch (ev.kind) {
     case event::event_kind::series_catalogue: {
@@ -3403,34 +3074,6 @@ bool instance_manager::apply_read_answer(const event::event& ev) {
     }
 }
 
-void instance_manager::apply_password_policy(const event::event& ev) {
-    policy_read_.reset();
-
-    if (!ev.policy_available) {
-        /*
-         * The deployment did not state a policy, so nothing is assessed and
-         * the create prompt says so. The alternative -- treating the absence
-         * as a policy that requires nothing -- would turn an outage into a
-         * screen that promises a password the deployment was about to refuse.
-         */
-        password_policy_.fail(ev.message);
-        return;
-    }
-
-    password_policy_.set(ev.policy);
-}
-
-void instance_manager::forget_probe(model_state::instance_handle handle,
-    const std::string& instance_id) {
-    if (const auto found = probing_.find(instance_id); found != probing_.end()) {
-        if (found->second)
-            found->second->request_stop();
-        probing_.erase(found);
-    }
-    probe_intervals_.erase(instance_id);
-    probes_.forget(handle);
-}
-
 void instance_manager::apply(const event::event& ev) {
     /*
      * Every event that is not a store event is dealt with below, and the two
@@ -3445,7 +3088,7 @@ void instance_manager::apply(const event::event& ev) {
      * session to find.
      */
     if (ev.kind == event::event_kind::probe_result) {
-        apply_probe_result(ev);
+        probe_service_.apply_probe_result(ev);
         return;
     }
 
@@ -3456,7 +3099,7 @@ void instance_manager::apply(const event::event& ev) {
      * which is drawn before anybody has signed in to anything.
      */
     if (ev.kind == event::event_kind::password_policy_fetched) {
-        apply_password_policy(ev);
+        policy_service_.apply_password_policy(ev);
         return;
     }
 
