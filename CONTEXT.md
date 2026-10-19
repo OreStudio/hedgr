@@ -58,14 +58,18 @@ exists only for the length of the sign-in attempt.
 
 ## Master password
 
-The single secret that protects the whole local store: every credential, every
-instance, every folder and every label. It is never itself stored. Hedgr holds
-it in memory only while the store is unlocked, and asks for it again on the next
-launch.
+The single secret that unlocks the local store. On disk it protects only the
+credentials, which are encrypted under a key derived from it. The catalogue
+(every instance, folder and label, and each account's principal) is stored in
+the clear, so anyone holding the file can read it with any SQLite tool. The
+master password is never itself stored. Hedgr holds it in memory only while the
+store is unlocked, and asks for it again on the next launch.
 
-Because it guards the catalogue and not only the secrets, losing it loses the
-instance list as well as the logins. That is the blast radius of the decision
-and there is no recovery from it.
+Hedgr also gates the catalogue in its interface: nothing in the store is shown
+until the store is unlocked. Losing the master password therefore loses the
+logins outright and locks Hedgr out of the instance list, although the list is
+still readable in the file. That is the blast radius of the decision and there
+is no recovery from it inside Hedgr.
 
 ## Store lock
 
