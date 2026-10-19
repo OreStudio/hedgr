@@ -128,7 +128,7 @@ void draw_series_row(std::string_view label, float extra_indent,
     const float text_y =
         rect_min.y + (rect_size.y - ImGui::GetTextLineHeight()) * 0.5f;
     draw->AddText(ImVec2(x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
-        std::string{label}.c_str());
+        label.data(), label.data() + label.size());
 }
 
 void open_chart(const render_input& input,
@@ -607,23 +607,34 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         : state.market_selected_series_label.c_str();
     if (ImGui::BeginCombo("##series-combo", preview,
             ImGuiComboFlags_HeightLarge)) {
-        for (const auto* row : visible) {
-            ImGui::PushID(row->id.c_str());
-            const bool chosen =
-                row->id == state.market_selected_series_id;
-            if (ImGui::Selectable("##combo-row", chosen)) {
-                state.market_selected_series_id = row->id;
-                state.market_selected_series_label = row->label;
-                open_chart(input, *session, *row);
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(visible.size()));
+        /* The chosen row is always drawn, so opening the combo scrolls to it. */
+        for (std::size_t i = 0; i < visible.size(); ++i) {
+            if (visible[i]->id == state.market_selected_series_id)
+                clipper.IncludeItemByIndex(static_cast<int>(i));
+        }
+        while (clipper.Step()) {
+            for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
+                ++index) {
+                const auto* row = visible[static_cast<std::size_t>(index)];
+                ImGui::PushID(row->id.c_str());
+                const bool chosen =
+                    row->id == state.market_selected_series_id;
+                if (ImGui::Selectable("##combo-row", chosen)) {
+                    state.market_selected_series_id = row->id;
+                    state.market_selected_series_label = row->label;
+                    open_chart(input, *session, *row);
+                }
+                request_flags(input, *session, row->label);
+                const auto pair = hedgr::ui::widget::currencies_of(row->label);
+                draw_series_row(row->label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
+                if (chosen)
+                    ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
             }
-            request_flags(input, *session, row->label);
-            const auto pair = hedgr::ui::widget::currencies_of(row->label);
-            draw_series_row(row->label, 0.0f,
-                image_texture(input, *session, pair.base),
-                image_texture(input, *session, pair.quote));
-            if (chosen)
-                ImGui::SetItemDefaultFocus();
-            ImGui::PopID();
         }
         if (visible.empty())
             ImGui::TextDisabled("No series matches the filter.");
@@ -647,31 +658,37 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
 
-        for (const auto* row : visible) {
-            request_flags(input, *session, row->label);
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::PushID(row->id.c_str());
-            ImGui::Selectable("##row", false,
-                ImGuiSelectableFlags_SpanAllColumns
-                    | ImGuiSelectableFlags_AllowDoubleClick);
-            const auto pair = hedgr::ui::widget::currencies_of(row->label);
-            draw_series_row(row->label, 0.0f,
-                image_texture(input, *session, pair.base),
-                image_texture(input, *session, pair.quote));
-            if (ImGui::IsItemHovered()
-                && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                state.market_selected_series_id = row->id;
-                state.market_selected_series_label = row->label;
-                open_chart(input, *session, *row);
-            }
-            ImGui::SetItemTooltip("%s", row->uri.c_str());
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(visible.size()));
+        while (clipper.Step()) {
+            for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
+                ++index) {
+                const auto* row = visible[static_cast<std::size_t>(index)];
+                request_flags(input, *session, row->label);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(row->id.c_str());
+                ImGui::Selectable("##row", false,
+                    ImGuiSelectableFlags_SpanAllColumns
+                        | ImGuiSelectableFlags_AllowDoubleClick);
+                const auto pair = hedgr::ui::widget::currencies_of(row->label);
+                draw_series_row(row->label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
+                if (ImGui::IsItemHovered()
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    state.market_selected_series_id = row->id;
+                    state.market_selected_series_label = row->label;
+                    open_chart(input, *session, *row);
+                }
+                ImGui::SetItemTooltip("%s", row->uri.c_str());
 
-            ImGui::PopID();
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", row->asset_class.c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextDisabled("%s", row->producer_kind.c_str());
+                ImGui::PopID();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", row->asset_class.c_str());
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", row->producer_kind.c_str());
+            }
         }
         ImGui::EndTable();
     }

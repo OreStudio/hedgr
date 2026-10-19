@@ -15,6 +15,7 @@ set(files
     "data_health_tests.cpp"
     "ema_tests.cpp"
     "flags_tests.cpp"
+    "frame_cost_tests.cpp"
     "market_view_tests.cpp"
     "render_tests.cpp"
     "shortcut_bar_tests.cpp"
