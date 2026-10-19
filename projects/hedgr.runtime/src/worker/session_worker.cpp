@@ -228,7 +228,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                 const auto& account = answer.value();
                 auto authenticated = for_key(key, job.attempt);
                 authenticated.kind = event::event_kind::session_authenticated;
-                authenticated.token = account.token;
+                authenticated.token = domain::secret_string{account.token};
                 authenticated.tenant_name = account.tenant_name;
                 authenticated.tenant_id = account.tenant_id;
                 authenticated.party_name = account.party_name;
@@ -359,7 +359,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                         auto refreshed_fact = for_key(key, job.attempt);
                         refreshed_fact.kind =
                             event::event_kind::session_token_refreshed;
-                        refreshed_fact.token = token;
+                        refreshed_fact.token = domain::secret_string{token};
                         refreshed_fact.tenant_id = tenant_id;
                         refreshed_fact.party_id = party_id;
                         refreshed_fact.payload = principal;

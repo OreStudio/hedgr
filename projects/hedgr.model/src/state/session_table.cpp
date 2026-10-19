@@ -145,7 +145,8 @@ void session_table::set_last_error(session_handle h, std::string value) {
 
 void session_table::set_account_result(session_handle h, std::string tenant_name,
                                         std::string party_name,
-                                        std::string party_id, std::string token) {
+                                        std::string party_id,
+                                        domain::secret_string token) {
     columns_.tenant_name[h.index] = std::move(tenant_name);
     columns_.party_name[h.index] = std::move(party_name);
     columns_.party_id[h.index] = std::move(party_id);
@@ -169,10 +170,10 @@ void session_table::set_mode(session_handle h, domain::session_mode value) {
 }
 
 std::string_view session_table::token(session_handle h) const {
-    return columns_.token[h.index];
+    return columns_.token[h.index].view();
 }
 
-void session_table::set_token(session_handle h, std::string token) {
+void session_table::set_token(session_handle h, domain::secret_string token) {
     columns_.token[h.index] = std::move(token);
 }
 

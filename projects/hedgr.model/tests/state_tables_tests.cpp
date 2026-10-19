@@ -53,6 +53,7 @@ using hedgr::model::domain::label;
 using hedgr::model::domain::label_severity;
 using hedgr::model::domain::labelling_owner;
 using hedgr::model::domain::probe_result;
+using hedgr::model::domain::secret_string;
 using hedgr::model::domain::reachability;
 using hedgr::model::domain::readiness;
 using hedgr::model::domain::session_status;
@@ -231,31 +232,45 @@ TEST_CASE("removing a session drops the token it held", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
     sessions.set_account_result(handle, "acme", "books", "party-1",
-        "secret-token");
+        secret_string{std::string{"secret-token"}});
 
     REQUIRE(sessions.tenant_name(handle) == "acme");
     REQUIRE(sessions.party_id(handle) == "party-1");
+
+    /*
+     * The token is short enough to live inside its column slot, which the
+     * table keeps after the remove, so the slot's bytes can still be read.
+     */
+    const char* const slot = sessions.token(handle).data();
+    const auto length = sessions.token(handle).size();
     sessions.remove(handle);
 
     REQUIRE_FALSE(sessions.contains(handle));
     REQUIRE(sessions.size() == 0);
+    REQUIRE(std::string(slot, length).find_first_not_of('\0')
+            == std::string::npos);
 }
 
 TEST_CASE("a refreshed token replaces the one the session holds", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
     sessions.set_account_result(handle, "acme", "books", "party-1",
-        "old-token");
+        secret_string{std::string{"old-token-xyz"}});
+    const char* const slot = sessions.token(handle).data();
 
-    sessions.set_token(handle, "new-token");
+    sessions.set_token(handle, secret_string{std::string{"new-token"}});
 
     REQUIRE(sessions.token(handle) == "new-token");
+    REQUIRE(sessions.token(handle).data() == slot);
+    REQUIRE(std::string(slot + 10, 3).find_first_not_of('\0')
+            == std::string::npos);
 }
 
 TEST_CASE("the parties a login may act as are kept with its session", "[session]") {
     session_table sessions;
     const auto handle = sessions.insert("inst-1", "id-1");
-    sessions.set_account_result(handle, "acme", "books", "party-1", "token");
+    sessions.set_account_result(handle, "acme", "books", "party-1",
+        secret_string{std::string{"token"}});
     const std::string parties{"party-1\x1f"
         "Books\x1e"
         "party-2\x1f"

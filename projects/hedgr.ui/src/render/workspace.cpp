@@ -540,7 +540,9 @@ void workspace::submit_master_password(const render_input& input) {
     request.kind = input.store_lock == store_lock::absent
         ? command_kind::set_master_password
         : command_kind::unlock_store;
-    request.password = std::string{master_password_.data()};
+    request.password =
+        hedgr::model::domain::secret_string{
+            std::string{master_password_.data()}};
     input.commands.push(std::move(request));
 
     /*
