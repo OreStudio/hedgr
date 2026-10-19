@@ -26,6 +26,7 @@
 #include "hedgr.ui/widget/label_pill.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -114,6 +115,25 @@ affordances_for(node_kind kind, bool is_root) noexcept;
  */
 [[nodiscard]] HEDGR_UI_EXPORT bool can_drop_onto(std::string_view dragged_id,
     std::string_view target_id, const std::vector<std::string>& forbidden);
+
+/** @brief What a dragged row is: what kind and which row. */
+struct dragged_row final {
+    node_kind kind = node_kind::folder;
+    std::string id;
+};
+
+/**
+ * @brief The bytes a dragged row is handed to ImGui as.
+ *
+ * ImGui keeps a byte copy of the payload and returns it on the drop frame,
+ * after the source's own objects are gone, so the id travels as bytes.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::string encode_drag_payload(node_kind kind,
+    std::string_view id);
+
+/** @brief The row a payload names, or nothing when it is too short to be one. */
+[[nodiscard]] HEDGR_UI_EXPORT std::optional<dragged_row> decode_drag_payload(
+    const void* data, int size);
 
 /** @brief One folder in the tree the browser draws. */
 struct tree_folder final {

@@ -289,6 +289,29 @@ shortcut_toggle_command(const render_input& input,
     hedgr::model::domain::window_kind kind, std::string_view target_id);
 
 /**
+ * @brief The save for a new instance, read from the form's drafts.
+ *
+ * The key is generated, so two creations never share a row even when they
+ * share a name, and a rename never leaves a key a later creation can reuse.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::model::command::command
+new_instance_command(const window_ui_state& state);
+
+/** @brief Whether an instance already carries @p name, which the store holds unique. */
+[[nodiscard]] HEDGR_UI_EXPORT bool instance_name_taken(
+    const render_input& input, std::string_view name);
+
+/**
+ * @brief The save for the account the form holds.
+ *
+ * An edit keeps the row's key. A new or copied account gets a generated one,
+ * and the name is the form's text as shown, with nothing appended.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::model::command::command
+account_save_command(const render_input& input, const window_ui_state& state,
+    std::string_view instance_id);
+
+/**
  * @brief What the startup notice says, as a heading and the reason under it.
  *
  * The reason is the runtime's own sentence, carried through unchanged: it

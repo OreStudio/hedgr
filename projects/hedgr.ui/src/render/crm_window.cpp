@@ -347,7 +347,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                     + ImGui::GetContentRegionAvail().x - rate_width);
                 ImGui::PushStyleColor(ImGuiCol_Text, colour);
                 ImGui::PushFont(icon::numeric_font());
-                if (ImGui::Selectable(rate.c_str(), selected,
+                if (ImGui::Selectable(std::format("{}##{}", rate, pair).c_str(),
+                        selected,
                         ImGuiSelectableFlags_AllowDoubleClick)) {
                     state.crm_pair = pair;
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)

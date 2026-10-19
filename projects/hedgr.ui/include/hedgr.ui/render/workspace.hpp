@@ -237,9 +237,8 @@ private:
     /**
      * @brief Whether the startup notice's window is still up.
      *
-     * Re-armed whenever the notice appears and cleared by the title bar's
-     * close button, which is the same arrangement the password prompt uses.
-     * The notice is not a modal, so putting it down is allowed: the
+     * Cleared by the title bar's close button, after which the notice stays
+     * down for the rest of the run. The notice is not a modal, so putting it down is allowed: the
      * application behind it still runs, and hiding the report of the failure
      * does not undo the failure.
      */

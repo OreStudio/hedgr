@@ -1363,11 +1363,10 @@ void instance_manager::seed_accounts_for_instance(
     };
 
     /*
-     * The account key follows the one the Accounts window builds when an
-     * operator adds a row, so a seeded login and a typed one are the same shape
-     * of key. Deriving it from the instance and the name is also the whole of
-     * the idempotency, because seeding twice writes the same two rows over
-     * themselves.
+     * The account key is derived from the instance and the name, and that is
+     * the whole of the idempotency, because seeding twice writes the same two
+     * rows over themselves. The Accounts window generates its keys, so a typed
+     * account never shares a key with a seeded one.
      */
     for (const auto& login : logins) {
         const auto id = std::format("acct:{}:{}", instance.id, login.name);

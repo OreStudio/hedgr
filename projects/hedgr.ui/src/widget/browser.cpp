@@ -31,11 +31,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <numbers>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -224,15 +226,6 @@ forbidden_for(const widget::browser_model& model, std::string_view dragged_id) {
 /** @brief The payload type of a dragged tree row. */
 constexpr const char* drag_payload = "hedgr.browser.node";
 
-/** @brief What a dragged row carries: what it is and which row it was. */
-struct drag_payload_data final {
-    /** @brief Whether the dropped row is a folder or a leaf. */
-    widget::node_kind kind = widget::node_kind::folder;
-
-    /** @brief The row's id. */
-    std::string id;
-};
-
 /**
  * @brief Moves a dragged folder to @p target, if the tree and the host allow.
  *
@@ -248,7 +241,7 @@ struct drag_payload_data final {
  * carries a leaf, so a host that supports it sees one consistent event.
  */
 void accept_drop(const widget::browser_model& model,
-    const drag_payload_data& dragged, const drop_target& target,
+    const widget::dragged_row& dragged, const drop_target& target,
     const render_input& input) {
     namespace command = hedgr::model::command;
 
@@ -729,8 +722,8 @@ void draw_rail_row(const widget::browser_model& model, widget::node_kind kind,
         model.activate_leaf(input, window, id);
 
     if (draggable && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-        const drag_payload_data payload{kind, std::string{id}};
-        ImGui::SetDragDropPayload(drag_payload, &payload, sizeof(payload));
+        const std::string payload = widget::encode_drag_payload(kind, id);
+        ImGui::SetDragDropPayload(drag_payload, payload.data(), payload.size());
         ImGui::TextUnformatted(std::string{name}.c_str());
         ImGui::EndDragDropSource();
     }
@@ -738,11 +731,10 @@ void draw_rail_row(const widget::browser_model& model, widget::node_kind kind,
     if (heading && ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload =
                 ImGui::AcceptDragDropPayload(drag_payload);
-            payload != nullptr
-            && payload->DataSize == static_cast<int>(sizeof(drag_payload_data))) {
-            accept_drop(model,
-                *static_cast<const drag_payload_data*>(payload->Data),
-                drop_target{std::string{id}}, input);
+            payload != nullptr) {
+            if (const auto dragged = widget::decode_drag_payload(
+                    payload->Data, payload->DataSize))
+                accept_drop(model, *dragged, drop_target{std::string{id}}, input);
         }
         ImGui::EndDragDropTarget();
     }
@@ -1217,6 +1209,41 @@ node_affordances affordances_for(node_kind kind, bool is_root) noexcept {
     result.remove = false;
     result.create_inside = true;
     return result;
+}
+
+namespace {
+
+/**
+ * @brief The fixed part of a drag payload; the row's id follows it.
+ *
+ * ImGui copies the payload as bytes and hands the copy back on later frames,
+ * after the source's objects are gone, so the payload holds the id's bytes
+ * rather than a string that points somewhere else.
+ */
+struct drag_payload_head final {
+    node_kind kind = node_kind::folder;
+};
+static_assert(std::is_trivially_copyable_v<drag_payload_head>);
+
+}
+
+std::string encode_drag_payload(node_kind kind, std::string_view id) {
+    const drag_payload_head head{kind};
+    std::string bytes(sizeof(head), '\0');
+    std::memcpy(bytes.data(), &head, sizeof(head));
+    bytes.append(id);
+    return bytes;
+}
+
+std::optional<dragged_row> decode_drag_payload(const void* data, int size) {
+    if (data == nullptr || size < static_cast<int>(sizeof(drag_payload_head)))
+        return std::nullopt;
+    const auto* bytes = static_cast<const char*>(data);
+    drag_payload_head head;
+    std::memcpy(&head, bytes, sizeof(head));
+    return dragged_row{head.kind,
+        std::string{bytes + sizeof(head),
+            static_cast<std::size_t>(size) - sizeof(head)}};
 }
 
 bool can_drop_onto(std::string_view dragged_id, std::string_view target_id,

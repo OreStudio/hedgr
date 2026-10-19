@@ -54,6 +54,7 @@ target_link_libraries(${lib_target_name}
         imgui::imgui
         implot::implot
     PRIVATE
+        ores::utility
         # miniaudio's Linux backends are loaded at run time, so what it needs
         # from the host is the dynamic loader, threads and the math library
         # rather than a link against ALSA or PulseAudio.

@@ -35,6 +35,7 @@
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
+#include "window_forms.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -54,6 +55,7 @@ namespace {
 namespace widget = hedgr::ui::widget;
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
+namespace forms = hedgr::ui::render::forms;
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::model::domain::folder_tree;
@@ -357,37 +359,7 @@ void clear_create_draft(window_ui_state& state) {
  * cannot disagree about which draft a save is reading.
  */
 void save_new_instance(const render_input& input, window_ui_state& state) {
-    instance row;
-
-    /*
-     * A new instance's key is derived from its name, which the store holds
-     * unique. A serial would be unique too and would also mean the same
-     * instance had a different key every time it was created in a test.
-     */
-    const std::string name{buffer_text(state.draft_name)};
-    row.id = std::format("inst:{}", name);
-    row.name = name;
-    row.subject_prefix = buffer_text(state.draft_subject);
-    row.wire_format = buffer_text(state.draft_wire_format);
-    row.tls_ca = buffer_text(state.draft_tls_ca);
-    row.tls_cert = buffer_text(state.draft_tls_cert);
-    row.tls_key = buffer_text(state.draft_tls_key);
-    row.folder_id = state.browser.form_folder;
-
-    /*
-     * A new row has no stored scheme to carry through, so it starts on the
-     * transport the client is built for. An existing row's scheme never passes
-     * through here, which is what keeps an edit from changing it.
-     */
-    row.nats_url = widget::join_host_port(widget::host_port{
-        std::string{"nats://"}, std::string{buffer_text(state.draft_host)},
-        std::string{buffer_text(state.draft_port)}});
-
-    command request;
-    request.kind = command_kind::save_instance;
-    request.instance_id = row.id;
-    request.instance_row = std::move(row);
-
+    auto request = hedgr::ui::render::new_instance_command(state);
     const std::string id = request.instance_id;
     input.commands.push(std::move(request));
     apply_labels(input, labelling_owner::instance, id,
@@ -698,7 +670,15 @@ void draw_create_form(const render_input& input, window_ui_state& state) {
         "empty field falls back to the environment.");
     ImGui::PopStyleColor();
 
+    const bool name_taken = hedgr::ui::render::instance_name_taken(input,
+        buffer_text(state.draft_name));
+    if (name_taken)
+        ImGui::TextColored(
+            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
+            "An instance with this name already exists.");
+
     const bool complete = !buffer_text(state.draft_name).empty()
+        && !name_taken
         && !buffer_text(state.draft_host).empty()
         && !buffer_text(state.draft_subject).empty();
 
@@ -2005,6 +1985,51 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
 }
 
 namespace hedgr::ui::render {
+
+command new_instance_command(const window_ui_state& state) {
+    instance row;
+
+    /*
+     * The key is generated rather than derived from the name, because the
+     * runtime saves by key and a name can be changed: a key built from a name
+     * would let a new instance land on an old row that had been renamed away
+     * from it.
+     */
+    const std::string name{buffer_text(state.draft_name)};
+    row.id = forms::new_row_id("inst");
+    row.name = name;
+    row.subject_prefix = buffer_text(state.draft_subject);
+    row.wire_format = buffer_text(state.draft_wire_format);
+    row.tls_ca = buffer_text(state.draft_tls_ca);
+    row.tls_cert = buffer_text(state.draft_tls_cert);
+    row.tls_key = buffer_text(state.draft_tls_key);
+    row.folder_id = state.browser.form_folder;
+
+    /*
+     * A new row has no stored scheme to carry through, so it starts on the
+     * transport the client is built for. An existing row's scheme never passes
+     * through here, which is what keeps an edit from changing it.
+     */
+    row.nats_url = widget::join_host_port(widget::host_port{
+        std::string{"nats://"}, std::string{buffer_text(state.draft_host)},
+        std::string{buffer_text(state.draft_port)}});
+
+    command request;
+    request.kind = command_kind::save_instance;
+    request.instance_id = row.id;
+    request.instance_row = std::move(row);
+    return request;
+}
+
+bool instance_name_taken(const render_input& input, std::string_view name) {
+    const auto& layout = input.instances.layout();
+    const auto rows = input.instances.rows();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (layout.is_alive(index) && rows[index].name == name)
+            return true;
+    }
+    return false;
+}
 
 void select_folder_for_capture(std::string_view folder_id) {
     pending_capture_folder = std::string{folder_id};

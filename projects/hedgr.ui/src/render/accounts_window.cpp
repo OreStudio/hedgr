@@ -138,36 +138,8 @@ void load_draft(window_ui_state& state, const account* row) {
 /** @brief Pushes a save for one account and the labels it should carry. */
 void save_account(const render_input& input, window_ui_state& state,
     std::string_view instance_id) {
-    const std::string_view editing{state.browser.form_leaf};
-    const auto existing = input.accounts.find(editing);
-
-    account row;
-    if (existing)
-        row = *input.accounts.get(*existing);
-
-    std::string name{forms::buffer_text(state.draft_name)};
-    if (state.browser.form_duplicating)
-        name.append(" copy");
-
-    /*
-     * A new account's key is derived from its instance and its name, which
-     * together are what a person means when they name an account. A serial
-     * would be unique too and would make the same account a different row every
-     * time it was created in a test.
-     */
-    row.id = existing && !state.browser.form_duplicating
-        ? row.id
-        : std::format("acct:{}:{}", instance_id, name);
-    row.instance_id = std::string{instance_id};
-    row.name = name;
-    row.principal = forms::buffer_text(state.draft_subject);
-    row.folder_id = state.browser.form_folder;
-
-    command request;
-    request.kind = command_kind::save_account;
-    request.account_id = row.id;
-    request.account_row = std::move(row);
-
+    auto request =
+        hedgr::ui::render::account_save_command(input, state, instance_id);
     const std::string id = request.account_id;
     input.commands.push(std::move(request));
     forms::apply_labels(input, labelling_owner::account, id,
@@ -700,6 +672,34 @@ void account_details(const tree_leaf& leaf, const render_input& input,
 }
 
 namespace hedgr::ui::render {
+
+command account_save_command(const render_input& input,
+    const window_ui_state& state, std::string_view instance_id) {
+    const std::string_view editing{state.browser.form_leaf};
+    const auto existing = input.accounts.find(editing);
+
+    account row;
+    if (existing)
+        row = *input.accounts.get(*existing);
+
+    /*
+     * Only an edit keeps its key. A new or copied account gets a generated one,
+     * because the runtime saves by key and a key built from the name would let
+     * a new account land on an old one renamed away from that name.
+     */
+    if (!existing || state.browser.form_duplicating)
+        row.id = forms::new_row_id("acct");
+    row.instance_id = std::string{instance_id};
+    row.name = forms::buffer_text(state.draft_name);
+    row.principal = forms::buffer_text(state.draft_subject);
+    row.folder_id = state.browser.form_folder;
+
+    command request;
+    request.kind = command_kind::save_account;
+    request.account_id = row.id;
+    request.account_row = std::move(row);
+    return request;
+}
 
 void select_account_for_capture(std::string_view account_id) {
     pending_capture_selected_account = std::string{account_id};

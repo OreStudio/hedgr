@@ -24,7 +24,10 @@
 #include "hedgr.model/domain/label.hpp"
 #include "hedgr.model/domain/labelling.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "ores.utility/uuid/uuid_v7_generator.hpp"
+#include <boost/uuid/uuid_io.hpp>
 #include <cstdint>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -43,6 +46,17 @@
  * cheaper than a symbol.
  */
 namespace hedgr::ui::render::forms {
+
+/**
+ * @brief A fresh key for a new row, never derived from what the row is called.
+ *
+ * The runtime saves by key, so a key built from a name lets a new row land on
+ * an old one that was later renamed away from that name.
+ */
+[[nodiscard]] inline std::string new_row_id(std::string_view prefix) {
+    static ores::utility::uuid::uuid_v7_generator generate;
+    return std::format("{}-{}", prefix, boost::uuids::to_string(generate()));
+}
 
 /**
  * @brief Copies text into a fixed-size buffer, truncating it to fit.

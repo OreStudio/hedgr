@@ -17,6 +17,8 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.model/domain/account.hpp"
+#include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/render/panels.hpp"
@@ -27,7 +29,9 @@
 #include <catch2/catch_all.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -1072,4 +1076,130 @@ TEST_CASE("a flag request asks for the image the map names", "[flags]") {
     state.pending_images.insert(make_tenant_key("tenant-1", "image-usd"));
     request_flags(input, session, "FX GBP/USD");
     CHECK(state.commands.size() == 0);
+}
+
+TEST_CASE("a dragged row's id outlives the row it was copied from",
+    "[browser]") {
+    using hedgr::ui::widget::decode_drag_payload;
+    using hedgr::ui::widget::encode_drag_payload;
+    using hedgr::ui::widget::node_kind;
+
+    /*
+     * ImGui keeps a byte copy of the payload and hands it back on the drop
+     * frame, after the source's strings are gone. A uuid-length id is long
+     * enough to live on the heap, which is the case a byte copy of a
+     * std::string would leave dangling.
+     */
+    const std::string expected = "folder:0190a5c2-7e4b-7c1d-9a3f-1b2c3d4e5f60";
+    std::vector<char> held;
+    {
+        const std::string source = expected;
+        const std::string bytes = encode_drag_payload(node_kind::folder, source);
+        held.assign(bytes.begin(), bytes.end());
+    }
+
+    const auto dragged =
+        decode_drag_payload(held.data(), static_cast<int>(held.size()));
+    REQUIRE(dragged);
+    CHECK(dragged->kind == node_kind::folder);
+    CHECK(dragged->id == expected);
+
+    CHECK_FALSE(decode_drag_payload(held.data(), 0));
+    CHECK_FALSE(decode_drag_payload(nullptr, 0));
+}
+
+namespace {
+
+void fill(auto& buffer, std::string_view text) {
+    std::snprintf(buffer.data(), buffer.size(), "%.*s",
+        static_cast<int>(text.size()), text.data());
+}
+
+}
+
+TEST_CASE("a new instance never lands on an existing row", "[forms]") {
+    using hedgr::ui::render::new_instance_command;
+
+    window_ui_state form;
+    fill(form.draft_name, "foo");
+    fill(form.draft_host, "localhost");
+    fill(form.draft_port, "4222");
+    fill(form.draft_subject, "ores");
+
+    /*
+     * Two creations under one name are two rows: the store refuses the
+     * second by name, rather than the first being overwritten by key.
+     */
+    const auto first = new_instance_command(form);
+    const auto second = new_instance_command(form);
+    CHECK(first.instance_id != second.instance_id);
+    CHECK(first.instance_row.id == first.instance_id);
+    CHECK(first.instance_row.name == "foo");
+
+    /*
+     * A row renamed from "foo" to "bar" keeps the key it was created under,
+     * and a new "foo" must not be given that key.
+     */
+    CHECK(first.instance_id != "inst:foo");
+}
+
+TEST_CASE("an instance name already in use is reported as taken", "[forms]") {
+    using hedgr::ui::render::instance_name_taken;
+
+    empty_state state;
+    hedgr::model::domain::instance row;
+    row.id = "inst-1";
+    row.name = "foo";
+    static_cast<void>(state.instances.upsert(row));
+    const auto input = input_with(state, store_lock::unlocked);
+
+    CHECK(instance_name_taken(input, "foo"));
+    CHECK_FALSE(instance_name_taken(input, "bar"));
+}
+
+TEST_CASE("an account save keeps an edit's key and gives new rows their own",
+    "[forms]") {
+    using hedgr::ui::render::account_save_command;
+
+    empty_state state;
+    hedgr::model::domain::account renamed;
+    renamed.id = "acct:inst-1:ops";
+    renamed.instance_id = "inst-1";
+    renamed.name = "renamed";
+    renamed.principal = "ops@example";
+    static_cast<void>(state.accounts.upsert(renamed));
+    const auto input = input_with(state, store_lock::unlocked);
+
+    SECTION("an edit keeps the row's key") {
+        window_ui_state form;
+        form.browser.form_leaf = renamed.id;
+        fill(form.draft_name, "renamed again");
+        fill(form.draft_subject, "ops@example");
+
+        const auto saved = account_save_command(input, form, "inst-1");
+        CHECK(saved.account_id == renamed.id);
+        CHECK(saved.account_row.name == "renamed again");
+    }
+
+    SECTION("a new account named after a renamed one gets its own key") {
+        window_ui_state form;
+        fill(form.draft_name, "ops");
+        fill(form.draft_subject, "other@example");
+
+        const auto saved = account_save_command(input, form, "inst-1");
+        CHECK(saved.account_id != renamed.id);
+        CHECK(saved.account_row.id == saved.account_id);
+        CHECK(saved.account_row.name == "ops");
+    }
+
+    SECTION("a copy is saved under the name the form showed") {
+        window_ui_state form;
+        form.browser.form_duplicating = true;
+        fill(form.draft_name, "renamed copy");
+        fill(form.draft_subject, "copy@example");
+
+        const auto saved = account_save_command(input, form, "inst-1");
+        CHECK(saved.account_row.name == "renamed copy");
+        CHECK(saved.account_id != renamed.id);
+    }
 }
