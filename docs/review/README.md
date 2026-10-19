@@ -31,7 +31,7 @@ Each bundle is one pull request, merged before the next starts.
 | 3 | UI memory safety and identity | UW-1, UR-14, UR-15, UR-4, UR-19, UR-20, UR-21 | open |
 | 4 | Secret handling and store robustness | MS-1, MS-2, MS-4, MS-12, MS-8, MS-9, MS-16, MS-17 | open |
 | 5 | Build hygiene and warnings | UW-2, UW-3, UW-8, UW-9, UW-5 | in review (#24) |
-| 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | open |
+| 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | in review (#26) |
 | 7 | Backfill through the time-ordered endpoint | SR-9, C-4, SR-10 | open |
 | 8 | Data health has one owner | UR-1, UR-2, UR-OS-2, AR-14 | open |
 | 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | in review (#25) |
