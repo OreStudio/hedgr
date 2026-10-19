@@ -46,6 +46,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/hedgr.runtime.service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/lock_service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/password_policy_service.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/pending_reads.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/probe_service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/read_service.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/window_service.hpp"

@@ -49,7 +49,6 @@ namespace model_state = hedgr::model::state;
 using condition_source = model_state::condition_source;
 using manager::connection_options_for;
 using support::lg;
-using support::running_key;
 using support::steady_now_ns;
 
 /**
@@ -170,8 +169,8 @@ read_service::start_deployment_read(std::string_view window_id) {
     if (!read)
         return std::nullopt;
 
-    const auto key = running_key(read->instance_id, read->account_id);
-    if (deployment_reads_.contains(key))
+    const auto id = request_id::deployment(read->instance_id, read->account_id);
+    if (pending_.contains(id))
         return std::nullopt;
 
     worker::deployment_job job;
@@ -180,7 +179,7 @@ read_service::start_deployment_read(std::string_view window_id) {
     job.token = std::move(read->token);
     job.principal = std::move(read->principal);
 
-    deployment_reads_.insert(key);
+    pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a deployment read for '" << read->instance_id << "' / '"
         << read->account_id << "'";
@@ -220,15 +219,11 @@ read_service::start_market_read(std::string_view window_id,
         return std::nullopt;
 
     const bool catalogue = series_id.empty();
-    const auto session_key = running_key(read->instance_id, read->account_id);
-    const auto points_key =
-        std::format("{}\x1f{}", session_key, series_id);
-    if (catalogue) {
-        if (catalogues_reading_.contains(session_key))
-            return std::nullopt;
-    } else if (points_reading_.contains(points_key)) {
+    const auto id = catalogue
+        ? request_id::catalogue(read->instance_id, read->account_id)
+        : request_id::points(read->instance_id, read->account_id, series_id);
+    if (pending_.contains(id))
         return std::nullopt;
-    }
 
     worker::market_job job;
     job.options = std::move(read->options);
@@ -238,12 +233,9 @@ read_service::start_market_read(std::string_view window_id,
     job.catalogue = catalogue;
     job.series_id = std::string{series_id};
 
-    if (catalogue) {
-        catalogues_reading_.insert(session_key);
+    pending_.mark(id);
+    if (catalogue)
         market_.begin_catalogue(read->instance_id, read->account_id);
-    } else {
-        points_reading_.insert(points_key);
-    }
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a market " << (catalogue ? "catalogue" : "points")
@@ -263,7 +255,7 @@ void read_service::start_currency_image_map(const model::event::event& ev) {
         && (existing->state == model::state::image_map_state::ready
             || existing->state == model::state::image_map_state::reading))
         return;
-    if (currency_images_reading_.contains(ev.tenant_id))
+    if (pending_.contains(request_id::currency_image_map(ev.tenant_id)))
         return;
     auto read = session_read_for(ev.instance_id, ev.account_id,
         read_gate::token_only);
@@ -273,7 +265,7 @@ void read_service::start_currency_image_map(const model::event::event& ev) {
     worker::image_map_job job;
     job.session = std::move(*read);
     job.session.tenant_id = ev.tenant_id;
-    currency_images_reading_.insert(ev.tenant_id);
+    pending_.mark(request_id::currency_image_map(ev.tenant_id));
     currency_images_.begin(ev.tenant_id);
     worker::spawn_image_map_read(pool_, std::move(job), events_);
 }
@@ -424,17 +416,16 @@ void read_service::load_image(const model::command::command& cmd) {
         read_gate::signed_in_with_token);
     if (!read || read->tenant_id.empty() || cmd.image_id.empty())
         return;
-    const auto key = model::state::make_tenant_key(read->tenant_id,
-        cmd.image_id);
-    if (images_reading_.contains(key)
+    const auto id = request_id::image(read->tenant_id, cmd.image_id);
+    if (pending_.contains(id)
         || images_.contains(read->tenant_id, cmd.image_id)
-        || failed_images_.contains(key))
+        || failed_images_.contains(id.subject))
         return;
 
     worker::image_job job;
     job.session = std::move(*read);
     job.image_id = cmd.image_id;
-    images_reading_.insert(key);
+    pending_.mark(id);
     worker::spawn_image_read(pool_, std::move(job), events_);
 }
 
@@ -445,9 +436,8 @@ void read_service::start_market_backfill(std::string_view instance_id,
     if (!read)
         return;
 
-    const auto points_key = std::format("{}\x1f{}",
-        running_key(instance_id, account_id), series_id);
-    if (points_reading_.contains(points_key))
+    const auto id = request_id::points(instance_id, account_id, series_id);
+    if (pending_.contains(id))
         return;
 
     worker::market_job job;
@@ -460,7 +450,7 @@ void read_service::start_market_backfill(std::string_view instance_id,
     job.series_id = std::string{series_id};
     job.limit = 2000;
 
-    points_reading_.insert(points_key);
+    pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Seeding live history for series '" << series_id << "' on '"
         << instance_id << "' / '" << account_id << "'";
@@ -472,10 +462,10 @@ void read_service::load_crm_names(const model::command::command& cmd) {
 }
 
 bool read_service::apply(const model::event::event& ev) {
+    if (const auto answered = request_id::answered_by(ev))
+        pending_.clear(*answered);
     switch (ev.kind) {
     case event::event_kind::series_catalogue: {
-        catalogues_reading_.erase(
-            running_key(ev.instance_id, ev.account_id));
         if (ev.message.empty()) {
             market_.set_catalogue(ev.instance_id, ev.account_id,
                 ev.series);
@@ -517,7 +507,6 @@ bool read_service::apply(const model::event::event& ev) {
     case event::event_kind::image_loaded: {
         const auto key = model::state::make_tenant_key(ev.tenant_id,
             ev.image_id);
-        images_reading_.erase(key);
         if (ev.message.empty()) {
             if (images_.put(ev.tenant_id, ev.image_id,
                     model::state::image_content{.mime_type = ev.mime_type,
@@ -532,7 +521,6 @@ bool read_service::apply(const model::event::event& ev) {
         return true;
     }
     case event::event_kind::currency_image_map: {
-        currency_images_reading_.erase(ev.tenant_id);
         if (ev.message.empty()) {
             std::vector<std::pair<std::string, std::string>> mapped;
             for (const auto& image : ev.image_refs) {
@@ -545,9 +533,6 @@ bool read_service::apply(const model::event::event& ev) {
         return true;
     }
     case event::event_kind::series_points: {
-        const auto key = std::format("{}\x1f{}",
-            running_key(ev.instance_id, ev.account_id), ev.series_id);
-        points_reading_.erase(key);
         if (ev.message.empty()) {
             market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
                 ev.points, ev.observed_at_ns);
@@ -559,7 +544,6 @@ bool read_service::apply(const model::event::event& ev) {
     }
     case event::event_kind::deployment_snapshot:
         /* The snapshot itself belongs on the session row, applied below. */
-        deployment_reads_.erase(running_key(ev.instance_id, ev.account_id));
         return false;
     default:
         return false;
@@ -569,14 +553,11 @@ bool read_service::apply(const model::event::event& ev) {
 void read_service::clear() {
     market_.clear();
     currency_images_.clear();
-    currency_images_reading_.clear();
     images_.clear();
-    images_reading_.clear();
     failed_images_.clear();
     term_structures_.clear();
     crm_.clear();
-    catalogues_reading_.clear();
-    points_reading_.clear();
+    pending_.clear_all();
 }
 
 }

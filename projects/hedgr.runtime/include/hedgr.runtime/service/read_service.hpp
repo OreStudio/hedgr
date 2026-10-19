@@ -30,7 +30,9 @@
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
+#include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/refusal.hpp"
+#include "hedgr.runtime/service/pending_reads.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_options.hpp"
@@ -60,7 +62,7 @@ namespace hedgr::runtime::service {
  * are passed in as const references, and the one market table the live feed
  * also writes is handed out by @c market().
  */
-class read_service final {
+class HEDGR_RUNTIME_EXPORT read_service final {
 public:
     read_service(boost::asio::io_context& pool,
         model::command::event_queue& events,
@@ -122,7 +124,7 @@ public:
     /** @brief Images whose reads are in flight, keyed as the cache keys them. */
     [[nodiscard]] const std::unordered_set<std::string>&
     pending_images() const noexcept {
-        return images_reading_;
+        return pending_.subjects(request_kind::image);
     }
 
     /**
@@ -179,6 +181,11 @@ public:
      * session row still has something to apply.
      */
     [[nodiscard]] bool apply(const model::event::event& ev);
+
+    /** @brief The reads in flight, for a test to see a mark come and go. */
+    [[nodiscard]] const pending_reads& pending() const noexcept {
+        return pending_;
+    }
 
     /** @brief Forgets every table and every mark. */
     void clear();
@@ -253,29 +260,17 @@ private:
     const session::transport::session_options& seed_;
     std::filesystem::path database_path_;
 
-    /** @brief The sessions whose catalogue read is out, by running key. */
-    std::unordered_set<std::string> catalogues_reading_;
-
-    /** @brief The session-and-series whose points read is out. */
-    std::unordered_set<std::string> points_reading_;
-
     /**
-     * @brief The deployment reads in flight, by the session they serve.
+     * @brief Every read in flight.
      *
-     * A read is short-lived and has no cancellation of its own, so a set of
-     * keys is all the state it needs: an entry means one read is out, and the
-     * snapshot event removes it whatever the read found.
+     * A read is short-lived and has no cancellation of its own, so a mark is
+     * all the state it needs: it is set when the read starts and cleared by
+     * whatever answer ends it.
      */
-    std::unordered_set<std::string> deployment_reads_;
-
-    /** @brief Tenant-and-image whose read is out. */
-    std::unordered_set<std::string> images_reading_;
+    pending_reads pending_;
 
     /** @brief Tenant-and-image whose read failed, so it is not asked again. */
     std::unordered_set<std::string> failed_images_;
-
-    /** @brief Tenants whose currency image map read is out. */
-    std::unordered_set<std::string> currency_images_reading_;
 
     /** @brief The market series and the points each chart holds. */
     model::state::market_table market_;

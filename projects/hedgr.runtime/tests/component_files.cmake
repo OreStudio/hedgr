@@ -14,6 +14,7 @@ set(files
     "environment_seed_tests.cpp"
     "hermetic_environment.cpp"
     "market_stream_tests.cpp"
+    "read_service_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
