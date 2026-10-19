@@ -206,9 +206,15 @@ struct curve_group final {
         group.members.push_back(row);
         curves.push_back(std::move(group));
     }
-    std::sort(curves.begin(), curves.end(),
+    std::stable_sort(curves.begin(), curves.end(),
         [](const curve_group& a, const curve_group& b) {
-            return a.label < b.label;
+            const auto rank = [](const curve_group& group) {
+                return group.members.empty()
+                    ? 0 : tenor_rank(group.members.front()->tenor);
+            };
+            const auto a_rank = rank(a);
+            const auto b_rank = rank(b);
+            return a_rank != b_rank ? a_rank < b_rank : a.label < b.label;
         });
     return curves;
 }
@@ -575,6 +581,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
         visible.push_back(&row);
     }
+    std::stable_sort(visible.begin(), visible.end(),
+        [](const domain::market_series_row* a,
+            const domain::market_series_row* b) {
+            const auto a_rank = tenor_rank(a->tenor);
+            const auto b_rank = tenor_rank(b->tenor);
+            return a_rank != b_rank ? a_rank < b_rank : a->label < b->label;
+        });
 
     if (visible.empty() && !rows.empty()) {
         ImGui::SameLine();

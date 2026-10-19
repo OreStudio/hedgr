@@ -131,7 +131,7 @@ void render_term_structure(window_handle handle, const render_input& input,
     }
 
     const auto health = assess_data_health(newest_at_ns, input.wall_now_ns,
-        ir_health_thresholds, ir_history_ns);
+        ir_health_thresholds);
     foot.word = std::string{data_health_word(health.state)};
     foot.colour = health_colour(health.state);
     foot.as_of = as_of_text(newest_at_ns);

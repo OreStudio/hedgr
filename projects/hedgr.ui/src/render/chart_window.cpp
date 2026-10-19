@@ -284,8 +284,7 @@ void render_chart(window_handle handle, const render_input& input,
         : no_points;
     const std::int64_t newest_at_ns =
         points.empty() ? 0 : points.back().at_ns;
-    const auto health = assess_data_health(newest_at_ns,
-        input.wall_now_ns, fx_health_thresholds, fx_history_ns);
+    const auto health = assess_data_health(newest_at_ns, input.wall_now_ns);
     const std::size_t start = live_window_start(points, span_ns);
     const double first = points.empty() ? 0.0 : points[start].value;
     const double last = points.empty() ? 0.0 : points.back().value;

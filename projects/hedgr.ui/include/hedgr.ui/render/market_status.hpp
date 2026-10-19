@@ -43,8 +43,6 @@ namespace hedgr::ui::render {
         return hedgr::ui::theme::failure_colour;
     case data_health::unavailable:
         return ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    case data_health::historical:
-        return ImGui::GetColorU32(ImGuiCol_Text);
     }
     return ImGui::GetColorU32(ImGuiCol_TextDisabled);
 }
