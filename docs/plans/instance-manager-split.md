@@ -155,6 +155,13 @@ Risk is medium. The code is small, but it is the one place that wrote manager
 state from pool threads. The extraction must not move those writes into a new
 class and call them encapsulated.
 
+Status: done (#42). `lock_service` takes the pool, the two channels and the
+account table by reference. Its `apply()` returns that the store unlocked and
+any credential failure that names an account, and the facade acts on both. The
+two deliberate behaviour changes landed as their own commits: SR-8b refuses an
+unlock or set-password while one runs, and SR-8c drops a result that a lock
+overtook. `start_stored_connect` stays in the facade with supervision.
+
 ### 5. Read service
 
 Needs prerequisite C. Move every `start_*_read`, `start_market_backfill`, the
