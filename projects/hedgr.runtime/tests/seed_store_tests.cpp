@@ -144,15 +144,6 @@ TEST_CASE("a store can be seeded for a capture", "[seed]") {
     std::filesystem::remove(path.string() + "-shm", ignored);
     std::filesystem::create_directories(path.parent_path(), ignored);
 
-    /*
-     * A capture shows what this case writes and nothing else, so the seeder's
-     * scan of the OreStudio checkouts is turned off here. Left on, every
-     * environment beside the repository would be seeded as well and the counts
-     * asserted below would be about the operator's machine rather than about
-     * what the capture asked for.
-     */
-    setenv("HEDGR_ORESTUDIO_ROOT", "", 1);
-
     instance_manager manager;
     REQUIRE(manager.start(path, session_options{
         .nats_url = seed_connection(

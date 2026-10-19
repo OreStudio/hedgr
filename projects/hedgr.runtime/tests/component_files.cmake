@@ -12,6 +12,7 @@ set(files
     "connection_options_tests.cpp"
     "crm_worker_tests.cpp"
     "environment_seed_tests.cpp"
+    "hermetic_environment.cpp"
     "market_stream_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"
