@@ -35,6 +35,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/service/lock_service.hpp"
 #include "hedgr.runtime/service/password_policy_service.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
@@ -47,7 +48,6 @@
 #include "hedgr.store/repository/instance_repository.hpp"
 #include "hedgr.store/repository/label_repository.hpp"
 #include "hedgr.store/repository/labelling_repository.hpp"
-#include "hedgr.store/repository/master_repository.hpp"
 #include "hedgr.store/repository/shortcut_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <chrono>
@@ -297,7 +297,7 @@ public:
      * only one that describes an attempt.
      */
     [[nodiscard]] model::domain::store_lock store_lock() const noexcept {
-        return store_lock_;
+        return lock_service_.store_lock();
     }
 
     /**
@@ -307,7 +307,9 @@ public:
      * half a second reads as a hung application. This is what lets it say it is
      * working instead.
      */
-    [[nodiscard]] bool is_unlocking() const noexcept { return unlocking_; }
+    [[nodiscard]] bool is_unlocking() const noexcept {
+        return lock_service_.is_unlocking();
+    }
 
     /**
      * @brief Why the last unlock was refused, or empty.
@@ -322,7 +324,7 @@ public:
      * nothing about what was tried.
      */
     [[nodiscard]] const std::string& lock_error() const noexcept {
-        return lock_error_;
+        return lock_service_.lock_error();
     }
 
     [[nodiscard]] bool is_started() const noexcept { return started_; }
@@ -363,21 +365,7 @@ private:
     void do_save_shortcut(const model::command::command& cmd);
     void do_remove_shortcut(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
-    void do_store_credential(const model::command::command& cmd);
-
-    /**
-     * @brief Seals a password and sends it back to be stored.
-     *
-     * The key derivation is deliberate work, so it runs on the pool and the
-     * sealed value returns as a command the frame loop applies. Both secrets
-     * are wiped when the coroutine ends.
-     */
-    void start_credential_store(std::string account_id, std::string password,
-        model::domain::secret_string master_password);
     void do_disconnect_session(const model::command::command& cmd);
-    void do_set_master_password(const model::command::command& cmd);
-    void do_unlock_store(const model::command::command& cmd);
-    void do_lock_store();
     void do_refresh_window(const model::command::command& cmd);
 
     /** @brief Starts the read an open asked for, then raises what it refused. */
@@ -524,15 +512,6 @@ private:
                               const std::string& account_id,
                               std::string message);
 
-    /**
-     * @brief Forgets the held master password and returns to @c locked.
-     *
-     * @p deliberate is the operator having asked for it, which leaves the store
-     * @c locked; anything else is a check that failed, which leaves it
-     * @c failed. The distinction is the whole reason the two states exist.
-     */
-    void drop_master_password(bool deliberate);
-
     void stop_session(const std::string& window_or_session_id);
 
     async::executor pool_;
@@ -567,24 +546,6 @@ private:
     std::unique_ptr<store::repository::label_repository> label_repo_;
     std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
     std::unique_ptr<store::repository::shortcut_repository> shortcut_repo_;
-    std::unique_ptr<store::repository::master_repository> master_repo_;
-
-    /**
-     * @brief The master password, held only while the store is unlocked.
-     *
-     * A @c secret_string and not a @c std::string, because this one has to
-     * survive between frames: it is the copy most likely to be forgotten, and
-     * the type is what stops it being copied somewhere else and wipes the bytes
-     * when the lock closes. It is never logged, never placed on an event and
-     * never written to a window's state; the only reader is the seal and the
-     * session job that opens one credential with it.
-     */
-    model::domain::secret_string master_password_;
-
-    model::domain::store_lock store_lock_ = model::domain::store_lock::absent;
-
-    /** @brief Whether a derivation is running on the pool right now. */
-    bool unlocking_ = false;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
 
@@ -680,8 +641,6 @@ private:
     /** @brief Why the store could not be brought up. See @c startup_failure(). */
     std::string startup_failure_;
 
-    /** @brief Why the last unlock was refused. See @c lock_error(). */
-    std::string lock_error_;
     bool started_ = false;
 
     /*
@@ -692,6 +651,7 @@ private:
     service::password_policy_service policy_service_{seed_options_,
         probe_pool_.context(), events_};
     service::window_service window_service_{sessions_};
+    service::lock_service lock_service_{pool_.context(), commands_, events_, accounts_};
 };
 
 }
