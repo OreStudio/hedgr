@@ -214,8 +214,8 @@ struct event final {
     /** @brief The batch's cells, for crm_rates. */
     std::vector<domain::crm_cell> crm_cells;
 
-    /** @brief The batch's newest as-of text, for crm_rates. */
-    std::string crm_as_of;
+    /** @brief The batch's newest as-of in UTC nanoseconds, for crm_rates. */
+    std::int64_t crm_as_of_ns = 0;
 
     /** @brief The CRM scope the window asked for, for crm_rates. */
     std::string crm_name;

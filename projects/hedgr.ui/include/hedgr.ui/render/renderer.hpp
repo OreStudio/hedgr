@@ -33,6 +33,7 @@
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
+#include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -220,14 +221,14 @@ struct window_ui_state final {
     /** @brief The pair selected in the matrix, empty when none. */
     std::string crm_pair;
 
-    /** @brief When the CRM window next polls, on the ImGui clock. */
-    double crm_next_poll = 0.0;
-
     /** @brief Whether the CRM window has taken its scope from its state. */
     bool crm_initialised = false;
 
     /** @brief Every currency seen since the party was chosen. */
     std::set<std::string> crm_currencies;
+
+    /** @brief The matrix as last derived from the CRM batch. */
+    crm_grid crm_view;
 
     /** @brief Whether the CRM picker popup is open. */
     bool crm_picker_open = false;

@@ -70,8 +70,8 @@ TEST_CASE("looking up a held chart allocates nothing", "[cost][market]") {
 
 TEST_CASE("looking up a held CRM batch allocates nothing", "[cost][crm]") {
     hedgr::model::state::crm_table crm;
-    crm.set(instance, account, party, "majors", false, {}, {}, "now", 0);
-    crm.set(instance, account, party, "majors", true, {}, {}, "later", 0);
+    crm.set(instance, account, party, "majors", false, {}, {}, 1, 0);
+    crm.set(instance, account, party, "majors", true, {}, {}, 2, 0);
     crm.set_names(instance, account, party, {"majors"});
 
     const auto before = allocations();
@@ -82,10 +82,10 @@ TEST_CASE("looking up a held CRM batch allocates nothing", "[cost][crm]") {
     }
     CHECK(allocations() - before == 0);
     CHECK(found == 2 * lookups);
-    CHECK(crm.get(instance, account, party, "majors", false)->observed_as_of
-        == "now");
-    CHECK(crm.get(instance, account, party, "majors", true)->observed_as_of
-        == "later");
+    CHECK(crm.get(instance, account, party, "majors", false)->observed_as_of_ns
+        == 1);
+    CHECK(crm.get(instance, account, party, "majors", true)->observed_as_of_ns
+        == 2);
 }
 
 TEST_CASE("looking up a held curve allocates nothing", "[cost][rates]") {

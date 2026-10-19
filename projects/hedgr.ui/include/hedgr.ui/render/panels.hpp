@@ -179,6 +179,15 @@ identity_text(const identity_bar_state& state);
 HEDGR_UI_EXPORT void request_flags(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view label);
 
+/**
+ * @brief Asks the runtime for one currency's flag, once.
+ *
+ * Any code the tenant's image map names is asked for, so a currency outside
+ * the drawn fallbacks still gets the deployment's image.
+ */
+HEDGR_UI_EXPORT void request_flag(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view currency);
+
 /** @brief The uploaded texture for a currency's flag, or zero. */
 [[nodiscard]] HEDGR_UI_EXPORT ImTextureID
 image_texture(const render_input& input,

@@ -17,27 +17,23 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.ui/render/crm_rate.hpp"
-#include <catch2/catch_all.hpp>
+#include "hedgr.runtime/worker/crm_worker.hpp"
+#include <catch2/catch_test_macros.hpp>
 
-using hedgr::ui::render::crm_decimal_places;
-using hedgr::ui::render::crm_delta_is_zero;
+using hedgr::runtime::worker::parse_iso8601_utc;
 
-TEST_CASE("a direct CRM rate uses its pair convention", "[crm]") {
-    CHECK(crm_decimal_places(4, false, 0.72) == 4);
-    CHECK(crm_decimal_places(2, false, 112.0) == 2);
-    CHECK(crm_decimal_places(-1, false, 1.0) == 5);
-}
+TEST_CASE("a CRM as-of reads in OreStudio's wire shape", "[crm]") {
+    constexpr std::int64_t t_form = 1'792'360'345'000'000'000;
+    CHECK(parse_iso8601_utc("2026-10-18T21:52:25Z") == t_form);
 
-TEST_CASE("a reciprocal CRM rate keeps the direct significant figures",
-    "[crm]") {
-    CHECK(crm_decimal_places(4, true, 0.72) == 5);
-    CHECK(crm_decimal_places(2, true, 0.0089) == 7);
-}
+    /* The shape to_iso8601_utc writes: a space and six fraction digits. */
+    CHECK(parse_iso8601_utc("2026-10-18 21:52:25.250000Z")
+        == t_form + 250'000'000);
+    CHECK(parse_iso8601_utc("2026-10-18 21:52:25+00:00") == t_form);
 
-TEST_CASE("a CRM delta that rounds to zero is neutral", "[crm]") {
-    CHECK(crm_delta_is_zero(0.0));
-    CHECK(crm_delta_is_zero(0.0049));
-    CHECK(crm_delta_is_zero(-0.0049));
-    CHECK_FALSE(crm_delta_is_zero(0.005));
+    /* An offset or a missing designator is not misread as UTC. */
+    CHECK(parse_iso8601_utc("2026-10-18T22:52:25+01:00") == 0);
+    CHECK(parse_iso8601_utc("2026-10-18T21:52:25") == 0);
+    CHECK(parse_iso8601_utc("") == 0);
+    CHECK(parse_iso8601_utc("not a time") == 0);
 }

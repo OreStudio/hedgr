@@ -24,7 +24,6 @@
 #include <cstdint>
 #include <ctime>
 #include <string>
-#include <string_view>
 
 namespace hedgr::ui::render {
 
@@ -45,19 +44,6 @@ namespace hedgr::ui::render {
     std::strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &utc);
     return buffer;
 }
-
-/**
- * @brief Reads an ISO-8601 UTC instant, or returns zero when it cannot.
- *
- * The CRM service reports its batch time as text rather than as an instant on
- * the wire. This is the one place that text becomes nanoseconds, so every
- * screen can judge and draw the same value instead of parsing it twice. The
- * grammar is OreStudio's wire shape: either separator, an optional fraction,
- * and a UTC designator. A non-zero offset or a missing designator reads as
- * zero rather than as the wrong instant.
- */
-[[nodiscard]] HEDGR_UI_EXPORT std::int64_t parse_iso8601_utc(
-    std::string_view text);
 
 /** @brief An age as OreStudio words one, for example "5 minutes ago". */
 [[nodiscard]] HEDGR_UI_EXPORT std::string age_text(std::int64_t age_ns);

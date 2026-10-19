@@ -22,31 +22,8 @@
 
 TEST_CASE("an as-of instant is ISO 8601 in UTC", "[time]") {
     using hedgr::ui::render::as_of_text;
-    using hedgr::ui::render::parse_iso8601_utc;
-
-    const auto instant = parse_iso8601_utc("2026-10-18T21:52:25Z");
-    REQUIRE(instant > 0);
-    CHECK(as_of_text(instant) == "2026-10-18T21:52:25Z");
-
+    CHECK(as_of_text(1'792'360'345'000'000'000) == "2026-10-18T21:52:25Z");
     CHECK(as_of_text(0).empty());
-    CHECK(parse_iso8601_utc("") == 0);
-    CHECK(parse_iso8601_utc("not a time") == 0);
-}
-
-TEST_CASE("an as-of instant reads in OreStudio's wire shape", "[time]") {
-    using hedgr::ui::render::parse_iso8601_utc;
-
-    const auto t_form = parse_iso8601_utc("2026-10-18T21:52:25Z");
-    REQUIRE(t_form > 0);
-
-    /* The shape to_iso8601_utc writes: a space and six fraction digits. */
-    CHECK(parse_iso8601_utc("2026-10-18 21:52:25.250000Z")
-        == t_form + 250'000'000);
-    CHECK(parse_iso8601_utc("2026-10-18 21:52:25+00:00") == t_form);
-
-    /* An offset or a missing designator is not misread as UTC. */
-    CHECK(parse_iso8601_utc("2026-10-18T22:52:25+01:00") == 0);
-    CHECK(parse_iso8601_utc("2026-10-18T21:52:25") == 0);
 }
 
 TEST_CASE("an age reads as OreStudio words it", "[time]") {

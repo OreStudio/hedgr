@@ -406,6 +406,15 @@ private:
     /** @brief Reads the CRM batch a cross-rates window shows. */
     void start_crm_read(model::state::window_handle handle);
 
+    /**
+     * @brief Reads each CRM batch an open cross-rates window shows, when due.
+     *
+     * The deadline belongs to the batch rather than the window, so any number
+     * of windows over one matrix cost one read per cadence. Whether a window is
+     * collapsed or drawn plays no part, because the interface never asks.
+     */
+    void pump_crm_reads();
+
     void start_crm_names_read(std::string_view instance_id,
         std::string_view account_id, std::string_view party_id);
 

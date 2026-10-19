@@ -18,7 +18,7 @@
  *
  */
 #include "hedgr.ui/icon/fonts.hpp"
-#include "hedgr.ui/render/crm_rate.hpp"
+#include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
@@ -29,26 +29,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <format>
-#include <map>
-#include <set>
 #include <string>
-#include <string_view>
 #include <utility>
-#include <vector>
 
 namespace hedgr::ui::render {
 
 using hedgr::model::state::window_handle;
-
-namespace {
-
-[[nodiscard]] std::string pair_text(const std::string& base,
-    const std::string& quote) {
-    return base + "/" + quote;
-}
-
-}
 
 void render_crm_matrix(window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
@@ -97,7 +83,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_party_id, state.crm_name, state.crm_reciprocal);
 
     const auto as_of_ns = snapshot != nullptr
-        ? parse_iso8601_utc(snapshot->observed_as_of) : 0;
+        ? snapshot->observed_as_of_ns : 0;
     const bool reading = snapshot != nullptr && snapshot->reading;
     set_health_foot(foot, model::domain::data_health::unavailable, as_of_ns,
         reading);
@@ -134,18 +120,6 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     if (ImGui::Button("Refresh"))
         request_refresh();
 
-    /*
-     * The window polls only while it is drawn. The server computes the batch
-     * on demand, so a hidden matrix must not keep a party's rate engine busy.
-     */
-    const double now = ImGui::GetTime();
-    if (state.crm_next_poll == 0.0)
-        state.crm_next_poll = now + 5.0;
-    if (now >= state.crm_next_poll) {
-        request_refresh();
-        state.crm_next_poll = now + 5.0;
-    }
-
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (snapshot == nullptr || snapshot->cells.empty()) {
         if (snapshot != nullptr && !snapshot->error.empty())
@@ -157,24 +131,10 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         else
             ImGui::TextDisabled("Reading the CRM...");
     } else {
-        std::set<std::pair<std::string, std::string>> fresh;
-        std::set<std::pair<std::string, std::string>> stale;
-        std::set<std::pair<std::string, std::string>> disconnected;
-        std::set<std::pair<std::string, std::string>> unavailable;
-        for (const auto& cell : snapshot->cells) {
-            if (cell.crm_name != state.crm_name)
-                continue;
-            const auto pair = std::make_pair(cell.base_currency_code,
-                cell.quote_currency_code);
-            if (cell.status == "fresh")
-                fresh.insert(pair);
-            else if (cell.status == "stale")
-                stale.insert(pair);
-            else if (cell.status == "disconnected")
-                disconnected.insert(pair);
-            else
-                unavailable.insert(pair);
-        }
+        if (state.crm_view.version != snapshot->version)
+            state.crm_view = build_crm_grid(*snapshot, state.crm_name,
+                state.crm_currencies);
+        const auto& counts = state.crm_view.counts;
 
         /*
          * The cells carry the deployment's own verdict on each pair, so the
@@ -182,16 +142,12 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          * again. A batch that keeps returning fresh cells is live even when
          * the observation time it quotes has not moved.
          */
-        const auto health = model::domain::assess_verdicts({
-            .fresh = fresh.size(),
-            .stale = stale.size(),
-            .disconnected = disconnected.size(),
-            .unavailable = unavailable.size()});
+        const auto health = model::domain::assess_verdicts(counts);
         set_health_foot(foot, health, as_of_ns, reading);
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(health_colour(health)),
-            "\u25cf %zu fresh  %zu stale  %zu unavailable", fresh.size(),
-            stale.size(), disconnected.size() + unavailable.size());
+            "\u25cf %zu fresh  %zu stale  %zu unavailable", counts.fresh,
+            counts.stale, counts.disconnected + counts.unavailable);
         if (snapshot->latency_ns > 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %.0f ms",
@@ -205,25 +161,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         return;
     }
 
-    std::map<std::pair<std::string, std::string>,
-        const model::domain::crm_cell*> cells;
-    for (const auto& cell : snapshot->cells) {
-        if (cell.crm_name != state.crm_name)
-            continue;
-        state.crm_currencies.insert(cell.base_currency_code);
-        state.crm_currencies.insert(cell.quote_currency_code);
-        const auto key = std::make_pair(cell.base_currency_code,
-            cell.quote_currency_code);
-        const auto found = cells.find(key);
-        if (found == cells.end()
-            || (found->second->status == "unavailable"
-                && cell.status != "unavailable"))
-            cells[key] = &cell;
-    }
-
-    std::set<std::string> currencies;
-    for (const auto& currency : state.crm_currencies)
-        currencies.insert(currency);
+    const auto& grid = state.crm_view;
+    const auto& currencies = grid.currencies;
     if (currencies.size() < 2) {
         ImGui::TextDisabled("No pairs for this CRM.");
         widget::draw_status_foot(status, input.now_ns, foot);
@@ -241,20 +180,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             - widget::status_foot_height(status)
             - ImGui::GetStyle().ItemSpacing.y,
         160.0f);
-    for (const auto& [pair, cell] : cells) {
-        static_cast<void>(cell);
-        request_flags(input, *session, "FX " + pair.first + "/" + pair.second);
-    }
-
-    std::map<std::pair<std::string, std::string>,
-        const model::domain::crm_convention*> conventions;
-    for (const auto& convention : snapshot->conventions) {
-        const auto slash = convention.pair_code.find('/');
-        if (slash == std::string::npos)
-            continue;
-        conventions[{convention.pair_code.substr(0, slash),
-            convention.pair_code.substr(slash + 1)}] = &convention;
-    }
+    for (const auto& currency : currencies)
+        request_flag(input, *session, currency);
 
     if (ImGui::BeginTable("##crm", static_cast<int>(currencies.size()) + 1,
             flags, ImVec2(0.0f, table_height))) {
@@ -287,6 +214,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         const float cell_line = ImGui::GetTextLineHeight();
         const float row_height = cell_line * 2.0f
             + ImGui::GetStyle().CellPadding.y * 2.0f + 4.0f;
+        std::size_t at = 0;
         for (const auto& base : currencies) {
             ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
             ImGui::TableNextColumn();
@@ -298,6 +226,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             }
             ImGui::TextUnformatted(base.c_str());
             for (const auto& quote : currencies) {
+                const auto& entry = grid.cells[at++];
                 ImGui::TableNextColumn();
                 if (base == quote) {
                     ImGui::TextColored(ImVec4(0.30f, 0.33f, 0.37f, 1.0f),
@@ -306,25 +235,23 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         ImGui::SetTooltip("Same currency");
                     continue;
                 }
-                const auto found = cells.find({base, quote});
-                if (found == cells.end()) {
+                if (entry.cell == nullptr) {
                     ImGui::TextDisabled("\u2014");
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("No configured rate for %s",
-                            pair_text(base, quote).c_str());
+                            entry.pair.c_str());
                     continue;
                 }
-                const auto& cell = *found->second;
+                const auto& cell = *entry.cell;
                 if (cell.status == "unavailable") {
                     ImGui::TextDisabled("\u2014");
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("%s  %s\n%s\n%s",
-                            pair_text(base, quote).c_str(),
-                            cell.crm_name.c_str(), cell.status.c_str(),
-                            "No direct or derived quote");
+                            entry.pair.c_str(), cell.crm_name.c_str(),
+                            cell.status.c_str(), "No direct or derived quote");
                     continue;
                 }
-                const std::string pair = pair_text(base, quote);
+                const auto& pair = entry.pair;
                 const bool selected = state.crm_pair == pair;
                 const double delta = cell.delta_pct.value_or(0.0);
                 if (!selected && !crm_delta_is_zero(delta)
@@ -349,21 +276,13 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                           theme::readiness_colour(
                               model::domain::readiness::bootstrapping))
                     : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
-                int convention_places = -1;
-                if (const auto convention = conventions.find({base, quote});
-                    convention != conventions.end())
-                    convention_places = convention->second->decimal_places;
-                const int places = crm_decimal_places(convention_places,
-                    cell.reciprocal, cell.rate);
-                const std::string rate = std::format("{:.{}f}", cell.rate,
-                    places);
-                const float rate_width = ImGui::CalcTextSize(rate.c_str()).x;
+                const float rate_width
+                    = ImGui::CalcTextSize(entry.rate.c_str()).x;
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX()
                     + ImGui::GetContentRegionAvail().x - rate_width);
                 ImGui::PushStyleColor(ImGuiCol_Text, colour);
                 ImGui::PushFont(icon::numeric_font());
-                if (ImGui::Selectable(std::format("{}##{}", rate, pair).c_str(),
-                        selected,
+                if (ImGui::Selectable(entry.label.c_str(), selected,
                         ImGuiSelectableFlags_AllowDoubleClick)) {
                     state.crm_pair = pair;
                     if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)

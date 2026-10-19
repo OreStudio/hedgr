@@ -1202,25 +1202,44 @@ TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
         {model::domain::crm_cell{.crm_name = "majors",
             .base_currency_code = "EUR", .quote_currency_code = "USD",
             .rate = 1.1, .status = "fresh"}},
-        {}, "2026-01-01T00:00:00Z", 0);
-    table.set("i", "a", "p2", "", false, {}, {}, "2026-01-01T00:00:01Z", 0);
+        {}, 1'000, 0);
+    table.set("i", "a", "p2", "", false, {}, {}, 2'000, 0);
     const auto* one = table.get("i", "a", "p1", "majors", false);
     const auto* two = table.get("i", "a", "p2", "", false);
     REQUIRE(one != nullptr);
     REQUIRE(two != nullptr);
     CHECK(one->cells.size() == 1);
     CHECK(one->cells.front().rate == 1.1);
-    CHECK(one->observed_as_of == "2026-01-01T00:00:00Z");
+    CHECK(one->observed_as_of_ns == 1'000);
     CHECK(two->cells.empty());
     CHECK(table.get("i", "a", "p3", "", false) == nullptr);
 }
 
 TEST_CASE("a failed CRM read keeps the error and the last cells", "[crm]") {
     crm_table table;
-    table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, {}, "now", 0);
+    table.set("i", "a", "p", "", false, {model::domain::crm_cell{}}, {}, 1, 0);
     table.fail("i", "a", "p", "", false, "refused");
     const auto* snapshot = table.get("i", "a", "p", "", false);
     REQUIRE(snapshot != nullptr);
     CHECK(snapshot->cells.size() == 1);
     CHECK(snapshot->error == "refused");
+}
+
+TEST_CASE("a CRM batch's version moves only when its cells do", "[crm]") {
+    crm_table table;
+    table.set("i", "a", "p", "majors", false, {}, {}, 1, 0);
+    table.set("i", "a", "p", "majors", true, {}, {}, 1, 0);
+    const auto direct = table.get("i", "a", "p", "majors", false)->version;
+    const auto reciprocal = table.get("i", "a", "p", "majors", true)->version;
+    CHECK(direct != 0);
+    CHECK(reciprocal != direct);
+
+    table.begin("i", "a", "p", "majors", false);
+    table.fail("i", "a", "p", "majors", false, "refused");
+    table.schedule("i", "a", "p", "majors", false, 42);
+    CHECK(table.get("i", "a", "p", "majors", false)->version == direct);
+    CHECK(table.get("i", "a", "p", "majors", false)->next_read_ns == 42);
+
+    table.set("i", "a", "p", "majors", false, {}, {}, 2, 0);
+    CHECK(table.get("i", "a", "p", "majors", false)->version > reciprocal);
 }

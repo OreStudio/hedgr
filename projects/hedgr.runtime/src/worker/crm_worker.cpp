@@ -19,11 +19,27 @@
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "ores.platform/time/datetime.hpp"
 #include <algorithm>
 #include <chrono>
+#include <exception>
+#include <string>
 #include <utility>
 
 namespace hedgr::runtime::worker {
+
+std::int64_t parse_iso8601_utc(std::string_view text) {
+    try {
+        const auto instant = ores::platform::time::datetime::from_iso8601_utc(
+            std::string{text});
+        const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            instant.time_since_epoch()).count();
+        return ns > 0 ? ns : 0;
+    } catch (const std::exception&) {
+        return 0;
+    }
+}
+
 void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     model::command::event_queue& events) {
     const auto party = job.party_id;
@@ -50,7 +66,7 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
             answer.message = rates.error().message;
             return;
         }
-        std::string newest;
+        std::int64_t newest = 0;
         for (const auto& item : *rates) {
             answer.crm_cells.push_back(model::domain::crm_cell{
                 .crm_name = item.crm_name,
@@ -61,9 +77,9 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
                 .as_of = item.as_of,
                 .reciprocal = item.reciprocal,
                 .delta_pct = item.delta_pct});
-            newest = std::max(newest, item.as_of);
+            newest = std::max(newest, parse_iso8601_utc(item.as_of));
         }
-        answer.crm_as_of = std::move(newest);
+        answer.crm_as_of_ns = newest;
         if (const auto conventions = client.currency_pair_conventions()) {
             for (const auto& item : *conventions) {
                 answer.crm_conventions.push_back(model::domain::crm_convention{
