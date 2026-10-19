@@ -34,7 +34,7 @@ Each bundle is one pull request, merged before the next starts.
 | 6 | Live tick path | SR-2, SR-4, SR-5, SR-6, C-3 | open |
 | 7 | Backfill through the time-ordered endpoint | SR-9, C-4, SR-10 | open |
 | 8 | Data health has one owner | UR-1, UR-2, UR-OS-2, AR-14 | open |
-| 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | open |
+| 9 | Reuse OreStudio libraries | MS-22, MS-23, UR-OS-1, C-8, C-9, C-10 | in review (#25) |
 | 10 | Frame loop idle and minimised policy | UW-4, AR-2 | open |
 | 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | open |
 
