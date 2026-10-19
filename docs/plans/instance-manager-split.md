@@ -87,7 +87,7 @@ Status: done. `session_read_for` returns the existing `worker::session_read`
 and takes a `read_gate`, because the copies differ. Deployment, market,
 backfill and image reads need a token. CRM, term structure and CRM names reads
 start with an empty one. The currency image map checks the token and not the
-session status. Seven starters use it and nine copies went, a net 70-line
+session status. Nine copies became one helper, a net 70-line
 deletion, not 150, because each starter still builds its own job. Tests pin each
 starter against a signed-out, refused, dropped and token-less session.
 
