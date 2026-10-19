@@ -26,7 +26,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
 #include <cstddef>
-#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <random>
@@ -96,18 +95,6 @@ private:
         .nats_url = "nats://localhost:20405",
         .subject_prefix = "ores.dev.brave_hopper",
     };
-}
-
-/**
- * @brief Pins the environment scan at no checkouts.
- *
- * The suite already does this through the test properties, and this repeats it
- * for a binary run by hand: the seeding case has to see the deployed-package
- * shape, one instance from the process's own options, not whatever checkouts
- * happen to sit beside the repository on this machine.
- */
-void pin_no_checkouts() {
-    setenv("HEDGR_ORESTUDIO_ROOT", "", 1);
 }
 
 /** @brief The account with @p id, or nullptr. */
@@ -185,7 +172,6 @@ void push_command(instance_manager& manager, command request) {
  */
 TEST_CASE("a started store holds the two seeded accounts of its instance",
     "[seed]") {
-    pin_no_checkouts();
     const temporary_database database;
     instance_manager manager;
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
@@ -246,7 +232,6 @@ TEST_CASE("a started store holds the two seeded accounts of its instance",
 
 TEST_CASE("a seeded account is the operator's after the first start",
     "[seed]") {
-    pin_no_checkouts();
     const temporary_database database;
     std::string instance_id;
 
@@ -288,7 +273,6 @@ TEST_CASE("a seeded account is the operator's after the first start",
 
 TEST_CASE("an instance already in the store is seeded on the next start",
     "[seed]") {
-    pin_no_checkouts();
     const temporary_database database;
 
     {

@@ -20,8 +20,8 @@
 #ifndef HEDGR_RUNTIME_SEED_SEEDER_HPP
 #define HEDGR_RUNTIME_SEED_SEEDER_HPP
 
-#include "hedgr.model/state/condition_table.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.runtime/refusal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/repository/account_repository.hpp"
 #include "hedgr.store/repository/folder_repository.hpp"
@@ -33,12 +33,6 @@
 #include <vector>
 
 namespace hedgr::runtime::seed {
-
-/** @brief One write the store refused, as the condition it is raised as. */
-struct refusal final {
-    model::state::condition_key key;
-    std::string message;
-};
 
 /** @brief The catalogue tables seeding writes into. */
 struct tables final {

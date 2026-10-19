@@ -24,7 +24,6 @@
 #include "hedgr.store/sqlite/database.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
-#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <random>
@@ -179,7 +178,6 @@ TEST_CASE("a seed write the store refuses is a start failure", "[reported]") {
      * The refusal is a trigger, so the store itself says no and the error is
      * the repository's own.
      */
-    setenv("HEDGR_ORESTUDIO_ROOT", "", 1);
     const temporary_database database;
     {
         auto opened = hedgr::store::sqlite::database::open(database.path());

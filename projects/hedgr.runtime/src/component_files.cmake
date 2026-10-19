@@ -37,6 +37,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/connection_options.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/hedgr.runtime.manager.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/manager/instance_manager.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/refusal.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/seed/hedgr.runtime.seed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/seed/seeder.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/service/hedgr.runtime.service.hpp"

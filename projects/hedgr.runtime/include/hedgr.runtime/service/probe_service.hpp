@@ -24,9 +24,9 @@
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.model/state/condition_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.runtime/refusal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
 #include <chrono>
@@ -38,12 +38,6 @@
 #include <unordered_map>
 
 namespace hedgr::runtime::service {
-
-/** @brief A request the schedule refused, as the condition it is raised as. */
-struct refusal final {
-    model::state::condition_key key;
-    std::string message;
-};
 
 /**
  * @brief How to reach the deployment an instance row describes.
