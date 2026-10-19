@@ -92,8 +92,10 @@ box_result<std::vector<unsigned char>> derive_key(std::string_view password,
         static_cast<int>(salt.size()), secret_box::iterations, EVP_sha256(),
         static_cast<int>(key.size()), key.data());
 
-    if (derived != 1)
+    if (derived != 1) {
+        cleanse(key);
         return std::unexpected(crypto_failure("the key derivation failed"));
+    }
     return key;
 }
 
@@ -252,11 +254,13 @@ box_result<std::string> decrypt(const std::vector<unsigned char>& key,
     int total = 0;
 
     if (EVP_DecryptUpdate(context.get(), plaintext.data(), &produced,
-            ciphertext.data(), static_cast<int>(ciphertext.size())) != 1)
+            ciphertext.data(), static_cast<int>(ciphertext.size())) != 1) {
+        cleanse(plaintext);
         return std::unexpected(crypto_failure("the ciphertext could not be decrypted"));
+    }
     total = produced;
 
-    if (EVP_DecryptFinal_ex(context.get(), plaintext.data() + total, &produced) != 1)
+    if (EVP_DecryptFinal_ex(context.get(), plaintext.data() + total, &produced) != 1) {
         /*
          * The tag did not verify, which is what a wrong password looks like and
          * what a tampered ciphertext looks like. The two are reported with one
@@ -264,7 +268,9 @@ box_result<std::string> decrypt(const std::vector<unsigned char>& key,
          * unauthenticated plaintext at this point, so it is wiped before the
          * error is returned rather than left for the allocator.
          */
+        cleanse(plaintext);
         return std::unexpected(wrong_password());
+    }
     total += produced;
 
     std::string result(reinterpret_cast<const char*>(plaintext.data()),
