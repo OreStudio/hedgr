@@ -49,22 +49,38 @@ namespace hedgr::ui::render {
 [[nodiscard]] HEDGR_UI_EXPORT std::string age_text(std::int64_t age_ns);
 
 /**
- * @brief The as-of instant with how old it is against @p wall_now_ns.
+ * @brief How old a tick is, in the fewest characters that still tell a late
+ * feed from a dead one.
  *
- * A verdict word says that data is stale and not by how much. Seventy minutes
- * behind and ten seconds behind are different faults, one in the feed and one in
- * the link, and the age is what tells them apart at a glance. An instant ahead
- * of this clock says so, because that is a clock fault and not a slow feed.
+ * Seconds under a minute, whole minutes to ten, then ">10m": a tick older than
+ * that is stale beyond argument and its exact age is noise. An instant ahead of
+ * this clock reads "ahead", because that is a clock fault and not a slow feed.
+ */
+[[nodiscard]] inline std::string tick_age_text(std::int64_t age_ns) {
+    constexpr std::int64_t second = 1'000'000'000;
+    if (age_ns < 0)
+        return "ahead";
+    const auto seconds = age_ns / second;
+    if (seconds < 60)
+        return std::to_string(seconds) + "s";
+    const auto minutes = seconds / 60;
+    if (minutes > 10 || (minutes == 10 && seconds > 600))
+        return ">10m";
+    return std::to_string(minutes) + "m";
+}
+
+/**
+ * @brief The as-of instant with its age in front.
+ *
+ * The age goes before the instant so the instant, which the foot right-aligns,
+ * stays where it is on every frame while the age changes width.
  */
 [[nodiscard]] inline std::string as_of_age_text(std::int64_t at_ns,
     std::int64_t wall_now_ns) {
-    auto text = as_of_text(at_ns);
+    const auto text = as_of_text(at_ns);
     if (text.empty() || wall_now_ns <= 0)
         return text;
-    const auto age_ns = wall_now_ns - at_ns;
-    text += age_ns < 0 ? " (ahead of this clock)"
-                       : " (" + age_text(age_ns) + ")";
-    return text;
+    return tick_age_text(wall_now_ns - at_ns) + " \u00b7 " + text;
 }
 
 }
