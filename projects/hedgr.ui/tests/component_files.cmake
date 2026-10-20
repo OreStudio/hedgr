@@ -23,6 +23,7 @@ set(files
     "sound_tests.cpp"
     "splash_tests.cpp"
     "status_bar_tests.cpp"
+    "term_ladder_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

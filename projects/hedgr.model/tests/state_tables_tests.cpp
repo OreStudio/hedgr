@@ -1005,6 +1005,30 @@ TEST_CASE("a term structure read replaces the previous curve", "[rates]") {
     REQUIRE(curve->curves.back().at_ns == 12);
 }
 
+TEST_CASE("a term structure row's version changes on begin, set and fail",
+    "[rates]") {
+    using hedgr::model::state::term_structure_table;
+
+    term_structure_table curves;
+    curves.begin("i", "a", "k", "IR");
+    const auto begun = curves.get("i", "a", "k")->version;
+    REQUIRE(begun > 0);
+    curves.set("i", "a", "k", "IR", {});
+    const auto set = curves.get("i", "a", "k")->version;
+    REQUIRE(set > begun);
+    curves.fail("i", "a", "k", "no observations");
+    const auto failed = curves.get("i", "a", "k")->version;
+    REQUIRE(failed > set);
+
+    curves.begin("i", "a", "other", "IR");
+    REQUIRE(curves.get("i", "a", "other")->version > failed);
+    REQUIRE(curves.get("i", "a", "k")->version == failed);
+
+    curves.clear();
+    curves.begin("i", "a", "k", "IR");
+    REQUIRE(curves.get("i", "a", "k")->version > failed + 1);
+}
+
 TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
     "[images]") {
     using hedgr::model::state::image_cache;

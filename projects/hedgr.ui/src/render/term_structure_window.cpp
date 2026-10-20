@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/market_status.hpp"
@@ -29,10 +30,6 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
-#include <cctype>
-#include <format>
-#include <limits>
-#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -46,35 +43,6 @@ namespace {
 
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
-
-[[nodiscard]] int tenor_rank(std::string_view tenor) {
-    if (tenor.empty())
-        return 0;
-    int amount = 0;
-    std::size_t i = 0;
-    while (i < tenor.size()
-        && std::isdigit(static_cast<unsigned char>(tenor[i]))) {
-        amount = amount * 10 + (tenor[i] - '0');
-        ++i;
-    }
-    if (amount == 0)
-        amount = 1;
-    if (i >= tenor.size())
-        return amount;
-    switch (static_cast<char>(std::toupper(
-        static_cast<unsigned char>(tenor[i])))) {
-    case 'D':
-        return amount;
-    case 'W':
-        return amount * 7;
-    case 'M':
-        return amount * 30;
-    case 'Y':
-        return amount * 365;
-    default:
-        return amount;
-    }
-}
 
 }
 
@@ -177,20 +145,12 @@ void render_term_structure(window_handle handle, const render_input& input,
             const int end = primary + 1;
             const int count = end - first;
 
-            auto ladder = all_curves[static_cast<std::size_t>(primary)].nodes;
-            std::sort(ladder.begin(), ladder.end(),
-                [](const auto& a, const auto& b) {
-                    return tenor_rank(a.tenor) < tenor_rank(b.tenor);
-                });
-            std::vector<double> xs(ladder.size());
-            std::vector<const char*> labels(ladder.size());
-            std::map<std::string, std::size_t> index_of;
-            for (std::size_t i = 0; i < ladder.size(); ++i) {
-                xs[i] = static_cast<double>(i);
-                labels[i] = ladder[i].tenor.empty()
-                    ? "spot" : ladder[i].tenor.c_str();
-                index_of[ladder[i].tenor] = i;
-            }
+            const auto& ladder = state.ladder;
+            update_term_ladder(state.ladder,
+                {.version = curve->version, .history = history}, all_curves,
+                static_cast<std::size_t>(first),
+                static_cast<std::size_t>(primary));
+            const auto& xs = ladder.xs;
 
             double low = all_curves[static_cast<std::size_t>(primary)].nodes.front().value;
             double high = low;
@@ -221,7 +181,7 @@ void render_term_structure(window_handle handle, const render_input& input,
                 ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
                     ImPlotAxisFlags_Opposite);
                 ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
-                    static_cast<int>(xs.size()), labels.data());
+                    static_cast<int>(xs.size()), ladder.labels.data());
                 ImPlot::SetupAxisLimits(ImAxis_X1, -0.75,
                     static_cast<double>(xs.size()) - 0.25, ImGuiCond_Always);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, low - pad, high + pad,
@@ -231,15 +191,8 @@ void render_term_structure(window_handle handle, const render_input& input,
                 const ImVec4 newest_colour =
                     ImGui::ColorConvertU32ToFloat4(theme::curve_latest_colour);
                 for (int c = first; c < end; ++c) {
-                    const auto& history_curve = all_curves[static_cast<std::size_t>(c)];
                     const bool newest = c == primary;
-                    std::vector<double> ys(xs.size(),
-                        std::numeric_limits<double>::quiet_NaN());
-                    for (const auto& node : history_curve.nodes) {
-                        const auto found = index_of.find(node.tenor);
-                        if (found != index_of.end())
-                            ys[found->second] = node.value;
-                    }
+                    const auto& ys = ladder.ys[static_cast<std::size_t>(c - first)];
 
                     if (newest) {
                         fill_gradient_under_curve(xs.data(), ys.data(),
@@ -274,9 +227,10 @@ void render_term_structure(window_handle handle, const render_input& input,
                         spec.Marker = ImPlotMarker_Circle;
                         spec.MarkerSize = 3.0f;
                     }
-                    const auto name = std::format("##curve-{}", c);
-                    ImPlot::PlotLine(name.c_str(), xs.data(), ys.data(),
+                    ImGui::PushID(c);
+                    ImPlot::PlotLine("##curve", xs.data(), ys.data(),
                         static_cast<int>(xs.size()), spec);
+                    ImGui::PopID();
                 }
                 ImPlot::EndPlot();
             }
