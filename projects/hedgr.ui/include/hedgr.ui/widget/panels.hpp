@@ -180,9 +180,6 @@ struct session_facts final {
     /** @brief When the session was established, on the monotonic clock. */
     std::int64_t opened_at_ns = 0;
 
-    /** @brief The last round trip's latency in microseconds. */
-    std::int64_t latency_us = 0;
-
     /** @brief Where the session is in its lifecycle. */
     hedgr::model::domain::session_status status =
         hedgr::model::domain::session_status::disconnected;

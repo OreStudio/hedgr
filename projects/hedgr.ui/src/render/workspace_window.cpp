@@ -243,18 +243,6 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
         fact_row(icon::fact, "Party", facts.party);
 
         /*
-         * The latency is the last round trip the session reported, in
-         * microseconds. It is the only measurement Hedgr has of the connection,
-         * and it is a fact rather than a judging: nothing here says whether the
-         * number is good.
-         */
-        fact_row(icon::clock, "Last round trip",
-            facts.latency_us > 0
-                ? std::format("{:.1f} ms",
-                      static_cast<double>(facts.latency_us) / 1000.0)
-                : std::string{});
-
-        /*
          * The session's own clock reading, rendered as an age rather than as a
          * timestamp: the monotonic clock has no wall time in it, and "38
          * seconds ago" is the question a person is actually asking when they

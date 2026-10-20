@@ -49,8 +49,6 @@ enum class event_kind : std::uint8_t {
     session_authenticated = 1,
     /** @brief The attempt failed; code and message say why. */
     session_failed = 2,
-    /** @brief A subscribed subject produced a payload. */
-    session_data = 3,
     /** @brief A window's data was refreshed and is ready to draw. */
     window_data = 4,
     /** @brief A probe finished, whatever it found. */
@@ -267,10 +265,7 @@ struct event final {
      */
     std::string parties;
 
-    /** @brief Subject the payload arrived on, for session_data. */
-    std::string subject;
-
-    /** @brief The payload, for session_data and window_data. */
+    /** @brief The payload, for window_data. */
     std::string payload;
 
     /** @brief What the broker answered, for probe_result. */
