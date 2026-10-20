@@ -950,3 +950,18 @@ TEST_CASE("a removal saves the window wall", "[catalogue]") {
         REQUIRE(wall_refused());
     }
 }
+TEST_CASE("a refused re-attach keeps the attachment the store still holds",
+    "[catalogue]") {
+    world w;
+    w.save_instance("inst-a");
+    w.save_label("lbl-a");
+    w.attach(labelling_owner::instance, "inst-a", "lbl-a");
+    REQUIRE(w.manager->labellings().size() == 1);
+
+    w.database.refuse("instance_label", "INSERT");
+    w.attach(labelling_owner::instance, "inst-a", "lbl-a");
+
+    REQUIRE(refused_by_test(w.manager->last_error(),
+        "cannot attach label lbl-a to inst-a:"));
+    REQUIRE(w.manager->labellings().size() == 1);
+}

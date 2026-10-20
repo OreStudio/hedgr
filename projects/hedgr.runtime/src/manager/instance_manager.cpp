@@ -1253,10 +1253,20 @@ void instance_manager::do_attach_label(const command::command& cmd) {
         return;
     }
 
+    /*
+     * Attaching a pair that is already attached changes nothing, so a refused
+     * write must leave it attached: the store still holds it, and removing it
+     * from the table would hide a label the store still holds until the next
+     * start.
+     */
+    const auto attached = labellings_.labels_of(row.owner, row.owner_id);
+    const bool already = std::find(attached.begin(), attached.end(),
+        row.label_id) != attached.end();
     labellings_.add(row.owner, row.owner_id, row.label_id);
 
     if (auto saved = labelling_repo_->save(row); !saved) {
-        labellings_.remove(row.owner, row.owner_id, row.label_id);
+        if (!already)
+            labellings_.remove(row.owner, row.owner_id, row.label_id);
         raise({condition_source::labelling, row.owner_id},
             store_failure(
                 std::format("cannot attach label {} to {}", row.label_id,
