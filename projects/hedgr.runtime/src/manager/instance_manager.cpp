@@ -285,9 +285,13 @@ void instance_manager::pump() {
      * than on the next one, and so an answer applied above has already moved
      * the deadline the schedule reads.
      */
-    probe_service_.pump_probes(started_, [this](const domain::instance& row) {
-        return connection_options_for(row, seed_options_, database_->path());
-    });
+    probe_service_.pump_probes(started_,
+        [this](const domain::instance& row) {
+            return connection_options_for(row, seed_options_, database_->path());
+        },
+        [this](const domain::instance& row) {
+            return wire_format_holder(row) == nullptr;
+        });
     read_service_.pump_crm_reads();
 
     /*
@@ -493,6 +497,23 @@ void instance_manager::do_connect_session(const command::command& cmd) {
     }
 
     /*
+     * Before the password is remembered or a derivation is started: a refusal
+     * starts nothing, and an operator who is told to disconnect another
+     * session first should not also find a credential saved for an attempt
+     * that never ran.
+     */
+    if (const auto* holder = wire_format_holder(*instance_row)) {
+        raise({condition_source::session, cmd.account_id},
+            std::format(
+                "cannot connect to {}: it uses the {} wire format, but {} is "
+                "signed in using {}, and this process speaks one wire format at "
+                "a time; disconnect {} first",
+                instance_row->name, instance_row->wire_format, holder->name,
+                holder->wire_format, holder->name));
+        return;
+    }
+
+    /*
      * A credential typed for this attempt wins over a stored one. The operator
      * who has just filled in a password prompt is asking for that password to
      * be used, and quietly preferring the remembered one would make the prompt
@@ -555,6 +576,24 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      */
     auto blob = std::move(sealed).value();
     start_stored_connect(cmd, std::move(blob.value()));
+}
+
+const domain::instance* instance_manager::wire_format_holder(
+    const domain::instance& row) const {
+    for (const auto session : live_sessions(sessions_)) {
+        const auto status = sessions_.status(session);
+        if (status != domain::session_status::connecting
+            && status != domain::session_status::authenticated)
+            continue;
+        const auto instance_id = sessions_.instance_id(session);
+        const auto held = catalogue_.instances().find(instance_id);
+        if (!held)
+            continue;
+        const auto* other = catalogue_.instances().get(*held);
+        if (other->wire_format != row.wire_format)
+            return other;
+    }
+    return nullptr;
 }
 
 void instance_manager::start_session_for(const command::command& cmd,

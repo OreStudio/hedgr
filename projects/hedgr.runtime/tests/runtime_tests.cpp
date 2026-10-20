@@ -2736,3 +2736,201 @@ TEST_CASE("a deployment snapshot lands on the session row and frees the next rea
     CHECK(manager.sessions().deployment(*handle).tenant_total == 0);
     manager.stop();
 }
+
+namespace {
+
+/**
+ * @brief Saves an instance and an account, the instance speaking @p format.
+ *
+ * The instance listens at @p url, so a connection that reaches the wire is a
+ * connection the guard let through.
+ */
+void add_formatted_instance(instance_manager& manager, const std::string& id,
+    const std::string& name, const std::string& format, const std::string& url) {
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance(id, name, "ores.test." + id);
+    save.instance_row.nats_url = url;
+    save.instance_row.wire_format = format;
+    save.instance_id = id;
+    push_command(manager, save);
+
+    command save_account;
+    save_account.kind = command_kind::save_account;
+    save_account.account_row = make_account("ident-" + id, id);
+    push_command(manager, save_account);
+}
+
+void connect_formatted(instance_manager& manager, const std::string& id) {
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = id;
+    connect.account_id = "ident-" + id;
+    connect.principal = "alice@example.test";
+    connect.password = secret_string{std::string{"not-a-real-secret"}};
+    push_command(manager, connect);
+}
+
+void disconnect_formatted(instance_manager& manager, const std::string& id) {
+    command disconnect;
+    disconnect.kind = command_kind::disconnect_session;
+    disconnect.instance_id = id;
+    disconnect.account_id = "ident-" + id;
+    push_command(manager, disconnect);
+}
+
+[[nodiscard]] bool has_session(const instance_manager& manager,
+    const std::string& id) {
+    return manager.sessions().find(id, "ident-" + id).has_value();
+}
+
+/** @brief Pumps for @p span, long enough for a connect to reach the wire. */
+void pump_for(instance_manager& manager, std::chrono::milliseconds span) {
+    const auto until = std::chrono::steady_clock::now() + span;
+    while (std::chrono::steady_clock::now() < until) {
+        manager.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+constexpr std::chrono::milliseconds wire_quiet{600};
+
+}
+
+namespace {
+
+constexpr const char* refused_url = "nats://127.0.0.1:1";
+
+/** @brief An instance in @p format with a session that is authenticated. */
+void hold_format(instance_manager& manager, const std::string& id,
+    const std::string& format) {
+    add_formatted_instance(manager, id, "Holder", format, refused_url);
+    sign_in_unreachable(manager, id, "ident-" + id);
+}
+
+[[nodiscard]] std::string wire_format_message(const instance_manager& manager) {
+    for (const auto& row : manager.conditions().rows()) {
+        if (row.key.source == condition_source::session
+            && row.message.contains("wire format"))
+            return row.message;
+    }
+    return {};
+}
+
+}
+
+TEST_CASE("a connect that would change the wire format of a live session is refused",
+    "[runtime][wire]") {
+    const temporary_database database("wire-refused");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    hold_format(manager, "inst-live", "json");
+
+    const connection_counter counter;
+    add_formatted_instance(manager, "inst-other", "Other", "msgpack", counter.url());
+    connect_formatted(manager, "inst-other");
+    pump_for(manager, wire_quiet);
+
+    const auto message = wire_format_message(manager);
+    CHECK(message.contains("msgpack"));
+    CHECK(message.contains("json"));
+    CHECK(message.contains("Holder"));
+    CHECK_FALSE(has_session(manager, "inst-other"));
+    CHECK(counter.count() == 0);
+    manager.stop();
+}
+
+TEST_CASE("two live sessions may share a wire format", "[runtime][wire]") {
+    const temporary_database database("wire-same");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    hold_format(manager, "inst-live", "json");
+
+    const connection_counter counter;
+    add_formatted_instance(manager, "inst-other", "Other", "json", counter.url());
+    connect_formatted(manager, "inst-other");
+
+    CHECK(wire_format_message(manager).empty());
+    CHECK(has_session(manager, "inst-other"));
+    CHECK(wait_until([&] {
+        manager.pump();
+        return counter.count() > 0;
+    }, std::chrono::seconds(10)));
+    manager.stop();
+}
+
+TEST_CASE("a session that failed no longer holds the wire format", "[runtime][wire]") {
+    const temporary_database database("wire-failed");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    add_formatted_instance(manager, "inst-live", "Holder", "json", refused_url);
+    refuse_sign_in(manager, "inst-live", "ident-inst-live");
+
+    const connection_counter counter;
+    add_formatted_instance(manager, "inst-other", "Other", "msgpack", counter.url());
+    connect_formatted(manager, "inst-other");
+
+    CHECK(wire_format_message(manager).empty());
+    CHECK(has_session(manager, "inst-other"));
+    CHECK(wait_until([&] {
+        manager.pump();
+        return counter.count() > 0;
+    }, std::chrono::seconds(10)));
+    manager.stop();
+}
+
+TEST_CASE("disconnecting or removing the holder releases the wire format",
+    "[runtime][wire]") {
+    for (const bool remove_instance : {false, true}) {
+        CAPTURE(remove_instance);
+        const temporary_database database("wire-released");
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        hold_format(manager, "inst-live", "json");
+
+        const connection_counter counter;
+        add_formatted_instance(manager, "inst-other", "Other", "msgpack",
+            counter.url());
+        connect_formatted(manager, "inst-other");
+        REQUIRE_FALSE(wire_format_message(manager).empty());
+        REQUIRE(counter.count() == 0);
+
+        if (remove_instance) {
+            command remove;
+            remove.kind = command_kind::remove_instance;
+            remove.instance_id = "inst-live";
+            push_command(manager, remove);
+        } else {
+            disconnect_formatted(manager, "inst-live");
+        }
+        REQUIRE_FALSE(has_session(manager, "inst-live"));
+
+        connect_formatted(manager, "inst-other");
+        CHECK(has_session(manager, "inst-other"));
+        CHECK(wait_until([&] {
+            manager.pump();
+            return counter.count() > 0;
+        }, std::chrono::seconds(10)));
+        manager.stop();
+    }
+}
+
+TEST_CASE("a probe waits while a live session holds another wire format",
+    "[runtime][wire]") {
+    const temporary_database database("wire-probe");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    hold_format(manager, "inst-live", "json");
+
+    const connection_counter counter;
+    add_formatted_instance(manager, "inst-other", "Other", "msgpack", counter.url());
+    pump_for(manager, wire_quiet);
+    CHECK(counter.count() == 0);
+
+    disconnect_formatted(manager, "inst-live");
+    CHECK(wait_until([&] {
+        manager.pump();
+        return counter.count() > 0;
+    }, std::chrono::seconds(10)));
+    manager.stop();
+}

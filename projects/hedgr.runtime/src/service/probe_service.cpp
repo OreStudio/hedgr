@@ -107,7 +107,8 @@ void probe_service::do_probe_all() {
     }
 }
 
-void probe_service::pump_probes(bool started, const endpoint_for& endpoint) {
+void probe_service::pump_probes(bool started, const endpoint_for& endpoint,
+    const probe_allowed& allowed) {
     /*
      * A stopped manager starts no probes: shutting down cancels every probe it
      * has, and a pump that outlives the shutdown command must not start a new
@@ -131,6 +132,8 @@ void probe_service::pump_probes(bool started, const endpoint_for& endpoint) {
 
         const model_state::instance_handle handle{index, layout.generation[index]};
         if (probes_.next_probe_ns(handle) > now)
+            continue;
+        if (!allowed(row))
             continue;
 
         spawn_probe_for(row, endpoint);

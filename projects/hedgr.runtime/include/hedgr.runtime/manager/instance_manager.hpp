@@ -357,6 +357,22 @@ private:
     void raise(model::state::condition_key key, std::string message);
 
     void do_connect_session(const model::command::command& cmd);
+
+    /**
+     * @brief The instance whose live session speaks a different wire format
+     * from @p row, or nullptr.
+     *
+     * The ORE client keeps one process-wide codec that every connect
+     * overwrites, so a second format would corrupt the sessions already open
+     * (C-5). Live means connecting or authenticated: a failed session has no
+     * worker decoding anything, and a removed one has no row. A session of
+     * @p row itself never conflicts, its format being @p row's own. Probes are
+     * held back by the same answer, because their connect writes the same
+     * global.
+     */
+    [[nodiscard]] const model::domain::instance*
+    wire_format_holder(const model::domain::instance& row) const;
+
     void do_disconnect_session(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
 
