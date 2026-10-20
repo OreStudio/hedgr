@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/ema.hpp"
 #include <algorithm>
+#include <span>
 
 namespace hedgr::ui::render {
 
@@ -96,21 +97,18 @@ bool update_chart_plot(chart_plot& plot, const chart_plot_key& key,
     if (plot.key == key)
         return false;
     plot.key = key;
-    plot.xs.clear();
-    plot.ys.clear();
     plot.ema.clear();
     plot.candles.clear();
-    plot.start = live_window_start(points, key.span_ns);
+    const auto start = live_window_start(points, key.span_ns);
+    plot.start_seq = points.first_seq + start;
     if (points.size == 0)
         return true;
 
     plot.low = points.value[points.size - 1];
     plot.high = plot.low;
-    plot.xs.assign(points.at_s + plot.start, points.at_s + points.size);
-    plot.ys.assign(points.value + plot.start, points.value + points.size);
-    for (const auto value : plot.ys) {
-        plot.low = std::min(plot.low, value);
-        plot.high = std::max(plot.high, value);
+    for (std::size_t i = start; i < points.size; ++i) {
+        plot.low = std::min(plot.low, points.value[i]);
+        plot.high = std::max(plot.high, points.value[i]);
     }
 
     /*
@@ -118,14 +116,24 @@ bool update_chart_plot(chart_plot& plot, const chart_plot_key& key,
      * width comes from the points actually in view.
      */
     const auto candle_span = key.span_ns == 0
-        ? points.at_ns[points.size - 1] - points.at_ns[plot.start]
+        ? points.at_ns[points.size - 1] - points.at_ns[start]
         : key.span_ns;
     plot.candle_width_ns = candle_width_for(candle_span);
     if (key.candles)
-        build_candles(points, plot.start, plot.candle_width_ns, plot.candles);
-    if (key.ema && plot.ys.size() > 1)
-        exponential_moving_average(plot.ys, plot.ema);
+        build_candles(points, start, plot.candle_width_ns, plot.candles);
+    if (key.ema && points.size - start > 1) {
+        exponential_moving_average(
+            std::span{points.value + start, points.size - start}, plot.ema);
+    }
     return true;
+}
+
+std::size_t chart_plot_start(const chart_plot& plot,
+    const state::series_columns& columns) noexcept {
+    if (plot.start_seq <= columns.first_seq)
+        return 0;
+    return std::min(static_cast<std::size_t>(plot.start_seq - columns.first_seq),
+        columns.size);
 }
 
 }

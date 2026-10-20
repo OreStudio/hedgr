@@ -829,6 +829,38 @@ Risk is medium. The custom draw code takes raw pointers and a count and must nev
 be handed a span across a compaction. Deleted in this PR: `chart_plot::xs` and
 `ys`, `live_window_start` over a deque, `std::deque` in `chart_plot.hpp`.
 
+**Status: built.** The chart plots from the table's columns and keeps no copy of
+them. The open decisions took the recommended values (D1, D7).
+
+Deviations from the text above, each the smallest choice that left no ambiguity.
+
+- **`chart_plot_start`.** `chart_plot` keeps `start_seq`, and a free function turns
+  it into an index of the frame's columns, clamped to the ring. The EMA takes a
+  `std::span`, so it reads the column directly.
+- **`chart_plot::xs` and `ys` were already pointers' worth of copy only.** Step 2
+  had moved the deque to columns, so the `live_window_start` over a deque and the
+  `std::deque` in `chart_plot.hpp` were gone. What step 4 deleted is the two
+  vectors and the copy into them.
+- **The key still needs the stamp, and a compaction always comes with one.** The
+  `first_seq` conversion is exercised in a unit test by compacting without
+  rebuilding, which the runtime cannot do. It is a guard, not a path.
+- **"10 and 110 charts allocate the same" is not true of the chart.** The chrome
+  formats seven strings a frame per chart (twelve on a frame that replots, which
+  includes the log line). The test asserts the count per chart is the same at 10
+  and 110, which is what a copy that grew with the ring would break.
+- **A frame test seam.** `render_chart` is declared in `windows.hpp` so a test can
+  draw charts without a workspace's layout clipping them.
+- **Seven thousand points in view.** The widest span the combo offers is one hour,
+  so the benchmark's series is half a second apart and every one of the 7,200 ring
+  points is in view.
+
+Measured, Release, 200 charts over full fine rings, median of 15 frames, five
+runs. A frame with nothing new is 55.4 ms before and after. A frame after every
+series ticked is 62.4 ms before and 58.3 ms after, so the replot of 200 charts
+fell from about 6.7 ms to about 2.9 ms. The 2.9 ms is the log lines, the min and
+max scan and the test's own appends. It is a CPU figure for building draw lists,
+not a frame time.
+
 ### 5. The term structure ladder (UR-8)
 
 - `term_structure` gets `version`, stamped from a table counter on `begin`, `set`

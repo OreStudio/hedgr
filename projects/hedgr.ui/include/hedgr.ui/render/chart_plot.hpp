@@ -50,30 +50,32 @@ struct chart_plot_key final {
 };
 
 /**
- * @brief A chart's plot arrays, kept between frames.
+ * @brief What a chart derives from its points, kept between frames.
  *
  * The points change about once a second and a frame comes sixty times a
- * second, so the arrays are rebuilt only when the key changes, and a rebuild
- * reuses the vectors' storage.
+ * second, so the candles and the average are rebuilt only when the key
+ * changes, and a rebuild reuses the vectors' storage. The points themselves
+ * stay in the series table's columns and are never copied here.
  */
 struct chart_plot final {
     chart_plot_key key;
 
-    /** @brief The first index of the points in view. */
-    std::size_t start = 0;
+    /**
+     * @brief The sequence number of the first point in view.
+     *
+     * A sequence number and not an index, so it names the same point after the
+     * ring compacts. @c chart_plot_start turns it into an index each frame.
+     */
+    std::uint64_t start_seq = 0;
 
-    /** @brief Seconds since the epoch and values of the points in view. */
-    std::vector<double> xs;
-    std::vector<double> ys;
-
-    /** @brief The moving average of @c ys, or empty when it is off. */
+    /** @brief The moving average of the points in view, or empty when it is off. */
     std::vector<double> ema;
 
     /** @brief The candles, or empty when the chart draws a line. */
     std::vector<candle> candles;
     std::int64_t candle_width_ns = 0;
 
-    /** @brief The range of @c ys. */
+    /** @brief The range of the values in view. */
     double low = 0.0;
     double high = 0.0;
 };
@@ -88,6 +90,16 @@ struct chart_plot final {
 HEDGR_UI_EXPORT bool update_chart_plot(chart_plot& plot,
     const chart_plot_key& key,
     const hedgr::model::state::series_columns& columns);
+
+/**
+ * @brief The index in @p columns of the first point @p plot has in view.
+ *
+ * Valid for the frame @p columns came from. A point that has left the ring
+ * gives zero, and an empty ring gives zero.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::size_t chart_plot_start(
+    const chart_plot& plot,
+    const hedgr::model::state::series_columns& columns) noexcept;
 
 }
 

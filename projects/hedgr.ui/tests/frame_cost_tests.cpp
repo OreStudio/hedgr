@@ -346,6 +346,7 @@ TEST_CASE("a steady chart frame allocates the same for every chart",
     INFO("allocations with 10 charts: " << few << ", with 110: " << many);
     CHECK(few % 10 == 0);
     CHECK(many == few / 10 * 110);
+    WARN("steady allocations per chart: " << few / 10);
 }
 
 TEST_CASE("a frame after every series ticked allocates the same for every chart",
@@ -373,6 +374,31 @@ TEST_CASE("a frame after every series ticked allocates the same for every chart"
     INFO("allocations after a tick, 10 charts: " << few << ", 110: " << many);
     CHECK(few % 10 == 0);
     CHECK(many == few / 10 * 110);
+    WARN("allocations per chart after a tick: " << few / 10);
+}
+
+TEST_CASE("a chart whose series is gone draws the reading state, not stale data",
+    "[frame][chart]") {
+    chart_desk charts{1};
+    int vertices = 0;
+    for (int i = 0; i < 3; ++i)
+        vertices = charts.draw();
+    REQUIRE(vertices > static_cast<int>(ring_points) * 6);
+    REQUIRE(charts.states[0]->plot.key.version != 0);
+
+    /* The window still holds the handle. The row it named is gone. */
+    charts.desk.market.erase(charts.series[0]);
+    REQUIRE(charts.desk.windows.series(charts.windows[0]).size() == 1);
+    const auto after = charts.draw();
+    CHECK(after < static_cast<int>(ring_points));
+    CHECK(charts.states[0]->plot.key.version == 0);
+    CHECK(charts.states[0]->plot.candles.empty());
+    CHECK(charts.states[0]->plot.ema.empty());
+
+    /* Interning the series again gives a new handle, which holds no points. */
+    const auto fresh = charts.desk.market.intern("i", "a", "s-0");
+    CHECK(fresh != charts.series[0]);
+    CHECK(charts.draw() < static_cast<int>(ring_points));
 }
 
 TEST_CASE("the cost of a frame over 200 charts of a full ring",

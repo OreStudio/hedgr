@@ -18,12 +18,14 @@
  *
  */
 #include "hedgr.ui/render/ema.hpp"
+#include <array>
 #include <catch2/catch_all.hpp>
 #include <vector>
 
 TEST_CASE("the ema is seeded with the first value", "[ema]") {
     std::vector<double> values{9.0, 9.0, 9.0, 9.0};
-    hedgr::ui::render::exponential_moving_average({1.0, 3.0, 3.0}, values, 3);
+    hedgr::ui::render::exponential_moving_average(
+        std::array{1.0, 3.0, 3.0}, values, 3);
     REQUIRE(values.size() == 3);
     CHECK(values[0] == 1.0);
     CHECK(values[1] == 2.0);
@@ -32,10 +34,11 @@ TEST_CASE("the ema is seeded with the first value", "[ema]") {
 
 TEST_CASE("the ema handles empty and single series", "[ema]") {
     std::vector<double> none{1.0};
-    hedgr::ui::render::exponential_moving_average({}, none);
+    hedgr::ui::render::exponential_moving_average(
+        std::span<const double>{}, none);
     CHECK(none.empty());
     std::vector<double> one;
-    hedgr::ui::render::exponential_moving_average({4.0}, one);
+    hedgr::ui::render::exponential_moving_average(std::array{4.0}, one);
     REQUIRE(one.size() == 1);
     CHECK(one.front() == 4.0);
 }
