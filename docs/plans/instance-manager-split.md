@@ -313,6 +313,9 @@ move it twice, and it would pull the master password into a class that then
 depends on the lock. What can land now are the tests that survive the actor, the
 stale-attempt filter and a token-refresh case.
 
+The plan for the actor is `docs/plans/session-actor.md`. Its step 7 moves
+supervision into a `session_service`.
+
 ## Where it ends
 
 After step 7 the facade is the constructor, `start()`, `pump()` in a fixed order,
