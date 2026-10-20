@@ -24,6 +24,7 @@
 #include <string>
 
 using hedgr::ui::widget::currencies_of;
+using hedgr::ui::widget::flag_available;
 using hedgr::ui::widget::has_flag;
 
 TEST_CASE("a currency pair names both of its currencies", "[flags]") {
@@ -47,9 +48,27 @@ TEST_CASE("a label with no currency names none", "[flags]") {
     REQUIRE(pair.quote.empty());
 }
 
-TEST_CASE("a currency the build does not know has no flag", "[flags]") {
-    REQUIRE_FALSE(has_flag("XXX"));
-    REQUIRE(currencies_of("FX XXX/USD").base.empty());
+TEST_CASE("a currency the build has no artwork for is still named",
+    "[flags]") {
+    REQUIRE_FALSE(has_flag("TWD"));
+    CHECK(currencies_of("IR TWD IR_SWAP").base == "TWD");
+    CHECK(currencies_of("FX TWD/USD").base == "TWD");
+}
+
+TEST_CASE("a word that is not a currency code is not named", "[flags]") {
+    CHECK(currencies_of("EQ AAPL").base.empty());
+    CHECK(currencies_of("IR twd 1M").base.empty());
+    CHECK(currencies_of("FX GBPX/USD").base.empty());
+}
+
+TEST_CASE("a flag is available from the server image or the built-in artwork",
+    "[flags]") {
+    constexpr ImTextureID served = 7;
+    CHECK(flag_available("TWD", served));
+    CHECK(flag_available("GBP", 0));
+    CHECK(flag_available("GBP", served));
+    CHECK_FALSE(flag_available("TWD", 0));
+    CHECK_FALSE(flag_available("", served));
 }
 
 TEST_CASE("the flag list covers the currencies the deployment quotes", "[flags]") {

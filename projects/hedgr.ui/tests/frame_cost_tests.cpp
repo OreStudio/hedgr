@@ -20,6 +20,7 @@
 #include "allocation_counter.hpp"
 #include "headless_desk.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
@@ -227,6 +228,82 @@ TEST_CASE("a CRM asks for the flag of any currency the tenant has an image for",
         if (request.kind == model::command::command_kind::load_image)
             asked.push_back(request.image_id);
     CHECK(asked == std::vector<std::string>{"img-th"});
+}
+
+namespace {
+
+/** @brief What drawing one label's flags did to the window. */
+struct flag_draw final {
+    int vertices = 0;
+    float cursor_moved = 0.0f;
+    std::size_t texture_gets = 0;
+    std::vector<std::string> asked;
+};
+
+flag_draw draw_flags_for(desk& desk, std::string_view label) {
+    flag_draw result;
+    auto input = desk.input();
+    const auto gets_before = desk.textures.gets;
+    frame([&] {
+        const auto* list = ImGui::GetWindowDrawList();
+        const auto vertices_before = list->VtxBuffer.Size;
+        const auto cursor_before = ImGui::GetCursorPosY();
+        render::draw_series_flags(input, desk.session, label);
+        result.vertices = list->VtxBuffer.Size - vertices_before;
+        result.cursor_moved = ImGui::GetCursorPosY() - cursor_before;
+    });
+    result.texture_gets = desk.textures.gets - gets_before;
+    for (const auto& request : desk.commands.drain())
+        if (request.kind == model::command::command_kind::load_image)
+            result.asked.push_back(request.image_id);
+    return result;
+}
+
+}
+
+TEST_CASE("a currency outside the built-in artwork is drawn from its server image",
+    "[frame][flags]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"TWD", "img-tw"}});
+
+    const auto before = draw_flags_for(desk, "IR TWD IR_SWAP");
+    CHECK(before.asked == std::vector<std::string>{"img-tw"});
+    CHECK(before.vertices == 0);
+
+    static_cast<void>(desk.images.put("t", "img-tw", {.mime_type = "image/svg+xml",
+        .data = std::vector<std::uint8_t>(4, 3)}));
+    const auto after = draw_flags_for(desk, "IR TWD IR_SWAP");
+    CHECK(after.asked.empty());
+    CHECK(after.texture_gets == 1);
+    CHECK(after.vertices > 0);
+    CHECK(after.cursor_moved > 0.0f);
+}
+
+TEST_CASE("a currency with no server image and no artwork draws nothing",
+    "[frame][flags]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"GBP", "img-gb"}});
+
+    const auto drawn = draw_flags_for(desk, "IR TWD IR_SWAP");
+
+    CHECK(drawn.asked.empty());
+    CHECK(drawn.texture_gets == 0);
+    CHECK(drawn.vertices == 0);
+    CHECK(drawn.cursor_moved == 0.0f);
+}
+
+TEST_CASE("a currency with artwork and no server image falls back to the artwork",
+    "[frame][flags]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"USD", "img-us"}});
+
+    const auto drawn = draw_flags_for(desk, "IR BRL 1Y");
+
+    CHECK(drawn.texture_gets == 0);
+    CHECK(drawn.vertices > 0);
 }
 
 namespace {

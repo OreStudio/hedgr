@@ -36,10 +36,20 @@ inline constexpr float flag_height = 11.0f;
 /**
  * @brief Whether this build knows a currency's flag.
  *
- * A currency the deployment adds after this build gets no flag rather than a
- * wrong one; the row still names it in full.
+ * Only the built-in artwork; a currency the deployment adds after this build
+ * may still have a server image.
  */
 [[nodiscard]] HEDGR_UI_EXPORT bool has_flag(std::string_view currency);
+
+/**
+ * @brief Whether a currency can be drawn at all.
+ *
+ * The server's image wins when it sent one; the built-in artwork covers a
+ * currency it did not. A currency with neither is left undrawn rather than
+ * shown as a blank grey box.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool
+flag_available(std::string_view currency, ImTextureID texture);
 
 /** @brief The currencies a series label names, base and quote. */
 struct currency_pair final {
@@ -51,9 +61,10 @@ struct currency_pair final {
  * @brief Reads the currencies out of a label the market catalogue produced.
  *
  * An FX label is "FX GBP/USD" and an interest-rate label is "IR GBP 1D", so
- * the pair comes from the word after the asset class. A label with no currency
- * in it, or a currency this build does not know, yields empty codes and the
- * row is drawn without flags.
+ * the pair comes from the word after the asset class. A word that is not an
+ * ISO-shaped code (three capital letters) yields an empty code. Whether the
+ * code has a flag is for flag_available, since the server may serve an image
+ * for a currency this build has no artwork for.
  */
 [[nodiscard]] HEDGR_UI_EXPORT currency_pair
 currencies_of(std::string_view label);

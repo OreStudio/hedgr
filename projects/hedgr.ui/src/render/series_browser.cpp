@@ -56,12 +56,12 @@ void draw_series_row(std::string_view label, float extra_indent,
     const auto pair = hedgr::ui::widget::currencies_of(label);
     float x = rect_min.x + 4.0f + extra_indent;
     const float flag_y = rect_min.y + (rect_size.y - hedgr::ui::widget::flag_height) * 0.5f;
-    if (!pair.base.empty()) {
+    if (hedgr::ui::widget::flag_available(pair.base, base_texture)) {
         hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.base, 1.0f,
             base_texture);
         x += hedgr::ui::widget::flag_width + 2.0f;
     }
-    if (!pair.quote.empty()) {
+    if (hedgr::ui::widget::flag_available(pair.quote, quote_texture)) {
         hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote, 1.0f,
             quote_texture);
         x += hedgr::ui::widget::flag_width + 4.0f;
