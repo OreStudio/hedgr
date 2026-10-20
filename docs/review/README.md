@@ -39,7 +39,7 @@ Each bundle is one pull request, merged before the next starts.
 | 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | merged (#30), partly deferred |
 
 Structural work that follows the bundles above, in the order Part D of
-`architecture.md` gives: version-stamped series table, `instance_manager`
+`architecture.md` gives: version-stamped series table (planned, see `docs/plans/series-table.md`), `instance_manager`
 split (done, see `docs/plans/instance-manager-split.md`), session actor (planned, see `docs/plans/session-actor.md`). Each needs its own plan and is not scheduled here.
 
 ## Deferred from merged bundles
