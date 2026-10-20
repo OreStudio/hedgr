@@ -20,12 +20,44 @@
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.model/event/event.hpp"
 #include <algorithm>
+#include <iterator>
+#include <limits>
 #include <map>
 #include <set>
 #include <cstdint>
 #include <utility>
 
 namespace hedgr::runtime::worker {
+
+std::vector<model::domain::term_curve>
+build_term_curves(const pillar_history& by_term, std::size_t max_history) {
+    std::set<std::int64_t> times;
+    auto complete_from = std::numeric_limits<std::int64_t>::min();
+    for (const auto& [tenor, points] : by_term) {
+        for (const auto& point : points)
+            times.insert(point.first);
+        complete_from = std::max(complete_from, points.begin()->first);
+    }
+
+    std::vector<std::int64_t> instants(times.lower_bound(complete_from),
+        times.end());
+    if (instants.size() > max_history)
+        instants.erase(instants.begin(),
+            instants.end() - static_cast<std::ptrdiff_t>(max_history));
+
+    std::vector<model::domain::term_curve> curves;
+    for (const auto at : instants) {
+        model::domain::term_curve curve;
+        curve.at_ns = at;
+        for (const auto& [tenor, points] : by_term) {
+            const auto value = std::prev(points.upper_bound(at))->second;
+            curve.nodes.push_back(model::domain::term_node{
+                .tenor = tenor, .value = value, .at_ns = at});
+        }
+        curves.push_back(std::move(curve));
+    }
+    return curves;
+}
 
 void spawn_term_structure_read(boost::asio::io_context& context,
     term_structure_job job, model::command::event_queue& events) {
@@ -55,8 +87,7 @@ void spawn_term_structure_read(boost::asio::io_context& context,
          * newer instants, so each pillar's value at it is within that page.
          */
         constexpr std::uint32_t max_history = 20;
-        std::map<std::string, std::map<std::int64_t, double>> by_term;
-        std::set<std::int64_t> times;
+        pillar_history by_term;
         for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
             const auto read = client.market_series_points(ids[i], max_history);
             if (!read) {
@@ -72,29 +103,10 @@ void spawn_term_structure_read(boost::asio::io_context& context,
             for (const auto& point : read->points) {
                 const auto tenor = tenors[i].empty() ? point.term : tenors[i];
                 by_term[tenor][point.at_ns] = point.value;
-                times.insert(point.at_ns);
             }
         }
 
-        std::vector<std::int64_t> instants(times.begin(), times.end());
-        if (instants.size() > max_history)
-            instants.erase(instants.begin(),
-                instants.end() - static_cast<std::ptrdiff_t>(max_history));
-
-        for (const auto at : instants) {
-            model::domain::term_curve curve;
-            curve.at_ns = at;
-            for (const auto& [tenor, points] : by_term) {
-                const auto found = points.upper_bound(at);
-                if (found == points.begin())
-                    continue;
-                const auto value = std::prev(found)->second;
-                curve.nodes.push_back(model::domain::term_node{
-                    .tenor = tenor, .value = value, .at_ns = at});
-            }
-            if (!curve.nodes.empty())
-                answer.term_curves.push_back(std::move(curve));
-        }
+        answer.term_curves = build_term_curves(by_term, max_history);
         if (answer.term_curves.empty())
             answer.message = "the curve's tenors hold no observations";
     };

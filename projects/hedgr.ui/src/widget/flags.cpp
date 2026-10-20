@@ -54,7 +54,17 @@ bool has_flag(std::string_view currency) {
     return false;
 }
 
+bool flag_available(std::string_view currency, ImTextureID texture) {
+    return !currency.empty() && (texture != 0 || has_flag(currency));
+}
+
 currency_pair currencies_of(std::string_view label) {
+    const auto code = [](std::string_view word) {
+        const bool iso = word.size() == 3
+            && std::all_of(word.begin(), word.end(),
+                [](char c) { return c >= 'A' && c <= 'Z'; });
+        return iso ? std::string{word} : std::string{};
+    };
     const auto second = [&label]() -> std::string_view {
         const auto first = label.find(' ');
         if (first == std::string_view::npos)
@@ -70,10 +80,9 @@ currency_pair currencies_of(std::string_view label) {
     if (slash != std::string_view::npos) {
         const auto base = second.substr(0, slash);
         const auto quote = second.substr(slash + 1);
-        return {has_flag(base) ? std::string{base} : std::string{},
-            has_flag(quote) ? std::string{quote} : std::string{}};
+        return {code(base), code(quote)};
     }
-    return {has_flag(second) ? std::string{second} : std::string{}, {}};
+    return {code(second), {}};
 }
 
 void draw_flag(ImDrawList* draw, ImVec2 p, std::string_view currency,

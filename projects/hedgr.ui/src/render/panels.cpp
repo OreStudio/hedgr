@@ -282,10 +282,15 @@ void draw_series_flags(const render_input& input,
     request_flags(input, session, label);
 
     const auto pair = hedgr::ui::widget::currencies_of(label);
+    const auto base_texture = image_texture(input, session, pair.base);
+    const auto quote_texture = image_texture(input, session, pair.quote);
+    const bool has_base =
+        hedgr::ui::widget::flag_available(pair.base, base_texture);
+    const bool has_quote =
+        hedgr::ui::widget::flag_available(pair.quote, quote_texture);
     const float flag_w = hedgr::ui::widget::flag_width * series_flag_scale;
     const float flag_h = hedgr::ui::widget::flag_height * series_flag_scale;
-    const auto flags = static_cast<int>(!pair.base.empty())
-        + static_cast<int>(!pair.quote.empty());
+    const auto flags = static_cast<int>(has_base) + static_cast<int>(has_quote);
     if (flags == 0)
         return;
 
@@ -299,14 +304,14 @@ void draw_series_flags(const render_input& input,
     auto* draw = ImGui::GetWindowDrawList();
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     float x = origin.x;
-    if (!pair.base.empty()) {
+    if (has_base) {
         hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.base,
-            series_flag_scale, image_texture(input, session, pair.base));
+            series_flag_scale, base_texture);
         x += flag_w + gap;
     }
-    if (!pair.quote.empty()) {
+    if (has_quote) {
         hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote,
-            series_flag_scale, image_texture(input, session, pair.quote));
+            series_flag_scale, quote_texture);
     }
     ImGui::Dummy(ImVec2(flags_width, flag_h));
 }
