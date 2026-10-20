@@ -40,7 +40,7 @@ Each bundle is one pull request, merged before the next starts.
 
 Structural work that follows the bundles above, in the order Part D of
 `architecture.md` gives: version-stamped series table, `instance_manager`
-split (done, see `docs/plans/instance-manager-split.md`), session actor. Each needs its own plan and is not scheduled here.
+split (done, see `docs/plans/instance-manager-split.md`), session actor (planned, see `docs/plans/session-actor.md`). Each needs its own plan and is not scheduled here.
 
 ## Deferred from merged bundles
 
