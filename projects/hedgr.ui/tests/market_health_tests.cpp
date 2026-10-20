@@ -168,7 +168,7 @@ TEST_CASE("a CRM reads the deployment's verdicts in Hedgr's words",
     CHECK(says(stopped, "STALE"));
 }
 
-TEST_CASE("a stale chart says how old its newest point is", "[health][chart]") {
+TEST_CASE("a stale chart says how old its newest point is, capped at ten minutes", "[health][chart]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
     const auto handle = desk.open(window_kind::chart,
@@ -182,5 +182,5 @@ TEST_CASE("a stale chart says how old its newest point is", "[health][chart]") {
     const auto text = drawn_text(desk, handle, state);
     CHECK(says(text, "STALE"));
     CHECK(says(text, render::as_of_text(now - 71 * 60 * second)));
-    CHECK(says(text, "(1 hour ago)"));
+    CHECK(says(text, ">10m"));
 }

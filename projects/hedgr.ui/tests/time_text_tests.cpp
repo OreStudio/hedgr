@@ -36,16 +36,30 @@ TEST_CASE("an age reads as OreStudio words it", "[time]") {
     CHECK(age_text(2 * 86'400'000'000'000LL) == "2 days ago");
 }
 
-TEST_CASE("an as-of instant carries its age against this clock", "[time]") {
+TEST_CASE("a tick's age is short and capped at ten minutes", "[time]") {
+    using hedgr::ui::render::tick_age_text;
+    constexpr std::int64_t second = 1'000'000'000;
+    CHECK(tick_age_text(0) == "0s");
+    CHECK(tick_age_text(12 * second) == "12s");
+    CHECK(tick_age_text(59 * second) == "59s");
+    CHECK(tick_age_text(60 * second) == "1m");
+    CHECK(tick_age_text(9 * 60 * second + 59 * second) == "9m");
+    CHECK(tick_age_text(10 * 60 * second) == "10m");
+    CHECK(tick_age_text(10 * 60 * second + second) == ">10m");
+    CHECK(tick_age_text(71 * 60 * second) == ">10m");
+    CHECK(tick_age_text(-second) == "ahead");
+}
+
+TEST_CASE("an as-of instant carries its age in front", "[time]") {
     using hedgr::ui::render::as_of_age_text;
     constexpr std::int64_t second = 1'000'000'000;
     constexpr std::int64_t at = 1'792'360'345 * second;
-    CHECK(as_of_age_text(at, at + 71 * 60 * second)
-        == "2026-10-18T21:52:25Z (1 hour ago)");
     CHECK(as_of_age_text(at, at + 12 * second)
-        == "2026-10-18T21:52:25Z (12 seconds ago)");
+        == "12s \u00b7 2026-10-18T21:52:25Z");
+    CHECK(as_of_age_text(at, at + 71 * 60 * second)
+        == ">10m \u00b7 2026-10-18T21:52:25Z");
     CHECK(as_of_age_text(at, at - 90 * second)
-        == "2026-10-18T21:52:25Z (ahead of this clock)");
+        == "ahead \u00b7 2026-10-18T21:52:25Z");
     CHECK(as_of_age_text(0, at).empty());
     CHECK(as_of_age_text(at, 0) == "2026-10-18T21:52:25Z");
 }
