@@ -152,6 +152,12 @@ HEDGR_UI_EXPORT void render_series_browser(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
+/** @brief One market series as a candle or line plot, drawn from the series table's columns. */
+HEDGR_UI_EXPORT void render_chart(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 /** @brief The party's cross-rates matrix, base against quote. */
 HEDGR_UI_EXPORT void render_crm_matrix(
     hedgr::model::state::window_handle handle, const render_input& input,
