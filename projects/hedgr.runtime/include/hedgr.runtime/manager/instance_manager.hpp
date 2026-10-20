@@ -35,6 +35,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/service/catalogue_service.hpp"
 #include "hedgr.runtime/service/lock_service.hpp"
 #include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.runtime/service/password_policy_service.hpp"
@@ -45,12 +46,6 @@
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_options.hpp"
-#include "hedgr.store/repository/account_repository.hpp"
-#include "hedgr.store/repository/folder_repository.hpp"
-#include "hedgr.store/repository/instance_repository.hpp"
-#include "hedgr.store/repository/label_repository.hpp"
-#include "hedgr.store/repository/labelling_repository.hpp"
-#include "hedgr.store/repository/shortcut_repository.hpp"
 #include "hedgr.store/sqlite/database.hpp"
 #include <chrono>
 #include <cstdint>
@@ -134,24 +129,24 @@ public:
     [[nodiscard]] std::expected<void, std::string> save_windows();
 
     [[nodiscard]] const model::state::instance_table& instances() const noexcept {
-        return instances_;
+        return catalogue_.instances();
     }
 
     [[nodiscard]] const model::state::account_table& accounts() const noexcept {
-        return accounts_;
+        return catalogue_.accounts();
     }
 
     [[nodiscard]] const model::state::folder_table& folders() const noexcept {
-        return folders_;
+        return catalogue_.folders();
     }
 
     [[nodiscard]] const model::state::label_table& labels() const noexcept {
-        return labels_;
+        return catalogue_.labels();
     }
 
     [[nodiscard]] const model::state::labelling_table& labellings() const
         noexcept {
-        return labellings_;
+        return catalogue_.labellings();
     }
 
     /**
@@ -163,7 +158,7 @@ public:
      */
     [[nodiscard]] const model::state::shortcut_table& shortcuts() const
         noexcept {
-        return shortcuts_;
+        return catalogue_.shortcuts();
     }
 
     [[nodiscard]] const model::state::session_table& sessions() const noexcept {
@@ -361,18 +356,6 @@ private:
      */
     void raise(model::state::condition_key key, std::string message);
 
-    void do_save_instance(const model::command::command& cmd);
-    void do_remove_instance(const model::command::command& cmd);
-    void do_save_account(const model::command::command& cmd);
-    void do_remove_account(const model::command::command& cmd);
-    void do_save_folder(const model::command::command& cmd);
-    void do_remove_folder(const model::command::command& cmd);
-    void do_save_label(const model::command::command& cmd);
-    void do_remove_label(const model::command::command& cmd);
-    void do_attach_label(const model::command::command& cmd);
-    void do_detach_label(const model::command::command& cmd);
-    void do_save_shortcut(const model::command::command& cmd);
-    void do_remove_shortcut(const model::command::command& cmd);
     void do_connect_session(const model::command::command& cmd);
     void do_disconnect_session(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
@@ -380,30 +363,18 @@ private:
     /** @brief Starts the read an open asked for, then raises what it refused. */
     void complete_open(service::open_outcome outcome);
 
+    /**
+     * @brief Raises what the catalogue refused, then winds down what a removal
+     * left behind.
+     *
+     * The catalogue owns the rows and returns what it removed. The session, the
+     * probe, the stream and the windows of a removed instance or account belong
+     * to other jobs, so this is the one place that reaches them.
+     */
+    void complete_catalogue(service::catalogue_effect effect);
+
     /** @brief Routes a window's read request to the starter that serves it. */
     void start_read(const service::read_request& request);
-
-    /**
-     * @brief Drops every shortcut pointing at a target that is going away.
-     *
-     * Called from the two removals whose rows a shortcut can name, so the bar
-     * never offers an entry that opens something the store no longer holds. The
-     * store call is made through @c store_failure like every other write, so a
-     * refusal reaches the status bar rather than leaving the entry behind.
-     */
-    void drop_target_shortcuts(model::domain::window_kind kind,
-                               const std::string& target_id);
-
-    /**
-     * @brief Moves every leaf out of @p folder_ids and into its tree's root.
-     *
-     * Called before a folder removal, so that removing a folder removes the
-     * folder rather than the operator's instances and accounts. A leaf whose
-     * tree has no root -- which a store written before roots existed could
-     * hold -- is left where it is rather than moved to nowhere, and the
-     * runtime reports that the tree is broken instead of silently detaching it.
-     */
-    void rehome_leaves(const std::vector<std::string>& folder_ids);
 
     /**
      * @brief Hands one connect attempt to the session pool.
@@ -459,23 +430,12 @@ private:
      */
     async::executor probe_pool_;
 
-    model::state::instance_table instances_;
-    model::state::account_table accounts_;
-    model::state::folder_table folders_;
-    model::state::label_table labels_;
-    model::state::labelling_table labellings_;
-    model::state::shortcut_table shortcuts_;
+    service::catalogue_service catalogue_;
     model::state::session_table sessions_;
     model::command::command_queue commands_;
     model::command::event_queue events_;
 
     std::unique_ptr<store::sqlite::database> database_;
-    std::unique_ptr<store::repository::instance_repository> instance_repo_;
-    std::unique_ptr<store::repository::account_repository> account_repo_;
-    std::unique_ptr<store::repository::folder_repository> folder_repo_;
-    std::unique_ptr<store::repository::label_repository> label_repo_;
-    std::unique_ptr<store::repository::labelling_repository> labelling_repo_;
-    std::unique_ptr<store::repository::shortcut_repository> shortcut_repo_;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
 
@@ -514,13 +474,13 @@ private:
      * Last, so both are built after and destroyed before the tables, the
      * channel and the options they hold references to.
      */
-    service::probe_service probe_service_{instances_, probe_pool_.context(), events_};
+    service::probe_service probe_service_{catalogue_.instances(), probe_pool_.context(), events_};
     service::password_policy_service policy_service_{seed_options_,
         probe_pool_.context(), events_};
     service::window_service window_service_{sessions_};
-    service::lock_service lock_service_{pool_.context(), commands_, events_, accounts_};
-    service::read_service read_service_{pool_.context(), events_, instances_,
-        accounts_, sessions_, window_service_.windows(), seed_options_};
+    service::lock_service lock_service_{pool_.context(), commands_, events_, catalogue_.accounts()};
+    service::read_service read_service_{pool_.context(), events_,
+        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), seed_options_};
     service::market_feed market_feed_;
 };
 
