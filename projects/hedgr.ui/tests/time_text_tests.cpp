@@ -19,6 +19,7 @@
  */
 #include "hedgr.ui/render/time_text.hpp"
 #include <catch2/catch_all.hpp>
+#include <cstdint>
 
 TEST_CASE("an as-of instant is ISO 8601 in UTC", "[time]") {
     using hedgr::ui::render::as_of_text;
@@ -33,4 +34,18 @@ TEST_CASE("an age reads as OreStudio words it", "[time]") {
     CHECK(age_text(5 * 60'000'000'000LL) == "5 minutes ago");
     CHECK(age_text(3612 * 1'000'000'000LL) == "1 hour ago");
     CHECK(age_text(2 * 86'400'000'000'000LL) == "2 days ago");
+}
+
+TEST_CASE("an as-of instant carries its age against this clock", "[time]") {
+    using hedgr::ui::render::as_of_age_text;
+    constexpr std::int64_t second = 1'000'000'000;
+    constexpr std::int64_t at = 1'792'360'345 * second;
+    CHECK(as_of_age_text(at, at + 71 * 60 * second)
+        == "2026-10-18T21:52:25Z (1 hour ago)");
+    CHECK(as_of_age_text(at, at + 12 * second)
+        == "2026-10-18T21:52:25Z (12 seconds ago)");
+    CHECK(as_of_age_text(at, at - 90 * second)
+        == "2026-10-18T21:52:25Z (ahead of this clock)");
+    CHECK(as_of_age_text(0, at).empty());
+    CHECK(as_of_age_text(at, 0) == "2026-10-18T21:52:25Z");
 }

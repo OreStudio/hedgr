@@ -167,3 +167,20 @@ TEST_CASE("a CRM reads the deployment's verdicts in Hedgr's words",
     const auto stopped = crm_text({{"USD", "fresh"}, {"EUR", "disconnected"}});
     CHECK(says(stopped, "STALE"));
 }
+
+TEST_CASE("a stale chart says how old its newest point is", "[health][chart]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+    const auto handle = desk.open(window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
+
+    const auto series = desk.market.intern("i", "a", "s");
+    desk.market.append(series, model::domain::market_level::fine,
+        {.at_ns = now - 71 * 60 * second, .value = 1.26}, 1);
+
+    render::window_ui_state state;
+    const auto text = drawn_text(desk, handle, state);
+    CHECK(says(text, "STALE"));
+    CHECK(says(text, render::as_of_text(now - 71 * 60 * second)));
+    CHECK(says(text, "(1 hour ago)"));
+}

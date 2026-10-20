@@ -72,7 +72,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
 
     if (state.crm_name.empty()) {
         ImGui::TextDisabled("No CRM selected.");
-        set_health_foot(foot, model::domain::data_health::unavailable, 0,
+        set_health_foot(foot, model::domain::data_health::unavailable, 0, 0,
             false);
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
@@ -86,7 +86,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         ? snapshot->observed_as_of_ns : 0;
     const bool reading = snapshot != nullptr && snapshot->reading;
     set_health_foot(foot, model::domain::data_health::unavailable, as_of_ns,
-        reading);
+        input.wall_now_ns, reading);
 
     auto configure_scope = [&] {
         model::command::command request;
@@ -143,7 +143,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          * the observation time it quotes has not moved.
          */
         const auto health = model::domain::assess_verdicts(counts);
-        set_health_foot(foot, health, as_of_ns, reading);
+        set_health_foot(foot, health, as_of_ns, input.wall_now_ns, reading);
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(health_colour(health)),
             "\u25cf %zu fresh  %zu stale  %zu unavailable", counts.fresh,
