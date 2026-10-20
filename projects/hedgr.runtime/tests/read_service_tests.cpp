@@ -99,8 +99,9 @@ struct fixture final {
     state::window_handle series_browser;
     hedgr::session::transport::session_options seed;
     hedgr::runtime::async::executor pool{1};
+    hedgr::model::state::series_table series;
     service::read_service reads{pool.context(), events, instances, accounts,
-        sessions, windows, seed};
+        sessions, windows, series, seed};
 };
 
 /** @brief One kind of read, how to start it and how it ends. */

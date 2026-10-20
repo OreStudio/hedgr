@@ -95,16 +95,20 @@ std::size_t series_table::ring_bytes(const row& r) const noexcept {
     return total;
 }
 
-void series_table::refresh(row& r, const series_catalogue& catalogue) {
+bool series_table::refresh(row& r, const series_catalogue& catalogue) {
+    const auto listed_before = r.info.listed;
     if (const auto* listed = catalogue.row_of(r.series_id)) {
+        const auto moved = r.info.uri != listed->uri
+            || r.info.party_id != listed->party_id;
         r.info.uri = listed->uri;
         r.info.party_id = listed->party_id;
         r.info.tenor = listed->tenor;
         r.info.curve_key = listed->curve_key;
         r.info.listed = true;
-    } else {
-        r.info.listed = false;
+        return moved || !listed_before;
     }
+    r.info.listed = false;
+    return listed_before;
 }
 
 void series_table::apply_catalogue(std::string_view instance_id,
@@ -119,8 +123,11 @@ void series_table::apply_catalogue(std::string_view instance_id,
     catalogue.state = catalogue_state::ready;
     catalogue.error.clear();
     catalogue.generation = ++counter_;
-    for (const auto held : entry.held)
-        refresh(rows_[held.index], catalogue);
+    for (const auto held : entry.held) {
+        auto& r = rows_[held.index];
+        if (refresh(r, catalogue) && r.watchers != 0)
+            changes_.push_back(held);
+    }
 }
 
 void series_table::begin_catalogue(std::string_view instance_id,
@@ -181,9 +188,12 @@ bool series_table::contains(series_handle h) const noexcept {
     return owns(layout_, h);
 }
 
-void series_table::acquire(series_handle h) noexcept {
-    if (auto* r = row_of(h))
-        ++r->watchers;
+void series_table::acquire(series_handle h) {
+    auto* r = row_of(h);
+    if (r == nullptr)
+        return;
+    if (r->watchers++ == 0)
+        changes_.push_back(h);
 }
 
 void series_table::release(series_handle h) {
@@ -193,13 +203,44 @@ void series_table::release(series_handle h) {
     if (--r->watchers != 0)
         return;
     r->released_at = ++counter_;
+    changes_.push_back(h);
     evict_to_budget();
+}
+
+void series_table::drain_changes(std::vector<series_handle>& out) {
+    out.clear();
+    out.swap(changes_);
+}
+
+std::span<const series_handle> series_table::held(std::string_view instance_id,
+    std::string_view account_id) const {
+    const auto* entry = find_in(scopes_, {instance_id, account_id});
+    return entry == nullptr ? std::span<const series_handle>{}
+                            : std::span<const series_handle>{entry->held};
+}
+
+std::optional<series_key> series_table::key_of(series_handle h) const noexcept {
+    const auto* r = row_of(h);
+    if (r == nullptr)
+        return std::nullopt;
+    return series_key{r->instance_id, r->account_id, r->series_id};
+}
+
+std::size_t series_table::watcher_total() const noexcept {
+    std::size_t total = 0;
+    for (std::uint32_t i = 0; i < layout_.capacity(); ++i) {
+        if (layout_.is_alive(i))
+            total += rows_[i].watchers;
+    }
+    return total;
 }
 
 void series_table::erase(series_handle h) {
     auto* r = row_of(h);
     if (r == nullptr)
         return;
+    if (r->watchers != 0)
+        changes_.push_back(h);
     resident_ -= ring_bytes(*r);
     const key_parts<3> key{r->instance_id, r->account_id, r->series_id};
     const key_parts<2> scope_key{r->instance_id, r->account_id};
@@ -325,6 +366,19 @@ std::size_t series_table::forget_scope(std::string_view instance_id,
     if (held.empty())
         scopes_.erase(entry);
     return held.size();
+}
+
+std::size_t series_table::forget_instance(std::string_view instance_id) {
+    std::vector<std::string> accounts;
+    for (const auto& [key, entry] : scopes_) {
+        static_cast<void>(entry);
+        if (key.parts[0] == instance_id)
+            accounts.push_back(key.parts[1]);
+    }
+    std::size_t removed = 0;
+    for (const auto& account : accounts)
+        removed += forget_scope(instance_id, account);
+    return removed;
 }
 
 void series_table::clear() {

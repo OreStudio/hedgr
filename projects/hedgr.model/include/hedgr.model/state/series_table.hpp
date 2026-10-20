@@ -81,6 +81,13 @@ struct series_info final {
     bool listed = false;
 };
 
+/** @brief The three names that identify a series, borrowed from its row. */
+struct series_key final {
+    std::string_view instance_id;
+    std::string_view account_id;
+    std::string_view series_id;
+};
+
 /** @brief Hashes a series id or a borrowed view of one alike. */
 struct series_id_hash final {
     using is_transparent = void;
@@ -184,16 +191,42 @@ public:
     /** @brief Whether @p h names a row that is still held. */
     [[nodiscard]] bool contains(series_handle h) const noexcept;
 
-    /** @brief Adds a watcher to a row. A stale handle is ignored. */
-    void acquire(series_handle h) noexcept;
+    /**
+     * @brief Adds a watcher to a row. A stale handle is ignored.
+     *
+     * A row going from none to one watcher is recorded as a change.
+     */
+    void acquire(series_handle h);
 
     /**
      * @brief Removes a watcher from a row.
      *
-     * When the count reaches zero the row counts as just released, and unwatched
-     * rows are evicted while the rings hold more than the budget.
+     * When the count reaches zero the row counts as just released and is
+     * recorded as a change, and unwatched rows are evicted while the rings
+     * hold more than the budget.
      */
     void release(series_handle h);
+
+    /**
+     * @brief Hands over the rows whose watch state may have flipped.
+     *
+     * Replaces the contents of @p out with every row that gained its first
+     * watcher, lost its last, was erased while watched, or whose catalogue
+     * description changed while watched, since the last call. A handle can
+     * appear more than once and may be stale by now, so a reader checks the
+     * row as it stands. Allocates nothing when no row changed.
+     */
+    void drain_changes(std::vector<series_handle>& out);
+
+    /** @brief The rows of one session, in the order they were interned. */
+    [[nodiscard]] std::span<const series_handle>
+    held(std::string_view instance_id, std::string_view account_id) const;
+
+    /** @brief The names of a row, or nothing for a stale handle. */
+    [[nodiscard]] std::optional<series_key> key_of(series_handle h) const noexcept;
+
+    /** @brief The watchers of every row added up, for an audit of the holders. */
+    [[nodiscard]] std::size_t watcher_total() const noexcept;
 
     /** @brief Removes a row now, whoever watches it. Its handle goes stale. */
     void erase(series_handle h);
@@ -258,6 +291,12 @@ public:
     std::size_t forget_scope(std::string_view instance_id,
         std::string_view account_id);
 
+    /**
+     * @brief Removes every row and catalogue of one instance, all accounts.
+     * @return the number of rows removed.
+     */
+    std::size_t forget_instance(std::string_view instance_id);
+
     /** @brief Removes every row and every catalogue. Stamps keep rising. */
     void clear();
 
@@ -299,7 +338,7 @@ private:
     [[nodiscard]] row* row_of(series_handle h) noexcept;
     [[nodiscard]] const row* row_of(series_handle h) const noexcept;
     [[nodiscard]] std::size_t ring_bytes(const row& r) const noexcept;
-    void refresh(row& r, const series_catalogue& catalogue);
+    bool refresh(row& r, const series_catalogue& catalogue);
     void evict_to_budget();
 
     composite_map<2, scope> scopes_;
@@ -310,6 +349,7 @@ private:
     std::size_t resident_ = 0;
     /** @brief The last stamp issued; never reset, so none repeats. */
     std::uint64_t counter_ = 0;
+    std::vector<series_handle> changes_;
 };
 
 }

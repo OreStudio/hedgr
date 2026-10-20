@@ -37,6 +37,7 @@ void grow(window_columns& columns, std::size_t count) {
     columns.state.resize(count);
     columns.session_instance.resize(count);
     columns.session_account.resize(count);
+    columns.series.resize(count);
 }
 
 }
@@ -57,6 +58,7 @@ window_handle window_table::insert(const domain::window_spec& spec) {
         spec.session ? spec.session->instance_id : std::string{};
     columns_.session_account[index] =
         spec.session ? spec.session->account_id : std::string{};
+    columns_.series[index].clear();
 
     const window_handle h{index, layout_.generation[index]};
     by_id_.emplace(columns_.id[index], h);
@@ -72,6 +74,7 @@ void window_table::remove(window_handle h) {
     columns_.session_generation[h.index] = 0;
     columns_.session_instance[h.index].clear();
     columns_.session_account[h.index].clear();
+    columns_.series[h.index].clear();
     layout_.release(h.index);
 }
 
@@ -142,6 +145,16 @@ std::optional<session_handle> window_table::session_of(window_handle h) const {
     if (!session.is_valid())
         return std::nullopt;
     return session;
+}
+
+std::span<const series_handle>
+window_table::series(window_handle h) const noexcept {
+    return columns_.series[h.index];
+}
+
+void window_table::set_series(window_handle h,
+    std::span<const series_handle> handles) {
+    columns_.series[h.index].assign(handles.begin(), handles.end());
 }
 
 domain::window_spec

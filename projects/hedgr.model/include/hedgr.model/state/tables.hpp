@@ -568,6 +568,14 @@ struct window_columns final {
      */
     std::vector<std::string> session_instance;
     std::vector<std::string> session_account;
+
+    /*
+     * The series each window holds, one list per window and empty for a kind
+     * that shows none. Written through window_table::set_series only, so the
+     * window service is the one place that pairs a write with the table's
+     * acquire and release.
+     */
+    std::vector<std::vector<series_handle>> series;
 };
 
 /**
@@ -621,6 +629,13 @@ public:
     void clear_session(window_handle h);
 
     [[nodiscard]] std::optional<session_handle> session_of(window_handle h) const;
+
+    /** @brief The series the window holds, or nothing for a kind with none. */
+    [[nodiscard]] std::span<const series_handle>
+    series(window_handle h) const noexcept;
+
+    /** @brief Replaces the series the window holds. */
+    void set_series(window_handle h, std::span<const series_handle> handles);
 
     /**
      * @brief The window's persisted description.

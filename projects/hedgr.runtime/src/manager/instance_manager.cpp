@@ -99,10 +99,11 @@ constexpr std::size_t probe_thread_count = 2;
 instance_manager::instance_manager(std::size_t pool_threads,
     worker::tick_feed_factory market_feeds)
     : pool_(pool_threads), probe_pool_(probe_thread_count)
-    , market_feed_(catalogue_.instances(), sessions_, window_service_.windows(),
-          read_service_.market(), seed_options_, std::move(market_feeds),
-          [this](std::string_view window_id) {
-              return read_service_.start_market_catalogue_read(window_id);
+    , market_feed_(catalogue_.instances(), sessions_, series_, seed_options_,
+          std::move(market_feeds),
+          [this](std::string_view instance_id, std::string_view account_id) {
+              return read_service_.start_market_catalogue_read(instance_id,
+                  account_id);
           },
           [this](std::string_view instance_id, std::string_view account_id,
                  std::string_view series_id) {
@@ -832,6 +833,18 @@ void instance_manager::complete_catalogue(service::catalogue_effect effect) {
         window_service_.unbind(*session);
         sessions_.remove(*session);
     }
+
+    /*
+     * The windows give back what they hold before the rows go, because a row
+     * is read through its handle. Nothing refers to a removed account's or
+     * instance's series after this, so its rows and catalogue are forgotten
+     * and the table does not keep them for the life of the process.
+     */
+    window_service_.release_scope(gone.instance_id, gone.account_id);
+    if (gone.account_id.empty())
+        series_.forget_instance(gone.instance_id);
+    else
+        series_.forget_scope(gone.instance_id, gone.account_id);
     static_cast<void>(save_windows());
 }
 

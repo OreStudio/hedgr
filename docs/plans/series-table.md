@@ -742,6 +742,56 @@ double release hides. Deleted in this PR: the per-frame derivation and its maps 
 `market_feed.cpp:135-232`, `live_windows` if nothing else uses it,
 `running_key`'s use in the feed.
 
+**Status: built.** A chart window holds its series, the table counts the holders,
+and `market_feed::pump` works from the table's change list. The open decisions
+took the recommended values and D4 stays out of scope.
+
+Deviations from the text above, each the smallest choice that left no ambiguity.
+
+- **Only charts hold a series.** A term structure window holds none. Nothing
+  reads a member ring until the actor plan's step 8, and acquiring the members
+  would open a live watch and a backfill for each with no consumer, which a user
+  would see as new traffic. `window_columns::series` is empty for every other
+  kind, and the term structure takes its handles with step 8.
+- **The series table moved to `instance_manager`.** The window service needs it
+  before the read service exists, so the manager owns it and hands a reference to
+  the window service, the read service and the feed. `read_service` no longer
+  owns a table.
+- **The feed has no window input.** `market_feed` lost its `window_table`. A
+  restored chart's catalogue read is asked for by session, through
+  `read_service::start_market_catalogue_read(instance, account)`, from the first
+  pass that finds a held row with no catalogue.
+- **What the change list records.** A row's first watcher, its last, an erase of a
+  watched row, and a catalogue apply that moved the `listed`, `uri` or `party_id`
+  of a watched row. A catalogue that changes nothing records nothing, so the 60 s
+  read costs the feed nothing. A full pass runs only when a stream opens, from
+  `series_table::held`.
+- **A failed catalogue read no longer drops watches.** The old derivation read the
+  catalogue state every frame and unwatched everything while the last read had
+  failed. The plan's rule (`watchers > 0`, listed, the session's party) does not
+  look at it, so a watched series stays watched through a transient failure and is
+  not backfilled again after it.
+- **The feed holds a session handle.** `session_table::find` builds a joined key
+  per call, which is one allocation per stream per frame. The stream entry keeps
+  the handle it was opened for and the sweep checks `contains` and `status`.
+- **`window_service::release_scope` and `series_table::forget_instance`.** Removing
+  an account or an instance makes its windows give back their holds, then forgets
+  the rows and the catalogue (MS-5). `rebind` and `open` of an existing window
+  re-hold, so an account that returns brings its charts back live.
+- **The holder audit** is `hedgr.runtime/tests/holder_audit.hpp`. It checks every
+  row's watchers against the valid handles the window table holds, the total
+  against `series_table::watcher_total`, and that no window holds a handle whose
+  row is gone.
+
+Mutations run against the finished code, all killed except one equivalent: skip
+`release` on close, skip `acquire` on restore, evict a watched row, no change on
+the first or last watcher, no change from a catalogue apply or an erase, skip the
+re-hold on rebind, a doubled acquire, no `release_scope`, no forget on removal,
+the party check dropped, no pass on stream open, no unwatch when a want is lost.
+Releasing before acquiring in `hold_series` changes nothing, because a window
+that keeps its series returns before either runs.
+
+
 ### 4. The chart plots from the ring
 
 The remaining half of AR-1. Closes the copy.

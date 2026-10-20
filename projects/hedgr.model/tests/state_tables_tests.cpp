@@ -1070,6 +1070,37 @@ TEST_CASE("a restored window keeps the session it was saved against",
     REQUIRE(stored.session->account_id == "acct-1");
 }
 
+TEST_CASE("a window holds the series handles it is given and none after it goes",
+    "[window]") {
+    using hedgr::model::domain::window_kind;
+    using hedgr::model::domain::window_spec;
+    using hedgr::model::state::series_handle;
+    using hedgr::model::state::window_table;
+
+    window_table windows;
+    window_spec spec;
+    spec.id = "chart:i:a:s-1";
+    spec.kind = window_kind::chart;
+    const auto handle = windows.insert(spec);
+    CHECK(windows.series(handle).empty());
+
+    const std::vector<series_handle> held{{3, 1}, {4, 2}};
+    windows.set_series(handle, held);
+    REQUIRE(windows.series(handle).size() == 2);
+    CHECK(windows.series(handle)[0] == held[0]);
+    CHECK(windows.series(handle)[1] == held[1]);
+
+    windows.set_series(handle, {});
+    CHECK(windows.series(handle).empty());
+
+    windows.set_series(handle, held);
+    windows.remove(handle);
+    spec.id = "chart:i:a:s-2";
+    const auto reused = windows.insert(spec);
+    CHECK(reused.index == handle.index);
+    CHECK(windows.series(reused).empty());
+}
+
 TEST_CASE("a CRM batch is kept per session and party", "[crm]") {
     crm_table table;
     table.set("i", "a", "p1", "majors", false,

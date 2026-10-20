@@ -70,6 +70,7 @@ public:
         const model::state::account_table& accounts,
         const model::state::session_table& sessions,
         const model::state::window_table& windows,
+        model::state::series_table& series,
         const session::transport::session_options& seed);
 
     /**
@@ -172,6 +173,10 @@ public:
     [[nodiscard]] std::optional<refusal>
     start_market_catalogue_read(std::string_view window_id);
 
+    /** @brief The same, for the session signed in as an instance and account. */
+    [[nodiscard]] std::optional<refusal> start_market_catalogue_read(
+        std::string_view instance_id, std::string_view account_id);
+
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
         std::string_view account_id, std::string_view series_id);
@@ -248,6 +253,10 @@ private:
     [[nodiscard]] std::optional<refusal>
     start_market_read(std::string_view window_id, std::string_view series_id);
 
+    /** @brief Starts a catalogue read (empty series) or a points read. */
+    [[nodiscard]] std::optional<refusal> launch_market_read(
+        worker::session_read read, std::string_view series_id);
+
     /** @brief Asks for one series' points, on the window's session. */
     [[nodiscard]] std::optional<refusal>
     start_market_points_read(std::string_view window_id,
@@ -284,7 +293,7 @@ private:
     std::unordered_set<std::string> failed_images_;
 
     /** @brief The market series, their catalogues and the points each holds. */
-    model::state::series_table market_;
+    model::state::series_table& market_;
 
     /** @brief Points answers dropped for a series nobody holds. */
     std::size_t unheld_points_ = 0;

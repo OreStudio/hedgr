@@ -22,6 +22,7 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/refusal.hpp"
 #include "hedgr.runtime/service/window_traits.hpp"
@@ -74,7 +75,14 @@ struct open_outcome final {
  */
 class window_service final {
 public:
-    explicit window_service(const model::state::session_table& sessions);
+    /**
+     * @param series the table whose watchers the open windows are. A window
+     * that shows a series interns it and acquires it, and gives it back when
+     * it closes, so the table's watcher count is the number of windows
+     * holding a row.
+     */
+    window_service(const model::state::session_table& sessions,
+        model::state::series_table& series);
 
     [[nodiscard]] const model::state::window_table& windows() const noexcept {
         return windows_;
@@ -134,11 +142,36 @@ public:
      */
     void unbind(model::state::session_handle session);
 
+    /**
+     * @brief Makes every window of one instance stop holding its series.
+     *
+     * An empty @p account_id means every account of the instance. The windows
+     * stay open and keep their place on the wall. Called before the rows are
+     * forgotten, because a handle is read through its row.
+     */
+    void release_scope(std::string_view instance_id,
+        std::string_view account_id);
+
     /** @brief Writes every window. The refusal to raise, or nothing. Needs a store. */
     [[nodiscard]] std::optional<refusal> save_windows();
 
 private:
+    /**
+     * @brief Makes the window hold exactly the series its state names.
+     *
+     * Idempotent. A series already held keeps its watcher, so a window that is
+     * restored, rebound and reopened holds each series once. The scope is the
+     * session pair the window shows, which a restored window has before its
+     * session signs in.
+     */
+    void hold_series(model::state::window_handle window,
+        std::string_view instance_id, std::string_view account_id);
+
+    /** @brief Gives back every series the window holds. */
+    void drop_series(model::state::window_handle window);
+
     const model::state::session_table& sessions_;
+    model::state::series_table& series_;
     model::state::window_table windows_;
     std::unique_ptr<store::repository::window_repository> window_repo_;
     std::uint64_t next_window_serial_ = 1;
