@@ -250,8 +250,9 @@ interval and a recovered one on the next success. It cannot see a blip shorter
 than the interval, and it costs one request per interval. The upstream change
 removes both limits. Ask for it when step 3 is in review, not before.
 
-**E. The series table (Part D step 6), not landed.** What the actor needs from
-it:
+**E. The series table (Part D step 6), not landed.** Planned in
+`docs/plans/series-table.md`, which maps these three points to its steps. What
+the actor needs from it:
 
 1. A stable key for a watched series, so `set_watch` and the buckets coming back
    name a series by handle and not by `(instance, account, series id)` strings.
