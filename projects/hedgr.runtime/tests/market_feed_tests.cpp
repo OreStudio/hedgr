@@ -1082,6 +1082,30 @@ TEST_CASE("removing an account gives back what its charts held and forgets "
     hedgr::testing::audit_holders(*w.manager);
 }
 
+TEST_CASE("a chart whose account was removed and added back is live again",
+    "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    REQUIRE(w.feeds.at(0)->watches.size() == 1);
+
+    command remove;
+    remove.kind = command_kind::remove_account;
+    remove.instance_id = instance_id;
+    remove.account_id = "a-1";
+    w.push(std::move(remove));
+    CHECK(w.manager->market().size() == 0);
+    hedgr::testing::audit_holders(*w.manager);
+
+    w.sign_in("a-1");
+    REQUIRE(w.feeds.size() == 2);
+    w.set_catalogue("a-1", {row("s-1")});
+    CHECK(watches(w, *w.feeds.at(1), "a-1", {"s-1"}));
+    CHECK(w.manager->market().watchers(w.handle_of("a-1", "s-1")) == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
 TEST_CASE("removing an instance gives back what its charts held and forgets "
     "its series", "[feed]") {
     world w;

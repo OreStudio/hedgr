@@ -36,6 +36,8 @@ namespace hedgr::testing {
  * Every valid handle the window table holds is one watcher of its row, and no
  * row has a watcher no window accounts for. A reference count leaks silently,
  * so a lifecycle test calls this last and a leaked or doubled holder fails it.
+ * A window must not hold a handle whose row is gone either, which is what a
+ * removal that forgot the windows would leave behind.
  */
 inline void audit_holders(const runtime::manager::instance_manager& manager) {
     const auto& windows = manager.windows();
@@ -50,6 +52,7 @@ inline void audit_holders(const runtime::manager::instance_manager& manager) {
         const model::state::window_handle window{
             index, layout.generation[index]};
         for (const auto handle : windows.series(window)) {
+            CHECK(series.contains(handle));
             if (!series.contains(handle))
                 continue;
             ++held[{handle.index, handle.generation}];
