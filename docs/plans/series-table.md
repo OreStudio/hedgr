@@ -561,6 +561,52 @@ allocation per 7 appends and one free per 7 front pops.
 Risk is low, an addition. Deleted in this step: nothing. This is the only step in
 which two stores coexist, and step 2 must follow it.
 
+**Status: built.** `series_ring`, `series_table`, `series_bucket` and `series_handle`
+are in `hedgr.model`, tested by `series_table_tests.cpp`, used by nothing, with
+`market_table` untouched. The open decisions took the recommended values: D1 a
+sliding window with 25 percent slack, D2 a 256 MiB byte budget with watched rows
+never evicted, D5 merge by bucket id. D3 and D4 do not arise until step 2.
+
+Deviations from the text above, each the smallest choice that left no ambiguity.
+
+- **`acquire`, `release`, `erase`.** The staleness bullet says `release` frees the
+  slot and the eviction text says `release` drops a watcher. `acquire` and
+  `release` count watchers, and `release` evicts only when the count reaches zero
+  and the rings are over budget. `erase(handle)` frees the slot at once, which is
+  what eviction and `forget_scope` call. `set_budget` is added so a test can
+  set the pressure after the rows exist.
+- **A late bucket.** It stamps nothing, as planned. It still records
+  `observed_at_ns` and clears a failure, as `market_table` does, so the
+  differential compares both. Clearing a failure changes what the row shows, so
+  that one case stamps.
+- **A catalogue refresh never stamps a row.** The stamp says what the plot data
+  is. Changed `uri` or `party_id` reach a reader through `catalogue.generation`
+  and `info()`, not through the ring's stamp. The Stamps bullet's "a refresh that
+  changes no field" therefore reads "a refresh".
+- **Canonical URI.** `series_info::uri` is the catalogue row's `uri` as given.
+  `hedgr.model` links no ORE codec, so the canonicalisation named under "What
+  identifies a series" is the runtime's job and lands with step 2's `intern`
+  call sites.
+- **`catalogue_state`** is still the enum in `market_table.hpp`. It moves with
+  step 2, which deletes that header.
+- **Merge renumbers.** A seed that changes a ring moves `first_seq` past every
+  number issued before it, because points are inserted in the middle and no old
+  sequence number would name the same point. A cache holding one rebuilds, which
+  it does anyway because the stamp changed.
+- **The differential test** compares the six columns, the failure text,
+  `observed_at_ns` and `newest_at_ns`, not the stamps. The MS-7 difference is kept
+  out by whole-hour timestamps (bucket equality is time equality) in one run, and
+  in the other by seeding a row only before it holds a point.
+
+Mutations run against the finished code, 47 of them, all killed. That covers the
+ones this step names (one column fewer in the move, the oldest moved, `end`
+against capacity, `<` for `<=`, stamp before the late check, the generation
+compare in `owns`, seeded over live, key by `at_ns`, evict by data age, ignore
+watchers). Two survived the first draft of the tests and are now pinned: the
+release order of eviction and a release that leaves a watcher behind. A linear
+growth mutant changes no allocation count, because `std::vector::resize` grows
+geometrically by itself, and is killed only through the byte accounting.
+
 ### 2. The bucket path and the writers
 
 Replace the string with the handle from the delivery thread to the table, and

@@ -58,6 +58,7 @@ struct session_tag {};
 struct window_tag {};
 struct folder_tag {};
 struct label_tag {};
+struct series_tag {};
 
 using instance_handle = handle<instance_tag>;
 using account_handle = handle<account_tag>;
@@ -65,6 +66,7 @@ using session_handle = handle<session_tag>;
 using window_handle = handle<window_tag>;
 using folder_handle = handle<folder_tag>;
 using label_handle = handle<label_tag>;
+using series_handle = handle<series_tag>;
 
 /**
  * @brief Aliveness and generation counters shared by the live state tables.
