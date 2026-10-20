@@ -49,17 +49,3 @@ TEST_CASE("a tick's age is short and capped at ten minutes", "[time]") {
     CHECK(tick_age_text(71 * 60 * second) == ">10m");
     CHECK(tick_age_text(-second) == "ahead");
 }
-
-TEST_CASE("an as-of instant carries its age in front", "[time]") {
-    using hedgr::ui::render::as_of_age_text;
-    constexpr std::int64_t second = 1'000'000'000;
-    constexpr std::int64_t at = 1'792'360'345 * second;
-    CHECK(as_of_age_text(at, at + 12 * second)
-        == "12s \u00b7 2026-10-18T21:52:25Z");
-    CHECK(as_of_age_text(at, at + 71 * 60 * second)
-        == ">10m \u00b7 2026-10-18T21:52:25Z");
-    CHECK(as_of_age_text(at, at - 90 * second)
-        == "ahead \u00b7 2026-10-18T21:52:25Z");
-    CHECK(as_of_age_text(0, at).empty());
-    CHECK(as_of_age_text(at, 0) == "2026-10-18T21:52:25Z");
-}

@@ -43,6 +43,9 @@ constexpr int status_error_row_lines = 1;
 
 /** @brief The status and its timestamp, split where their colours change. */
 struct status_text final {
+    /** @brief The age and its separator, drawn in the state's colour. */
+    std::string age;
+
     /** @brief The ISO instant, with the updating note after it. */
     std::string timestamp;
 
@@ -59,6 +62,8 @@ struct status_text final {
  */
 [[nodiscard]] status_text build_status_text(const foot_state& state) {
     status_text text;
+    if (!state.age.empty())
+        text.age = state.age + " \u00b7 ";
     if (!state.as_of.empty())
         text.timestamp = state.as_of;
     if (state.updating)
@@ -283,8 +288,10 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
     const auto text = build_status_text(state);
     const float dot_side = ImGui::GetTextLineHeight() * 0.55f;
     const float dot_gap = style.ItemInnerSpacing.x;
-    const float timestamp_width = text.timestamp.empty()
-        ? 0.0f : ImGui::CalcTextSize(text.timestamp.c_str()).x;
+    const float age_width = text.age.empty()
+        ? 0.0f : ImGui::CalcTextSize(text.age.c_str()).x;
+    const float timestamp_width = age_width + (text.timestamp.empty()
+        ? 0.0f : ImGui::CalcTextSize(text.timestamp.c_str()).x);
     const float word_width = text.word.empty()
         ? 0.0f : ImGui::CalcTextSize(text.word.c_str()).x;
     const float head_width = text.word.empty()
@@ -335,13 +342,18 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
         x += combo_width(control) + gap;
     }
 
-    if (!text.timestamp.empty()) {
+    if (!text.age.empty() || !text.timestamp.empty()) {
         ImGui::SetCursorPos(ImVec2(state_x, line_y));
+        if (!text.age.empty()) {
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(state.colour),
+                "%s", text.age.c_str());
+            ImGui::SameLine(0.0f, 0.0f);
+        }
         ImGui::TextDisabled("%s", text.timestamp.c_str());
     }
 
     if (!text.word.empty()) {
-        const float head_x = text.timestamp.empty()
+        const float head_x = timestamp_width <= 0.0f
             ? state_x : state_x + timestamp_width + gap;
         ImGui::SetCursorPos(ImVec2(head_x, line_y));
         const ImVec2 dot_origin = ImGui::GetCursorScreenPos();
