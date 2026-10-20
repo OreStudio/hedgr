@@ -224,6 +224,15 @@ live session uses a different format. Test first, two instances with different
 formats, the second `connect_session` raises a condition and starts nothing.
 Needed before step 3. It can land today.
 
+Status: done. `instance_manager::wire_format_holder` finds a live session
+(connecting or authenticated) whose instance row has another format.
+`do_connect_session` raises a `session` condition naming both formats and the
+holder, before any credential is remembered or derived, and starts nothing.
+A probe's connect also writes the process-wide codec, so a probe waits, keeping
+its deadline, while a session holds another format. The deployment and policy
+reads connect too and are not guarded. The guard keys on the instance rows, so
+a row edited under a live session is not seen. Delete it when D2 is decided.
+
 **C. `session_link`, the seam.** One interface over what the workers and the
 actor call on a `session_client`, with a forwarding adapter and a fake. It is
 step 1, not a prerequisite, because it is a pure addition.

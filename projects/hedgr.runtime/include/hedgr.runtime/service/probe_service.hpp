@@ -48,6 +48,9 @@ namespace hedgr::runtime::service {
 using endpoint_for = std::function<session::transport::session_options(
     const model::domain::instance&)>;
 
+/** @brief Whether an instance may be probed now, or must wait. */
+using probe_allowed = std::function<bool(const model::domain::instance&)>;
+
 /**
  * @brief When each instance is probed next, which probes are in flight, and
  * what each last said.
@@ -82,9 +85,12 @@ public:
      * frame is already reflected in the deadline it reads. An instance with a
      * probe in flight is skipped: an instance is never probed twice at once,
      * because two probes racing on one instance would report two results for
-     * one moment and would spend two of the pool's two threads doing it.
+     * one moment and would spend two of the pool's two threads doing it. An
+     * instance @p allowed refuses keeps its deadline and is asked again next
+     * pump, so it is probed as soon as the refusal lifts.
      */
-    void pump_probes(bool started, const endpoint_for& endpoint);
+    void pump_probes(bool started, const endpoint_for& endpoint,
+        const probe_allowed& allowed);
 
     /** @brief Applies one probe's answer: the result, then the next deadline. */
     void apply_probe_result(const model::event::event& ev);
