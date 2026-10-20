@@ -22,7 +22,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <deque>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -147,14 +146,6 @@ struct market_point final {
     double value = 0.0;
 
     /**
-     * @brief The term this observation holds for a composite curve, or empty.
-     *
-     * A leaf series carries its tenor in its identity; a composite curve's
-     * observations name the term in their own URI.
-     */
-    std::string term;
-
-    /**
      * @brief The bucket's first value.
      *
      * Zero on a point that was not built from a bucket, which a candle reads
@@ -168,75 +159,6 @@ struct market_point final {
 
     /** @brief The lowest value in the bucket. */
     double low = 0.0;
-};
-
-/**
- * @brief One series' plotted points and how the last read went.
- *
- * The points and the failure are one value because a screen draws them
- * together: a read that failed must not leave the previous points looking
- * current, and a read that succeeded must clear the last failure.
- */
-struct market_series_snapshot final {
-    /** @brief One second buckets, two hours. */
-    std::deque<market_point> fine;
-
-    /** @brief One minute buckets, two days. */
-    std::deque<market_point> medium;
-
-    /** @brief One hour buckets, thirty days. */
-    std::deque<market_point> coarse;
-
-    /** @brief When the last read or tick arrived, on the monotonic clock. */
-    std::int64_t observed_at_ns = 0;
-
-    /** @brief Why the last read failed, or empty. */
-    std::string failure;
-
-    /**
-     * @brief Changes whenever anything above changes, and never repeats.
-     *
-     * The table stamps it from one counter for every chart, so a window that
-     * kept plot data derived from a snapshot rebuilds exactly when the stamp
-     * it kept differs, including after it switched to another chart.
-     */
-    std::uint64_t version = 0;
-
-    /** @brief The buckets of one level, oldest first. */
-    [[nodiscard]] const std::deque<market_point>&
-    level(market_level which) const noexcept {
-        switch (which) {
-        case market_level::fine:
-            return fine;
-        case market_level::medium:
-            return medium;
-        case market_level::coarse:
-            return coarse;
-        }
-        return fine;
-    }
-
-    /**
-     * @brief The newest observation at any level, on the market's clock.
-     *
-     * A level publishes a bucket only once the next bucket opens, so a coarse
-     * level trails the feed by up to its bucket width. Freshness and the as-of
-     * time read the newest point the feed has published, whichever level the
-     * plot happens to draw. Zero when there is none.
-     */
-    [[nodiscard]] std::int64_t newest_at_ns() const noexcept {
-        std::int64_t newest = 0;
-        for (const auto* points : {&fine, &medium, &coarse}) {
-            if (!points->empty())
-                newest = std::max(newest, points->back().at_ns);
-        }
-        return newest;
-    }
-
-    /** @brief Whether this snapshot holds a completed read or a tick. */
-    [[nodiscard]] bool is_read() const noexcept {
-        return observed_at_ns != 0 && failure.empty();
-    }
 };
 
 }

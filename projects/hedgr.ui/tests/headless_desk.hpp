@@ -81,7 +81,7 @@ struct desk final {
     model::state::label_table labels;
     model::state::labelling_table labellings;
     model::state::session_table sessions;
-    model::state::market_table market;
+    model::state::series_table market;
     model::state::term_structure_table term_structures;
     model::state::crm_table crm;
     model::state::tenant_image_map currency_images;

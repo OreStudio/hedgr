@@ -41,7 +41,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
@@ -86,6 +86,7 @@ using hedgr::model::domain::readiness;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::shortcut;
 using hedgr::model::domain::window_kind;
+using hedgr::model::domain::market_level;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::catalogue_state;
@@ -2525,9 +2526,9 @@ TEST_CASE("a points answer fills the table and frees the series for the next rea
     push_command(manager, refresh(chart_id));
 
     const auto points_version = [&manager]() -> std::uint64_t {
-        const auto* held =
-            manager.market().points(read_instance, read_account, "s-1");
-        return held == nullptr ? 0 : held->version;
+        const auto held =
+            manager.market().find(read_instance, read_account, "s-1");
+        return held ? manager.market().version(*held) : 0;
     };
 
     const auto first = wait_until([&] {
@@ -2536,8 +2537,8 @@ TEST_CASE("a points answer fills the table and frees the series for the next rea
     }, std::chrono::seconds(10));
     REQUIRE(first);
     const auto after_first = points_version();
-    CHECK_FALSE(manager.market().points(read_instance, read_account, "s-1")
-                    ->failure.empty());
+    CHECK_FALSE(manager.market().failure(
+        *manager.market().find(read_instance, read_account, "s-1")).empty());
 
     /*
      * The first answer cleared the series' mark, so a second request is a read
@@ -2559,11 +2560,58 @@ TEST_CASE("a points answer fills the table and frees the series for the next rea
     answer.observed_at_ns = 5;
     manager.events().push(answer);
     manager.pump();
-    const auto* filled =
-        manager.market().points(read_instance, read_account, "s-1");
-    REQUIRE(filled != nullptr);
-    CHECK(filled->failure.empty());
-    CHECK(filled->version != after_second);
+    const auto filled =
+        manager.market().find(read_instance, read_account, "s-1");
+    REQUIRE(filled.has_value());
+    CHECK(manager.market().failure(*filled).empty());
+    CHECK(manager.market().version(*filled) != after_second);
+    manager.stop();
+}
+
+TEST_CASE("a points answer for a series nobody holds is dropped and counted",
+    "[runtime][reads]") {
+    const temporary_database database("points-unheld");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    const auto answer = [](std::string series_id, std::string message) {
+        event fact;
+        fact.kind = event_kind::series_points;
+        fact.instance_id = read_instance;
+        fact.account_id = read_account;
+        fact.series_id = std::move(series_id);
+        fact.message = std::move(message);
+        fact.points = {{.at_ns = 1'000'000'000, .value = 1.5}};
+        fact.observed_at_ns = 5;
+        return fact;
+    };
+
+    /* Nothing holds s-9, so neither a success nor a failure makes a row. */
+    manager.events().push(answer("s-9", {}));
+    manager.events().push(answer("s-9", "no responder"));
+    manager.pump();
+    CHECK(manager.unheld_points() == 2);
+    CHECK_FALSE(manager.market().find(read_instance, read_account, "s-9")
+                    .has_value());
+    CHECK(manager.market().size() == 0);
+
+    /* A chart's refresh interns its series, so its answer is kept. */
+    push_command(manager,
+        open_window(window_kind::chart, read_instance, read_account, "s-1"));
+    const auto chart = find_window_of_kind(manager, window_kind::chart);
+    REQUIRE(chart.has_value());
+    push_command(manager, refresh(std::string{manager.windows().id(*chart)}));
+    const auto held =
+        manager.market().find(read_instance, read_account, "s-1");
+    REQUIRE(held.has_value());
+
+    manager.events().push(answer("s-1", {}));
+    manager.pump();
+    CHECK(manager.unheld_points() == 2);
+    const auto fine = manager.market().columns(*held, market_level::fine);
+    REQUIRE(fine.size == 1);
+    CHECK(fine.value[0] == 1.5);
     manager.stop();
 }
 

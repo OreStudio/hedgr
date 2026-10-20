@@ -655,6 +655,52 @@ live feed: that the real cnats delivery thread publishes as the unit test does.
 `market-eventing.md` verified the live path once, on 17 October 2026 against
 brave_hopper. The same check is repeated before this lands.
 
+**Status: built.** `market_table` is gone and `series_table` is the one store.
+Three commits in one pull request, because no seam leaves a build with one
+store: the bucket path, writers and readers together (the ring's slot type
+breaks the producer and the consumer at once), then the deletion. The
+differential test of step 1 was run against the final `series_table` code
+(2 cases, 4,578 assertions, passed) and then deleted with `market_table`.
+
+Deviations from the text above, each the smallest choice that left no ambiguity.
+
+- **Canonicalisation lives in `market_feed`.** The feed calls
+  `session::market::canonical_series_uri` (the existing ORE `oresmd_uri_codec`,
+  `series_of`, `write` path) once, when it first watches a series, and passes the
+  result to `tick_feed::watch`. A URI the codec does not read is not watched, is
+  logged once and is still interned and backfilled, as before. `series_info::uri`
+  stays the catalogue row's URI as given, so the model needs no codec. The sink's
+  `watch` takes the canonical string and returns nothing.
+- **The feed holds what it watches.** `market_feed` calls `acquire` when it
+  watches a series and `release` when it unwatches, retires a stream or closes
+  one. Without it a watched row has zero watchers and the budget could evict it
+  under a live chart. Step 3 moves the holder from the feed to the windows.
+- **Stale and late are counted by the feed** (`stale_buckets()`,
+  `late_buckets()`) and the unheld backfill answers by `read_service`
+  (`unheld_points()`). All three are readable through `instance_manager`.
+- **`tick_sink` keeps one map and no vector.** Each aggregator carries its handle,
+  and `unwatch` and a re-watch find it by a scan of the map under `mu_`. A watch
+  set is hundreds of entries and changes on a window open or close, so the scan
+  costs less than a second structure kept in step. A second watch of one URI by a
+  different handle keeps the first aggregator, as the old code did.
+- **Accessor names are kept.** `instance_manager::market()`, `render_input::market`
+  and `desk.market` return a `series_table` and keep their names, so the headless
+  frame tests change by type and by the calls the table renamed.
+- **The "stale" bucket test uses a crafted handle.** The runtime has no path that
+  releases a series row yet (that is step 3), so the feed test hands the drain the
+  handle a released series would have held, its slot and the generation before the
+  occupant's. The release and reuse itself is pinned in `series_table_tests.cpp`.
+- **`market_point::term` was dead in the model only.** The session transport's
+  own `market_point` keeps its `term`, which the term structure worker reads.
+- **`market_feed_tests.cpp` rows carry real series URIs.** The feed canonicalises
+  before it watches, so the fixture's `oresmd://test/<id>` could not be watched.
+  The non-series case moved from the sink to the feed.
+- **The chart still copies.** `update_chart_plot` takes `series_columns` and fills
+  `xs` and `ys` from the `at_s` and `value` columns, as planned for this step.
+
+Mutations run against the finished code, all killed, listed in the pull request.
+
+
 ### 3. Holders and the watch set
 
 A window holds handles, and the feed reacts to a change list. Closes SR-11, AR-3

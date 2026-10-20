@@ -20,7 +20,7 @@
 #include "allocation_counter.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include <catch2/catch_all.hpp>
@@ -51,20 +51,24 @@ constexpr int lookups = 1000;
 }
 
 TEST_CASE("looking up a held chart allocates nothing", "[cost][market]") {
-    hedgr::model::state::market_table market;
-    market.set_catalogue(instance, account, {});
-    market.set_points(instance, account, series,
-        {{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
+    hedgr::model::state::series_table market;
+    market.apply_catalogue(instance, account, {});
+    const auto held = market.intern(instance, account, series);
+    const std::vector<hedgr::model::domain::market_point> observed{
+        {.at_ns = 1'000'000'000, .value = 1.1}};
+    market.seed(held, observed, 1);
 
     const auto before = allocations();
     std::size_t found = 0;
     for (int i = 0; i < lookups; ++i) {
-        found += market.points(instance, account, series) != nullptr;
+        found += market.find(instance, account, series).has_value();
         found += market.catalogue(instance, account) != nullptr;
+        found += market.columns(held, hedgr::model::domain::market_level::fine)
+                     .size;
     }
     CHECK(allocations() - before == 0);
-    CHECK(found == 2 * lookups);
-    CHECK(market.points(instance, account, party) == nullptr);
+    CHECK(found == 3 * lookups);
+    CHECK_FALSE(market.find(instance, account, party).has_value());
     CHECK(market.catalogue(instance, party) == nullptr);
 }
 
@@ -121,16 +125,17 @@ TEST_CASE("looking up a held flag allocates nothing", "[cost][images]") {
 
 TEST_CASE("the cost of one chart lookup", "[!benchmark][market]") {
     constexpr std::size_t charts = 200;
-    hedgr::model::state::market_table market;
+    hedgr::model::state::series_table market;
+    const std::vector<hedgr::model::domain::market_point> observed{
+        {.at_ns = 1'000'000'000, .value = 1.1}};
     std::vector<std::string> ids;
     for (std::size_t i = 0; i < charts; ++i) {
         ids.push_back(series + std::to_string(i));
-        market.set_points(instance, account, ids.back(),
-            {{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
+        market.seed(market.intern(instance, account, ids.back()), observed, 1);
     }
     std::size_t next = 0;
-    BENCHMARK("market_table::points over 200 charts") {
+    BENCHMARK("series_table::find over 200 charts") {
         next = (next + 1) % charts;
-        return market.points(instance, account, ids[next]);
+        return market.find(instance, account, ids[next]);
     };
 }

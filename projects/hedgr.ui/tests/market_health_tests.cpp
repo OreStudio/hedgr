@@ -80,9 +80,10 @@ TEST_CASE("a chart on a one-day period is live while its feed ticks",
      * its newest point trails the feed. The second level has a point from a
      * second ago.
      */
-    desk.market.append_point("i", "a", "s", model::domain::market_level::medium,
+    const auto series = desk.market.intern("i", "a", "s");
+    desk.market.append(series, model::domain::market_level::medium,
         {.at_ns = now - 50 * second, .value = 1.25}, 1);
-    desk.market.append_point("i", "a", "s", model::domain::market_level::fine,
+    desk.market.append(series, model::domain::market_level::fine,
         {.at_ns = now - second, .value = 1.26}, 2);
 
     render::window_ui_state state;

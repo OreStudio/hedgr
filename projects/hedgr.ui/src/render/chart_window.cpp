@@ -34,7 +34,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <deque>
 #include <ctime>
 #include <format>
 #include <string>
@@ -190,31 +189,30 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::PopID();
         return;
     }
-    const auto* snapshot = input.market.points(
-        input.sessions.instance_id(*session),
+    const auto& series = input.market;
+    const auto row = series.find(input.sessions.instance_id(*session),
         input.sessions.account_id(*session), chart->series_id);
-    const bool reading = snapshot == nullptr
-        || (!snapshot->is_read() && snapshot->failure.empty());
+    const bool reading = !row
+        || (series.observed_at_ns(*row) == 0 && series.failure(*row).empty());
 
     const auto span_ns = chart_span_ns(state.market_view.chart_span);
-    static const std::deque<domain::market_point> no_points;
-    const auto& points = snapshot != nullptr
-        ? snapshot->level(level_for(span_ns))
-        : no_points;
-    const std::int64_t as_of_ns =
-        snapshot != nullptr ? snapshot->newest_at_ns() : 0;
+    const hedgr::model::state::series_columns points = row
+        ? series.columns(*row, level_for(span_ns))
+        : hedgr::model::state::series_columns{};
+    const std::int64_t as_of_ns = row ? series.newest_at_ns(*row) : 0;
     const auto health = domain::assess_data_health(as_of_ns,
         input.wall_now_ns, domain::fx_health_thresholds);
     auto& plot = state.plot;
     update_chart_plot(plot,
-        chart_plot_key{.version = snapshot != nullptr ? snapshot->version : 0,
+        chart_plot_key{.version = row ? series.version(*row) : 0,
             .span_ns = span_ns,
             .candles = state.market_view.chart_style == 0,
             .ema = state.market_view.chart_ema != 0},
         points);
     const std::size_t start = plot.start;
-    const double first = points.empty() ? 0.0 : points[start].value;
-    const double last = points.empty() ? 0.0 : points.back().value;
+    const bool no_points = points.size == 0;
+    const double first = no_points ? 0.0 : points.value[start];
+    const double last = no_points ? 0.0 : points.value[points.size - 1];
     const double change = last - first;
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
@@ -245,7 +243,7 @@ void render_chart(window_handle handle, const render_input& input,
      * so the plot gets the rest of the window.
      */
     ImGui::TextUnformatted(chart->label.c_str());
-    if (!points.empty()) {
+    if (!no_points) {
         const double percent =
             first != 0.0 ? change / first * 100.0 : 0.0;
         const ImVec4 tint = health_tint(health,
@@ -257,7 +255,7 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::TextColored(tint, "%+.2f%%", percent);
         ImGui::PopFont();
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::TextDisabled("%zu points", points.size() - start);
+        ImGui::TextDisabled("%zu points", points.size - start);
         if (span_ns == 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 All points");
@@ -268,10 +266,11 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::SameLine();
     draw_series_flags(input, *session, chart->label);
 
-    if (snapshot != nullptr && !snapshot->failure.empty()) {
+    if (row && !series.failure(*row).empty()) {
+        const auto failure = series.failure(*row);
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
-            "%s", snapshot->failure.c_str());
+            "%.*s", static_cast<int>(failure.size()), failure.data());
     }
 
     const float foot_height = widget::status_foot_height(status, foot);
@@ -283,7 +282,7 @@ void render_chart(window_handle handle, const render_input& input,
             ImGuiChildFlags_None)) {
         if (reading) {
             ImGui::TextDisabled("Reading the series...");
-        } else if (points.empty()) {
+        } else if (no_points) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
             const auto& xs = plot.xs;

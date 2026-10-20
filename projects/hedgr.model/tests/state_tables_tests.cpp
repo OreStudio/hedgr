@@ -33,7 +33,6 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/estate_history.hpp"
 #include "hedgr.model/state/probe_table.hpp"
-#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include <catch2/catch_all.hpp>
 #include <array>
@@ -854,189 +853,62 @@ TEST_CASE("four estate polls read back as four different buckets", "[probe]") {
             != history.at(index - 1).observed_at_ns);
 }
 
-TEST_CASE("the market table keeps a catalogue per session and points per chart",
-    "[market]") {
-    using hedgr::model::domain::market_point;
-    using hedgr::model::domain::market_series_row;
-    using hedgr::model::state::catalogue_state;
-    using hedgr::model::state::market_table;
-
-    market_table market;
-    REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
-
-    market.begin_catalogue("i-1", "a-1");
-    REQUIRE(market.catalogue("i-1", "a-1")->state == catalogue_state::reading);
-
-    market.set_catalogue("i-1", "a-1", std::vector<market_series_row>{
-        {.id = "s-1", .uri = "oresmd://fx/GBP?ccy=USD", .label = "FX GBP/USD",
-            .asset_class = "FX", .producer_kind = "SYNTHETIC", .party_id = "p-1"}});
-    market.set_catalogue("i-2", "a-2", std::vector<market_series_row>{
-        {.id = "s-9", .uri = "oresmd://ir/GBP?tenor=1D", .label = "IR GBP 1D",
-            .asset_class = "IR", .producer_kind = "SYNTHETIC", .party_id = "p-2"}});
-
-    /*
-     * Two instances, two accounts, two catalogues. One login's list is not
-     * another's, and the pair is the key.
-     */
-    REQUIRE(market.catalogue("i-1", "a-1")->series.size() == 1);
-    REQUIRE(market.catalogue("i-2", "a-2")->series.size() == 1);
-    REQUIRE(market.catalogue("i-1", "a-2") == nullptr);
-
-    REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
-    market.set_points("i-1", "a-1", "s-1",
-        std::vector<market_point>{{.at_ns = 2'000'000'000, .value = 1.2},
-            {.at_ns = 1'000'000'000, .value = 1.1}},
-        10);
-    const auto* points = market.points("i-1", "a-1", "s-1");
-    REQUIRE(points != nullptr);
-    REQUIRE(points->is_read());
-    REQUIRE(points->fine.size() == 2);
-
-    /* A failed read keeps the points and says the read failed. */
-    market.fail_points("i-1", "a-1", "s-1", "no responder", 20);
-    REQUIRE_FALSE(points->is_read());
-    REQUIRE(points->fine.size() == 2);
-    REQUIRE(points->failure == "no responder");
-
-    market.clear();
-    REQUIRE(market.catalogue("i-1", "a-1") == nullptr);
-    REQUIRE(market.points("i-1", "a-1", "s-1") == nullptr);
-}
-
-TEST_CASE("every change to a chart stamps a version no chart held before",
-    "[market]") {
-    using hedgr::model::domain::market_level;
-    using hedgr::model::domain::market_point;
-    using hedgr::model::state::market_table;
-
-    market_table market;
-    market.set_points("i", "a", "s-1",
-        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
-    const auto* one = market.points("i", "a", "s-1");
-    const auto seeded = one->version;
-    CHECK(seeded != 0);
-
-    market.set_points("i", "a", "s-2",
-        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
-    const auto other = market.points("i", "a", "s-2")->version;
-    CHECK(other != seeded);
-    CHECK(one->version == seeded);
-
-    market.append_point("i", "a", "s-1", market_level::fine,
-        market_point{.at_ns = 2'000'000'000, .value = 1.2}, 2);
-    const auto appended = one->version;
-    CHECK(appended != seeded);
-    CHECK(appended != other);
-
-    /* A replaced newest bucket changes no size and no time, only the value. */
-    market.append_point("i", "a", "s-1", market_level::fine,
-        market_point{.at_ns = 2'000'000'000, .value = 1.3}, 3);
-    CHECK(one->version != appended);
-
-    const auto before_failure = one->version;
-    market.fail_points("i", "a", "s-1", "no responder", 4);
-    CHECK(one->version != before_failure);
-
-    const auto last = one->version;
-    market.clear();
-    market.set_points("i", "a", "s-1",
-        std::vector<market_point>{{.at_ns = 1'000'000'000, .value = 1.1}}, 1);
-    CHECK(market.points("i", "a", "s-1")->version > last);
-}
-
-TEST_CASE("a backfill fills all three levels and live points win",
-    "[market]") {
-    using hedgr::model::domain::market_level;
-    using hedgr::model::domain::market_point;
-    using hedgr::model::state::market_table;
-
-    market_table market;
-    market.set_points("i-1", "a-1", "s-1",
-        std::vector<market_point>{
-            {.at_ns = 1'000'000'000, .value = 1.0},
-            {.at_ns = 1'500'000'000, .value = 2.0},
-            {.at_ns = 2'000'000'000, .value = 3.0},
-            {.at_ns = 61'000'000'000, .value = 4.0}},
-        10);
-
-    const auto* snapshot = market.points("i-1", "a-1", "s-1");
-    REQUIRE(snapshot != nullptr);
-    REQUIRE(snapshot->fine.size() == 3);
-    REQUIRE(snapshot->fine.front().open == 1.0);
-    REQUIRE(snapshot->fine.front().high == 2.0);
-    REQUIRE(snapshot->fine[1].high == 3.0);
-    REQUIRE(snapshot->fine.back().value == 4.0);
-    REQUIRE(snapshot->medium.size() == 2);
-    REQUIRE(snapshot->coarse.size() == 1);
-
-    market.append_point("i-1", "a-1", "s-1", market_level::fine,
-        market_point{.at_ns = 62'000'000'000, .value = 5.0}, 20);
-    REQUIRE(snapshot->fine.back().value == 5.0);
-
-    /* A point older than the newest bucket is dropped, not rewritten. */
-    market.append_point("i-1", "a-1", "s-1", market_level::fine,
-        market_point{.at_ns = 500'000'000, .value = 9.0}, 21);
-    REQUIRE(snapshot->fine.back().value == 5.0);
-
-    /* The backfill saw 4.0 where the subscription already has 5.0. */
-    market.set_points("i-1", "a-1", "s-1",
-        std::vector<market_point>{
-            {.at_ns = 62'000'000'000, .value = 4.0}},
-        22);
-    REQUIRE(snapshot->fine.back().value == 5.0);
-}
-
 TEST_CASE("the bucket ring keeps order and drops when full", "[ring]") {
     using hedgr::model::domain::market_level;
-    using hedgr::model::domain::market_point;
     using hedgr::model::state::bucket_ring;
-    using hedgr::model::state::market_bucket;
+    using hedgr::model::state::series_bucket;
+    using hedgr::model::state::series_handle;
 
     bucket_ring ring;
-    std::vector<market_bucket> out;
+    std::vector<series_bucket> out;
+    const series_handle first{1, 1};
+    const series_handle second{2, 1};
+    const series_handle third{3, 1};
 
     for (int i = 0; i < 10; ++i) {
-        REQUIRE(ring.try_push(market_bucket{.series_id = "s-1",
-            .level = market_level::fine,
-            .point = market_point{.at_ns = i, .value = static_cast<double>(i)}}));
+        REQUIRE(ring.try_push(series_bucket{.series = first,
+            .at_ns = i, .value = static_cast<double>(i),
+            .level = market_level::fine}));
     }
     REQUIRE(ring.drain(out) == 10);
     REQUIRE(out.size() == 10);
-    REQUIRE(out.front().point.at_ns == 0);
-    REQUIRE(out.back().point.at_ns == 9);
+    REQUIRE(out.front().at_ns == 0);
+    REQUIRE(out.back().at_ns == 9);
+    REQUIRE(out.back().series == first);
     REQUIRE(ring.high_water() == 10);
 
     for (std::size_t i = 0; i < bucket_ring::capacity + 5; ++i) {
-        ring.try_push(market_bucket{.series_id = "s-2",
-            .level = market_level::medium,
-            .point = market_point{.at_ns = static_cast<std::int64_t>(i),
-                .value = 1.0}});
+        ring.try_push(series_bucket{.series = second,
+            .at_ns = static_cast<std::int64_t>(i), .value = 1.0,
+            .level = market_level::medium});
     }
     REQUIRE(ring.dropped() == 5);
     REQUIRE(ring.drain(out) == bucket_ring::capacity);
-    REQUIRE(out.back().point.at_ns
+    REQUIRE(out.back().at_ns
         == static_cast<std::int64_t>(bucket_ring::capacity - 1));
+    REQUIRE(out.back().series == second);
 
     /* The ring wraps: the indices are taken modulo the capacity. */
     for (std::int64_t i = 0; i < 3; ++i) {
-        ring.try_push(market_bucket{.series_id = "s-3",
-            .level = market_level::coarse,
-            .point = market_point{.at_ns = i, .value = 2.0}});
+        ring.try_push(series_bucket{.series = third, .at_ns = i,
+            .value = 2.0, .level = market_level::coarse});
     }
     REQUIRE(ring.drain(out) == 3);
-    REQUIRE(out.front().point.at_ns == 0);
-    REQUIRE(out.back().point.at_ns == 2);
+    REQUIRE(out.front().at_ns == 0);
+    REQUIRE(out.back().at_ns == 2);
 }
 
 TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     using hedgr::model::domain::market_level;
     using hedgr::model::state::bucket_aggregator;
     using hedgr::model::state::bucket_ring;
-    using hedgr::model::state::market_bucket;
+    using hedgr::model::state::series_bucket;
+    using hedgr::model::state::series_handle;
 
     bucket_ring ring;
-    bucket_aggregator aggregator{"s-1", ring};
-    std::vector<market_bucket> out;
+    const series_handle series{4, 2};
+    bucket_aggregator aggregator{series, ring};
+    std::vector<series_bucket> out;
 
     aggregator.on_tick(200'000'000, 1.0);
     aggregator.on_tick(800'000'000, 2.0);
@@ -1044,23 +916,25 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
 
     aggregator.on_tick(1'200'000'000, 3.0);
     REQUIRE(ring.drain(out) == 1);
+    REQUIRE(out.front().series == series);
     REQUIRE(out.front().level == market_level::fine);
-    REQUIRE(out.front().point.at_ns == 800'000'000);
-    REQUIRE(out.front().point.value == 2.0);
-    REQUIRE(out.front().point.open == 1.0);
-    REQUIRE(out.front().point.high == 2.0);
-    REQUIRE(out.front().point.low == 1.0);
+    REQUIRE(out.front().at_ns == 800'000'000);
+    REQUIRE(out.front().value == 2.0);
+    REQUIRE(out.front().open == 1.0);
+    REQUIRE(out.front().high == 2.0);
+    REQUIRE(out.front().low == 1.0);
 
     aggregator.on_tick(61'200'000'000, 4.0);
     REQUIRE(ring.drain(out) == 2);
     REQUIRE(out[0].level == market_level::fine);
-    REQUIRE(out[0].point.value == 3.0);
+    REQUIRE(out[0].value == 3.0);
     REQUIRE(out[1].level == market_level::medium);
-    REQUIRE(out[1].point.at_ns == 1'200'000'000);
-    REQUIRE(out[1].point.open == 1.0);
-    REQUIRE(out[1].point.high == 3.0);
-    REQUIRE(out[1].point.low == 1.0);
-    REQUIRE(out[1].point.value == 3.0);
+    REQUIRE(out[1].series == series);
+    REQUIRE(out[1].at_ns == 1'200'000'000);
+    REQUIRE(out[1].open == 1.0);
+    REQUIRE(out[1].high == 3.0);
+    REQUIRE(out[1].low == 1.0);
+    REQUIRE(out[1].value == 3.0);
 
     /* A late tick is dropped by every level, not written out of order. */
     aggregator.on_tick(500'000'000, 9.0);
@@ -1069,9 +943,9 @@ TEST_CASE("ticks close their own bucket at each resolution", "[aggregator]") {
     aggregator.on_tick(122'400'000'000, 5.0);
     REQUIRE(ring.drain(out) == 2);
     REQUIRE(out[0].level == market_level::fine);
-    REQUIRE(out[0].point.value == 4.0);
+    REQUIRE(out[0].value == 4.0);
     REQUIRE(out[1].level == market_level::medium);
-    REQUIRE(out[1].point.value == 4.0);
+    REQUIRE(out[1].value == 4.0);
     REQUIRE(aggregator.ticks() == 6);
 }
 

@@ -17,11 +17,14 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "allocation_counter.hpp"
+#include "hedgr.model/state/series_bucket.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <arpa/inet.h>
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <chrono>
 #include <netinet/in.h>
 #include <string>
@@ -32,10 +35,14 @@
 
 namespace {
 
-using hedgr::model::state::market_bucket;
+using hedgr::model::state::series_bucket;
+using hedgr::model::state::series_handle;
 using hedgr::runtime::worker::tick_sink;
 using hedgr::session::market::canonical_series_uri;
 using hedgr::session::market::tick;
+
+constexpr series_handle fx_handle{1, 1};
+constexpr series_handle swap_handle{2, 1};
 
 constexpr auto fx_series =
     "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate&ccy=USD";
@@ -51,12 +58,20 @@ tick tick_for(const char* series_uri, std::int64_t at_ns, double value) {
     return tick{.series_uri = *key, .at_ns = at_ns, .value = value};
 }
 
-std::vector<std::string> series_ids(std::vector<market_bucket>& buckets) {
-    std::vector<std::string> ids;
+std::vector<series_handle> series_of_buckets(
+    std::vector<series_bucket>& buckets) {
+    std::vector<series_handle> handles;
     for (const auto& bucket : buckets)
-        ids.push_back(bucket.series_id);
+        handles.push_back(bucket.series);
     buckets.clear();
-    return ids;
+    return handles;
+}
+
+/** @brief The canonical URI the feed hands the sink for @p series_uri. */
+std::string canonical(const char* series_uri) {
+    const auto key = canonical_series_uri(series_uri);
+    REQUIRE(key.has_value());
+    return *key;
 }
 
 /**
@@ -103,10 +118,10 @@ TEST_CASE("the sink keeps the ticks of watched series and drops the rest",
     "[market_stream]") {
     constexpr std::int64_t second = 1'000'000'000;
     tick_sink sink;
-    std::vector<market_bucket> buckets;
+    std::vector<series_bucket> buckets;
 
-    REQUIRE(sink.watch("fx-1", fx_series));
-    REQUIRE(sink.watch("swap-1", swap_series));
+    sink.watch(fx_handle, canonical(fx_series));
+    sink.watch(swap_handle, canonical(swap_series));
     REQUIRE(sink.watched() == 2);
 
     /*
@@ -119,31 +134,121 @@ TEST_CASE("the sink keeps the ticks of watched series and drops the rest",
     }
     REQUIRE(sink.ticks() == 4);
     REQUIRE(sink.drain(buckets) == 2);
-    const auto closed = series_ids(buckets);
-    CHECK(closed == std::vector<std::string>{"fx-1", "swap-1"});
+    const auto closed = series_of_buckets(buckets);
+    CHECK(std::ranges::count(closed, fx_handle) == 1);
+    CHECK(std::ranges::count(closed, swap_handle) == 1);
 
-    sink.unwatch("swap-1");
+    sink.unwatch(swap_handle);
     REQUIRE(sink.watched() == 1);
     for (const auto* series : {fx_series, swap_series}) {
         sink.on_tick(tick_for(series, 3 * second, 3.0));
         sink.on_tick(tick_for(series, 4 * second, 4.0));
     }
     REQUIRE(sink.drain(buckets) == 2);
-    CHECK(series_ids(buckets) == std::vector<std::string>{"fx-1", "fx-1"});
+    CHECK(series_of_buckets(buckets)
+        == std::vector<series_handle>{fx_handle, fx_handle});
 
     /* Watching again continues the series. */
-    REQUIRE(sink.watch("swap-1", swap_series));
+    sink.watch(swap_handle, canonical(swap_series));
     sink.on_tick(tick_for(swap_series, 5 * second, 5.0));
     sink.on_tick(tick_for(swap_series, 6 * second, 6.0));
     REQUIRE(sink.drain(buckets) == 1);
-    CHECK(buckets.front().series_id == "swap-1");
-    CHECK(buckets.front().point.value == 5.0);
+    CHECK(buckets.front().series == swap_handle);
+    CHECK(buckets.front().value == 5.0);
 }
 
-TEST_CASE("a URI that names no series is not watched", "[market_stream]") {
+TEST_CASE("a bucket of a series that is not watched is not published",
+    "[market_stream]") {
+    constexpr std::int64_t second = 1'000'000'000;
     tick_sink sink;
-    CHECK_FALSE(sink.watch("odd-1", "not-a-uri"));
-    CHECK(sink.watched() == 0);
+    std::vector<series_bucket> buckets;
+
+    /* The handle was never watched, and unwatching it is harmless. */
+    sink.unwatch(fx_handle);
+    sink.on_tick(tick_for(fx_series, 1 * second, 1.0));
+    sink.on_tick(tick_for(fx_series, 2 * second, 2.0));
+    CHECK(sink.drain(buckets) == 0);
+
+    /* Unwatching one series leaves another's aggregator alone. */
+    sink.watch(fx_handle, canonical(fx_series));
+    sink.watch(swap_handle, canonical(swap_series));
+    sink.unwatch(swap_handle);
+    CHECK(sink.watched() == 1);
+    sink.on_tick(tick_for(fx_series, 3 * second, 1.0));
+    sink.on_tick(tick_for(fx_series, 4 * second, 2.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == fx_handle);
+
+    /* A handle of the same slot and another generation is another series. */
+    const series_handle reused{fx_handle.index, fx_handle.generation + 1};
+    sink.unwatch(reused);
+    CHECK(sink.watched() == 1);
+
+    /*
+     * The new occupant's watch can reach the sink before the old occupant's
+     * unwatch does. They are two series, so neither replaces the other.
+     */
+    sink.watch(reused, canonical(zero_series));
+    CHECK(sink.watched() == 2);
+    sink.unwatch(fx_handle);
+    CHECK(sink.watched() == 1);
+    sink.on_tick(tick_for(zero_series, 5 * second, 1.0));
+    sink.on_tick(tick_for(zero_series, 6 * second, 2.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == reused);
+}
+
+TEST_CASE("watching one series under a new URI replaces its aggregator",
+    "[market_stream]") {
+    constexpr std::int64_t second = 1'000'000'000;
+    tick_sink sink;
+    std::vector<series_bucket> buckets;
+
+    sink.watch(fx_handle, canonical(fx_series));
+    sink.on_tick(tick_for(fx_series, 1 * second, 1.0));
+
+    /* The same URI again changes nothing, so the open bucket continues. */
+    sink.watch(fx_handle, canonical(fx_series));
+    sink.on_tick(tick_for(fx_series, 2 * second, 2.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().value == 1.0);
+    buckets.clear();
+
+    /* A new URI replaces it: the old URI is no longer routed and its open
+     * bucket is gone, not published late. */
+    sink.watch(fx_handle, canonical(swap_series));
+    REQUIRE(sink.watched() == 1);
+    sink.on_tick(tick_for(fx_series, 3 * second, 3.0));
+    sink.on_tick(tick_for(fx_series, 4 * second, 4.0));
+    CHECK(sink.drain(buckets) == 0);
+    sink.on_tick(tick_for(swap_series, 5 * second, 5.0));
+    sink.on_tick(tick_for(swap_series, 6 * second, 6.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == fx_handle);
+    CHECK(buckets.front().value == 5.0);
+}
+
+TEST_CASE("a tick that closes a bucket allocates nothing", "[market_stream][cost]") {
+    constexpr std::int64_t second = 1'000'000'000;
+    tick_sink sink;
+    sink.watch(fx_handle, canonical(fx_series));
+    std::vector<series_bucket> buckets;
+    buckets.reserve(4096);
+
+    /* The first tick of a series logs, so the loop warms up before it counts. */
+    std::vector<tick> ticks;
+    for (int s = 1; s <= 3000; ++s)
+        ticks.push_back(tick_for(fx_series, s * second, s));
+    sink.on_tick(ticks.front());
+    sink.on_tick(ticks[1]);
+    sink.drain(buckets);
+
+    const auto before = hedgr::testing::allocations();
+    for (std::size_t i = 2; i < ticks.size(); ++i)
+        sink.on_tick(ticks[i]);
+    CHECK(hedgr::testing::allocations() - before == 0);
+    CHECK(sink.drain(buckets) >= 2990);
+    CHECK(buckets.back().series == fx_handle);
 }
 
 TEST_CASE("asking a stream to stop does not wait for its connect",
@@ -189,12 +294,12 @@ TEST_CASE("asking a stream to stop does not wait for its connect",
 TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
     constexpr std::int64_t second = 1'000'000'000;
     tick_sink sink;
-    REQUIRE(sink.watch("fx-1", fx_series));
+    sink.watch(fx_handle, canonical(fx_series));
 
     std::thread watcher([&sink]() {
         for (int i = 0; i < 2000; ++i) {
-            REQUIRE(sink.watch("swap-1", swap_series));
-            sink.unwatch("swap-1");
+            sink.watch(swap_handle, canonical(swap_series));
+            sink.unwatch(swap_handle);
         }
     });
     std::int64_t at = second;
@@ -204,11 +309,11 @@ TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
     }
     watcher.join();
 
-    std::vector<market_bucket> buckets;
+    std::vector<series_bucket> buckets;
     REQUIRE(sink.drain(buckets) > 0);
     std::size_t fx = 0;
     for (const auto& bucket : buckets)
-        fx += bucket.series_id == "fx-1";
+        fx += bucket.series == fx_handle;
     CHECK(fx >= 1999);
     CHECK(sink.ticks() >= 2000);
 }

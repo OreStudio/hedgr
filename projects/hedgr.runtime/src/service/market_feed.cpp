@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.session/market/tick_stream.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
 #include <algorithm>
@@ -50,12 +51,12 @@ using support::steady_now_ns;
 market_feed::market_feed(const model::state::instance_table& instances,
     const model::state::session_table& sessions,
     const model::state::window_table& windows,
-    model::state::market_table& market,
+    model::state::series_table& series,
     const session::transport::session_options& seed,
     worker::tick_feed_factory feeds, catalogue_read read_catalogue,
     backfill_read read_backfill)
     : instances_(instances), sessions_(sessions), windows_(windows),
-      market_(market), seed_(seed), market_feeds_(std::move(feeds)),
+      series_(series), seed_(seed), market_feeds_(std::move(feeds)),
       read_catalogue_(std::move(read_catalogue)),
       read_backfill_(std::move(read_backfill)) {
     if (!market_feeds_) {
@@ -117,8 +118,17 @@ void market_feed::close(std::string_view instance_id,
     const auto found = market_streams_.find(key);
     if (found == market_streams_.end())
         return;
+    release_watches(found->second);
     retire_market_stream(std::move(found->second.stream));
     market_streams_.erase(found);
+}
+
+void market_feed::release_watches(market_stream_entry& entry) {
+    for (const auto& [series_id, handle] : entry.watched) {
+        static_cast<void>(series_id);
+        series_.release(handle);
+    }
+    entry.watched.clear();
 }
 
 void market_feed::retire_market_stream(
@@ -154,7 +164,7 @@ std::vector<refusal> market_feed::pump() {
         const auto instance_id = sessions_.instance_id(*session);
         const auto account_id = sessions_.account_id(*session);
         const auto* catalogue =
-            market_.catalogue(instance_id, account_id);
+            series_.catalogue(instance_id, account_id);
         if (catalogue == nullptr
             || catalogue->state
                 == model_state::catalogue_state::failed) {
@@ -174,8 +184,8 @@ std::vector<refusal> market_feed::pump() {
         }
 
         const auto row = std::find_if(catalogue->series.begin(),
-            catalogue->series.end(), [&chart](const auto& series) {
-                return series.id == chart->series_id;
+            catalogue->series.end(), [&chart](const auto& listed) {
+                return listed.id == chart->series_id;
             });
         if (row == catalogue->series.end())
             continue;
@@ -192,7 +202,7 @@ std::vector<refusal> market_feed::pump() {
             .emplace_back(row->id, row->uri);
     }
 
-    std::vector<model::state::market_bucket> buckets;
+    std::vector<model::state::series_bucket> buckets;
     const auto now = steady_now_ns();
 
     for (auto it = market_streams_.begin(); it != market_streams_.end();) {
@@ -202,6 +212,7 @@ std::vector<refusal> market_feed::pump() {
         if (!session
             || sessions_.status(*session)
                 != domain::session_status::authenticated) {
+            release_watches(entry);
             retire_market_stream(std::move(entry.stream));
             it = market_streams_.erase(it);
             continue;
@@ -217,8 +228,18 @@ std::vector<refusal> market_feed::pump() {
         for (const auto& [series_id, uri] : desired) {
             if (entry.watched.contains(series_id))
                 continue;
-            entry.stream->watch(series_id, uri);
-            entry.watched.emplace(series_id, uri);
+            const auto handle = series_.intern(entry.instance_id,
+                entry.account_id, series_id);
+            series_.acquire(handle);
+            entry.watched.emplace(series_id, handle);
+            if (auto canonical = session::market::canonical_series_uri(uri)) {
+                entry.stream->watch(handle, std::move(*canonical));
+            } else {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "Not watching series '" << series_id << "' in party '"
+                    << sessions_.party_id(*session)
+                    << "': its URI names no series: " << uri;
+            }
             read_backfill_(entry.instance_id,
                 entry.account_id, series_id);
         }
@@ -227,13 +248,14 @@ std::vector<refusal> market_feed::pump() {
                 ++watch;
                 continue;
             }
-            entry.stream->unwatch(watch->first);
+            entry.stream->unwatch(watch->second);
+            series_.release(watch->second);
             watch = entry.watched.erase(watch);
         }
 
         if (entry.stream->take_reconnected()) {
-            for (const auto& [series_id, uri] : entry.watched) {
-                static_cast<void>(uri);
+            for (const auto& [series_id, handle] : entry.watched) {
+                static_cast<void>(handle);
                 read_backfill_(entry.instance_id,
                     entry.account_id, series_id);
             }
@@ -241,8 +263,15 @@ std::vector<refusal> market_feed::pump() {
 
         entry.stream->drain(buckets);
         for (const auto& bucket : buckets) {
-            market_.append_point(entry.instance_id, entry.account_id,
-                bucket.series_id, bucket.level, bucket.point, now);
+            const auto applied = series_.append(bucket.series, bucket.level,
+                model_state::series_point{.at_ns = bucket.at_ns,
+                    .value = bucket.value, .open = bucket.open,
+                    .high = bucket.high, .low = bucket.low},
+                now);
+            if (applied == model_state::append_result::stale)
+                ++stale_buckets_;
+            else if (applied == model_state::append_result::late)
+                ++late_buckets_;
         }
 
         ++it;
@@ -257,6 +286,7 @@ std::vector<refusal> market_feed::pump() {
 void market_feed::cancel() {
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
+        release_watches(entry);
         retire_market_stream(std::move(entry.stream));
     }
     market_streams_.clear();

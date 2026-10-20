@@ -19,19 +19,8 @@
  */
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
-#include "ores.logging/make_logger.hpp"
 #include <chrono>
 #include <utility>
-
-namespace {
-
-[[nodiscard]] auto& lg() {
-    using namespace ores::logging;
-    static auto instance = make_logger("hedgr.runtime.worker.market_stream");
-    return instance;
-}
-
-}
 
 namespace hedgr::runtime::worker {
 
@@ -72,21 +61,21 @@ void market_stream::set_token(std::string token) {
     cv_.notify_all();
 }
 
-void market_stream::watch(std::string series_id, std::string uri) {
+void market_stream::watch(model::state::series_handle series,
+    std::string canonical_uri) {
     {
         std::lock_guard lock(mu_);
         commands_.push_back(command{
-            .add = true, .series_id = std::move(series_id),
-            .uri = std::move(uri)});
+            .add = true, .series = series,
+            .canonical_uri = std::move(canonical_uri)});
     }
     cv_.notify_all();
 }
 
-void market_stream::unwatch(std::string_view series_id) {
+void market_stream::unwatch(model::state::series_handle series) {
     {
         std::lock_guard lock(mu_);
-        commands_.push_back(command{
-            .add = false, .series_id = std::string{series_id}, .uri = {}});
+        commands_.push_back(command{.add = false, .series = series});
     }
     cv_.notify_all();
 }
@@ -134,14 +123,10 @@ void market_stream::run() {
         if (token)
             stream.set_token(std::move(*token));
         for (auto& item : queued) {
-            if (!item.add) {
-                sink->unwatch(item.series_id);
-            } else if (!sink->watch(item.series_id, item.uri)) {
-                BOOST_LOG_SEV(lg(), ores::logging::warn)
-                    << "Not watching series '" << item.series_id
-                    << "' in party '" << options_.party_id
-                    << "': its URI names no series: " << item.uri;
-            }
+            if (item.add)
+                sink->watch(item.series, std::move(item.canonical_uri));
+            else
+                sink->unwatch(item.series);
         }
 
         if (!stream.connected()) {

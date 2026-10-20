@@ -54,7 +54,7 @@ std::size_t texture_asks_over(std::size_t rows) {
             .label = std::format("FX GBP/USD {:05}", i),
             .asset_class = "FX", .producer_kind = "SYNTHETIC"});
     }
-    desk.market.set_catalogue("i", "a", std::move(catalogue));
+    desk.market.apply_catalogue("i", "a", std::move(catalogue));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;

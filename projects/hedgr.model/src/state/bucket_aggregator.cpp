@@ -19,7 +19,6 @@
  */
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include <algorithm>
-#include <utility>
 
 namespace hedgr::model::state {
 
@@ -32,9 +31,8 @@ constexpr std::array<domain::market_level, 3> levels{
 
 }
 
-bucket_aggregator::bucket_aggregator(std::string series_id,
-    bucket_ring& ring)
-    : series_id_(std::move(series_id))
+bucket_aggregator::bucket_aggregator(series_handle series, bucket_ring& ring)
+    : series_(series)
     , ring_(ring) {
 }
 
@@ -50,13 +48,14 @@ void bucket_aggregator::on_tick(std::int64_t at_ns, double value) {
 
         if (bucket != bucket_start_[i]) {
             if (current_[i].at_ns != 0) {
-                ring_.try_push(market_bucket{
-                    .series_id = series_id_,
-                    .level = level,
-                    .point = current_[i]});
+                const auto& closed = current_[i];
+                ring_.try_push(series_bucket{.series = series_,
+                    .at_ns = closed.at_ns, .value = closed.value,
+                    .open = closed.open, .high = closed.high,
+                    .low = closed.low, .level = level});
             }
             bucket_start_[i] = bucket;
-            current_[i] = domain::market_point{.at_ns = at_ns, .value = value,
+            current_[i] = series_point{.at_ns = at_ns, .value = value,
                 .open = value, .high = value, .low = value};
         } else {
             current_[i].at_ns = at_ns;

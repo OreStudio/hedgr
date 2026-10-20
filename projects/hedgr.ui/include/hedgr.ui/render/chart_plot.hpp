@@ -21,10 +21,10 @@
 #define HEDGR_UI_RENDER_CHART_PLOT_HPP
 
 #include "hedgr.model/domain/market.hpp"
+#include "hedgr.model/state/series_ring.hpp"
 #include "hedgr.ui/export.hpp"
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <vector>
 
 namespace hedgr::ui::render {
@@ -40,7 +40,7 @@ struct candle final {
 
 /** @brief Everything a chart's plot data is derived from, besides the points. */
 struct chart_plot_key final {
-    /** @brief The snapshot's version, or 0 when there is no snapshot. */
+    /** @brief The series' stamp, or 0 when the chart has no series row. */
     std::uint64_t version = 0;
     std::int64_t span_ns = 0;
     bool candles = false;
@@ -79,12 +79,15 @@ struct chart_plot final {
 };
 
 /**
- * @brief Rebuilds @p plot from @p points when @p key differs from its own.
+ * @brief Rebuilds @p plot from @p columns when @p key differs from its own.
+ *
+ * The columns are the ring's, valid for the frame. Nothing in the plot points
+ * into them, so a compaction between frames cannot leave it dangling.
  * @return whether it rebuilt.
  */
 HEDGR_UI_EXPORT bool update_chart_plot(chart_plot& plot,
     const chart_plot_key& key,
-    const std::deque<hedgr::model::domain::market_point>& points);
+    const hedgr::model::state::series_columns& columns);
 
 }
 

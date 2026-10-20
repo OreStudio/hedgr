@@ -21,7 +21,8 @@
 #define HEDGR_RUNTIME_SERVICE_MARKET_FEED_HPP
 
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/refusal.hpp"
@@ -44,7 +45,7 @@ namespace hedgr::runtime::service {
  * One stream per session, in a map keyed by the session's running key. The
  * stream owns the connection and its thread. This class owns the watch set,
  * asks for the catalogue and the backfill, and drains closed buckets into the
- * market table. It runs on the frame thread and is the only writer of the
+ * series table. It runs on the frame thread and is the only writer of the
  * buckets it applies. The NATS dispatch thread and the stream thread never
  * reach a member of it.
  *
@@ -54,7 +55,7 @@ namespace hedgr::runtime::service {
  * stream whatever supervision did.
  *
  * Holds no reference to the manager. The tables it reads are passed in as
- * const references, the market table it appends to as a reference, and the two
+ * const references, the series table it appends to as a reference, and the two
  * reads it asks for as callbacks, so it never reaches the read service.
  */
 class HEDGR_RUNTIME_EXPORT market_feed final {
@@ -74,7 +75,7 @@ public:
     market_feed(const model::state::instance_table& instances,
         const model::state::session_table& sessions,
         const model::state::window_table& windows,
-        model::state::market_table& market,
+        model::state::series_table& series,
         const session::transport::session_options& seed,
         worker::tick_feed_factory feeds, catalogue_read read_catalogue,
         backfill_read read_backfill);
@@ -105,11 +106,26 @@ public:
     /** @brief Asks every stream to stop and forgets them all. */
     void cancel();
 
+    /**
+     * @brief Buckets dropped because their series was released in flight.
+     *
+     * The handle's generation no longer matched, so writing the bucket would
+     * have put it in the series that now holds the slot.
+     */
+    [[nodiscard]] std::size_t stale_buckets() const noexcept {
+        return stale_buckets_;
+    }
+
+    /** @brief Buckets dropped because they were older than the newest held. */
+    [[nodiscard]] std::size_t late_buckets() const noexcept {
+        return late_buckets_;
+    }
+
 private:
     const model::state::instance_table& instances_;
     const model::state::session_table& sessions_;
     const model::state::window_table& windows_;
-    model::state::market_table& market_;
+    model::state::series_table& series_;
     const session::transport::session_options& seed_;
 
     /** @brief Makes the feed for one session; a real stream unless a test says. */
@@ -134,8 +150,16 @@ private:
         std::string instance_id;
         std::string account_id;
         std::unique_ptr<worker::tick_feed> stream;
-        std::unordered_map<std::string, std::string> watched;
+
+        /** @brief The handle of each watched series id; the feed holds each. */
+        std::unordered_map<std::string, model::state::series_handle> watched;
     };
+
+    /** @brief Stops holding every series @p entry watches. */
+    void release_watches(market_stream_entry& entry);
+
+    std::size_t stale_buckets_ = 0;
+    std::size_t late_buckets_ = 0;
 
     std::unordered_map<std::string, market_stream_entry> market_streams_;
 

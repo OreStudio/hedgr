@@ -19,6 +19,7 @@
  */
 #include "hedgr.model/domain/health.hpp"
 #include "hedgr.model/domain/market.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 
@@ -60,18 +61,25 @@ TEST_CASE("every market screen spells a freshness state the same way",
 }
 
 TEST_CASE("a series is as of its newest point at any level", "[health]") {
-    using hedgr::model::domain::market_point;
-    hedgr::model::domain::market_series_snapshot snapshot;
-    CHECK(snapshot.newest_at_ns() == 0);
+    using hedgr::model::domain::market_level;
+    hedgr::model::state::series_table table;
+    const auto series = table.intern("i", "a", "s");
+    CHECK(table.newest_at_ns(series) == 0);
 
-    snapshot.medium.push_back(market_point{.at_ns = now - 50 * second});
-    snapshot.coarse.push_back(market_point{.at_ns = now - 3000 * second});
-    snapshot.fine.push_back(market_point{.at_ns = now - 1 * second});
-    CHECK(snapshot.newest_at_ns() == now - 1 * second);
-    CHECK(fx(snapshot.newest_at_ns()) == data_health::live);
+    table.append(series, market_level::medium, {.at_ns = now - 50 * second}, 1);
+    table.append(series, market_level::coarse,
+        {.at_ns = now - 3000 * second}, 1);
+    CHECK(table.newest_at_ns(series) == now - 50 * second);
 
-    snapshot.fine.clear();
-    CHECK(snapshot.newest_at_ns() == now - 50 * second);
+    table.append(series, market_level::fine, {.at_ns = now - 1 * second}, 1);
+    CHECK(table.newest_at_ns(series) == now - 1 * second);
+    CHECK(fx(table.newest_at_ns(series)) == data_health::live);
+
+    const auto quiet = table.intern("i", "a", "quiet");
+    table.append(quiet, market_level::medium, {.at_ns = now - 50 * second}, 1);
+    table.append(quiet, market_level::coarse,
+        {.at_ns = now - 3000 * second}, 1);
+    CHECK(table.newest_at_ns(quiet) == now - 50 * second);
 }
 
 TEST_CASE("a lagging rate delays a batch and a stopped feed makes it stale",

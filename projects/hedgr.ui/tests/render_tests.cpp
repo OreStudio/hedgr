@@ -192,7 +192,7 @@ using hedgr::model::state::label_table;
 using hedgr::model::state::labelling_table;
 using hedgr::model::state::image_cache;
 using hedgr::model::state::tenant_image_map;
-using hedgr::model::state::market_table;
+using hedgr::model::state::series_table;
 using hedgr::model::state::crm_table;
 using hedgr::model::state::term_structure_table;
 using hedgr::model::state::password_policy_state;
@@ -212,7 +212,7 @@ struct empty_state final {
     label_table labels;
     labelling_table labellings;
     session_table sessions;
-    market_table market;
+    series_table market;
     term_structure_table term_structures;
     crm_table crm;
     tenant_image_map currency_images;

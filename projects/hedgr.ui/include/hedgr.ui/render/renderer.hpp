@@ -26,7 +26,7 @@
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
@@ -416,8 +416,8 @@ struct render_input final {
     /** @brief The live sessions. */
     const hedgr::model::state::session_table& sessions;
 
-    /** @brief The market series and the points each chart holds. */
-    const hedgr::model::state::market_table& market;
+    /** @brief The market series, their catalogues and the points each holds. */
+    const hedgr::model::state::series_table& market;
 
     /** @brief The latest term structure each browser session read. */
     const hedgr::model::state::term_structure_table& term_structures;

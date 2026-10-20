@@ -22,7 +22,7 @@
 
 namespace hedgr::model::state {
 
-bool bucket_ring::try_push(market_bucket bucket) {
+bool bucket_ring::try_push(series_bucket bucket) {
     const auto released = released_.load(std::memory_order_acquire);
     if (next_ - released >= capacity) {
         dropped_.fetch_add(1, std::memory_order_relaxed);
@@ -35,7 +35,7 @@ bool bucket_ring::try_push(market_bucket bucket) {
     return true;
 }
 
-std::size_t bucket_ring::drain(std::vector<market_bucket>& out,
+std::size_t bucket_ring::drain(std::vector<series_bucket>& out,
     std::size_t limit) {
     const auto published = published_.load(std::memory_order_acquire);
     const auto available = published - taken_;

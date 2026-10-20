@@ -20,12 +20,12 @@
 #ifndef HEDGR_RUNTIME_WORKER_TICK_FEED_HPP
 #define HEDGR_RUNTIME_WORKER_TICK_FEED_HPP
 
-#include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/series_bucket.hpp"
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace hedgr::runtime::worker {
@@ -53,14 +53,20 @@ public:
     /** @brief The token the next resume uses. */
     virtual void set_token(std::string token) = 0;
 
-    /** @brief Watches one series, keeping its ticks. */
-    virtual void watch(std::string series_id, std::string uri) = 0;
+    /**
+     * @brief Watches one series, keeping its ticks.
+     *
+     * @p canonical_uri is the series' URI as the codec writes it, which is what
+     * a tick carries. The buckets that come back name the series by @p series.
+     */
+    virtual void watch(model::state::series_handle series,
+        std::string canonical_uri) = 0;
 
     /** @brief Stops watching one series. */
-    virtual void unwatch(std::string_view series_id) = 0;
+    virtual void unwatch(model::state::series_handle series) = 0;
 
     /** @brief Replaces @p out with the closed buckets waiting for the frame. */
-    virtual std::size_t drain(std::vector<model::state::market_bucket>& out) = 0;
+    virtual std::size_t drain(std::vector<model::state::series_bucket>& out) = 0;
 
     /** @brief Whether the feed reconnected since the last call. */
     virtual bool take_reconnected() = 0;
