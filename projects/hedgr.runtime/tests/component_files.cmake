@@ -22,6 +22,7 @@ set(files
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
     "store_lock_tests.cpp"
+    "term_curve_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

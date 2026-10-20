@@ -21,9 +21,13 @@
 #define HEDGR_RUNTIME_WORKER_TERM_STRUCTURE_WORKER_HPP
 
 #include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
 #include <boost/asio/io_context.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -37,6 +41,20 @@ struct term_structure_job final {
     std::vector<std::string> member_ids;
     std::vector<std::string> member_tenors;
 };
+
+/** @brief Each tenor's observed values, keyed by observation time. */
+using pillar_history = std::map<std::string, std::map<std::int64_t, double>>;
+
+/**
+ * @brief Rebuilds the curves at the newest @p max_history instants.
+ *
+ * Each tenor's last value is carried forward to every instant. An instant
+ * before some tenor's first observation would yield a partial curve, so only
+ * instants from the latest first observation onward are emitted, and every
+ * curve holds every tenor that has data. The newest instant always qualifies.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT std::vector<model::domain::term_curve>
+build_term_curves(const pillar_history& by_term, std::size_t max_history);
 
 /** @brief Reads each member's latest point and posts the curve. */
 HEDGR_RUNTIME_EXPORT void
