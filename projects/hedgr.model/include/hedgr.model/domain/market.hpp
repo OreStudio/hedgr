@@ -147,14 +147,6 @@ struct market_point final {
     double value = 0.0;
 
     /**
-     * @brief The term this observation holds for a composite curve, or empty.
-     *
-     * A leaf series carries its tenor in its identity; a composite curve's
-     * observations name the term in their own URI.
-     */
-    std::string term;
-
-    /**
      * @brief The bucket's first value.
      *
      * Zero on a point that was not built from a bucket, which a candle reads

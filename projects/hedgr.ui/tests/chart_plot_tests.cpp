@@ -18,36 +18,37 @@
  *
  */
 #include "allocation_counter.hpp"
+#include "hedgr.model/state/series_ring.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstdint>
-#include <deque>
 
 namespace {
 
-using hedgr::model::domain::market_point;
+using hedgr::model::state::series_point;
+using hedgr::model::state::series_ring;
 using hedgr::ui::render::chart_plot;
 using hedgr::ui::render::chart_plot_key;
 using hedgr::ui::render::update_chart_plot;
 
 constexpr std::int64_t second = 1'000'000'000;
 
-/** @brief One point a second from @p from to @p to, valued at its second. */
-std::deque<market_point> seconds(int from, int to) {
-    std::deque<market_point> points;
+/** @brief A ring holding one point a second from @p from to @p to, valued at its second. */
+series_ring seconds(int from, int to, std::size_t capacity = 7200) {
+    series_ring ring{capacity};
     for (int s = from; s <= to; ++s)
-        points.push_back(market_point{.at_ns = s * second,
+        ring.append(series_point{.at_ns = s * second,
             .value = static_cast<double>(s)});
-    return points;
+    return ring;
 }
 
 }
 
 TEST_CASE("a chart plot holds the points of its span", "[chart]") {
-    const auto points = seconds(1, 10);
+    const auto ring = seconds(1, 10);
     chart_plot plot;
     REQUIRE(update_chart_plot(plot,
-        chart_plot_key{.version = 1, .span_ns = 5 * second}, points));
+        chart_plot_key{.version = 1, .span_ns = 5 * second}, ring.columns()));
     CHECK(plot.start == 4);
     CHECK(plot.xs == std::vector<double>{5, 6, 7, 8, 9, 10});
     CHECK(plot.ys == std::vector<double>{5, 6, 7, 8, 9, 10});
@@ -58,12 +59,13 @@ TEST_CASE("a chart plot holds the points of its span", "[chart]") {
 }
 
 TEST_CASE("a chart plot keeps a sparse series whole", "[chart]") {
-    std::deque<market_point> points{{.at_ns = 1 * second, .value = 1.0},
-        {.at_ns = 2 * second, .value = 2.0},
-        {.at_ns = 100 * second, .value = 3.0}};
+    series_ring ring{7200};
+    ring.append({.at_ns = 1 * second, .value = 1.0});
+    ring.append({.at_ns = 2 * second, .value = 2.0});
+    ring.append({.at_ns = 100 * second, .value = 3.0});
     chart_plot plot;
     update_chart_plot(plot,
-        chart_plot_key{.version = 1, .span_ns = 5 * second}, points);
+        chart_plot_key{.version = 1, .span_ns = 5 * second}, ring.columns());
     CHECK(plot.start == 0);
     CHECK(plot.ys.size() == 3);
 }
@@ -71,11 +73,11 @@ TEST_CASE("a chart plot keeps a sparse series whole", "[chart]") {
 TEST_CASE("a chart plot over all points sizes candles from what is in view",
     "[chart]") {
     /* Ten minutes in view reads best at fifteen second candles. */
-    const auto points = seconds(0, 599);
+    const auto ring = seconds(0, 599);
     chart_plot plot;
     update_chart_plot(plot,
         chart_plot_key{.version = 1, .span_ns = 0, .candles = true, .ema = true},
-        points);
+        ring.columns());
     CHECK(plot.start == 0);
     CHECK(plot.candle_width_ns == 15 * second);
     REQUIRE(plot.candles.size() == 40);
@@ -88,36 +90,36 @@ TEST_CASE("a chart plot over all points sizes candles from what is in view",
 }
 
 TEST_CASE("a chart plot is rebuilt only when its key changes", "[chart][cost]") {
-    auto points = seconds(1, 3600);
+    auto ring = seconds(1, 3600, 3600);
     chart_plot plot;
     const chart_plot_key key{.version = 7, .span_ns = 3600 * second,
         .candles = true, .ema = true};
-    REQUIRE(update_chart_plot(plot, key, points));
+    REQUIRE(update_chart_plot(plot, key, ring.columns()));
 
     /* A frame with nothing new does no work and touches no allocator. */
     const auto before = hedgr::testing::allocations();
     for (int frame = 0; frame < 600; ++frame)
-        CHECK_FALSE(update_chart_plot(plot, key, points));
+        CHECK_FALSE(update_chart_plot(plot, key, ring.columns()));
     CHECK(hedgr::testing::allocations() - before == 0);
 
     /* A new tick is a new version; the rebuild reuses the storage it has. */
-    points.pop_front();
-    points.push_back(market_point{.at_ns = 3601 * second, .value = 0.5});
+    ring.append({.at_ns = 3601 * second, .value = 0.5});
     auto next = key;
     next.version = 8;
     const auto rebuild = hedgr::testing::allocations();
-    REQUIRE(update_chart_plot(plot, next, points));
+    REQUIRE(update_chart_plot(plot, next, ring.columns()));
     CHECK(hedgr::testing::allocations() - rebuild == 0);
     CHECK(plot.ys.back() == 0.5);
     CHECK(plot.low == 0.5);
 
     next.ema = false;
-    REQUIRE(update_chart_plot(plot, next, points));
+    REQUIRE(update_chart_plot(plot, next, ring.columns()));
     CHECK(plot.ema.empty());
 }
 
 TEST_CASE("the cost of a chart frame over one hour", "[!benchmark][chart]") {
-    const auto points = seconds(1, 3600);
+    const auto ring = seconds(1, 3600);
+    const auto points = ring.columns();
     const chart_plot_key key{.version = 1, .span_ns = 3600 * second,
         .candles = true, .ema = true};
 

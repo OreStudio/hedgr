@@ -236,6 +236,9 @@ read_service::start_market_read(std::string_view window_id,
     pending_.mark(id);
     if (catalogue)
         market_.begin_catalogue(read->instance_id, read->account_id);
+    else
+        static_cast<void>(market_.intern(read->instance_id, read->account_id,
+            series_id));
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a market " << (catalogue ? "catalogue" : "points")
@@ -467,7 +470,7 @@ bool read_service::apply(const model::event::event& ev) {
     switch (ev.kind) {
     case event::event_kind::series_catalogue: {
         if (ev.message.empty()) {
-            market_.set_catalogue(ev.instance_id, ev.account_id,
+            market_.apply_catalogue(ev.instance_id, ev.account_id,
                 ev.series);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
@@ -533,12 +536,16 @@ bool read_service::apply(const model::event::event& ev) {
         return true;
     }
     case event::event_kind::series_points: {
+        const auto held =
+            market_.find(ev.instance_id, ev.account_id, ev.series_id);
+        if (!held) {
+            ++unheld_points_;
+            return true;
+        }
         if (ev.message.empty()) {
-            market_.set_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.points, ev.observed_at_ns);
+            market_.seed(*held, ev.points, ev.observed_at_ns);
         } else {
-            market_.fail_points(ev.instance_id, ev.account_id, ev.series_id,
-                ev.message, ev.observed_at_ns);
+            market_.fail(*held, ev.message, ev.observed_at_ns);
         }
         return true;
     }

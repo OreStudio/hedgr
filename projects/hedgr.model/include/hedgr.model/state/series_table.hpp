@@ -24,7 +24,6 @@
 #include "hedgr.model/export.hpp"
 #include "hedgr.model/state/composite_key.hpp"
 #include "hedgr.model/state/handle.hpp"
-#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/series_ring.hpp"
 #include <array>
 #include <cstddef>
@@ -41,6 +40,18 @@ namespace hedgr::model::state {
 
 /** @brief The default resident budget: 256 MiB of ring buffers. */
 inline constexpr std::size_t series_default_budget = 256u * 1024u * 1024u;
+
+/** @brief Where one session's series catalogue read stands. */
+enum class catalogue_state : std::uint8_t {
+    /** @brief Nothing has been asked for. */
+    unread = 0,
+    /** @brief A read is in flight. */
+    reading = 1,
+    /** @brief The last read succeeded. */
+    ready = 2,
+    /** @brief The last read failed; the error says why. */
+    failed = 3,
+};
 
 /** @brief What the table did with an appended bucket. */
 enum class append_result : std::uint8_t {

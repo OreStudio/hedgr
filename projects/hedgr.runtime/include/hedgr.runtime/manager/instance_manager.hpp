@@ -31,7 +31,7 @@
 #include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/term_structure_table.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/export.hpp"
@@ -180,9 +180,24 @@ public:
         return window_service_.windows();
     }
 
-    /** @brief The market series and the points each chart holds. */
-    [[nodiscard]] const model::state::market_table& market() const noexcept {
+    /** @brief The market series, their catalogues and the points each holds. */
+    [[nodiscard]] const model::state::series_table& market() const noexcept {
         return read_service_.market();
+    }
+
+    /** @brief Closed buckets dropped for a series released in flight. */
+    [[nodiscard]] std::size_t stale_buckets() const noexcept {
+        return market_feed_.stale_buckets();
+    }
+
+    /** @brief Closed buckets dropped for being older than the newest held. */
+    [[nodiscard]] std::size_t late_buckets() const noexcept {
+        return market_feed_.late_buckets();
+    }
+
+    /** @brief Backfill answers dropped for a series nobody holds. */
+    [[nodiscard]] std::size_t unheld_points() const noexcept {
+        return read_service_.unheld_points();
     }
 
     /** @brief Which image each tenant currency names. */

@@ -107,8 +107,7 @@ boost::asio::awaitable<void> run_market(market_job job,
             for (const auto& point : read->points) {
                 fact.points.push_back(domain::market_point{
                     .at_ns = point.at_ns,
-                    .value = point.value,
-                    .term = point.term});
+                    .value = point.value});
             }
         } else {
             fact.message = describe(read.error());

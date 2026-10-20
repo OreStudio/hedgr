@@ -23,24 +23,13 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/export.hpp"
 #include "hedgr.model/state/composite_key.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace hedgr::model::state {
-
-/** @brief Where one session's series catalogue read stands. */
-enum class catalogue_state : std::uint8_t {
-    /** @brief Nothing has been asked for. */
-    unread = 0,
-    /** @brief A read is in flight. */
-    reading = 1,
-    /** @brief The last read succeeded. */
-    ready = 2,
-    /** @brief The last read failed; the error says why. */
-    failed = 3,
-};
 
 /** @brief The catalogue one session read. */
 struct market_catalogue final {

@@ -22,13 +22,14 @@
 
 #include "hedgr.model/state/bucket_aggregator.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/series_bucket.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <atomic>
 #include <cstddef>
 #include <mutex>
 #include <string>
-#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -39,7 +40,10 @@ namespace hedgr::runtime::worker {
  *
  * The party's subscription delivers every tick of the party; this keeps the
  * ones for a watched series and drops the rest. A tick names its series by
- * canonical URI, and so does a watch, so the match is one map lookup.
+ * canonical URI, and so does a watch, so the match is one map lookup. A watch
+ * also carries the series' handle, which the aggregator stamps on every bucket
+ * it closes, so the table can tell a bucket for a released series from one for
+ * the series now in its slot.
  *
  * Everything a tick handler reaches lives here, so the handler co-owns it
  * through a shared pointer and a handler that outlives its stream writes into
@@ -55,21 +59,22 @@ public:
     tick_sink& operator=(const tick_sink&) = delete;
 
     /**
-     * @brief Keeps the ticks of one series, by its catalogue URI.
+     * @brief Keeps the ticks of one series, by its canonical URI.
      *
-     * @return false when the URI names no series the codec knows, in which
-     * case nothing is watched.
+     * Watching a series that is already watched under the same URI changes
+     * nothing, so its open buckets continue. A new URI replaces the series'
+     * aggregator.
      */
-    bool watch(std::string series_id, std::string_view uri);
+    void watch(model::state::series_handle series, std::string canonical_uri);
 
     /** @brief Drops one series' ticks from here on. */
-    void unwatch(std::string_view series_id);
+    void unwatch(model::state::series_handle series);
 
     /** @brief Buckets one tick, or drops it when its series is not watched. */
     void on_tick(const session::market::tick& tick);
 
     /** @brief Copies the closed buckets waiting for the frame loop. */
-    std::size_t drain(std::vector<model::state::market_bucket>& out) {
+    std::size_t drain(std::vector<model::state::series_bucket>& out) {
         return ring_.drain(out);
     }
 
@@ -90,10 +95,13 @@ private:
     model::state::bucket_ring ring_;
     mutable std::mutex mu_;
 
-    /** @brief The canonical series URI each watched series id maps to. */
-    std::unordered_map<std::string, std::string> uri_of_;
-
-    /** @brief The aggregator of each watched series, by canonical URI. */
+    /**
+     * @brief The aggregator of each watched series, by canonical URI.
+     *
+     * Each aggregator holds its series' handle, which is what unwatch finds it
+     * by. A watch set is hundreds of entries and changes rarely, so the scan is
+     * cheaper than a second map kept in step with this one.
+     */
     std::unordered_map<std::string, model::state::bucket_aggregator> series_;
     std::atomic<std::size_t> ticks_{0};
 };

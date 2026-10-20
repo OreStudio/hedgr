@@ -19,6 +19,7 @@
  */
 #include "hedgr.runtime/worker/tick_sink.hpp"
 #include "ores.logging/make_logger.hpp"
+#include <algorithm>
 #include <utility>
 
 namespace {
@@ -33,28 +34,26 @@ namespace {
 
 namespace hedgr::runtime::worker {
 
-bool tick_sink::watch(std::string series_id, std::string_view uri) {
-    auto key = session::market::canonical_series_uri(uri);
-    if (!key)
-        return false;
-
+void tick_sink::watch(model::state::series_handle series,
+    std::string canonical_uri) {
     std::lock_guard lock(mu_);
-    if (const auto known = uri_of_.find(series_id);
-        known != uri_of_.end() && known->second != *key) {
-        series_.erase(known->second);
+    const auto held = std::ranges::find_if(series_,
+        [series](const auto& entry) {
+            return entry.second.series() == series;
+        });
+    if (held != series_.end()) {
+        if (held->first == canonical_uri)
+            return;
+        series_.erase(held);
     }
-    series_.try_emplace(*key, series_id, ring_);
-    uri_of_.insert_or_assign(std::move(series_id), std::move(*key));
-    return true;
+    series_.try_emplace(std::move(canonical_uri), series, ring_);
 }
 
-void tick_sink::unwatch(std::string_view series_id) {
+void tick_sink::unwatch(model::state::series_handle series) {
     std::lock_guard lock(mu_);
-    const auto known = uri_of_.find(std::string{series_id});
-    if (known == uri_of_.end())
-        return;
-    series_.erase(known->second);
-    uri_of_.erase(known);
+    std::erase_if(series_, [series](const auto& entry) {
+        return entry.second.series() == series;
+    });
 }
 
 void tick_sink::on_tick(const session::market::tick& tick) {

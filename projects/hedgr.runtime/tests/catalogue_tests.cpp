@@ -70,7 +70,8 @@ using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::condition_source;
-using hedgr::model::state::market_bucket;
+using hedgr::model::state::series_bucket;
+using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::runtime::worker::market_stream_options;
 using hedgr::runtime::worker::tick_feed;
@@ -182,9 +183,9 @@ public:
     void request_stop() override { ++state_->stops; }
     [[nodiscard]] bool finished() const noexcept override { return true; }
     void set_token(std::string) override {}
-    void watch(std::string, std::string) override {}
-    void unwatch(std::string_view) override {}
-    std::size_t drain(std::vector<market_bucket>& out) override {
+    void watch(series_handle, std::string) override {}
+    void unwatch(series_handle) override {}
+    std::size_t drain(std::vector<series_bucket>& out) override {
         out.clear();
         return 0;
     }

@@ -104,17 +104,18 @@ public:
      * Thread safe. The series is watched until @c unwatch, whether or not the
      * connection is open at the time.
      */
-    void watch(std::string series_id, std::string uri) override;
+    void watch(model::state::series_handle series,
+        std::string canonical_uri) override;
 
     /** @brief Stops watching one series. Thread safe. */
-    void unwatch(std::string_view series_id) override;
+    void unwatch(model::state::series_handle series) override;
 
     /**
      * @brief Copies the closed buckets waiting for the frame loop.
      *
      * Called from the frame thread only.
      */
-    std::size_t drain(std::vector<model::state::market_bucket>& out) override {
+    std::size_t drain(std::vector<model::state::series_bucket>& out) override {
         return sink_->drain(out);
     }
 
@@ -145,8 +146,8 @@ private:
     /** @brief A watch change posted from the frame thread. */
     struct command final {
         bool add = true;
-        std::string series_id;
-        std::string uri;
+        model::state::series_handle series;
+        std::string canonical_uri;
     };
 
     void run();

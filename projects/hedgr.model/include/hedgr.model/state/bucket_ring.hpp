@@ -20,30 +20,15 @@
 #ifndef HEDGR_MODEL_STATE_BUCKET_RING_HPP
 #define HEDGR_MODEL_STATE_BUCKET_RING_HPP
 
-#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/export.hpp"
+#include "hedgr.model/state/series_bucket.hpp"
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 namespace hedgr::model::state {
-
-/**
- * @brief One closed bucket on its way from the subscription to the frame loop.
- *
- * The series is named by the deployment's key rather than by an index, because
- * a watch can be removed while a bucket is in flight and an index would then
- * name the wrong series. The ring holds at most four thousand of these, and a
- * key is a UUID, so the copy is cheap enough.
- */
-struct market_bucket final {
-    std::string series_id;
-    domain::market_level level = domain::market_level::fine;
-    domain::market_point point;
-};
 
 /**
  * @brief A fixed ring between the NATS thread and the frame loop.
@@ -72,7 +57,7 @@ public:
      * @brief Adds one bucket, or drops it when the ring is full.
      * @return whether the bucket was published.
      */
-    bool try_push(market_bucket bucket);
+    bool try_push(series_bucket bucket);
 
     /**
      * @brief Copies the published buckets into @p out, oldest first.
@@ -80,7 +65,7 @@ public:
      * At most @p limit buckets are taken, so a frame that falls behind cannot
      * spend an unbounded amount of time draining.
      */
-    std::size_t drain(std::vector<market_bucket>& out,
+    std::size_t drain(std::vector<series_bucket>& out,
         std::size_t limit = capacity);
 
     /** @brief Buckets dropped because the ring was full, since construction. */
@@ -94,7 +79,7 @@ public:
     }
 
 private:
-    std::array<market_bucket, capacity> slots_{};
+    std::array<series_bucket, capacity> slots_{};
 
     /* One cursor per cache line: the producer and consumer never share one. */
     alignas(64) std::atomic<std::uint64_t> published_{0};

@@ -25,7 +25,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
-#include "hedgr.model/state/market_table.hpp"
+#include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
@@ -59,7 +59,7 @@ namespace hedgr::runtime::service {
  * deadline, and the @c crm_rates answer is what moves it.
  *
  * Holds no reference to the manager. The sessions, windows and rows it reads
- * are passed in as const references, and the one market table the live feed
+ * are passed in as const references, and the one series table the live feed
  * also writes is handed out by @c market().
  */
 class HEDGR_RUNTIME_EXPORT read_service final {
@@ -80,14 +80,25 @@ public:
      */
     void attach(std::filesystem::path database_path);
 
-    /** @brief The market series and the points each chart holds. */
-    [[nodiscard]] const model::state::market_table& market() const noexcept {
+    /** @brief The market series, their catalogues and the points each holds. */
+    [[nodiscard]] const model::state::series_table& market() const noexcept {
         return market_;
     }
 
     /** @brief The same, writable, for the feed that appends closed buckets. */
-    [[nodiscard]] model::state::market_table& market() noexcept {
+    [[nodiscard]] model::state::series_table& market() noexcept {
         return market_;
+    }
+
+    /**
+     * @brief Backfill answers dropped because nothing held their series.
+     *
+     * A read that outlives the window that asked for it must not grow the
+     * table, so an answer for a series that is no longer interned is counted
+     * and not stored.
+     */
+    [[nodiscard]] std::size_t unheld_points() const noexcept {
+        return unheld_points_;
     }
 
     /** @brief Which image each tenant currency names. */
@@ -272,8 +283,11 @@ private:
     /** @brief Tenant-and-image whose read failed, so it is not asked again. */
     std::unordered_set<std::string> failed_images_;
 
-    /** @brief The market series and the points each chart holds. */
-    model::state::market_table market_;
+    /** @brief The market series, their catalogues and the points each holds. */
+    model::state::series_table market_;
+
+    /** @brief Points answers dropped for a series nobody holds. */
+    std::size_t unheld_points_ = 0;
 
     /** @brief Which image each tenant currency names. */
     model::state::tenant_image_map currency_images_;

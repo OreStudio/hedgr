@@ -23,10 +23,12 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.model/state/bucket_ring.hpp"
+#include "hedgr.model/state/handle.hpp"
+#include "hedgr.model/state/series_bucket.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
+#include "hedgr.session/market/tick_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,7 @@
 #include <filesystem>
 #include <format>
 #include <functional>
+#include <map>
 #include <memory>
 #include <random>
 #include <string>
@@ -51,14 +54,14 @@ using hedgr::model::command::command_kind;
 using hedgr::model::domain::account;
 using hedgr::model::domain::instance;
 using hedgr::model::domain::market_level;
-using hedgr::model::domain::market_point;
 using hedgr::model::domain::market_series_row;
 using hedgr::model::domain::secret_string;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
-using hedgr::model::state::market_bucket;
+using hedgr::model::state::series_bucket;
+using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::runtime::worker::market_stream_options;
 using hedgr::runtime::worker::tick_feed;
@@ -134,14 +137,14 @@ private:
  */
 struct feed_state final {
     market_stream_options options;
-    std::vector<std::pair<std::string, std::string>> watches;
-    std::vector<std::string> unwatches;
+    std::vector<std::pair<series_handle, std::string>> watches;
+    std::vector<series_handle> unwatches;
     std::vector<std::string> tokens;
     int stops = 0;
     bool finished = false;
     bool reconnected = false;
     bool destroyed = false;
-    std::vector<market_bucket> waiting;
+    std::vector<series_bucket> waiting;
 };
 
 class fake_feed final : public tick_feed {
@@ -161,15 +164,15 @@ public:
         state_->tokens.push_back(std::move(token));
     }
 
-    void watch(std::string series_id, std::string uri) override {
-        state_->watches.emplace_back(std::move(series_id), std::move(uri));
+    void watch(series_handle series, std::string canonical_uri) override {
+        state_->watches.emplace_back(series, std::move(canonical_uri));
     }
 
-    void unwatch(std::string_view series_id) override {
-        state_->unwatches.emplace_back(series_id);
+    void unwatch(series_handle series) override {
+        state_->unwatches.emplace_back(series);
     }
 
-    std::size_t drain(std::vector<market_bucket>& out) override {
+    std::size_t drain(std::vector<series_bucket>& out) override {
         out.clear();
         out.swap(state_->waiting);
         return out.size();
@@ -308,9 +311,18 @@ struct world final {
 
     [[nodiscard]] bool settled(const std::string& account_id,
         const std::string& series) const {
-        const auto* points =
-            manager->market().points(instance_id, account_id, series);
-        return points != nullptr && !points->failure.empty();
+        const auto held =
+            manager->market().find(instance_id, account_id, series);
+        return held && !manager->market().failure(*held).empty();
+    }
+
+    /** @brief The handle the table holds for a series of this world. */
+    [[nodiscard]] series_handle handle_of(const std::string& account_id,
+        const std::string& series) const {
+        const auto held =
+            manager->market().find(instance_id, account_id, series);
+        REQUIRE(held.has_value());
+        return *held;
     }
 
     temporary_database database;
@@ -318,22 +330,50 @@ struct world final {
     std::unique_ptr<instance_manager> manager;
 };
 
+/**
+ * @brief A catalogue row whose URI names a real series.
+ *
+ * The feed canonicalises the URI before a watch, so a URI the codec does not
+ * read is never watched. Each id gets its own currency, so two ids are two
+ * series.
+ */
+[[nodiscard]] std::string series_uri(const std::string& id) {
+    const std::map<std::string, std::string> currency{
+        {"s-1", "USD"}, {"s-2", "EUR"}, {"s-far", "JPY"}};
+    const auto found = currency.find(id);
+    return "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate&ccy="
+        + (found == currency.end() ? std::string{"CHF"} : found->second);
+}
+
+[[nodiscard]] std::string canonical(const std::string& id) {
+    const auto key = hedgr::session::market::canonical_series_uri(series_uri(id));
+    REQUIRE(key.has_value());
+    return *key;
+}
+
 [[nodiscard]] market_series_row row(std::string id, std::string party_id = party) {
     market_series_row series;
-    series.uri = "oresmd://test/" + id;
+    series.uri = series_uri(id);
     series.id = std::move(id);
     series.party_id = std::move(party_id);
     return series;
 }
 
-[[nodiscard]] bool watches(const feed_state& feed,
-    std::vector<std::string> expected) {
-    std::vector<std::string> seen;
+/** @brief Whether the feed watched exactly the series in @p expected. */
+[[nodiscard]] bool watches(const world& w, const feed_state& feed,
+    const std::string& account_id, std::vector<std::string> expected) {
+    using key = std::pair<std::uint32_t, std::uint32_t>;
+    std::vector<key> seen;
     for (const auto& [series, uri] : feed.watches)
-        seen.push_back(series);
+        seen.emplace_back(series.index, series.generation);
+    std::vector<key> wanted;
+    for (const auto& id : expected) {
+        const auto series = w.handle_of(account_id, id);
+        wanted.emplace_back(series.index, series.generation);
+    }
     std::ranges::sort(seen);
-    std::ranges::sort(expected);
-    return seen == expected;
+    std::ranges::sort(wanted);
+    return seen == wanted;
 }
 
 }
@@ -366,20 +406,20 @@ TEST_CASE("the watch set follows the open and closed charts", "[feed]") {
     auto& feed = *w.feeds.at(0);
 
     w.open_chart("a-1", "s-1");
-    CHECK(watches(feed, {"s-1"}));
-    CHECK(feed.watches[0].second == "oresmd://test/s-1");
+    CHECK(watches(w, feed, "a-1", {"s-1"}));
+    CHECK(feed.watches[0].second == canonical("s-1"));
 
     w.open_chart("a-1", "s-2");
     w.open_chart("a-1", "s-far");
-    CHECK(watches(feed, {"s-1", "s-2"}));
+    CHECK(watches(w, feed, "a-1", {"s-1", "s-2"}));
 
     w.manager->pump();
-    CHECK(watches(feed, {"s-1", "s-2"}));
+    CHECK(watches(w, feed, "a-1", {"s-1", "s-2"}));
     CHECK(feed.unwatches.empty());
 
     w.close_chart("a-1", "s-1");
     REQUIRE(feed.unwatches.size() == 1);
-    CHECK(feed.unwatches[0] == "s-1");
+    CHECK(feed.unwatches[0] == w.handle_of("a-1", "s-1"));
 
     w.close_chart("a-1", "s-2");
     CHECK(feed.unwatches.size() == 2);
@@ -414,14 +454,15 @@ TEST_CASE("a chart opened before the catalogue is read it, then is watched",
     CHECK(w.feeds.at(0)->watches.empty());
 
     w.set_catalogue("a-1", {row("s-1")});
-    CHECK(watches(*w.feeds.at(0), {"s-1"}));
+    CHECK(watches(w, *w.feeds.at(0), "a-1", {"s-1"}));
 }
 
 TEST_CASE("watching a series seeds its history by a backfill", "[feed]") {
     world w;
     w.sign_in("a-1");
     w.set_catalogue("a-1", {row("s-1")});
-    REQUIRE(w.manager->market().points(instance_id, "a-1", "s-1") == nullptr);
+    REQUIRE_FALSE(
+        w.manager->market().find(instance_id, "a-1", "s-1").has_value());
 
     w.open_chart("a-1", "s-1");
     CHECK(wait_until([&] {
@@ -439,42 +480,141 @@ TEST_CASE("a reconnect seeds every watched series again", "[feed]") {
         w.manager->pump();
         return w.settled("a-1", "s-1");
     }));
-    const auto first =
-        w.manager->market().points(instance_id, "a-1", "s-1")->version;
+    const auto series = w.handle_of("a-1", "s-1");
+    const auto first = w.manager->market().version(series);
 
     w.feeds.at(0)->reconnected = true;
     w.manager->pump();
     CHECK(wait_until([&] {
         w.manager->pump();
-        return w.manager->market().points(instance_id, "a-1", "s-1")->version
-            != first;
+        return w.manager->market().version(series) != first;
     }));
     CHECK(w.feeds.at(0)->watches.size() == 1);
 }
 
-TEST_CASE("a drain applies each stream's buckets to its own session",
-    "[feed]") {
+TEST_CASE("a drained bucket lands in the series it names", "[feed]") {
     world w;
     w.sign_in("a-1");
     w.sign_in("a-2");
     REQUIRE(w.feeds.size() == 2);
+    w.set_catalogue("a-1", {row("s-1"), row("s-2")});
+    w.set_catalogue("a-2", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    w.open_chart("a-1", "s-2");
+    w.open_chart("a-2", "s-1");
 
-    market_bucket bucket;
-    bucket.series_id = "s-1";
+    const auto mine = w.handle_of("a-1", "s-1");
+    const auto sibling = w.handle_of("a-1", "s-2");
+    const auto other_session = w.handle_of("a-2", "s-1");
+    const auto before = w.manager->market().version(sibling);
+
+    series_bucket bucket;
+    bucket.series = mine;
     bucket.level = market_level::medium;
-    bucket.point.at_ns = 60'000'000'000;
-    bucket.point.value = 1.25;
+    bucket.at_ns = 60'000'000'000;
+    bucket.value = 1.25;
+    bucket.open = 1.0;
+    bucket.high = 1.5;
+    bucket.low = 0.75;
     w.feeds[0]->waiting.push_back(bucket);
     w.manager->pump();
 
-    const auto* mine = w.manager->market().points(instance_id, "a-1", "s-1");
-    REQUIRE(mine != nullptr);
-    REQUIRE(mine->medium.size() == 1);
-    CHECK(mine->medium.front().value == 1.25);
-    CHECK(mine->fine.empty());
-    CHECK(mine->coarse.empty());
-    CHECK(w.manager->market().points(instance_id, "a-2", "s-1") == nullptr);
+    const auto& series = w.manager->market();
+    const auto medium = series.columns(mine, market_level::medium);
+    REQUIRE(medium.size == 1);
+    CHECK(medium.at_ns[0] == 60'000'000'000);
+    CHECK(medium.value[0] == 1.25);
+    CHECK(medium.open[0] == 1.0);
+    CHECK(medium.high[0] == 1.5);
+    CHECK(medium.low[0] == 0.75);
+    CHECK(series.columns(mine, market_level::fine).size == 0);
+    CHECK(series.columns(mine, market_level::coarse).size == 0);
+    CHECK(series.columns(sibling, market_level::medium).size == 0);
+    CHECK(series.version(sibling) == before);
+    CHECK(series.columns(other_session, market_level::medium).size == 0);
     CHECK(w.feeds[0]->waiting.empty());
+    CHECK(w.manager->stale_buckets() == 0);
+    CHECK(w.manager->late_buckets() == 0);
+}
+
+TEST_CASE("a bucket whose series was released does not write the next "
+    "occupant of its slot", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1"), row("s-2")});
+    w.open_chart("a-1", "s-1");
+    w.open_chart("a-1", "s-2");
+    const auto live = w.handle_of("a-1", "s-2");
+    const auto& series = w.manager->market();
+    const auto before = series.version(live);
+
+    /*
+     * The handle a released series would have held: its slot, and the
+     * generation before the one the occupant now carries.
+     */
+    series_bucket stale;
+    stale.series = series_handle{live.index, live.generation - 1};
+    stale.level = market_level::fine;
+    stale.at_ns = 5'000'000'000;
+    stale.value = 9.0;
+    series_bucket nowhere = stale;
+    nowhere.series = series_handle{9999, 1};
+    w.feeds[0]->waiting.push_back(stale);
+    w.feeds[0]->waiting.push_back(nowhere);
+    w.manager->pump();
+
+    CHECK(w.manager->stale_buckets() == 2);
+    CHECK(w.manager->late_buckets() == 0);
+    CHECK(series.columns(live, market_level::fine).size == 0);
+    CHECK(series.version(live) == before);
+
+    /* The occupant's own bucket is applied, and an older one counts as late. */
+    series_bucket own = stale;
+    own.series = live;
+    w.feeds[0]->waiting.push_back(own);
+    own.at_ns = 4'000'000'000;
+    w.feeds[0]->waiting.push_back(own);
+    w.manager->pump();
+    CHECK(series.columns(live, market_level::fine).size == 1);
+    CHECK(series.columns(live, market_level::fine).value[0] == 9.0);
+    CHECK(w.manager->stale_buckets() == 2);
+    CHECK(w.manager->late_buckets() == 1);
+}
+
+TEST_CASE("a series whose URI names no series is interned and backfilled but "
+    "not watched", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    auto odd = row("s-1");
+    odd.uri = "not-a-uri";
+    w.set_catalogue("a-1", {odd});
+    w.open_chart("a-1", "s-1");
+
+    CHECK(w.feeds.at(0)->watches.empty());
+    CHECK(w.manager->market().find(instance_id, "a-1", "s-1").has_value());
+    CHECK(wait_until([&] {
+        w.manager->pump();
+        return w.settled("a-1", "s-1");
+    }));
+}
+
+TEST_CASE("a watch holds its series and unwatching lets it go", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    const auto series = w.handle_of("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+
+    w.close_chart("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 0);
+
+    w.open_chart("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+    CHECK(w.handle_of("a-1", "s-1") == series);
+
+    w.tell(event_kind::session_failed, "a-1");
+    CHECK(w.manager->market().watchers(series) == 0);
 }
 
 TEST_CASE("a token refresh keeps the stream and its watches", "[feed]") {
