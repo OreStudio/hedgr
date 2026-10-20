@@ -69,20 +69,6 @@ namespace hedgr::ui::render {
     return std::to_string(minutes) + "m";
 }
 
-/**
- * @brief The as-of instant with its age in front.
- *
- * The age goes before the instant so the instant, which the foot right-aligns,
- * stays where it is on every frame while the age changes width.
- */
-[[nodiscard]] inline std::string as_of_age_text(std::int64_t at_ns,
-    std::int64_t wall_now_ns) {
-    const auto text = as_of_text(at_ns);
-    if (text.empty() || wall_now_ns <= 0)
-        return text;
-    return tick_age_text(wall_now_ns - at_ns) + " \u00b7 " + text;
-}
-
 }
 
 #endif

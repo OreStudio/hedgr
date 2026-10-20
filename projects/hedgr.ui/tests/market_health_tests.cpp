@@ -18,9 +18,11 @@
  *
  */
 #include "headless_desk.hpp"
+#include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/render/time_text.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
+#include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <catch2/catch_all.hpp>
@@ -183,4 +185,30 @@ TEST_CASE("a stale chart says how old its newest point is, capped at ten minutes
     CHECK(says(text, "STALE"));
     CHECK(says(text, render::as_of_text(now - 71 * 60 * second)));
     CHECK(says(text, ">10m"));
+}
+
+TEST_CASE("the foot's age takes the colour of its verdict", "[health][chart]") {
+    using model::domain::data_health;
+    hedgr::testing::headless_imgui imgui;
+    hedgr::ui::widget::foot_state foot;
+    const std::int64_t at = now - 71 * 60 * second;
+
+    render::set_health_foot(foot, data_health::stale, at, now, false);
+    CHECK(foot.age == ">10m");
+    CHECK(foot.as_of == render::as_of_text(at));
+    CHECK(foot.colour == render::health_colour(data_health::stale));
+
+    render::set_health_foot(foot, data_health::delayed, now - 20 * second, now,
+        false);
+    CHECK(foot.age == "20s");
+    CHECK(foot.colour == render::health_colour(data_health::delayed));
+    CHECK(foot.colour != render::health_colour(data_health::stale));
+
+    render::set_health_foot(foot, data_health::live, now - 2 * second, now,
+        false);
+    CHECK(foot.age == "2s");
+    CHECK(foot.colour == render::health_colour(data_health::live));
+
+    render::set_health_foot(foot, data_health::unavailable, 0, now, false);
+    CHECK(foot.age.empty());
 }

@@ -85,6 +85,15 @@ struct foot_state final {
     std::string identity;
 
     /**
+     * @brief How old the data is, compact, or empty when there is none.
+     *
+     * Drawn before the instant in the state's colour, so a feed going late
+     * turns yellow and a dead one red where the eye already is. The instant
+     * after it stays quiet and stays put.
+     */
+    std::string age;
+
+    /**
      * @brief The instant the data is as of, or empty when there is none.
      *
      * Drawn after the state word as "as of ...". The state and the instant are
