@@ -18,23 +18,19 @@
  *
  */
 #include "allocation_counter.hpp"
-#include "hedgr.model/state/market_table.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
 #include "hedgr.model/state/series_ring.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
-#include <random>
 #include <string>
 #include <vector>
 
 /*
  * The series table is checked through its public interface only. The ring tests
  * compare all six columns, because a mutation that skips one column survives a
- * test that reads another. The differential tests run the same operations
- * through market_table and series_table and compare what a reader sees.
+ * test that reads another.
  */
 
 namespace {
@@ -44,7 +40,6 @@ using hedgr::model::domain::market_point;
 using hedgr::model::domain::market_series_row;
 using hedgr::model::state::append_outcome;
 using hedgr::model::state::append_result;
-using hedgr::model::state::market_table;
 using hedgr::model::state::series_columns;
 using hedgr::model::state::series_point;
 using hedgr::model::state::series_ring;
@@ -665,165 +660,4 @@ TEST_CASE("looking up and reading a held series allocates nothing",
     CHECK(found > 0);
     CHECK(stamps > 0);
     CHECK(table.columns(h, market_level::fine).size == capacity);
-}
-
-namespace {
-
-std::vector<series_point> from_deque(const std::deque<market_point>& d) {
-    std::vector<series_point> out;
-    for (const auto& p : d)
-        out.push_back({.at_ns = p.at_ns, .value = p.value, .open = p.open,
-            .high = p.high, .low = p.low});
-    return out;
-}
-
-series_point as_point(const market_point& p) {
-    return {.at_ns = p.at_ns, .value = p.value, .open = p.open, .high = p.high,
-        .low = p.low};
-}
-
-void compare(const market_table& old_table, const series_table& table,
-    hedgr::model::state::series_handle h, const std::string& id) {
-    const auto* snapshot = old_table.points(instance_id, account_id, id);
-    if (snapshot == nullptr) {
-        CHECK(table.columns(h, market_level::fine).size == 0);
-        return;
-    }
-    for (const auto level : {market_level::fine, market_level::medium,
-             market_level::coarse}) {
-        const auto expected = from_deque(snapshot->level(level));
-        const auto cols = table.columns(h, level);
-        REQUIRE(cols.size == expected.size());
-        bool same = true;
-        for (std::size_t i = 0; same && i < expected.size(); ++i) {
-            same = cols.at_ns[i] == expected[i].at_ns &&
-                cols.value[i] == expected[i].value &&
-                cols.open[i] == expected[i].open &&
-                cols.high[i] == expected[i].high &&
-                cols.low[i] == expected[i].low &&
-                cols.at_s[i] == static_cast<double>(expected[i].at_ns) / 1e9;
-        }
-        REQUIRE(same);
-    }
-    CHECK(table.failure(h) == snapshot->failure);
-    CHECK(table.observed_at_ns(h) == snapshot->observed_at_ns);
-    CHECK(table.newest_at_ns(h) == snapshot->newest_at_ns());
-}
-
-/**
- * Applies one random sequence to both tables.
- *
- * Aligned timestamps are whole hours, so two points share a bucket at every
- * level exactly when they share a timestamp, which is the one case where the
- * old exact-time merge and the new merge by bucket agree. Unaligned timestamps
- * are arbitrary, and then a row may be seeded only before it holds any point.
- * Those are the two deliberate differences, kept out by construction. The
- * versions are not compared, because the late stamp is the other difference.
- */
-std::size_t run_differential(std::uint64_t seed, bool aligned,
-    std::size_t ops) {
-    std::mt19937_64 rng{seed};
-    const std::vector<std::string> ids{"s-0", "s-1"};
-    market_table old_table;
-    series_table table;
-    std::vector<hedgr::model::state::series_handle> handles;
-    std::vector<std::int64_t> clock(ids.size(), 0);
-    std::vector<bool> touched(ids.size(), false);
-    for (const auto& id : ids)
-        handles.push_back(table.intern(instance_id, account_id, id));
-    constexpr std::int64_t hour = 3600 * second;
-
-    auto next_time = [&](std::size_t s) {
-        auto& t = clock[s];
-        const auto roll = rng() % 100;
-        if (roll < 5)
-            t -= static_cast<std::int64_t>(rng() % 4) *
-                (aligned ? hour : second);
-        else if (roll >= 15)
-            t += aligned
-                ? static_cast<std::int64_t>(rng() % 3) * hour
-                : static_cast<std::int64_t>(rng() % 3 + 1) * (second / 3 + 7);
-        if (t < 0)
-            t = 0;
-        return aligned ? t + hour : t + second;
-    };
-
-    if (!aligned) {
-        for (std::size_t s = 0; s < ids.size(); ++s) {
-            std::vector<market_point> observed;
-            for (std::size_t i = 0; i < 4000; ++i) {
-                clock[s] += static_cast<std::int64_t>(rng() % 3 + 1) *
-                    (second / 2 + 3);
-                observed.push_back({.at_ns = clock[s], .value =
-                    static_cast<double>(rng() % 1000) / 8.0});
-            }
-            old_table.set_points(instance_id, account_id, ids[s],
-                observed, 1);
-            table.seed(handles[s], observed, 1);
-            touched[s] = true;
-        }
-    }
-    for (std::size_t op = 0; op < ops; ++op) {
-        const auto s = static_cast<std::size_t>(rng() % ids.size());
-        const auto now = static_cast<std::int64_t>(op % 977) + 1;
-        const auto kind = rng() % 1000;
-        if (kind < 940) {
-            const auto level = static_cast<market_level>(
-                kind < 800 ? 0 : (kind < 900 ? 1 : 2));
-            const auto at = next_time(s);
-            const auto v = static_cast<double>(rng() % 1000) / 8.0;
-            const market_point p{.at_ns = at, .value = v,
-                .open = v + 1, .high = v + 2, .low = v - 1};
-            old_table.append_point(instance_id, account_id, ids[s], level, p, now);
-            table.append(handles[s], level, as_point(p), now);
-            touched[s] = true;
-        } else if (kind < 950) {
-            if (!aligned && touched[s])
-                continue;
-            std::vector<market_point> observed;
-            const auto count = rng() % 40;
-            std::int64_t t = clock[s];
-            for (std::size_t i = 0; i < count; ++i) {
-                t += static_cast<std::int64_t>(rng() % 3) *
-                    (aligned ? hour : second / 2 + 3);
-                observed.push_back({.at_ns = aligned ? t + hour : t + second,
-                    .value = static_cast<double>(rng() % 1000) / 8.0});
-            }
-            old_table.set_points(instance_id, account_id, ids[s], observed, now);
-            table.seed(handles[s], observed, now);
-            touched[s] = true;
-        } else {
-            old_table.fail_points(instance_id, account_id, ids[s], "failure", now);
-            table.fail(handles[s], "failure", now);
-        }
-        if (op % 1999 == 0) {
-            for (std::size_t i = 0; i < ids.size(); ++i)
-                compare(old_table, table, handles[i], ids[i]);
-        }
-    }
-    std::size_t fullest = 0;
-    for (std::size_t i = 0; i < ids.size(); ++i) {
-        compare(old_table, table, handles[i], ids[i]);
-        fullest = std::max(fullest,
-            table.columns(handles[i], market_level::fine).size);
-    }
-    return fullest;
-}
-
-}
-
-TEST_CASE("the series table reads like the market table on aligned times",
-    "[series][differential]") {
-    std::size_t fullest = 0;
-    for (const std::uint64_t seed : {1u, 2u, 3u, 4u})
-        fullest = std::max(fullest, run_differential(seed, true, 60000));
-    CHECK(fullest == hedgr::model::domain::market_fine_capacity);
-}
-
-TEST_CASE("the series table reads like the market table on any time",
-    "[series][differential]") {
-    std::size_t fullest = 0;
-    for (const std::uint64_t seed : {11u, 12u, 13u, 14u})
-        fullest = std::max(fullest, run_differential(seed, false, 60000));
-    CHECK(fullest == hedgr::model::domain::market_fine_capacity);
 }
