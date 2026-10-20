@@ -28,9 +28,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace hedgr::runtime::service {
 
@@ -175,8 +177,54 @@ std::string window_key_for(domain::window_kind kind,
     return {};
 }
 
-window_service::window_service(const model_state::session_table& sessions)
-    : sessions_(sessions) {
+window_service::window_service(const model_state::session_table& sessions,
+    model_state::series_table& series)
+    : sessions_(sessions), series_(series) {
+}
+
+void window_service::hold_series(model_state::window_handle window,
+    std::string_view instance_id, std::string_view account_id) {
+    const auto* chart =
+        std::get_if<domain::chart_state>(&windows_.state(window));
+    if (chart == nullptr || chart->series_id.empty())
+        return;
+
+    const auto wanted =
+        series_.intern(instance_id, account_id, chart->series_id);
+    const auto held = windows_.series(window);
+    if (held.size() == 1 && held.front() == wanted)
+        return;
+
+    /* Acquire before release, so a series the window keeps never reaches zero. */
+    series_.acquire(wanted);
+    drop_series(window);
+    windows_.set_series(window, std::span{&wanted, 1});
+}
+
+void window_service::drop_series(model_state::window_handle window) {
+    for (const auto held : windows_.series(window))
+        series_.release(held);
+    windows_.set_series(window, {});
+}
+
+void window_service::release_scope(std::string_view instance_id,
+    std::string_view account_id) {
+    for (const auto window : live_windows(windows_)) {
+        const auto held = windows_.series(window);
+        if (held.empty())
+            continue;
+        std::vector<model_state::series_handle> kept;
+        for (const auto handle : held) {
+            const auto key = series_.key_of(handle);
+            const bool inside = key && key->instance_id == instance_id
+                && (account_id.empty() || key->account_id == account_id);
+            if (inside)
+                series_.release(handle);
+            else
+                kept.push_back(handle);
+        }
+        windows_.set_series(window, kept);
+    }
 }
 
 void window_service::attach(store::sqlite::database& database) {
@@ -190,9 +238,15 @@ std::expected<void, std::string> window_service::load() {
         return std::unexpected(store_failure("cannot read the stored windows",
             windows.error()));
     }
+    for (const auto window : live_windows(windows_))
+        drop_series(window);
     windows_.clear();
     for (const auto& spec : windows.value()) {
         const auto handle = windows_.insert(spec);
+        if (spec.session) {
+            hold_series(handle, spec.session->instance_id,
+                spec.session->account_id);
+        }
 
         /*
          * Sessions are not persisted, so on a cold start the bind below finds
@@ -270,6 +324,7 @@ open_outcome window_service::open(const command::command& cmd) {
             if (const auto session =
                     sessions_.find(cmd.instance_id, cmd.account_id)) {
                 windows_.bind_session(*existing, *session);
+                hold_series(*existing, cmd.instance_id, cmd.account_id);
 
                 /*
                  * The restored window's first refresh ran while it had no
@@ -325,8 +380,10 @@ open_outcome window_service::open(const command::command& cmd) {
      * reach its state without a key lookup per window. A window opened with no
      * session named stays unbound and renders the session-loss state.
      */
-    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
+    if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id)) {
         windows_.bind_session(handle, *session);
+        hold_series(handle, cmd.instance_id, cmd.account_id);
+    }
 
     windows_.set_next_refresh_ns(handle,
         deadline_for(traits.on_open, traits.cadence));
@@ -365,6 +422,7 @@ window_service::close(const command::command& cmd) {
             std::format("cannot close: no window {}", cmd.window_id)};
     }
 
+    drop_series(*handle);
     windows_.remove(*handle);
 
     if (window_repo_) {
@@ -431,6 +489,7 @@ void window_service::rebind(std::string_view instance_id,
         }
 
         windows_.bind_session(window, session);
+        hold_series(window, instance_id, account_id);
         windows_.set_next_refresh_ns(window,
             deadline_for(traits_of(spec.kind).on_rebind, spec.cadence));
         BOOST_LOG_SEV(lg(), ores::logging::info)

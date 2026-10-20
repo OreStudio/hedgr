@@ -49,6 +49,13 @@ namespace hedgr::runtime::service {
  * buckets it applies. The NATS dispatch thread and the stream thread never
  * reach a member of it.
  *
+ * The windows hold the series they show, and the table counts those holders.
+ * A series is wanted when it has a holder, its catalogue lists it, and it is
+ * the session's party's. The feed reads the table's change list for the rows
+ * whose state may have flipped and does a full pass over a session's held rows
+ * only when its stream opens, so a desk where nothing changed costs it the
+ * drain and nothing else.
+ *
  * Supervision decides when a stream exists and calls @c open, @c retoken_or_open
  * and @c close. This class never reads a session's status to decide that
  * except in @c pump, where a session that is no longer authenticated loses its
@@ -60,9 +67,9 @@ namespace hedgr::runtime::service {
  */
 class HEDGR_RUNTIME_EXPORT market_feed final {
 public:
-    /** @brief Starts the catalogue read a chart's window needs, or refuses. */
-    using catalogue_read =
-        std::function<std::optional<refusal>(std::string_view window_id)>;
+    /** @brief Starts one session's catalogue read, or refuses. */
+    using catalogue_read = std::function<std::optional<refusal>(
+        std::string_view instance_id, std::string_view account_id)>;
 
     /** @brief Starts the backfill read of one series. */
     using backfill_read = std::function<void(std::string_view instance_id,
@@ -74,7 +81,6 @@ public:
      */
     market_feed(const model::state::instance_table& instances,
         const model::state::session_table& sessions,
-        const model::state::window_table& windows,
         model::state::series_table& series,
         const session::transport::session_options& seed,
         worker::tick_feed_factory feeds, catalogue_read read_catalogue,
@@ -98,7 +104,7 @@ public:
     void close(std::string_view instance_id, std::string_view account_id);
 
     /**
-     * @brief Reconciles watches, drains buckets and applies them to the model.
+     * @brief Applies the watch changes, drains buckets and applies them.
      * @return the catalogue reads that were refused, for the facade to raise.
      */
     [[nodiscard]] std::vector<refusal> pump();
@@ -124,7 +130,6 @@ public:
 private:
     const model::state::instance_table& instances_;
     const model::state::session_table& sessions_;
-    const model::state::window_table& windows_;
     model::state::series_table& series_;
     const session::transport::session_options& seed_;
 
@@ -151,12 +156,41 @@ private:
         std::string account_id;
         std::unique_ptr<worker::tick_feed> stream;
 
-        /** @brief The handle of each watched series id; the feed holds each. */
-        std::unordered_map<std::string, model::state::series_handle> watched;
+        /**
+         * @brief The session the stream was opened for.
+         *
+         * Held as a handle because the frame checks it every pump, and a
+         * handle check allocates nothing where a lookup by name builds a key.
+         * A session that was removed leaves the handle stale.
+         */
+        model::state::session_handle session;
+
+        /** @brief The series the stream is told to watch. */
+        std::vector<model::state::series_handle> watched;
+
+        /** @brief Set when the stream opens, until its full pass has run. */
+        bool needs_pass = true;
     };
 
-    /** @brief Stops holding every series @p entry watches. */
-    void release_watches(market_stream_entry& entry);
+    /**
+     * @brief Makes the stream watch @p series exactly when it is wanted.
+     *
+     * Idempotent. Starts the session's catalogue read when it has none, and the
+     * refusal of that read is added to @p refusals.
+     */
+    void reconcile(market_stream_entry& entry, model::state::series_handle series,
+        std::vector<refusal>& refusals);
+
+    /** @brief Whether @p series should be watched on @p entry's stream. */
+    [[nodiscard]] bool wanted(const market_stream_entry& entry,
+        model::state::series_handle series, std::vector<refusal>& refusals);
+
+    /** @brief Drops @p series from every stream that watches it. */
+    void forget(model::state::series_handle series);
+
+    /** @brief Reused every frame, so an idle desk allocates nothing. */
+    std::vector<model::state::series_handle> changes_;
+    std::vector<model::state::series_bucket> buckets_;
 
     std::size_t stale_buckets_ = 0;
     std::size_t late_buckets_ = 0;

@@ -182,7 +182,7 @@ public:
 
     /** @brief The market series, their catalogues and the points each holds. */
     [[nodiscard]] const model::state::series_table& market() const noexcept {
-        return read_service_.market();
+        return series_;
     }
 
     /** @brief Closed buckets dropped for a series released in flight. */
@@ -508,10 +508,15 @@ private:
     service::probe_service probe_service_{catalogue_.instances(), probe_pool_.context(), events_};
     service::password_policy_service policy_service_{seed_options_,
         probe_pool_.context(), events_};
-    service::window_service window_service_{sessions_};
+    /*
+     * The one series table. The windows hold its rows, the read service
+     * writes the catalogues and backfills, and the feed writes the buckets.
+     */
+    model::state::series_table series_;
+    service::window_service window_service_{sessions_, series_};
     service::lock_service lock_service_{pool_.context(), commands_, events_, catalogue_.accounts()};
     service::read_service read_service_{pool_.context(), events_,
-        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), seed_options_};
+        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), series_, seed_options_};
     service::market_feed market_feed_;
 };
 

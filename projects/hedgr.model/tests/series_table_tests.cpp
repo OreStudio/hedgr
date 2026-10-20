@@ -661,3 +661,137 @@ TEST_CASE("looking up and reading a held series allocates nothing",
     CHECK(stamps > 0);
     CHECK(table.columns(h, market_level::fine).size == capacity);
 }
+
+TEST_CASE("the first watcher and the last are the only recorded changes",
+    "[series][changes]") {
+    series_table table;
+    const auto h = table.intern(instance_id, account_id, "s-1");
+    std::vector<hedgr::model::state::series_handle> changes;
+
+    table.drain_changes(changes);
+    CHECK(changes.empty());
+
+    table.acquire(h);
+    table.acquire(h);
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0] == h);
+
+    table.release(h);
+    table.drain_changes(changes);
+    CHECK(changes.empty());
+
+    table.release(h);
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0] == h);
+
+    table.release(h);
+    table.acquire({99, 1});
+    table.drain_changes(changes);
+    CHECK(changes.empty());
+}
+
+TEST_CASE("a catalogue records a held watched row only when its watch state "
+    "moved", "[series][changes]") {
+    series_table table;
+    const auto watched = table.intern(instance_id, account_id, "s-1");
+    const auto idle = table.intern(instance_id, account_id, "s-2");
+    table.acquire(watched);
+    std::vector<hedgr::model::state::series_handle> changes;
+    table.drain_changes(changes);
+
+    table.apply_catalogue(instance_id, account_id,
+        {row("s-1", "u-1", "p-1"), row("s-2", "u-2", "p-1")});
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0] == watched);
+
+    table.apply_catalogue(instance_id, account_id,
+        {row("s-2", "u-2", "p-1"), row("s-1", "u-1", "p-1")});
+    table.drain_changes(changes);
+    CHECK(changes.empty());
+
+    table.apply_catalogue(instance_id, account_id,
+        {row("s-1", "u-1b", "p-1"), row("s-2", "u-2", "p-1")});
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+
+    table.apply_catalogue(instance_id, account_id,
+        {row("s-1", "u-1b", "p-2"), row("s-2", "u-2", "p-1")});
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+
+    table.apply_catalogue(instance_id, account_id, {row("s-2", "u-2", "p-1")});
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0] == watched);
+    CHECK_FALSE(table.info(watched)->listed);
+    CHECK(table.info(idle)->listed);
+}
+
+TEST_CASE("erasing a watched row is a change and an unwatched row is not",
+    "[series][changes]") {
+    series_table table;
+    const auto watched = table.intern(instance_id, account_id, "s-1");
+    const auto idle = table.intern(instance_id, account_id, "s-2");
+    table.acquire(watched);
+    std::vector<hedgr::model::state::series_handle> changes;
+    table.drain_changes(changes);
+
+    table.erase(idle);
+    table.drain_changes(changes);
+    CHECK(changes.empty());
+
+    table.forget_scope(instance_id, account_id);
+    table.drain_changes(changes);
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0] == watched);
+    CHECK_FALSE(table.contains(watched));
+}
+
+TEST_CASE("a scope lists its rows, names them and adds up its watchers",
+    "[series][changes]") {
+    series_table table;
+    const auto a = table.intern(instance_id, account_id, "s-1");
+    const auto b = table.intern(instance_id, account_id, "s-2");
+    const auto other = table.intern(instance_id, "a-2", "s-1");
+    table.acquire(a);
+    table.acquire(a);
+    table.acquire(other);
+
+    const auto held = table.held(instance_id, account_id);
+    REQUIRE(held.size() == 2);
+    CHECK(held[0] == a);
+    CHECK(held[1] == b);
+    CHECK(table.held(instance_id, "nobody").empty());
+
+    const auto key = table.key_of(other);
+    REQUIRE(key.has_value());
+    CHECK(key->instance_id == instance_id);
+    CHECK(key->account_id == "a-2");
+    CHECK(key->series_id == "s-1");
+    CHECK(table.watcher_total() == 3);
+
+    table.erase(a);
+    CHECK_FALSE(table.key_of(a).has_value());
+    CHECK(table.watcher_total() == 1);
+}
+
+TEST_CASE("forgetting an instance removes every account of it and no other",
+    "[series][scope]") {
+    series_table table;
+    const auto one = table.intern("i-1", "a-1", "s-1");
+    const auto two = table.intern("i-1", "a-2", "s-1");
+    const auto kept = table.intern("i-2", "a-1", "s-1");
+    table.apply_catalogue("i-1", "a-3", {row("s-1")});
+    table.apply_catalogue("i-2", "a-1", {row("s-1")});
+
+    CHECK(table.forget_instance("i-1") == 2);
+    CHECK_FALSE(table.contains(one));
+    CHECK_FALSE(table.contains(two));
+    CHECK(table.contains(kept));
+    CHECK(table.catalogue("i-1", "a-3") == nullptr);
+    CHECK(table.catalogue("i-2", "a-1") != nullptr);
+    CHECK(table.size() == 1);
+}

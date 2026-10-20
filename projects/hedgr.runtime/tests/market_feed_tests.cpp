@@ -17,11 +17,16 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "allocation_counter.hpp"
+#include "holder_audit.hpp"
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/instance.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/state/series_table.hpp"
+#include "hedgr.model/state/tables.hpp"
+#include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
@@ -30,6 +35,8 @@
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include "hedgr.store/repository/window_repository.hpp"
+#include "hedgr.store/sqlite/database.hpp"
 #include <algorithm>
 #include <atomic>
 #include <catch2/catch_test_macros.hpp>
@@ -39,6 +46,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -58,6 +66,7 @@ using hedgr::model::domain::market_series_row;
 using hedgr::model::domain::secret_string;
 using hedgr::model::domain::session_status;
 using hedgr::model::domain::window_kind;
+using hedgr::model::domain::window_spec;
 using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::series_bucket;
@@ -189,15 +198,7 @@ private:
 /** @brief The manager, one unreachable instance, and every feed it made. */
 struct world final {
     world() {
-        manager = std::make_unique<instance_manager>(1,
-            [this](market_stream_options options)
-                -> std::unique_ptr<tick_feed> {
-                auto state = std::make_shared<feed_state>();
-                state->options = std::move(options);
-                feeds.push_back(state);
-                return std::make_unique<fake_feed>(state);
-            });
-        REQUIRE(manager->start(database.path(), seed_options()).has_value());
+        make_manager();
 
         command save;
         save.kind = command_kind::save_instance;
@@ -207,6 +208,39 @@ struct world final {
         save.instance_row.subject_prefix = "ores.test.refused";
         save.instance_id = instance_id;
         push(std::move(save));
+    }
+
+    void make_manager() {
+        manager = std::make_unique<instance_manager>(1,
+            [this](market_stream_options options)
+                -> std::unique_ptr<tick_feed> {
+                auto state = std::make_shared<feed_state>();
+                state->options = std::move(options);
+                feeds.push_back(state);
+                return std::make_unique<fake_feed>(state);
+            });
+        REQUIRE(manager->start(database.path(), seed_options()).has_value());
+    }
+
+    /**
+     * @brief Stops the manager and starts another on the same store.
+     *
+     * The windows in @p extra are written to the store while no manager has it
+     * open, so the new one restores them, which is how two windows can show
+     * one series: the commands never make a second.
+     */
+    void restart(const std::vector<window_spec>& extra = {}) {
+        manager->stop();
+        manager.reset();
+        if (!extra.empty()) {
+            auto opened = hedgr::store::sqlite::database::open(database.path());
+            REQUIRE(opened.has_value());
+            hedgr::store::repository::window_repository windows{opened.value()};
+            for (const auto& spec : extra)
+                REQUIRE(windows.save(spec).has_value());
+        }
+        feeds.clear();
+        make_manager();
     }
 
     ~world() { manager->stop(); }
@@ -427,6 +461,7 @@ TEST_CASE("the watch set follows the open and closed charts", "[feed]") {
 
     w.open_chart("a-1", "s-1");
     CHECK(feed.watches.size() == 3);
+    hedgr::testing::audit_holders(*w.manager);
 }
 
 TEST_CASE("a chart whose series is not in the catalogue is not watched",
@@ -610,27 +645,35 @@ TEST_CASE("a series whose URI names no series is interned and backfilled but "
     }));
 }
 
-TEST_CASE("a watch holds its series and unwatching lets it go", "[feed]") {
+TEST_CASE("an open chart holds its series and closing it lets go", "[feed]") {
     world w;
     w.sign_in("a-1");
     w.set_catalogue("a-1", {row("s-1")});
     w.open_chart("a-1", "s-1");
     const auto series = w.handle_of("a-1", "s-1");
     CHECK(w.manager->market().watchers(series) == 1);
+    hedgr::testing::audit_holders(*w.manager);
 
     w.close_chart("a-1", "s-1");
     CHECK(w.manager->market().watchers(series) == 0);
+    hedgr::testing::audit_holders(*w.manager);
 
     w.open_chart("a-1", "s-1");
     CHECK(w.manager->market().watchers(series) == 1);
     CHECK(w.handle_of("a-1", "s-1") == series);
-
-    w.tell(event_kind::session_failed, "a-1");
-    CHECK(w.manager->market().watchers(series) == 0);
+    hedgr::testing::audit_holders(*w.manager);
 }
 
-TEST_CASE("a session that stops being authenticated lets go of what it "
-    "watched", "[feed]") {
+TEST_CASE("a chart opened with no session holds nothing until its session is "
+    "there", "[feed]") {
+    world w;
+    w.open_chart("a-1", "s-1");
+    CHECK(w.manager->market().size() == 0);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a session that stops being authenticated keeps its charts and "
+    "watches them again on the next stream", "[feed]") {
     world w;
     w.sign_in("a-1");
     w.set_catalogue("a-1", {row("s-1")});
@@ -646,7 +689,14 @@ TEST_CASE("a session that stops being authenticated lets go of what it "
     fact.status = session_status::disconnected;
     w.push(std::move(fact));
     CHECK(w.feeds.at(0)->stops == 1);
-    CHECK(w.manager->market().watchers(series) == 0);
+    CHECK(w.manager->market().watchers(series) == 1);
+    hedgr::testing::audit_holders(*w.manager);
+
+    w.tell(event_kind::session_authenticated, "a-1");
+    REQUIRE(w.feeds.size() == 2);
+    CHECK(watches(w, *w.feeds.at(1), "a-1", {"s-1"}));
+    CHECK(w.feeds.at(1)->unwatches.empty());
+    hedgr::testing::audit_holders(*w.manager);
 }
 
 TEST_CASE("a token refresh keeps the stream and its watches", "[feed]") {
@@ -696,6 +746,8 @@ TEST_CASE("a refresh that follows a failure in one frame opens a stream the "
 TEST_CASE("a session that is lost retires its stream", "[feed]") {
     world w;
     w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
     auto& feed = *w.feeds.at(0);
 
     SECTION("a failure") {
@@ -727,6 +779,7 @@ TEST_CASE("a session that is lost retires its stream", "[feed]") {
     CHECK(feed.stops == 1);
     w.manager->pump();
     CHECK(feed.stops == 1);
+    hedgr::testing::audit_holders(*w.manager);
 }
 
 TEST_CASE("a retired stream is kept until it says it has finished", "[feed]") {
@@ -772,4 +825,285 @@ TEST_CASE("a fact from a replaced attempt does not touch the stream",
     const auto handle = w.manager->sessions().find(instance_id, "a-1");
     REQUIRE(handle.has_value());
     CHECK(w.manager->sessions().status(*handle) == session_status::authenticated);
+}
+
+namespace {
+
+/** @brief A chart window restored from the store, whatever it is called. */
+[[nodiscard]] window_spec stored_chart(std::string window_id,
+    const std::string& account_id, const std::string& series) {
+    window_spec spec;
+    spec.id = std::move(window_id);
+    spec.kind = window_kind::chart;
+    spec.session = hedgr::model::domain::session_key{instance_id, account_id};
+    spec.state = hedgr::model::domain::chart_state{
+        .label = series, .series_id = series};
+    return spec;
+}
+
+[[nodiscard]] std::vector<market_series_row> rows_named(std::size_t count) {
+    std::vector<market_series_row> rows;
+    for (std::size_t i = 0; i < count; ++i)
+        rows.push_back(row(std::format("c-{}", i)));
+    return rows;
+}
+
+}
+
+TEST_CASE("a pass over an idle desk calls nothing", "[feed][cost]") {
+    world w;
+    w.sign_in("a-1");
+    constexpr std::size_t charts = 60;
+    w.set_catalogue("a-1", rows_named(charts));
+    for (std::size_t i = 0; i < charts; ++i)
+        w.open_chart("a-1", std::format("c-{}", i));
+    auto& feed = *w.feeds.at(0);
+    REQUIRE(feed.watches.size() == charts);
+
+    for (int frame = 0; frame < 20; ++frame)
+        w.manager->pump();
+    CHECK(feed.watches.size() == charts);
+    CHECK(feed.unwatches.empty());
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+/**
+ * @brief A feed on its own tables, with every chart held the way a window holds it.
+ *
+ * The feed reads tables and holds none of them, so this is the whole of its
+ * input: a series table whose rows have watchers, and a session. Nothing else
+ * in the manager's frame is in the count.
+ */
+struct bare_feed final {
+    explicit bare_feed(std::size_t charts, std::size_t catalogue_rows) {
+        hedgr::model::domain::instance row;
+        row.id = instance_id;
+        row.name = "Refused";
+        row.nats_url = "nats://127.0.0.1:1";
+        row.subject_prefix = "ores.test.refused";
+        static_cast<void>(instances.upsert(row));
+
+        session = sessions.insert(instance_id, "a-1");
+        sessions.set_account_result(session, "tenant", "party", party,
+            secret_string{std::string{"a-token"}});
+        sessions.set_status(session, session_status::authenticated);
+
+        auto rows = rows_named(catalogue_rows);
+        series.apply_catalogue(instance_id, "a-1", std::move(rows));
+        for (std::size_t i = 0; i < charts; ++i) {
+            series.acquire(
+                series.intern(instance_id, "a-1", std::format("c-{}", i)));
+        }
+
+        feed = std::make_unique<hedgr::runtime::service::market_feed>(
+            instances, sessions, series, options, [this](market_stream_options) {
+                return std::make_unique<fake_feed>(state);
+            },
+            [this](std::string_view, std::string_view)
+                -> std::optional<hedgr::runtime::refusal> {
+                ++catalogue_reads;
+                return std::nullopt;
+            },
+            [this](std::string_view, std::string_view, std::string_view) {
+                ++backfills;
+            });
+        feed->attach(std::filesystem::temp_directory_path() / "bare_feed.sqlite");
+        event opened;
+        opened.instance_id = instance_id;
+        opened.account_id = "a-1";
+        opened.party_id = party;
+        opened.token = secret_string{std::string{"a-token"}};
+        feed->open(opened);
+    }
+
+    hedgr::model::state::instance_table instances;
+    hedgr::model::state::session_table sessions;
+    hedgr::model::state::series_table series;
+    hedgr::model::state::session_handle session;
+    session_options options;
+    std::shared_ptr<feed_state> state = std::make_shared<feed_state>();
+    std::size_t catalogue_reads = 0;
+    std::size_t backfills = 0;
+    std::unique_ptr<hedgr::runtime::service::market_feed> feed;
+};
+
+TEST_CASE("the feed's pass over an idle desk allocates nothing whatever the "
+    "desk holds", "[feed][cost]") {
+    const auto idle_allocations = [](std::size_t charts, std::size_t rows) {
+        bare_feed desk{charts, rows};
+        REQUIRE(desk.feed->pump().empty());
+        REQUIRE(desk.state->watches.size() == charts);
+        REQUIRE(desk.backfills == charts);
+        REQUIRE(desk.catalogue_reads == 0);
+        static_cast<void>(desk.feed->pump());
+
+        const auto before = hedgr::testing::allocations();
+        for (int frame = 0; frame < 50; ++frame)
+            static_cast<void>(desk.feed->pump());
+        const auto spent = hedgr::testing::allocations() - before;
+        CHECK(desk.state->watches.size() == charts);
+        CHECK(desk.state->unwatches.empty());
+        CHECK(desk.backfills == charts);
+        return spent;
+    };
+
+    CHECK(idle_allocations(5, 20) == 0);
+    CHECK(idle_allocations(200, 5000) == 0);
+}
+
+TEST_CASE("two charts of one series watch it once and the last one to close "
+    "unwatches it", "[feed]") {
+    world w;
+    w.restart({stored_chart("w-a", "a-1", "s-1"),
+        stored_chart("w-b", "a-1", "s-1")});
+
+    /* Restored before any session signs in, each window already holds it. */
+    const auto series = w.handle_of("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 2);
+    hedgr::testing::audit_holders(*w.manager);
+
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    auto& feed = *w.feeds.at(0);
+    CHECK(watches(w, feed, "a-1", {"s-1"}));
+    CHECK(feed.watches.size() == 1);
+
+    command close;
+    close.kind = command_kind::close_window;
+    close.window_id = "w-a";
+    w.push(close);
+    CHECK(w.manager->market().watchers(series) == 1);
+    CHECK(feed.unwatches.empty());
+    CHECK(feed.watches.size() == 1);
+    hedgr::testing::audit_holders(*w.manager);
+
+    close.window_id = "w-b";
+    w.push(close);
+    CHECK(w.manager->market().watchers(series) == 0);
+    REQUIRE(feed.unwatches.size() == 1);
+    CHECK(feed.unwatches[0] == series);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a restored chart comes back live when its session signs in",
+    "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    REQUIRE(w.feeds.at(0)->watches.size() == 1);
+
+    w.restart();
+    const auto series = w.handle_of("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+    CHECK(w.feeds.empty());
+    hedgr::testing::audit_holders(*w.manager);
+
+    /* The restored chart has no catalogue, so the feed reads one for it. */
+    w.sign_in("a-1");
+    REQUIRE(w.feeds.size() == 1);
+    REQUIRE(wait_until([&] {
+        w.manager->pump();
+        const auto* catalogue = w.manager->market().catalogue(instance_id, "a-1");
+        return catalogue != nullptr
+            && catalogue->state
+                == hedgr::model::state::catalogue_state::failed;
+    }));
+    CHECK(w.feeds.at(0)->watches.empty());
+    w.set_catalogue("a-1", {row("s-1")});
+    CHECK(watches(w, *w.feeds.at(0), "a-1", {"s-1"}));
+    CHECK(w.manager->market().watchers(series) == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a catalogue that drops a watched series unwatches it and one that "
+    "lists it again watches it", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1"), row("s-2")});
+    w.open_chart("a-1", "s-1");
+    w.open_chart("a-1", "s-2");
+    auto& feed = *w.feeds.at(0);
+    REQUIRE(feed.watches.size() == 2);
+    const auto series = w.handle_of("a-1", "s-1");
+
+    w.set_catalogue("a-1", {row("s-2")});
+    REQUIRE(feed.unwatches.size() == 1);
+    CHECK(feed.unwatches[0] == series);
+    CHECK(w.manager->market().watchers(series) == 1);
+
+    w.set_catalogue("a-1", {row("s-2")});
+    CHECK(feed.unwatches.size() == 1);
+    CHECK(feed.watches.size() == 2);
+
+    w.set_catalogue("a-1", {row("s-1"), row("s-2")});
+    CHECK(feed.watches.size() == 3);
+    CHECK(feed.watches.back().first == series);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a catalogue that changes the party of a watched series stops "
+    "watching it", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    auto& feed = *w.feeds.at(0);
+    REQUIRE(feed.watches.size() == 1);
+
+    w.set_catalogue("a-1", {row("s-1", "p-other")});
+    CHECK(feed.unwatches.size() == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("removing an account gives back what its charts held and forgets "
+    "its series", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.sign_in("a-2");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.set_catalogue("a-2", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    w.open_chart("a-2", "s-1");
+    const auto kept = w.handle_of("a-2", "s-1");
+    REQUIRE(w.manager->market().size() == 2);
+
+    command remove;
+    remove.kind = command_kind::remove_account;
+    remove.instance_id = instance_id;
+    remove.account_id = "a-1";
+    w.push(std::move(remove));
+
+    const auto& series = w.manager->market();
+    CHECK_FALSE(series.find(instance_id, "a-1", "s-1").has_value());
+    CHECK(series.catalogue(instance_id, "a-1") == nullptr);
+    CHECK(series.size() == 1);
+    CHECK(series.watchers(kept) == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("removing an instance gives back what its charts held and forgets "
+    "its series", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.sign_in("a-2");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.set_catalogue("a-2", {row("s-1"), row("s-2")});
+    w.open_chart("a-1", "s-1");
+    w.open_chart("a-2", "s-2");
+    REQUIRE(w.manager->market().size() == 2);
+
+    command remove;
+    remove.kind = command_kind::remove_instance;
+    remove.instance_id = instance_id;
+    w.push(std::move(remove));
+
+    const auto& series = w.manager->market();
+    CHECK(series.size() == 0);
+    CHECK(series.catalogue(instance_id, "a-1") == nullptr);
+    CHECK(series.catalogue(instance_id, "a-2") == nullptr);
+    CHECK(series.watcher_total() == 0);
+    CHECK(w.feeds.at(0)->stops == 1);
+    CHECK(w.feeds.at(1)->stops == 1);
+    hedgr::testing::audit_holders(*w.manager);
 }

@@ -66,10 +66,11 @@ read_service::read_service(boost::asio::io_context& pool,
     const model::state::account_table& accounts,
     const model::state::session_table& sessions,
     const model::state::window_table& windows,
+    model::state::series_table& series,
     const session::transport::session_options& seed)
     : pool_(pool), events_(events), instances_(instances),
       accounts_(accounts), sessions_(sessions), windows_(windows),
-      seed_(seed) {
+      seed_(seed), market_(series) {
 }
 
 void read_service::attach(std::filesystem::path database_path) {
@@ -217,32 +218,51 @@ read_service::start_market_read(std::string_view window_id,
     auto read = session_read_for(*session, read_gate::signed_in_with_token);
     if (!read)
         return std::nullopt;
+    return launch_market_read(std::move(*read), series_id);
+}
 
+std::optional<refusal> read_service::start_market_catalogue_read(
+    std::string_view instance_id, std::string_view account_id) {
+    if (!is_open()) {
+        return refusal{{condition_source::read,
+                           std::format("{}/{}", instance_id, account_id)},
+            "cannot read the market: the store is not open"};
+    }
+
+    auto read = session_read_for(instance_id, account_id,
+        read_gate::signed_in_with_token);
+    if (!read)
+        return std::nullopt;
+    return launch_market_read(std::move(*read), {});
+}
+
+std::optional<refusal> read_service::launch_market_read(
+    worker::session_read read, std::string_view series_id) {
     const bool catalogue = series_id.empty();
     const auto id = catalogue
-        ? request_id::catalogue(read->instance_id, read->account_id)
-        : request_id::points(read->instance_id, read->account_id, series_id);
+        ? request_id::catalogue(read.instance_id, read.account_id)
+        : request_id::points(read.instance_id, read.account_id, series_id);
     if (pending_.contains(id))
         return std::nullopt;
 
     worker::market_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{read->instance_id, read->account_id};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
+    job.options = std::move(read.options);
+    job.key = domain::session_key{read.instance_id, read.account_id};
+    job.token = std::move(read.token);
+    job.principal = std::move(read.principal);
     job.catalogue = catalogue;
     job.series_id = std::string{series_id};
 
     pending_.mark(id);
     if (catalogue)
-        market_.begin_catalogue(read->instance_id, read->account_id);
+        market_.begin_catalogue(read.instance_id, read.account_id);
     else
-        static_cast<void>(market_.intern(read->instance_id, read->account_id,
+        static_cast<void>(market_.intern(read.instance_id, read.account_id,
             series_id));
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a market " << (catalogue ? "catalogue" : "points")
-        << " read for '" << read->instance_id << "' / '" << read->account_id
+        << " read for '" << read.instance_id << "' / '" << read.account_id
         << "'"
         << (catalogue ? std::string{}
                       : std::format(" series '{}'", series_id));

@@ -19,7 +19,6 @@
  */
 #include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.model/domain/session.hpp"
-#include "hedgr.model/domain/window.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
@@ -28,9 +27,7 @@
 #include <algorithm>
 #include <boost/log/sources/severity_feature.hpp>
 #include <string>
-#include <unordered_map>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace hedgr::runtime::service {
@@ -42,7 +39,6 @@ namespace model_state = hedgr::model::state;
 
 using manager::connection_options_for;
 using support::lg;
-using support::live_windows;
 using support::running_key;
 using support::steady_now_ns;
 
@@ -50,13 +46,12 @@ using support::steady_now_ns;
 
 market_feed::market_feed(const model::state::instance_table& instances,
     const model::state::session_table& sessions,
-    const model::state::window_table& windows,
     model::state::series_table& series,
     const session::transport::session_options& seed,
     worker::tick_feed_factory feeds, catalogue_read read_catalogue,
     backfill_read read_backfill)
-    : instances_(instances), sessions_(sessions), windows_(windows),
-      series_(series), seed_(seed), market_feeds_(std::move(feeds)),
+    : instances_(instances), sessions_(sessions), series_(series),
+      seed_(seed), market_feeds_(std::move(feeds)),
       read_catalogue_(std::move(read_catalogue)),
       read_backfill_(std::move(read_backfill)) {
     if (!market_feeds_) {
@@ -95,6 +90,8 @@ void market_feed::open(const model::event::event& ev) {
     entry.instance_id = ev.instance_id;
     entry.account_id = ev.account_id;
     entry.stream = std::move(stream);
+    if (const auto session = sessions_.find(ev.instance_id, ev.account_id))
+        entry.session = *session;
     market_streams_.insert_or_assign(
         running_key(ev.instance_id, ev.account_id), std::move(entry));
     BOOST_LOG_SEV(lg(), ores::logging::info)
@@ -118,17 +115,8 @@ void market_feed::close(std::string_view instance_id,
     const auto found = market_streams_.find(key);
     if (found == market_streams_.end())
         return;
-    release_watches(found->second);
     retire_market_stream(std::move(found->second.stream));
     market_streams_.erase(found);
-}
-
-void market_feed::release_watches(market_stream_entry& entry) {
-    for (const auto& [series_id, handle] : entry.watched) {
-        static_cast<void>(series_id);
-        series_.release(handle);
-    }
-    entry.watched.clear();
 }
 
 void market_feed::retire_market_stream(
@@ -139,139 +127,142 @@ void market_feed::retire_market_stream(
     retired_market_streams_.push_back(std::move(stream));
 }
 
+bool market_feed::wanted(const market_stream_entry& entry,
+    model::state::series_handle series, std::vector<refusal>& refusals) {
+    if (series_.watchers(series) == 0)
+        return false;
+
+    /*
+     * A watch is only possible once the catalogue names the series' URI. A
+     * restored chart has a series id and no catalogue to turn it into one, so
+     * the feed asks for the catalogue itself, which is what lets a chart that
+     * outlived the process come back to life without the series browser. The
+     * rows are refreshed when it lands, and that puts the chart back on the
+     * change list.
+     */
+    if (series_.catalogue(entry.instance_id, entry.account_id) == nullptr) {
+        if (auto refused =
+                read_catalogue_(entry.instance_id, entry.account_id))
+            refusals.push_back(std::move(*refused));
+        return false;
+    }
+
+    const auto* info = series_.info(series);
+    if (info == nullptr || !info->listed)
+        return false;
+
+    /*
+     * The tick subject is party scoped and the token is for the session's
+     * party. A chart looking at another party through the picker keeps its
+     * backfill and manual refresh, not a live stream.
+     */
+    const auto session = sessions_.find(entry.instance_id, entry.account_id);
+    if (!session)
+        return false;
+    if (info->party_id != sessions_.party_id(*session)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Not watching series '" << series_.key_of(series)->series_id
+            << "': it belongs to party '" << info->party_id
+            << "' and the session is party '" << sessions_.party_id(*session)
+            << "'";
+        return false;
+    }
+    return true;
+}
+
+void market_feed::reconcile(market_stream_entry& entry,
+    model::state::series_handle series, std::vector<refusal>& refusals) {
+    const auto watching = std::ranges::find(entry.watched, series);
+    const bool is_watched = watching != entry.watched.end();
+    const bool is_wanted = wanted(entry, series, refusals);
+    if (is_wanted == is_watched)
+        return;
+
+    if (!is_wanted) {
+        entry.stream->unwatch(series);
+        entry.watched.erase(watching);
+        return;
+    }
+
+    entry.watched.push_back(series);
+    const auto key = *series_.key_of(series);
+    if (auto canonical = session::market::canonical_series_uri(
+            series_.info(series)->uri)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Watching series '" << key.series_id << "' as '" << *canonical
+            << "'";
+        entry.stream->watch(series, std::move(*canonical));
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Not watching series '" << key.series_id << "' in party '"
+            << series_.info(series)->party_id << "': its URI names no series: "
+            << series_.info(series)->uri;
+    }
+    read_backfill_(key.instance_id, key.account_id, key.series_id);
+}
+
+void market_feed::forget(model::state::series_handle series) {
+    for (auto& [key, entry] : market_streams_) {
+        static_cast<void>(key);
+        const auto watching = std::ranges::find(entry.watched, series);
+        if (watching == entry.watched.end())
+            continue;
+        entry.stream->unwatch(series);
+        entry.watched.erase(watching);
+    }
+}
+
 std::vector<refusal> market_feed::pump() {
     std::vector<refusal> refusals;
 
-    /*
-     * What the open charts need, by session. A watch is only possible once the
-     * catalogue names the series' URI, so a chart opened before the catalogue
-     * read is watched on a later frame.
-     */
-    std::unordered_map<std::string,
-        std::vector<std::pair<std::string, std::string>>> wanted;
-
-    for (const auto window : live_windows(windows_)) {
-        if (windows_.kind(window) != domain::window_kind::chart)
-            continue;
-        const auto session = windows_.session_of(window);
-        if (!session)
-            continue;
-        const auto* chart =
-            std::get_if<domain::chart_state>(&windows_.state(window));
-        if (chart == nullptr || chart->series_id.empty())
-            continue;
-
-        const auto instance_id = sessions_.instance_id(*session);
-        const auto account_id = sessions_.account_id(*session);
-        const auto* catalogue =
-            series_.catalogue(instance_id, account_id);
-        if (catalogue == nullptr
-            || catalogue->state
-                == model_state::catalogue_state::failed) {
-            /*
-             * A restored chart has a series id and no catalogue to turn it into
-             * the URI a subscription needs. Reading the catalogue is what the
-             * series browser does; doing it here as well is what lets a chart
-             * that outlived the process come back to life without one. A
-             * failed read is left to the browser's cadence rather than retried
-             * on every frame.
-             */
-            if (catalogue == nullptr) {
-                if (auto refused = read_catalogue_(windows_.id(window)))
-                    refusals.push_back(std::move(*refused));
-            }
+    for (auto it = market_streams_.begin(); it != market_streams_.end();) {
+        const auto session = it->second.session;
+        if (sessions_.contains(session)
+            && sessions_.status(session)
+                == domain::session_status::authenticated) {
+            ++it;
             continue;
         }
-
-        const auto row = std::find_if(catalogue->series.begin(),
-            catalogue->series.end(), [&chart](const auto& listed) {
-                return listed.id == chart->series_id;
-            });
-        if (row == catalogue->series.end())
-            continue;
-
-        /*
-         * The tick subject is party scoped and the token is for the session's
-         * party. A chart looking at another party through the picker keeps its
-         * backfill and manual refresh, not a live stream.
-         */
-        if (row->party_id != sessions_.party_id(*session)) {
-            BOOST_LOG_SEV(lg(), ores::logging::info)
-                << "Not watching series '" << chart->series_id
-                << "': it belongs to party '" << row->party_id
-                << "' and the session is party '"
-                << sessions_.party_id(*session) << "'";
-            continue;
-        }
-
-        wanted[running_key(instance_id, account_id)]
-            .emplace_back(row->id, row->uri);
+        retire_market_stream(std::move(it->second.stream));
+        it = market_streams_.erase(it);
     }
 
-    std::vector<model::state::series_bucket> buckets;
-    const auto now = steady_now_ns();
+    for (auto& [key, entry] : market_streams_) {
+        static_cast<void>(key);
+        if (!entry.needs_pass)
+            continue;
+        entry.needs_pass = false;
+        for (const auto series :
+            series_.held(entry.instance_id, entry.account_id))
+            reconcile(entry, series, refusals);
+    }
 
-    for (auto it = market_streams_.begin(); it != market_streams_.end();) {
-        auto& entry = it->second;
-        const auto session = sessions_.find(entry.instance_id,
-            entry.account_id);
-        if (!session
-            || sessions_.status(*session)
-                != domain::session_status::authenticated) {
-            release_watches(entry);
-            retire_market_stream(std::move(entry.stream));
-            it = market_streams_.erase(it);
+    series_.drain_changes(changes_);
+    for (const auto series : changes_) {
+        const auto named = series_.key_of(series);
+        if (!named) {
+            forget(series);
             continue;
         }
+        const auto stream = market_streams_.find(
+            running_key(named->instance_id, named->account_id));
+        if (stream != market_streams_.end())
+            reconcile(stream->second, series, refusals);
+    }
 
-        const auto needed = wanted.find(it->first);
-        std::unordered_map<std::string, std::string> desired;
-        if (needed != wanted.end()) {
-            for (const auto& [series_id, uri] : needed->second)
-                desired.emplace(series_id, uri);
-        }
-
-        for (const auto& [series_id, uri] : desired) {
-            if (entry.watched.contains(series_id))
-                continue;
-            const auto handle = series_.intern(entry.instance_id,
-                entry.account_id, series_id);
-            series_.acquire(handle);
-            entry.watched.emplace(series_id, handle);
-            if (auto canonical = session::market::canonical_series_uri(uri)) {
-                BOOST_LOG_SEV(lg(), ores::logging::info)
-                    << "Watching series '" << series_id << "' as '"
-                    << *canonical << "'";
-                entry.stream->watch(handle, std::move(*canonical));
-            } else {
-                BOOST_LOG_SEV(lg(), ores::logging::warn)
-                    << "Not watching series '" << series_id << "' in party '"
-                    << sessions_.party_id(*session)
-                    << "': its URI names no series: " << uri;
-            }
-            read_backfill_(entry.instance_id,
-                entry.account_id, series_id);
-        }
-        for (auto watch = entry.watched.begin(); watch != entry.watched.end();) {
-            if (desired.contains(watch->first)) {
-                ++watch;
-                continue;
-            }
-            entry.stream->unwatch(watch->second);
-            series_.release(watch->second);
-            watch = entry.watched.erase(watch);
-        }
-
+    const auto now = steady_now_ns();
+    for (auto& [key, entry] : market_streams_) {
+        static_cast<void>(key);
         if (entry.stream->take_reconnected()) {
-            for (const auto& [series_id, handle] : entry.watched) {
-                static_cast<void>(handle);
-                read_backfill_(entry.instance_id,
-                    entry.account_id, series_id);
+            for (const auto series : entry.watched) {
+                const auto named = *series_.key_of(series);
+                read_backfill_(named.instance_id, named.account_id,
+                    named.series_id);
             }
         }
 
-        entry.stream->drain(buckets);
-        for (const auto& bucket : buckets) {
+        entry.stream->drain(buckets_);
+        for (const auto& bucket : buckets_) {
             const auto applied = series_.append(bucket.series, bucket.level,
                 model_state::series_point{.at_ns = bucket.at_ns,
                     .value = bucket.value, .open = bucket.open,
@@ -282,8 +273,6 @@ std::vector<refusal> market_feed::pump() {
             else if (applied == model_state::append_result::late)
                 ++late_buckets_;
         }
-
-        ++it;
     }
 
     std::erase_if(retired_market_streams_,
@@ -295,7 +284,6 @@ std::vector<refusal> market_feed::pump() {
 void market_feed::cancel() {
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
-        release_watches(entry);
         retire_market_stream(std::move(entry.stream));
     }
     market_streams_.clear();
