@@ -37,6 +37,7 @@
 #include <cstddef>
 #include <ctime>
 #include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -60,9 +61,9 @@ constexpr double chart_start_padding_share = 0.20;
 constexpr double chart_single_point_padding_s = 30.0;
 
 /** @brief Draws a dashed line over the plot, as the web chart draws its EMA. */
-void plot_dashed(const std::vector<double>& xs,
-    const std::vector<double>& ys, ImVec4 colour) {
-    if (xs.size() < 2 || xs.size() != ys.size())
+void plot_dashed(const double* xs, const double* ys, std::size_t count,
+    ImVec4 colour) {
+    if (count < 2)
         return;
     auto* draw = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
@@ -70,7 +71,7 @@ void plot_dashed(const std::vector<double>& xs,
     constexpr float gap = 4.0f;
     bool drawing = true;
     float remaining = dash;
-    for (std::size_t i = 0; i + 1 < xs.size(); ++i) {
+    for (std::size_t i = 0; i + 1 < count; ++i) {
         const auto a = ImPlot::PlotToPixels(xs[i], ys[i]);
         const auto b = ImPlot::PlotToPixels(xs[i + 1], ys[i + 1]);
         const float dx = b.x - a.x;
@@ -197,8 +198,10 @@ void render_chart(window_handle handle, const render_input& input,
         return;
     }
     const auto& series = input.market;
-    const auto row = series.find(input.sessions.instance_id(*session),
-        input.sessions.account_id(*session), chart->series_id);
+    const auto held = input.windows.series(handle);
+    const auto row = !held.empty() && series.contains(held.front())
+        ? std::optional{held.front()}
+        : std::nullopt;
     const bool reading = !row
         || (series.observed_at_ns(*row) == 0 && series.failure(*row).empty());
 
@@ -227,7 +230,7 @@ void render_chart(window_handle handle, const render_input& input,
             << (points.size ? points.at_ns[0] : 0)
             << " newest_at_ns="
             << (points.size ? points.at_ns[points.size - 1] : 0)
-            << " plotted=" << (points.size - plot.start)
+            << " plotted=" << (points.size - chart_plot_start(plot, points))
             << " candle_width_ns=" << plot.candle_width_ns
             << " candles=" << plot.candles.size()
             << " observed_at_ns=" << (row ? series.observed_at_ns(*row) : 0)
@@ -235,7 +238,10 @@ void render_chart(window_handle handle, const render_input& input,
             << (row ? std::string{series.failure(*row)} : std::string{})
             << "'";
     }
-    const std::size_t start = plot.start;
+    const std::size_t start = chart_plot_start(plot, points);
+    const std::size_t plotted = points.size - start;
+    const double* const xs = points.at_s + start;
+    const double* const ys = points.value + start;
     const bool no_points = points.size == 0;
     const double first = no_points ? 0.0 : points.value[start];
     const double last = no_points ? 0.0 : points.value[points.size - 1];
@@ -281,7 +287,7 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::TextColored(tint, "%+.2f%%", percent);
         ImGui::PopFont();
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::TextDisabled("%zu points", points.size - start);
+        ImGui::TextDisabled("%zu points", plotted);
         if (span_ns == 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 All points");
@@ -311,8 +317,6 @@ void render_chart(window_handle handle, const render_input& input,
         } else if (no_points) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {
-            const auto& xs = plot.xs;
-            const auto& ys = plot.ys;
             const auto& candle_points = plot.candles;
             const bool use_candles = !candle_points.empty();
             const double low = plot.low;
@@ -341,8 +345,8 @@ void render_chart(window_handle handle, const render_input& input,
                  * intraday one needs the minute. The span decides, because the
                  * formatter sees one tick and not the axis.
                  */
-                const double seconds = xs.size() > 1
-                    ? xs.back() - xs.front() : 0.0;
+                const double seconds = plotted > 1
+                    ? xs[plotted - 1] - xs[0] : 0.0;
                 const char* pattern = seconds <= 6.0 * 3600.0 ? "%H:%M:%S"
                     : seconds <= 90.0 * 24.0 * 3600.0 ? "%d %b %H:%M"
                     : "%d %b %Y";
@@ -350,14 +354,14 @@ void render_chart(window_handle handle, const render_input& input,
                     const_cast<char*>(pattern));
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
                 if (!use_candles) {
-                    const double x_span = xs.size() > 1
-                        ? xs.back() - xs.front() : 0.0;
+                    const double x_span = plotted > 1
+                        ? xs[plotted - 1] - xs[0] : 0.0;
                     const double x_pad = x_span > 0.0
                         ? x_span * chart_end_padding_share
                         : chart_single_point_padding_s;
                     ImPlot::SetupAxisLimits(ImAxis_X1,
-                        xs.front() - x_pad * chart_start_padding_share,
-                        xs.back() + x_pad,
+                        xs[0] - x_pad * chart_start_padding_share,
+                        xs[plotted - 1] + x_pad,
                         ImPlotCond_Always);
                     ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
                         high + span * 0.08, ImPlotCond_Always);
@@ -422,8 +426,8 @@ void render_chart(window_handle handle, const render_input& input,
                      * zero would be the whole plot rather than the area under
                      * the line.
                      */
-                    fill_gradient_under_curve(xs.data(), ys.data(),
-                        static_cast<int>(xs.size()),
+                    fill_gradient_under_curve(xs, ys,
+                        static_cast<int>(plotted),
                         ImGui::ColorConvertFloat4ToU32(line_colour), 0.32f);
                 }
 
@@ -445,18 +449,18 @@ void render_chart(window_handle handle, const render_input& input,
                     ImPlotSpec line;
                     line.LineColor = line_colour;
                     line.LineWeight = 1.5f;
-                    ImPlot::PlotLine("##line", xs.data(), ys.data(),
-                        static_cast<int>(xs.size()), line);
+                    ImPlot::PlotLine("##line", xs, ys,
+                        static_cast<int>(plotted), line);
                 }
 
-                if (!plot.ema.empty() && plot.ema.size() == xs.size()) {
-                    plot_dashed(xs, plot.ema,
+                if (!plot.ema.empty() && plot.ema.size() == plotted) {
+                    plot_dashed(xs, plot.ema.data(), plotted,
                         ImGui::ColorConvertU32ToFloat4(
                             theme::moving_average_colour));
                 }
 
-                const auto point = ImPlot::PlotToPixels(xs.back(),
-                    ys.back());
+                const auto point = ImPlot::PlotToPixels(xs[plotted - 1],
+                    ys[plotted - 1]);
                 auto* plot_draw = ImPlot::GetPlotDrawList();
                 ImPlot::PushPlotClipRect();
                 if (health == domain::data_health::live) {

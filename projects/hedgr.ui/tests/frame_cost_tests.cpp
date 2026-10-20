@@ -26,11 +26,15 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "implot.h"
+#include <algorithm>
 #include <catch2/catch_all.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <limits>
+#include <memory>
+#include <span>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -223,4 +227,209 @@ TEST_CASE("a CRM asks for the flag of any currency the tenant has an image for",
         if (request.kind == model::command::command_kind::load_image)
             asked.push_back(request.image_id);
     CHECK(asked == std::vector<std::string>{"img-th"});
+}
+
+namespace {
+
+constexpr std::int64_t half_second = 500'000'000;
+constexpr std::int64_t series_start_ns = 1'760'000'000'000'000'000;
+/** @brief The fine ring's capacity, every point of which is in view at one hour. */
+constexpr std::size_t ring_points = model::domain::market_fine_capacity;
+
+/**
+ * @brief Charts over series that each hold a full fine ring.
+ *
+ * The points are half a second apart, so the one hour span puts every point of
+ * the ring in view, the widest the chart can be asked to plot.
+ */
+struct chart_desk final {
+    headless_imgui imgui;
+    desk desk;
+    std::vector<model::state::window_handle> windows;
+    std::vector<model::state::series_handle> series;
+    std::vector<std::string> names;
+    std::vector<std::unique_ptr<render::window_ui_state>> states;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    std::int64_t next_at_ns = series_start_ns;
+
+    explicit chart_desk(std::size_t count) {
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto id = std::format("s-{}", i);
+            const auto handle = desk.market.intern("i", "a", id);
+            for (std::size_t p = 0; p < ring_points; ++p)
+                append(handle, p);
+            next_at_ns = series_start_ns
+                + static_cast<std::int64_t>(ring_points) * half_second;
+            const auto window = desk.open(model::domain::window_kind::chart,
+                model::domain::chart_state{.label = "FX GBP/USD",
+                    .series_id = id},
+                std::format("chart-{}", i));
+            desk.windows.set_series(window, std::span{&handle, 1});
+            series.push_back(handle);
+            names.push_back(std::format("chart-window-{}", i));
+            windows.push_back(window);
+            states.push_back(std::make_unique<render::window_ui_state>());
+            states.back()->market_view.chart_span = 3;
+        }
+    }
+
+    void append(model::state::series_handle handle, std::size_t index) {
+        const auto at = series_start_ns
+            + static_cast<std::int64_t>(index) * half_second;
+        const auto value = 1.0 + static_cast<double>(index % 97) / 1000.0;
+        static_cast<void>(desk.market.append(handle, model::domain::market_level::fine,
+            model::state::series_point{.at_ns = at, .value = value},
+            1));
+    }
+
+    /** @brief Appends the next bucket to every series. */
+    void tick() {
+        for (const auto handle : series) {
+            const auto at = next_at_ns;
+            const auto value = 1.0 + static_cast<double>(at % 89) / 1000.0;
+            static_cast<void>(desk.market.append(handle,
+                model::domain::market_level::fine,
+                model::state::series_point{.at_ns = at, .value = value}, 1));
+        }
+        next_at_ns += half_second;
+    }
+
+    /** @brief Draws every chart once and returns the vertices submitted. */
+    int draw() {
+        auto input = desk.input();
+        ImGui::NewFrame();
+        for (std::size_t i = 0; i < windows.size(); ++i) {
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(900.0f, 500.0f));
+            ImGui::Begin(names[i].c_str());
+            render::render_chart(windows[i], input, *states[i], status, lock);
+            ImGui::End();
+        }
+        ImGui::Render();
+        return ImGui::GetDrawData()->TotalVtxCount;
+    }
+};
+
+/** @brief Allocations of one steady frame with @p count charts over full rings. */
+std::size_t allocations_with_charts(std::size_t count) {
+    chart_desk charts{count};
+    int vertices = 0;
+    for (int i = 0; i < 3; ++i)
+        vertices = charts.draw();
+    const auto before = hedgr::testing::allocations();
+    const auto steady = charts.draw();
+    const auto allocations = hedgr::testing::allocations() - before;
+
+    /* The work happened: every chart plotted its whole ring, filled and lined. */
+    CHECK(vertices > 0);
+    CHECK(steady == vertices);
+    CHECK(static_cast<std::size_t>(steady) >= count * (ring_points - 1) * 6);
+    for (std::size_t i = 0; i < count; ++i) {
+        CHECK(charts.states[i]->plot.key.version
+            == charts.desk.market.version(charts.series[i]));
+        CHECK(charts.states[i]->plot.key.version != 0);
+    }
+    return allocations;
+}
+
+}
+
+/*
+ * A chart's chrome formats a few strings a frame, so the count is not zero. It
+ * must be the same for every chart and nothing a chart's points add to it.
+ */
+TEST_CASE("a steady chart frame allocates the same for every chart",
+    "[frame][chart]") {
+    const auto few = allocations_with_charts(10);
+    const auto many = allocations_with_charts(110);
+    INFO("allocations with 10 charts: " << few << ", with 110: " << many);
+    CHECK(few % 10 == 0);
+    CHECK(many == few / 10 * 110);
+    WARN("steady allocations per chart: " << few / 10);
+}
+
+TEST_CASE("a frame after every series ticked allocates the same for every chart",
+    "[frame][chart]") {
+    const auto after_tick = [](std::size_t count) {
+        chart_desk charts{count};
+        for (int i = 0; i < 3; ++i)
+            charts.draw();
+        charts.tick();
+        std::vector<std::uint64_t> before;
+        for (const auto& state : charts.states)
+            before.push_back(state->plot.key.version);
+        const auto allocations_before = hedgr::testing::allocations();
+        charts.draw();
+        const auto allocations = hedgr::testing::allocations() - allocations_before;
+        for (std::size_t i = 0; i < count; ++i) {
+            CHECK(charts.states[i]->plot.key.version > before[i]);
+            CHECK(charts.states[i]->plot.key.version
+                == charts.desk.market.version(charts.series[i]));
+        }
+        return allocations;
+    };
+    const auto few = after_tick(10);
+    const auto many = after_tick(110);
+    INFO("allocations after a tick, 10 charts: " << few << ", 110: " << many);
+    CHECK(few % 10 == 0);
+    CHECK(many == few / 10 * 110);
+    WARN("allocations per chart after a tick: " << few / 10);
+}
+
+TEST_CASE("a chart whose series is gone draws the reading state, not stale data",
+    "[frame][chart]") {
+    chart_desk charts{1};
+    int vertices = 0;
+    for (int i = 0; i < 3; ++i)
+        vertices = charts.draw();
+    REQUIRE(vertices > static_cast<int>(ring_points) * 6);
+    REQUIRE(charts.states[0]->plot.key.version != 0);
+
+    /* The window still holds the handle. The row it named is gone. */
+    charts.desk.market.erase(charts.series[0]);
+    REQUIRE(charts.desk.windows.series(charts.windows[0]).size() == 1);
+    const auto after = charts.draw();
+    CHECK(after < static_cast<int>(ring_points));
+    CHECK(charts.states[0]->plot.key.version == 0);
+    CHECK(charts.states[0]->plot.candles.empty());
+    CHECK(charts.states[0]->plot.ema.empty());
+
+    /* Interning the series again gives a new handle, which holds no points. */
+    const auto fresh = charts.desk.market.intern("i", "a", "s-0");
+    CHECK(fresh != charts.series[0]);
+    CHECK(charts.draw() < static_cast<int>(ring_points));
+}
+
+TEST_CASE("the cost of a frame over 200 charts of a full ring",
+    "[!benchmark][frame][chart]") {
+    chart_desk charts{200};
+    for (int i = 0; i < 3; ++i)
+        charts.draw();
+
+    const auto median_ms = [](auto&& run) {
+        std::vector<double> samples;
+        for (int i = 0; i < 15; ++i) {
+            const auto start = std::chrono::steady_clock::now();
+            run();
+            samples.push_back(std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - start).count());
+        }
+        std::ranges::sort(samples);
+        return samples[samples.size() / 2];
+    };
+
+    const auto steady = median_ms([&] { CHECK(charts.draw() > 0); });
+    const auto ticked = median_ms([&] {
+        charts.tick();
+        for (std::size_t i = 0; i < charts.states.size(); ++i)
+            CHECK(charts.states[i]->plot.key.version
+                != charts.desk.market.version(charts.series[i]));
+        CHECK(charts.draw() > 0);
+        for (std::size_t i = 0; i < charts.states.size(); ++i)
+            CHECK(charts.states[i]->plot.key.version
+                == charts.desk.market.version(charts.series[i]));
+    });
+    WARN("median ms of one frame over 200 charts, steady: " << steady);
+    WARN("median ms of one frame over 200 charts, every series ticked: " << ticked);
 }

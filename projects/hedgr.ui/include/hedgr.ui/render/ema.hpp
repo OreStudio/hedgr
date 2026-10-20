@@ -21,6 +21,7 @@
 #define HEDGR_UI_RENDER_EMA_HPP
 
 #include <cstddef>
+#include <span>
 #include <vector>
 
 namespace hedgr::ui::render {
@@ -35,7 +36,7 @@ inline constexpr std::size_t ema_period = 20;
  * the new one, so the line starts where the series starts rather than at zero.
  * It replaces what @p result held and reuses its storage.
  */
-inline void exponential_moving_average(const std::vector<double>& values,
+inline void exponential_moving_average(std::span<const double> values,
     std::vector<double>& result, std::size_t period = ema_period) {
     result.clear();
     result.reserve(values.size());

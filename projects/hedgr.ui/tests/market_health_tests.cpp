@@ -27,6 +27,7 @@
 #include "imgui_internal.h"
 #include <catch2/catch_all.hpp>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -83,6 +84,7 @@ TEST_CASE("a chart on a one-day period is live while its feed ticks",
      * second ago.
      */
     const auto series = desk.market.intern("i", "a", "s");
+    desk.windows.set_series(handle, std::span{&series, 1});
     desk.market.append(series, model::domain::market_level::medium,
         {.at_ns = now - 50 * second, .value = 1.25}, 1);
     desk.market.append(series, model::domain::market_level::fine,
@@ -177,6 +179,7 @@ TEST_CASE("a stale chart says how old its newest point is, capped at ten minutes
         model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
 
     const auto series = desk.market.intern("i", "a", "s");
+    desk.windows.set_series(handle, std::span{&series, 1});
     desk.market.append(series, model::domain::market_level::fine,
         {.at_ns = now - 71 * 60 * second, .value = 1.26}, 1);
 
