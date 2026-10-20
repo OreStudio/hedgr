@@ -29,6 +29,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -44,6 +45,12 @@ namespace {
 namespace domain = hedgr::model::domain;
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
+
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.chart_window");
+    return instance;
+}
 
 /** @brief The share of the x range kept clear after the last point. */
 constexpr double chart_end_padding_share = 0.010;
@@ -203,12 +210,31 @@ void render_chart(window_handle handle, const render_input& input,
     const auto health = domain::assess_data_health(as_of_ns,
         input.wall_now_ns, domain::fx_health_thresholds);
     auto& plot = state.plot;
-    update_chart_plot(plot,
+    const bool rebuilt = update_chart_plot(plot,
         chart_plot_key{.version = row ? series.version(*row) : 0,
             .span_ns = span_ns,
             .candles = state.market_view.chart_style == 0,
             .ema = state.market_view.chart_ema != 0},
         points);
+    if (rebuilt) {
+        const auto level = level_for(span_ns);
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Chart '" << chart->series_id << "' replotted: span_ns="
+            << span_ns << " level=" << static_cast<int>(level)
+            << " row=" << (row ? "held" : "absent")
+            << " ring_points=" << points.size
+            << " oldest_at_ns="
+            << (points.size ? points.at_ns[0] : 0)
+            << " newest_at_ns="
+            << (points.size ? points.at_ns[points.size - 1] : 0)
+            << " plotted=" << (points.size - plot.start)
+            << " candle_width_ns=" << plot.candle_width_ns
+            << " candles=" << plot.candles.size()
+            << " observed_at_ns=" << (row ? series.observed_at_ns(*row) : 0)
+            << " failure='"
+            << (row ? std::string{series.failure(*row)} : std::string{})
+            << "'";
+    }
     const std::size_t start = plot.start;
     const bool no_points = points.size == 0;
     const double first = no_points ? 0.0 : points.value[start];

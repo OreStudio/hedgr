@@ -195,8 +195,14 @@ std::vector<refusal> market_feed::pump() {
          * party. A chart looking at another party through the picker keeps its
          * backfill and manual refresh, not a live stream.
          */
-        if (row->party_id != sessions_.party_id(*session))
+        if (row->party_id != sessions_.party_id(*session)) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Not watching series '" << chart->series_id
+                << "': it belongs to party '" << row->party_id
+                << "' and the session is party '"
+                << sessions_.party_id(*session) << "'";
             continue;
+        }
 
         wanted[running_key(instance_id, account_id)]
             .emplace_back(row->id, row->uri);
@@ -233,6 +239,9 @@ std::vector<refusal> market_feed::pump() {
             series_.acquire(handle);
             entry.watched.emplace(series_id, handle);
             if (auto canonical = session::market::canonical_series_uri(uri)) {
+                BOOST_LOG_SEV(lg(), ores::logging::info)
+                    << "Watching series '" << series_id << "' as '"
+                    << *canonical << "'";
                 entry.stream->watch(handle, std::move(*canonical));
             } else {
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
