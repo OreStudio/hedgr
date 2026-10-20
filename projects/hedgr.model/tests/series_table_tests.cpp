@@ -24,6 +24,7 @@
 #include <catch2/catch_all.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -469,6 +470,27 @@ TEST_CASE("a catalogue read moves its generation and state", "[series][catalogue
     CHECK(cat->error.empty());
     CHECK(cat->generation > failed);
     CHECK(table.catalogue(instance_id, "a-2") == nullptr);
+}
+
+TEST_CASE("a catalogue generation is never repeated, even over a removed scope",
+    "[series][catalogue]") {
+    series_table table;
+    std::set<std::uint64_t> seen;
+    const auto take = [&] {
+        const auto* cat = table.catalogue(instance_id, account_id);
+        REQUIRE(cat != nullptr);
+        CHECK(seen.insert(cat->generation).second);
+    };
+    table.apply_catalogue(instance_id, account_id, {row("s-1"), row("s-2")});
+    take();
+    table.apply_catalogue(instance_id, account_id, {row("s-1"), row("s-2")});
+    take();
+    static_cast<void>(table.forget_scope(instance_id, account_id));
+    CHECK(table.catalogue(instance_id, account_id) == nullptr);
+    table.apply_catalogue(instance_id, account_id, {row("s-1"), row("s-2")});
+    take();
+    table.apply_catalogue(instance_id, "a-2", {row("s-1")});
+    CHECK(seen.insert(table.catalogue(instance_id, "a-2")->generation).second);
 }
 
 namespace {

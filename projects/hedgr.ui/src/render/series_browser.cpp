@@ -23,16 +23,15 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/series_browser_view.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
 #include "implot.h"
-#include <cctype>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <map>
 #include <vector>
 #include <string>
 #include <string_view>
@@ -48,62 +47,6 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
-
-[[nodiscard]] bool contains_ci(std::string_view haystack,
-    std::string_view needle) {
-    if (needle.empty())
-        return true;
-    const auto lower = [](char c) {
-        return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    };
-    for (std::size_t i = 0; i + needle.size() <= haystack.size(); ++i) {
-        bool match = true;
-        for (std::size_t j = 0; j < needle.size(); ++j) {
-            if (lower(haystack[i + j]) != lower(needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
-    }
-    return false;
-}
-
-/*
- * The flags sit left of the name, on the row's own background, so a list of
- * pairs reads as a currency list before it reads as a word list.
- */
-/** @brief One party in the session's picker. */
-struct party_entry final {
-    std::string id;
-    std::string name;
-};
-
-/**
- * @brief Reads the session's party list, which the runtime serialised.
- *
- * The records are id, unit separator, name, and a record separator between
- * parties. Parsing it here keeps the model's column a flat string, which is
- * what every other session column is.
- */
-[[nodiscard]] std::vector<party_entry> parties_of(std::string_view serialised) {
-    std::vector<party_entry> result;
-    while (!serialised.empty()) {
-        const auto record_end = serialised.find('\x1e');
-        const auto record = serialised.substr(0, record_end);
-        const auto unit = record.find('\x1f');
-        if (unit != std::string_view::npos) {
-            result.push_back(party_entry{
-                .id = std::string{record.substr(0, unit)},
-                .name = std::string{record.substr(unit + 1)}});
-        }
-        if (record_end == std::string_view::npos)
-            break;
-        serialised.remove_prefix(record_end + 1);
-    }
-    return result;
-}
 
 void draw_series_row(std::string_view label, float extra_indent,
     ImTextureID base_texture, ImTextureID quote_texture) {
@@ -149,64 +92,21 @@ void open_chart(const render_input& input,
 namespace hedgr::ui::render {
 
 
-/** @brief The tenors of one curve, as the chooser lists them. */
-struct curve_group final {
-    std::string key;
-    std::string label;
-    std::vector<const domain::market_series_row*> members;
-};
-
-[[nodiscard]] std::vector<curve_group> group_curves(
-    const std::vector<const domain::market_series_row*>& rows) {
-    /*
-     * One IR series is one curve. Its ladder lives in its observations' term
-     * parameter, not in the series URI: the series carries the index tenor
-     * (1D) and each observation names the curve point (1M, 3M, 10Y). Grouping
-     * series by their URI would therefore join the wrong thing, and reading
-     * only the newest observation would show a single point.
-     */
-    std::vector<curve_group> curves;
-    for (const auto* row : rows) {
-        if (row->asset_class != "IR")
-            continue;
-        curve_group group;
-        group.key = row->id;
-        group.label = row->curve_label.empty() ? row->label
-                                               : row->curve_label;
-        group.members.push_back(row);
-        curves.push_back(std::move(group));
-    }
-    std::stable_sort(curves.begin(), curves.end(),
-        [](const curve_group& a, const curve_group& b) {
-            const auto rank = [](const curve_group& group) {
-                return group.members.empty()
-                    ? 0 : tenor_rank(group.members.front()->tenor);
-            };
-            const auto a_rank = rank(a);
-            const auto b_rank = rank(b);
-            return a_rank != b_rank ? a_rank < b_rank : a.label < b.label;
-        });
-    return curves;
-}
-
 void open_curve(const render_input& input,
     hedgr::model::state::session_handle session,
-    const curve_group& curve) {
-    if (curve.members.empty())
-        return;
+    const domain::market_series_row& row) {
+    const auto& label = curve_label_of(row);
     command request;
     request.kind = command_kind::open_window;
     request.new_window_kind = domain::window_kind::term_structure;
-    request.series_id = curve.key;
-    request.series_label = curve.label;
+    request.series_id = row.id;
+    request.series_label = label;
     request.instance_id = std::string{input.sessions.instance_id(session)};
     request.account_id = std::string{input.sessions.account_id(session)};
-    request.curve_key = curve.key;
-    request.curve_label = curve.label;
-    for (const auto* member : curve.members) {
-        request.member_ids.push_back(member->id);
-        request.member_tenors.push_back({});
-    }
+    request.curve_key = row.id;
+    request.curve_label = label;
+    request.member_ids.push_back(row.id);
+    request.member_tenors.push_back({});
     input.commands.push(std::move(request));
 }
 
@@ -240,10 +140,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     ImGui::Checkbox("Synthetic only", &state.market_synthetic_only);
     ImGui::SetItemTooltip("%s",
         "Show only series a synthetic feed produced");
-    const std::string instance_id{input.sessions.instance_id(*session)};
-    const std::string account_id{input.sessions.account_id(*session)};
-    const auto* catalogue =
-        input.market.catalogue(instance_id, account_id);
+    const auto* catalogue = input.market.catalogue(
+        input.sessions.instance_id(*session),
+        input.sessions.account_id(*session));
     static const std::vector<domain::market_series_row> none;
     const auto& rows = catalogue != nullptr ? catalogue->series : none;
 
@@ -267,8 +166,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             "This deployment holds no market series for this session.");
     }
 
-    const std::string session_party{input.sessions.party_id(*session)};
-    const std::string filter{state.filter.data()};
+    const auto session_party = input.sessions.party_id(*session);
+    const std::string_view filter{state.filter.data()};
+    const std::uint64_t generation =
+        catalogue != nullptr ? catalogue->generation : 0;
 
     /*
      * The parties this login may act as, from the sign-in answer. The session
@@ -276,22 +177,20 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * answer carried no list still has the party it is scoped to, so the
      * picker is never empty.
      */
-    auto parties = parties_of(input.sessions.parties(*session));
-    if (parties.empty() && !session_party.empty()) {
-        parties.push_back(party_entry{.id = session_party,
-            .name = std::string{input.sessions.party_name(*session)}});
-    }
+    const auto& parties = state.parties;
+    update_party_list(state.parties, input.sessions.parties(*session),
+        session_party, input.sessions.party_name(*session));
     if (state.market_party_id.empty()) {
         state.market_party_id = session_party.empty()
-            ? (parties.empty() ? std::string{} : parties.front().id)
-            : session_party;
+            ? (parties.empty() ? std::string{} : parties.id(0))
+            : std::string{session_party};
     }
 
     if (!parties.empty()) {
-        std::string current{state.market_party_id};
-        for (const auto& party : parties) {
-            if (party.id == state.market_party_id)
-                current = party.name;
+        const char* current = state.market_party_id.c_str();
+        for (std::size_t i = 0; i < parties.size(); ++i) {
+            if (state.market_party_id == parties.id(i))
+                current = parties.name(i);
         }
         const std::string session_party_name{
             input.sessions.party_name(*session)};
@@ -299,11 +198,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TextUnformatted("Party");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(300.0f);
-        if (ImGui::BeginCombo("##party", current.c_str())) {
-            for (const auto& party : parties) {
-                const bool chosen = party.id == state.market_party_id;
-                if (ImGui::Selectable(party.name.c_str(), chosen))
-                    state.market_party_id = party.id;
+        if (ImGui::BeginCombo("##party", current)) {
+            for (std::size_t i = 0; i < parties.size(); ++i) {
+                const bool chosen = state.market_party_id == parties.id(i);
+                if (ImGui::Selectable(parties.name(i), chosen))
+                    state.market_party_id = parties.id(i);
                 if (chosen)
                     ImGui::SetItemDefaultFocus();
             }
@@ -319,15 +218,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * Asset class is the first cut. Choosing IR switches the list from points
      * to term structures: the per-tenor series of one curve become one row.
      */
-    std::vector<std::string> asset_classes;
-    for (const auto& row : rows) {
-        if (row.asset_class.empty())
-            continue;
-        if (std::find(asset_classes.begin(), asset_classes.end(),
-                row.asset_class) == asset_classes.end())
-            asset_classes.push_back(row.asset_class);
-    }
-    std::sort(asset_classes.begin(), asset_classes.end());
+    update_asset_classes(state.series_view, generation, rows);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(150.0f);
     const char* asset_preview = state.market_asset_class.empty()
@@ -335,7 +226,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     if (ImGui::BeginCombo("##asset-class", asset_preview)) {
         if (ImGui::Selectable("All assets", state.market_asset_class.empty()))
             state.market_asset_class.clear();
-        for (const auto& asset_class : asset_classes) {
+        for (const auto at : state.series_view.classes) {
+            const auto& asset_class = rows[at].asset_class;
             const bool chosen = asset_class == state.market_asset_class;
             if (ImGui::Selectable(asset_class.c_str(), chosen))
                 state.market_asset_class = asset_class;
@@ -422,22 +314,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     }
 
     if (state.market_asset_class == "IR") {
-        std::vector<const domain::market_series_row*> filtered;
-        for (const auto& row : rows) {
-            if (row.asset_class != "IR")
-                continue;
-            if (state.market_synthetic_only
-                && row.producer_kind != "SYNTHETIC")
-                continue;
-            if (!state.market_party_id.empty()
-                && row.party_id != state.market_party_id)
-                continue;
-            if (!contains_ci(row.label, filter)
-                && !contains_ci(row.uri, filter))
-                continue;
-            filtered.push_back(&row);
-        }
-        const auto curves = group_curves(filtered);
+        update_series_browser_view(state.series_view,
+            {.generation = generation, .filter = filter,
+                .asset_class = state.market_asset_class,
+                .party = state.market_party_id,
+                .synthetic_only = state.market_synthetic_only},
+            rows);
+        const auto& curves = state.series_view.rows;
 
         ImGui::TextUnformatted("Curve");
         ImGui::SameLine();
@@ -447,19 +330,21 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             : state.market_selected_curve_label.c_str();
         if (ImGui::BeginCombo("##curve-combo", preview,
                 ImGuiComboFlags_HeightLarge)) {
-            for (const auto& curve : curves) {
-                ImGui::PushID(curve.key.c_str());
-                const bool chosen = curve.key
+            for (const auto at : curves) {
+                const auto& curve = rows[at];
+                const auto& label = curve_label_of(curve);
+                ImGui::PushID(curve.id.c_str());
+                const bool chosen = curve.id
                     == state.market_selected_curve_key;
                 if (ImGui::Selectable("##curve-row", chosen)) {
-                    state.market_selected_curve_key = curve.key;
-                    state.market_selected_curve_label = curve.label;
+                    state.market_selected_curve_key = curve.id;
+                    state.market_selected_curve_label = label;
                     open_curve(input, *session, curve);
                 }
                 ImGui::SameLine();
-                ImGui::TextUnformatted(curve.label.c_str());
+                ImGui::TextUnformatted(label.c_str());
                 ImGui::SameLine();
-                ImGui::TextDisabled("%zu tenors", curve.members.size());
+                ImGui::TextDisabled("%zu tenors", std::size_t{1});
                 if (chosen)
                     ImGui::SetItemDefaultFocus();
                 ImGui::PopID();
@@ -485,28 +370,29 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             ImGui::TableSetupColumn("Source",
                 ImGuiTableColumnFlags_WidthFixed, 110.0f);
             ImGui::TableHeadersRow();
-            for (const auto& curve : curves) {
+            for (const auto at : curves) {
+                const auto& curve = rows[at];
+                const auto& label = curve_label_of(curve);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::PushID(curve.key.c_str());
-                const bool chosen = curve.key
+                ImGui::PushID(curve.id.c_str());
+                const bool chosen = curve.id
                     == state.market_selected_curve_key;
-                ImGui::Selectable(curve.label.c_str(), chosen,
+                ImGui::Selectable(label.c_str(), chosen,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick);
                 if (ImGui::IsItemHovered()
                     && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    state.market_selected_curve_key = curve.key;
-                    state.market_selected_curve_label = curve.label;
+                    state.market_selected_curve_key = curve.id;
+                    state.market_selected_curve_label = label;
                     open_curve(input, *session, curve);
                 }
-                ImGui::SetItemTooltip("%s", curve.key.c_str());
+                ImGui::SetItemTooltip("%s", curve.id.c_str());
                 ImGui::PopID();
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%zu", curve.members.size());
+                ImGui::TextDisabled("%zu", std::size_t{1});
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", curve.members.front()
-                        ->producer_kind.c_str());
+                ImGui::TextDisabled("%s", curve.producer_kind.c_str());
             }
             ImGui::EndTable();
         }
@@ -523,36 +409,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * exactly the same rows. The combobox is the quick way in; the table is the
      * overview, and a row in either opens the same chart.
      */
-    std::vector<const domain::market_series_row*> visible;
-    visible.reserve(rows.size());
-    for (const auto& row : rows) {
-        if (!state.market_asset_class.empty()
-            && row.asset_class != state.market_asset_class) {
-            continue;
-        }
-        if (state.market_synthetic_only
-            && row.producer_kind != "SYNTHETIC") {
-            continue;
-        }
-        if (!state.market_party_id.empty()
-            && row.party_id != state.market_party_id) {
-            continue;
-        }
-        if (!contains_ci(row.label, filter)
-            && !contains_ci(row.asset_class, filter)
-            && !contains_ci(row.uri, filter)
-            && !contains_ci(row.producer_kind, filter)) {
-            continue;
-        }
-        visible.push_back(&row);
-    }
-    std::stable_sort(visible.begin(), visible.end(),
-        [](const domain::market_series_row* a,
-            const domain::market_series_row* b) {
-            const auto a_rank = tenor_rank(a->tenor);
-            const auto b_rank = tenor_rank(b->tenor);
-            return a_rank != b_rank ? a_rank < b_rank : a->label < b->label;
-        });
+    update_series_browser_view(state.series_view,
+        {.generation = generation, .filter = filter,
+            .asset_class = state.market_asset_class,
+            .party = state.market_party_id,
+            .synthetic_only = state.market_synthetic_only},
+        rows);
+    const auto& visible = state.series_view.rows;
 
     if (visible.empty() && !rows.empty()) {
         ImGui::SameLine();
@@ -576,13 +439,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         clipper.Begin(static_cast<int>(visible.size()));
         /* The chosen row is always drawn, so opening the combo scrolls to it. */
         for (std::size_t i = 0; i < visible.size(); ++i) {
-            if (visible[i]->id == state.market_selected_series_id)
+            if (rows[visible[i]].id == state.market_selected_series_id)
                 clipper.IncludeItemByIndex(static_cast<int>(i));
         }
         while (clipper.Step()) {
             for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
                 ++index) {
-                const auto* row = visible[static_cast<std::size_t>(index)];
+                const auto* row = &rows[visible[static_cast<std::size_t>(index)]];
                 ImGui::PushID(row->id.c_str());
                 const bool chosen =
                     row->id == state.market_selected_series_id;
@@ -628,7 +491,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         while (clipper.Step()) {
             for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
                 ++index) {
-                const auto* row = visible[static_cast<std::size_t>(index)];
+                const auto* row = &rows[visible[static_cast<std::size_t>(index)]];
                 request_flags(input, *session, row->label);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();

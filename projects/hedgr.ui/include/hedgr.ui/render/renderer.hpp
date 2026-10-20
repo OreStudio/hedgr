@@ -33,6 +33,7 @@
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
+#include "hedgr.ui/render/series_browser_view.hpp"
 #include "hedgr.ui/render/term_ladder.hpp"
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
@@ -351,6 +352,10 @@ struct window_ui_state final {
 
     /** @brief A term structure window's ladder, rebuilt when its read changes. */
     term_ladder ladder;
+
+    /** @brief A series browser's rows and parties, rebuilt when they change. */
+    series_browser_view series_view;
+    party_list parties;
 
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
