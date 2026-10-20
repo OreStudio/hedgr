@@ -904,6 +904,51 @@ Outcome. Per frame per browser: O(n log n) and n allocations to zero when
 nothing changed. Risk is low. Deleted: the per-frame filter and sort at
 `series_browser.cpp:454-470,556-585`.
 
+**Status: built.** The browser draws from a cached view of indices and keeps no
+per-row work between frames.
+
+Deviations from the text above, each the smallest choice that left no ambiguity.
+
+- **`series_catalogue::generation` already existed.** Step 1 added it, readable
+  through `series.catalogue(...)` and drawn from the table's one counter, and
+  `apply_catalogue`, `begin_catalogue` and `fail_catalogue` bump it. Nothing else
+  writes a catalogue's rows, so there was no further change to bump on. This step
+  adds a test that it never repeats, including over a removed scope.
+- **The plan's allocation claim was wrong about the count.** The old frame
+  allocated a constant 8 times at 200 and at 5,000 rows, because `visible` is
+  reserved once and the asset class list is short. The cost was bytes and time,
+  not a count that grew with rows. "Equal at 200 and 5,000" therefore passes on
+  the old code. The test keeps it and adds a bound of 2, the chrome's identity and
+  footer text, which the old code fails. The row cost is shown by the
+  `[!benchmark]` case.
+- **One cache, two shapes.** `series_browser_view::rows` holds the curves when the
+  asset class is IR and the series otherwise. The key's asset class tells them
+  apart. The asset class list is its own entry keyed on the generation alone, so
+  a filter edit does not rebuild it. It sits before the asset class combo in the
+  frame, and the view after the combos, as the old code did, so a choice made this
+  frame shows this frame.
+- **`curve_group` is gone.** Every IR series is its own curve, so a group held one
+  member. A curve is a row index, its key is the row's id and its label is
+  `curve_label_of`. The "tenors" column still prints 1.
+- **The party list is parsed into one buffer.** `party_list` keeps each id and
+  name terminated end to end, so the combo takes a `const char*` and nothing is
+  copied per frame. Its key is the serialised string and the session's own party
+  and name, because the fallback entry depends on them.
+- **The IR curve table is still not clipped.** It draws every curve each frame.
+  Clipping it is a behaviour change to a view this step leaves alone.
+
+Measured, Release, 5,000 rows, `[!benchmark]` median of 100 samples, three runs. A
+steady frame is 0.83 to 0.97 ms and 8 allocations before, 51 microseconds and 2
+allocations after, about 17 times faster. It is a CPU figure for building draw
+lists, not a frame time.
+
+Mutations run against the finished code. Dropping the generation from the key and
+dropping the party from the key are each killed. Keeping pointers instead of
+indices behind the generation key is an equivalent mutant: the vector is replaced
+whole, a stale generation rebuilds before any read, and only an address
+sanitizer sees the dead pointer. With the generation also dropped it fails the
+shorter catalogue test, as the first mutation does.
+
 ## How a number is taken
 
 The repository has the pieces. `hedgr.ui/tests/frame_cost_tests.cpp` counts
@@ -1069,3 +1114,27 @@ A chart plots straight from the table and caches only what it derives. Memory is
 bounded by a budget and a scope removal. The term structure has rings to derive
 from, and the actor plan's step 8 has the key, the place and the stamp it asked
 for.
+
+## Where the six steps ended
+
+Market data is one `series_table` with no second store. A series row carries its
+stamp and its rings as contiguous columns, the delivery thread publishes flat
+buckets and allocates nothing, and the frame thread applies them by index and
+generation. Windows hold their series, the table counts the holders, and the feed
+works from a change list, so an idle desk costs it nothing. The chart plots from
+the table's columns and copies none of them. The term structure ladder and the
+series browser each cache what they derive on a stamp or a generation and cost a
+steady frame nothing that grows with their data. `market_table` is deleted, and
+the memory bound is a byte budget plus a scope removal.
+
+What remains is the work that needed the key and the stamp this plan built.
+
+- **The session actor's step 8.** The term structure still reads its curves on a
+  30 s read. Its member series, the composite key and the `max(member stamps)`
+  source are that plan's, and D4 (whether a series with a coordinate should chart
+  at all) is still undecided.
+- **The IR curve table** draws every curve each frame, unclipped.
+- **The draw cost** of `fill_gradient_under_curve` is untouched. If 200 charts
+  show it dominating, decimating to the plot's pixel width is its own change.
+- **The live checks** under "What cannot be verified" were not run. Every figure
+  here is a headless CPU figure, none a frame time.

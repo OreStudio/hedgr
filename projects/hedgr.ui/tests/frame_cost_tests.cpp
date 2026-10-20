@@ -489,3 +489,113 @@ TEST_CASE("a steady term structure frame costs nothing per overlay",
     INFO("allocations with 1 overlay: " << one << ", with 10: " << ten);
     CHECK(ten == one);
 }
+
+namespace {
+
+/** @brief A catalogue of @p rows FX series, a few of them on another party. */
+std::vector<model::domain::market_series_row> browser_catalogue(
+    std::size_t rows) {
+    std::vector<model::domain::market_series_row> catalogue;
+    for (std::size_t i = 0; i < rows; ++i) {
+        catalogue.push_back(model::domain::market_series_row{
+            .id = std::format("s-{}", i),
+            .uri = std::format("fx/gbpusd/{}", i),
+            .label = std::format("FX GBP/USD {:05}", i),
+            .asset_class = i % 7 == 0 ? "RATES" : "FX",
+            .producer_kind = "SYNTHETIC",
+            .party_id = i % 5 == 0 ? "p2" : "p1",
+            .tenor = i % 3 == 0 ? "1M" : "1Y"});
+    }
+    return catalogue;
+}
+
+/** @brief Allocations of one steady series browser frame over @p rows rows. */
+std::size_t browser_frame_allocations(std::size_t rows) {
+    headless_imgui imgui;
+    desk desk;
+    desk.sessions.set_parties(desk.session,
+        "p1\x1f" "First party\x1ep2\x1f" "Second party");
+    desk.market.apply_catalogue("i", "a", browser_catalogue(rows));
+    const auto handle = desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    state.market_party_id = "p1";
+    state.filter[0] = 'u';
+    state.filter[1] = 's';
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    const auto draw = [&] {
+        frame([&] {
+            render::render_series_browser(handle, input, state, status, lock);
+        });
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const auto before = hedgr::testing::allocations();
+    draw();
+    return hedgr::testing::allocations() - before;
+}
+
+}
+
+TEST_CASE("a steady series browser frame costs nothing per row",
+    "[frame][browser]") {
+    const auto small = browser_frame_allocations(200);
+    const auto large = browser_frame_allocations(5000);
+    INFO("allocations over 200 rows: " << small << ", over 5000: " << large);
+    CHECK(large == small);
+    /* Equal counts pass on the old code too, whose rows cost bytes and time. The
+       two left are the chrome's identity and footer text, not the rows. */
+    CHECK(small <= 2);
+}
+
+TEST_CASE("a series browser survives its catalogue being replaced by a shorter one",
+    "[frame][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.market.apply_catalogue("i", "a", browser_catalogue(5000));
+    const auto handle = desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    const auto draw = [&] {
+        frame([&] {
+            render::render_series_browser(handle, input, state, status, lock);
+        });
+    };
+    draw();
+    draw();
+    desk.market.apply_catalogue("i", "a", browser_catalogue(3));
+    draw();
+    desk.textures.gets = 0;
+    draw();
+    CHECK(desk.textures.gets <= 3 * 2);
+}
+
+TEST_CASE("one steady series browser frame over 5000 rows",
+    "[!benchmark][frame][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.market.apply_catalogue("i", "a", browser_catalogue(5000));
+    const auto handle = desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    state.filter[0] = 'u';
+    state.filter[1] = 's';
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    const auto draw = [&] {
+        frame([&] {
+            render::render_series_browser(handle, input, state, status, lock);
+        });
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    BENCHMARK("steady frame") {
+        draw();
+    };
+}
