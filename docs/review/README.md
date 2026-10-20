@@ -39,7 +39,7 @@ Each bundle is one pull request, merged before the next starts.
 | 11 | Per-frame allocation and clipping | UR-5, UR-6, UR-8, UR-9, UR-10, UR-13, MS-6, SR-11 | merged (#30), partly deferred |
 
 Structural work that follows the bundles above, in the order Part D of
-`architecture.md` gives: version-stamped series table (step 1, the model, built and unused, see `docs/plans/series-table.md`), `instance_manager`
+`architecture.md` gives: version-stamped series table (steps 1 and 2 built, see `docs/plans/series-table.md`: `market_table` is deleted, the bucket carries a handle and AR-8 and MS-7 are closed, AR-7 is closed for the writers, the point and the key and stays open for the chart's per-frame lookup and `chart_state` holding a handle, MS-5 and SR-11 wait for step 3), `instance_manager`
 split (done, see `docs/plans/instance-manager-split.md`), session actor (planned, see `docs/plans/session-actor.md`). Each needs its own plan and is not scheduled here.
 
 ## Deferred from merged bundles

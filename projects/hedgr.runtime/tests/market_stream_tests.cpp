@@ -183,6 +183,19 @@ TEST_CASE("a bucket of a series that is not watched is not published",
     const series_handle reused{fx_handle.index, fx_handle.generation + 1};
     sink.unwatch(reused);
     CHECK(sink.watched() == 1);
+
+    /*
+     * The new occupant's watch can reach the sink before the old occupant's
+     * unwatch does. They are two series, so neither replaces the other.
+     */
+    sink.watch(reused, canonical(zero_series));
+    CHECK(sink.watched() == 2);
+    sink.unwatch(fx_handle);
+    CHECK(sink.watched() == 1);
+    sink.on_tick(tick_for(zero_series, 5 * second, 1.0));
+    sink.on_tick(tick_for(zero_series, 6 * second, 2.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == reused);
 }
 
 TEST_CASE("watching one series under a new URI replaces its aggregator",

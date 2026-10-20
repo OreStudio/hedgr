@@ -334,14 +334,15 @@ struct world final {
  * @brief A catalogue row whose URI names a real series.
  *
  * The feed canonicalises the URI before a watch, so a URI the codec does not
- * read is never watched. Each id gets its own currency, so two ids are two
+ * read is never watched. The row names a quote, so the canonical series URI
+ * differs from the row's. Each id gets its own currency, so two ids are two
  * series.
  */
 [[nodiscard]] std::string series_uri(const std::string& id) {
     const std::map<std::string, std::string> currency{
         {"s-1", "USD"}, {"s-2", "EUR"}, {"s-far", "JPY"}};
     const auto found = currency.find(id);
-    return "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate&ccy="
+    return "oresmd://fx/GBP?type=quote&instrument=fx_spot&quote=rate&ccy="
         + (found == currency.end() ? std::string{"CHF"} : found->second);
 }
 
@@ -506,6 +507,13 @@ TEST_CASE("a drained bucket lands in the series it names", "[feed]") {
     const auto mine = w.handle_of("a-1", "s-1");
     const auto sibling = w.handle_of("a-1", "s-2");
     const auto other_session = w.handle_of("a-2", "s-1");
+
+    /* The backfills fail on their own clock, and each failure stamps a row. */
+    REQUIRE(wait_until([&] {
+        w.manager->pump();
+        return w.settled("a-1", "s-1") && w.settled("a-1", "s-2")
+            && w.settled("a-2", "s-1");
+    }));
     const auto before = w.manager->market().version(sibling);
 
     series_bucket bucket;
@@ -546,6 +554,10 @@ TEST_CASE("a bucket whose series was released does not write the next "
     w.open_chart("a-1", "s-2");
     const auto live = w.handle_of("a-1", "s-2");
     const auto& series = w.manager->market();
+    REQUIRE(wait_until([&] {
+        w.manager->pump();
+        return w.settled("a-1", "s-1") && w.settled("a-1", "s-2");
+    }));
     const auto before = series.version(live);
 
     /*
@@ -614,6 +626,26 @@ TEST_CASE("a watch holds its series and unwatching lets it go", "[feed]") {
     CHECK(w.handle_of("a-1", "s-1") == series);
 
     w.tell(event_kind::session_failed, "a-1");
+    CHECK(w.manager->market().watchers(series) == 0);
+}
+
+TEST_CASE("a session that stops being authenticated lets go of what it "
+    "watched", "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    const auto series = w.handle_of("a-1", "s-1");
+    REQUIRE(w.manager->market().watchers(series) == 1);
+
+    /* Only the pump's sweep of unauthenticated sessions retires this stream. */
+    event fact;
+    fact.kind = event_kind::session_status_changed;
+    fact.instance_id = instance_id;
+    fact.account_id = "a-1";
+    fact.status = session_status::disconnected;
+    w.push(std::move(fact));
+    CHECK(w.feeds.at(0)->stops == 1);
     CHECK(w.manager->market().watchers(series) == 0);
 }
 
