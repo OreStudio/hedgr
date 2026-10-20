@@ -16,6 +16,7 @@ set(files
     "password_policy_server_tests.cpp"
     "password_policy_tests.cpp"
     "secret_tests.cpp"
+    "series_table_tests.cpp"
     "session_tests.cpp"
     "signal_tests.cpp"
     "state_tables_tests.cpp"
