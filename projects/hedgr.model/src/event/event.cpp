@@ -29,8 +29,6 @@ std::string_view to_string(event_kind value) noexcept {
         return "session_authenticated";
     case event_kind::session_failed:
         return "session_failed";
-    case event_kind::session_data:
-        return "session_data";
     case event_kind::window_data:
         return "window_data";
     case event_kind::probe_result:

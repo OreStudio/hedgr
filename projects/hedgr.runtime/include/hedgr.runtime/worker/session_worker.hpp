@@ -71,9 +71,6 @@ struct session_job final {
      */
     model::domain::secret_string master_password;
 
-    /** @brief How long to wait between refresh round trips once authenticated. */
-    std::chrono::milliseconds refresh_interval{2000};
-
     /**
      * @brief Which attempt at this pair this worker is.
      *

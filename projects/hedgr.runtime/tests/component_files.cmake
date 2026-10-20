@@ -11,6 +11,7 @@ set(files
     "account_seed_tests.cpp"
     "catalogue_tests.cpp"
     "connection_options_tests.cpp"
+    "deadline_wait_tests.cpp"
     "crm_worker_tests.cpp"
     "environment_seed_tests.cpp"
     "hermetic_environment.cpp"

@@ -173,7 +173,6 @@ session_facts collect_session_facts(
     facts.tenant = std::string{sessions.tenant_name(handle)};
     facts.party = std::string{sessions.party_name(handle)};
     facts.opened_at_ns = sessions.opened_at_ns(handle);
-    facts.latency_us = sessions.latency_us(handle);
     facts.status = sessions.status(handle);
     facts.last_error = std::string{sessions.last_error(handle)};
 

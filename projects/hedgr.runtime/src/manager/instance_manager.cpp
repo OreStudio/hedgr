@@ -954,9 +954,6 @@ void instance_manager::apply(const event::event& ev) {
                 : std::format("{} ({})", ev.message, ev.code));
         break;
     }
-    case event::event_kind::session_data:
-        sessions_.set_latency_us(*handle, ev.latency_us);
-        break;
     case event::event_kind::window_data:
         /*
          * Nothing to do: the deadline was already moved when the request was

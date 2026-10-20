@@ -402,14 +402,13 @@ private:
 /**
  * @brief The live columns of a session, split by how often they are read.
  *
- * The frame loop reads status and latency for the connection indicator, so they
- * sit in the first block. The tenant, party and last error are read only when a
+ * The frame loop reads status for the connection indicator, so it
+ * sits in the first block. The tenant, party and last error are read only when a
  * detail surface opens, so they sit last and never enter the per-frame walk.
  */
 struct session_columns final {
     // Hot: read by the frame loop.
     std::vector<std::uint8_t> status;
-    std::vector<std::int64_t> latency_us;
 
     // Warm: read when a session row is drawn.
     std::vector<std::string> instance_id;
@@ -457,9 +456,6 @@ public:
 
     [[nodiscard]] domain::session_status status(session_handle h) const;
     void set_status(session_handle h, domain::session_status value);
-
-    [[nodiscard]] std::int64_t latency_us(session_handle h) const;
-    void set_latency_us(session_handle h, std::int64_t value);
 
     [[nodiscard]] std::string_view last_error(session_handle h) const;
     void set_last_error(session_handle h, std::string value);
@@ -532,11 +528,6 @@ public:
     /** @brief The status column, stride-1, holes included. */
     [[nodiscard]] std::span<const std::uint8_t> status_column() const noexcept {
         return columns_.status;
-    }
-
-    /** @brief The latency column, stride-1, holes included. */
-    [[nodiscard]] std::span<const std::int64_t> latency_us_column() const noexcept {
-        return columns_.latency_us;
     }
 
     void clear() noexcept;

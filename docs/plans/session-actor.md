@@ -99,9 +99,9 @@ real figure is a rate, and it scales with polling windows, not with charts.
   token's life, 24 minutes for a 30-minute token (`:289-296`, `:341`). A broker
   that dies in minute 1 is noticed in minute 24. A refresh failure is final
   (`:342-354`), although 20% of the token's life remains (SR-15).
-- The placeholder tick every 2 s (`:380-395`) makes no request. It carries the
-  timer wait as "latency", and `session_table::latency_us` has no reader outside
-  the table. It is write-only.
+- The placeholder tick every 2 s (`:380-395`) made no request. It carried the
+  timer wait as "latency" into `session_table::latency_us`, which fed the
+  workspace window's "Last round trip" row. Prerequisite A deleted all of it.
 - The stream asks `connected()` (`tick_stream.cpp:122`), which is a flag. In
   `ores.nats` at brave_hopper `connected` is stored true in `connect()`
   (`client.cpp:667`) and false only in `disconnect()` (`:673`). The disconnected
@@ -206,12 +206,17 @@ stated below under reconnect.
 
 Each is its own pull request and lands before the step that needs it.
 
-**A. Delete the placeholder (AR-5, SR-12, Part D step 1).** Remove the tick at
-`session_worker.cpp:380-395`, the `session_data` event, its `apply` case
-(`instance_manager.cpp:957`), `refresh_interval` and the write-only
-`latency_us` column. The actor has no 2 s tick, and if it kept the event it
-would have to emit it. No operator-visible behavior changes because nothing
-reads the value. Needed before step 6. It can land today.
+**A. Delete the placeholder (AR-5, SR-12, Part D step 1).** Remove the tick,
+the `session_data` event, its `apply` case, `refresh_interval` as a poll
+interval, the `session_table` `latency_us` column and `session_facts.latency_us`.
+The worker waits on the token refresh deadline only, and a stop wakes the wait
+at once. The probe's own `latency_us` stays.
+
+This is not invisible. The workspace window's "Last round trip" fact row read
+that column, and its only non-zero writer was the tick, whose value was the
+timer wait. Option 1 was decided: the row is removed, because a number that
+never measured a round trip is worse than none. Step 3's liveness ping may add a
+real "Last round trip" back, fed by an actual request. Needed before step 6.
 
 **B. One wire format per process or a refusal (C-5).** Until D2 below is
 decided, add the guard Part D step 0 named, refusing a connect when another

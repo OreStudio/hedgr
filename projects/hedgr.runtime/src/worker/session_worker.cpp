@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/worker/session_worker.hpp"
+#include "hedgr.runtime/worker/deadline_wait.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_error.hpp"
@@ -27,9 +28,8 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
@@ -96,11 +96,6 @@ void push_failure(event_queue& events, const domain::session_key& key,
     fact.payload = error.detail;
     events.push(std::move(fact));
 }
-
-/**
- * @brief The deployment-relative subject the placeholder refresh reads.
- */
-constexpr std::string_view placeholder_subject = "iam.v1.ops.bootstrap_status";
 
 /**
  * @brief Connects, signs in, then refreshes until asked to stop.
@@ -305,30 +300,8 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                            .count()
                     << " s";
 
-                boost::asio::steady_timer timer(
-                    co_await boost::asio::this_coro::executor);
-
-                /*
-                 * A disconnect is noticed at the next tick rather than interrupting
-                 * the wait: the timer is not cancelled from the frame loop, because
-                 * cancel() on another thread is not something Asio promises, and
-                 * one refresh interval of latency on a disconnect is not worth a
-                 * cross-thread cancellation protocol.
-                 */
-                BOOST_LOG_SEV(lg(), ores::logging::debug)
-                    << "Session '" << key.instance_id << "' / '"
-                    << key.account_id << "' refreshes every "
-                    << job.refresh_interval.count() << " ms";
-
                 while (!stop->stop_requested()) {
-                    timer.expires_after(job.refresh_interval);
-                    const auto started = std::chrono::steady_clock::now();
-
-                    boost::system::error_code ignored;
-                    co_await timer.async_wait(
-                        boost::asio::redirect_error(boost::asio::use_awaitable, ignored));
-
-                    const auto elapsed = std::chrono::steady_clock::now() - started;
+                    co_await wait_until_or_stop(next_refresh, stop);
                     if (stop->stop_requested())
                         break;
 
@@ -376,23 +349,6 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                                    .count()
                             << " s";
                     }
-
-                    /*
-                     * Placeholder data path. There is no live data protocol in
-                     * Hedgr yet, and inventing one here would put a fiction on the
-                     * wire that the first real protocol would have to unpick. So
-                     * the tick is reported as a tick: a fixed deployment-relative
-                     * subject, a note saying what it is, and the elapsed wait as
-                     * the latency, which is the one honest measurement available.
-                     */
-                    auto tick = for_key(key, job.attempt);
-                    tick.kind = event::event_kind::session_data;
-                    tick.subject = std::string(placeholder_subject);
-                    tick.payload = "refresh tick; no live data path is wired up yet";
-                    tick.latency_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                        elapsed)
-                                          .count();
-                    events.push(std::move(tick));
                 }
             }
         }
