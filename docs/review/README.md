@@ -40,7 +40,7 @@ Each bundle is one pull request, merged before the next starts.
 
 Structural work that follows the bundles above, in the order Part D of
 `architecture.md` gives: version-stamped series table, `instance_manager`
-split, session actor. Each needs its own plan and is not scheduled here.
+split (done, see `docs/plans/instance-manager-split.md`), session actor. Each needs its own plan and is not scheduled here.
 
 ## Deferred from merged bundles
 
@@ -55,4 +55,5 @@ split, session actor. Each needs its own plan and is not scheduled here.
 - SR-8: the thread crossing (#41), the double-submit guard and the stale-result drop (#42) are done. A set-password that a lock overtakes leaves the lock `locked` over a store with no master row, until the next unlock reads it as absent.
 - Split step 5: the term structure and CRM reads mark their table row and not the `pending_reads` registry.
 - Split step 6: a refresh that follows a failure in the same frame opens a stream that the same frame retires, pinned in `market_feed_tests.cpp`. The close in the disconnect and remove-account hooks is redundant with the pump's sweep of sessions that are not authenticated, so no test can tell it from the sweep.
+- Split step 7: removing an instance or an account stops its worker in `stop_session`, and the removal tests cannot tell that stop from the sweep that retires the session's stream, so it is unpinned. The probe forget in an instance removal is likewise masked by the slot reset. A removal still writes the table before the store, so a refused delete leaves the table without a row the store holds until restart, unlike a save, which restores the previous row.
 - Side finding: the X11 fallback fails to initialise the OpenGL loader without an EGL hint.
