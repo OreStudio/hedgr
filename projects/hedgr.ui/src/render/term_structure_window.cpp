@@ -136,7 +136,7 @@ void render_term_structure(window_handle handle, const render_input& input,
     set_health_foot(foot,
         hedgr::model::domain::assess_data_health(newest_at_ns,
             input.wall_now_ns, hedgr::model::domain::ir_health_thresholds),
-        newest_at_ns, curve != nullptr && curve->reading);
+        newest_at_ns, input.wall_now_ns, curve != nullptr && curve->reading);
     foot.controls.push_back(widget::foot_combo{
         .id = "history",
         .tooltip = "How many recent curves to overlay",

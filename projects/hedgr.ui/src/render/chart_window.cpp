@@ -243,7 +243,7 @@ void render_chart(window_handle handle, const render_input& input,
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
 
-    set_health_foot(foot, health, as_of_ns, reading);
+    set_health_foot(foot, health, as_of_ns, input.wall_now_ns, reading);
     foot.controls.push_back(widget::foot_combo{
         .id = "period",
         .tooltip = "The span the chart plots",

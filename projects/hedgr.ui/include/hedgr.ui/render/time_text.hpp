@@ -48,6 +48,25 @@ namespace hedgr::ui::render {
 /** @brief An age as OreStudio words one, for example "5 minutes ago". */
 [[nodiscard]] HEDGR_UI_EXPORT std::string age_text(std::int64_t age_ns);
 
+/**
+ * @brief The as-of instant with how old it is against @p wall_now_ns.
+ *
+ * A verdict word says that data is stale and not by how much. Seventy minutes
+ * behind and ten seconds behind are different faults, one in the feed and one in
+ * the link, and the age is what tells them apart at a glance. An instant ahead
+ * of this clock says so, because that is a clock fault and not a slow feed.
+ */
+[[nodiscard]] inline std::string as_of_age_text(std::int64_t at_ns,
+    std::int64_t wall_now_ns) {
+    auto text = as_of_text(at_ns);
+    if (text.empty() || wall_now_ns <= 0)
+        return text;
+    const auto age_ns = wall_now_ns - at_ns;
+    text += age_ns < 0 ? " (ahead of this clock)"
+                       : " (" + age_text(age_ns) + ")";
+    return text;
+}
+
 }
 
 #endif

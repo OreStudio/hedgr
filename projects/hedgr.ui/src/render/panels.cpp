@@ -176,7 +176,7 @@ void draw_signed_out(const render_input& input,
     ImGui::TextWrapped("%s",
         "This window is not signed in. Sign in from the Accounts window to "
         "read its data.");
-    set_health_foot(foot, domain::data_health::unavailable, 0, false);
+    set_health_foot(foot, domain::data_health::unavailable, 0, 0, false);
     hedgr::ui::widget::draw_status_foot(status, input.now_ns, foot);
 }
 

@@ -57,14 +57,16 @@ namespace hedgr::ui::render {
  * @brief Puts one health verdict on a market window's foot.
  *
  * Every market window states its health through this, so the word, the colour
- * and the as-of instant cannot drift apart from one window to the next.
+ * and the as-of instant cannot drift apart from one window to the next. The
+ * instant carries its age against @p wall_now_ns so a stale verdict can be told
+ * from a slightly late one without opening a log.
  */
 inline void set_health_foot(hedgr::ui::widget::foot_state& foot,
     hedgr::model::domain::data_health state, std::int64_t as_of_ns,
-    bool reading) {
+    std::int64_t wall_now_ns, bool reading) {
     foot.word = std::string{hedgr::model::domain::data_health_word(state)};
     foot.colour = health_colour(state);
-    foot.as_of = as_of_text(as_of_ns);
+    foot.as_of = as_of_age_text(as_of_ns, wall_now_ns);
     foot.updating = reading;
 }
 
