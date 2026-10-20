@@ -254,6 +254,57 @@ signed-in account stopping its session and unbinding its windows.
 
 Risk is low for the code and medium for the diff, at 716 lines.
 
+Status: done. `catalogue_service` owns the six tables and their repositories
+and holds no manager and no other service. Its `apply()` takes one of the twelve
+catalogue commands (the plan counted fourteen, which included `rehome_leaves`
+and `drop_target_shortcuts`, both private helpers) and returns a
+`catalogue_effect`, the refusals in the order the handler raised them and, for a
+removal, a `removal` naming the instance, the account if one, and the removed
+instance's probe handle. The facade's `complete_catalogue` raises the refusals
+and then winds down what the removal left, which is the probe, the sessions and
+their windows, the stream of a removed account and the saved wall. `load()`
+returns the sentence for the table it could not read.
+
+The tests landed first, each mutated against the unmoved code. They cover a
+refused save putting the previous row back for all five tables, a refused attach,
+the cascade of both removals into sessions, windows, labels, shortcuts and
+folders, the re-homing of leaves in the table and in the store, the wall saved
+after a removal, and every refused cascade write reaching the status bar. The
+survivors are equivalences. The stop of a worker in the two removals and the
+feed close are invisible because the pump's sweep retires the stream the same
+frame. The probe forget is invisible because a new occupant of the slot resets
+the probe row anyway. The label delete in an instance removal is covered by the
+store's own cascade, and the empty-target guard in `drop_target_shortcuts` is
+unreachable from a command.
+
+One real defect was found and fixed in its own commit, ahead of the move. A
+refused re-attach of a pair that was already attached removed it from the table
+while the store still held it. The move changes two things on purpose. The
+session loop of an instance removal now runs after its store writes and not
+before them, which is invisible because the two touch different state. The icon
+backfill now runs after the whole catalogue load and not between the instances
+and the accounts, which differs only when a later table also fails to read.
+
+## Where the split ended
+
+`instance_manager.cpp` went from 4,387 lines to 1,021 and its header from 849 to
+489. The facade is now the constructor, `start()`, `pump()` in a fixed order,
+`handle()` and `apply()` as routers, session supervision (`do_connect_session`,
+`start_session_for`, `start_stored_connect`, `do_disconnect_session`,
+`stop_session` and the session events in `apply()`), `complete_open`,
+`complete_catalogue`, `save_windows`, `stop()`, the accessors as forwards and the
+channels. Eight services hold the rest, `catalogue_service`, `lock_service`,
+`market_feed`, `password_policy_service`, `probe_service`, `read_service`,
+`window_service` and the seeder, and none of them holds a reference to the
+manager.
+
+What remains is session supervision, 257 lines of method bodies plus the event
+cases, and it stays until the session actor replaces it with one connection per
+session. The final count is higher than the 200 lines the review hoped for and
+close to the 1,100 this plan predicted. The `last_error_` string is gone, and
+each service returns its refusals for the facade to raise, so a frame that
+refuses twice keeps both conditions.
+
 ### Not a step. Session supervision
 
 Supervision stays in the facade. The session actor (Part D step 10 of the
