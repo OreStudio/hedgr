@@ -436,12 +436,21 @@ void read_service::start_market_backfill(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) {
     auto read = session_read_for(instance_id, account_id,
         read_gate::signed_in_with_token);
-    if (!read)
+    if (!read) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Backfill for series '" << series_id << "' on '" << instance_id
+            << "' / '" << account_id
+            << "' not started: no signed-in session with a token";
         return;
+    }
 
     const auto id = request_id::points(instance_id, account_id, series_id);
-    if (pending_.contains(id))
+    if (pending_.contains(id)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Backfill for series '" << series_id
+            << "' not started: one is already in flight";
         return;
+    }
 
     worker::market_job job;
     job.options = std::move(read->options);
@@ -454,7 +463,7 @@ void read_service::start_market_backfill(std::string_view instance_id,
     job.limit = 2000;
 
     pending_.mark(id);
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
+    BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Seeding live history for series '" << series_id << "' on '"
         << instance_id << "' / '" << account_id << "'";
     worker::spawn_market_read(pool_, std::move(job), events_);
@@ -540,12 +549,33 @@ bool read_service::apply(const model::event::event& ev) {
             market_.find(ev.instance_id, ev.account_id, ev.series_id);
         if (!held) {
             ++unheld_points_;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Dropped " << ev.points.size() << " points for series '"
+                << ev.series_id << "': no row is held for it";
             return true;
         }
         if (ev.message.empty()) {
             market_.seed(*held, ev.points, ev.observed_at_ns);
+            const auto fine = market_.columns(*held,
+                model::domain::market_level::fine);
+            const auto medium = market_.columns(*held,
+                model::domain::market_level::medium);
+            const auto coarse = market_.columns(*held,
+                model::domain::market_level::coarse);
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Seeded series '" << ev.series_id << "' from "
+                << ev.points.size() << " observations: fine=" << fine.size
+                << " medium=" << medium.size << " coarse=" << coarse.size
+                << " points held"
+                << (fine.size ? std::format(" (fine oldest_at_ns={} "
+                                            "newest_at_ns={})",
+                                    fine.at_ns[0], fine.at_ns[fine.size - 1])
+                              : std::string{});
         } else {
             market_.fail(*held, ev.message, ev.observed_at_ns);
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Backfill for series '" << ev.series_id
+                << "' failed: " << ev.message;
         }
         return true;
     }

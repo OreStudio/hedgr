@@ -22,6 +22,7 @@
 #include "hedgr.session/transport/session_client.hpp"
 #include "ores.logging/make_logger.hpp"
 #include <algorithm>
+#include <format>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -128,9 +129,15 @@ boost::asio::awaitable<void> run_market(market_job job,
             << "Market catalogue for '" << key.instance_id << "' holds "
             << fact.series.size() << " series";
     } else {
-        BOOST_LOG_SEV(lg(), ores::logging::debug)
-            << "Market points for series '" << job.series_id << "': "
-            << fact.points.size() << " points";
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Market points for series '" << job.series_id << "' on '"
+            << key.instance_id << "': " << fact.points.size()
+            << " points (limit " << job.limit << ")"
+            << (fact.points.empty()
+                    ? std::string{}
+                    : std::format(", oldest_at_ns={} newest_at_ns={}",
+                          fact.points.front().at_ns,
+                          fact.points.back().at_ns));
     }
 
     events.push(std::move(fact));
