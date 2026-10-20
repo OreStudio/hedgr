@@ -433,3 +433,59 @@ TEST_CASE("the cost of a frame over 200 charts of a full ring",
     WARN("median ms of one frame over 200 charts, steady: " << steady);
     WARN("median ms of one frame over 200 charts, every series ticked: " << ticked);
 }
+
+namespace {
+
+const std::vector<std::string> ladder_tenors{"10Y", "2Y", "1M", "6M", "ON",
+    "3M", "1Y", "5Y", "1W", "30Y", "15Y", "2W"};
+
+/** @brief @p count curves over the ladder tenors, each a little higher. */
+std::vector<model::domain::term_curve> curves_of(std::size_t count) {
+    std::vector<model::domain::term_curve> curves;
+    for (std::size_t c = 0; c < count; ++c) {
+        model::domain::term_curve curve{
+            .at_ns = static_cast<std::int64_t>(c + 1) * 1'000'000'000};
+        for (std::size_t t = 0; t < ladder_tenors.size(); ++t) {
+            curve.nodes.push_back({.tenor = ladder_tenors[t],
+                .value = 0.03 + 0.001 * static_cast<double>(c)
+                    + 0.0001 * static_cast<double>(t),
+                .at_ns = curve.at_ns});
+        }
+        curves.push_back(std::move(curve));
+    }
+    return curves;
+}
+
+/** @brief Allocations of one steady term structure frame overlaying @p overlays. */
+std::size_t term_structure_frame_allocations(int overlays) {
+    headless_imgui imgui;
+    desk desk;
+    desk.term_structures.set("i", "a", "k", "IR GBP", curves_of(10));
+    const auto handle = desk.open(model::domain::window_kind::term_structure,
+        model::domain::term_structure_state{.label = "IR GBP", .curve_key = "k"});
+    render::window_ui_state state;
+    state.market_view.term_history = overlays;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    const auto draw = [&] {
+        frame([&] {
+            render::render_term_structure(handle, input, state, status, lock);
+        });
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const auto before = hedgr::testing::allocations();
+    draw();
+    return hedgr::testing::allocations() - before;
+}
+
+}
+
+TEST_CASE("a steady term structure frame costs nothing per overlay",
+    "[frame][rates]") {
+    const auto one = term_structure_frame_allocations(1);
+    const auto ten = term_structure_frame_allocations(10);
+    INFO("allocations with 1 overlay: " << one << ", with 10: " << ten);
+    CHECK(ten == one);
+}

@@ -47,6 +47,15 @@ struct term_structure final {
 
     /** @brief Why the read failed, or empty. */
     std::string error;
+
+    /**
+     * @brief Changes whenever the row is begun, set or failed.
+     *
+     * Drawn from the table's one counter, so it never repeats, not for another
+     * curve and not after a clear. A view derived from the row is current
+     * while it matches.
+     */
+    std::uint64_t version = 0;
 };
 
 /**
@@ -80,6 +89,7 @@ public:
 
 private:
     composite_map<3, term_structure> structures_;
+    std::uint64_t counter_ = 0;
 };
 
 }

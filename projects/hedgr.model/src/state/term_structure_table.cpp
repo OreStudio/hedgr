@@ -29,6 +29,7 @@ void term_structure_table::begin(std::string_view instance_id,
     entry.label = std::move(label);
     entry.reading = true;
     entry.error.clear();
+    entry.version = ++counter_;
 }
 
 void term_structure_table::set(std::string_view instance_id,
@@ -40,6 +41,7 @@ void term_structure_table::set(std::string_view instance_id,
     entry.curves = std::move(curves);
     entry.reading = false;
     entry.error.clear();
+    entry.version = ++counter_;
 }
 
 void term_structure_table::fail(std::string_view instance_id,
@@ -48,6 +50,7 @@ void term_structure_table::fail(std::string_view instance_id,
     entry.key = std::string{key};
     entry.reading = false;
     entry.error = std::move(message);
+    entry.version = ++counter_;
 }
 
 const term_structure* term_structure_table::get(std::string_view instance_id,

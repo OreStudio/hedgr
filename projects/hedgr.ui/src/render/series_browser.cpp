@@ -149,36 +149,6 @@ void open_chart(const render_input& input,
 namespace hedgr::ui::render {
 
 
-/** @brief A tenor's rank in days, for ordering a curve's nodes. */
-[[nodiscard]] int tenor_rank(std::string_view tenor) {
-    if (tenor.empty())
-        return 0;
-    int amount = 0;
-    std::size_t i = 0;
-    while (i < tenor.size()
-        && std::isdigit(static_cast<unsigned char>(tenor[i]))) {
-        amount = amount * 10 + (tenor[i] - '0');
-        ++i;
-    }
-    if (amount == 0)
-        amount = 1;
-    if (i >= tenor.size())
-        return amount;
-    switch (static_cast<char>(std::toupper(
-        static_cast<unsigned char>(tenor[i])))) {
-    case 'D':
-        return amount;
-    case 'W':
-        return amount * 7;
-    case 'M':
-        return amount * 30;
-    case 'Y':
-        return amount * 365;
-    default:
-        return amount;
-    }
-}
-
 /** @brief The tenors of one curve, as the chooser lists them. */
 struct curve_group final {
     std::string key;
