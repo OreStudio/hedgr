@@ -56,6 +56,15 @@ HEDGR_UI_EXPORT void load_ui_fonts(float base_size_px);
 [[nodiscard]] HEDGR_UI_EXPORT ImFont* numeric_font();
 
 /**
+ * @brief The bold weight of the base face, or the base face when there is none.
+ *
+ * Found beside the base face on disk, so a value in bold is the same family as
+ * the caption above it. Hedgr ships no font files and this adds none: a desk
+ * without the bold file draws values in the regular weight.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImFont* bold_font();
+
+/**
  * @brief The directory holding the per-environment instance illustrations, or
  * an empty path when there is none.
  *

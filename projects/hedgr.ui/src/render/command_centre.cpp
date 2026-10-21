@@ -30,6 +30,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/tabs.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
@@ -513,6 +514,7 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
             const std::string label = screen_label(screen);
             if (ImGui::BeginTabItem(label.c_str(), pinned ? nullptr : &open,
                     flags)) {
+                widget::underline_selected_tab();
                 if (screen == "tenants")
                     draw_tenants(snapshot);
                 else
