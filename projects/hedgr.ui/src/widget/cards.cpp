@@ -76,6 +76,37 @@ void end_card() {
     ImGui::PopStyleColor(2);
 }
 
+bool begin_section_card(const char* id, float width) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::card_surface());
+    ImGui::PushStyleColor(ImGuiCol_Border, theme::card_border());
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+        ImVec2(section_card_padding, section_card_padding));
+    const bool open = ImGui::BeginChild(id, ImVec2(width, 0.0f),
+        ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY
+            | ImGuiChildFlags_AlwaysUseWindowPadding,
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    /*
+     * The child has read its fill, outline and padding by now, and popping them
+     * here keeps them off any child the card's body opens.
+     */
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    return open;
+}
+
+void section_card_divider() {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    ImGui::GetWindowDrawList()->AddRectFilled(origin,
+        ImVec2(origin.x + width, origin.y + 1.0f),
+        ImGui::GetColorU32(ImGuiCol_Separator));
+    ImGui::Dummy(ImVec2(width, 1.0f));
+}
+
+void end_section_card() {
+    ImGui::EndChild();
+}
+
 void card_title(const char* glyph, std::string_view title, ImU32 colour) {
     const ImVec4 as_float = ImGui::ColorConvertU32ToFloat4(colour);
     if (glyph != nullptr) {

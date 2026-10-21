@@ -156,6 +156,29 @@ HEDGR_UI_EXPORT void card_slot(int& column, int columns);
 /** @brief Closes a card, whether or not its body was submitted. */
 HEDGR_UI_EXPORT void end_card();
 
+/** @brief The air inside a section card, roomier than a field card's. */
+inline constexpr float section_card_padding = 14.0f;
+
+/**
+ * @brief Opens a card of @p width whose height follows its contents.
+ *
+ * The same surface and outline as @c begin_card, for a card that holds a
+ * header row, a divider and whatever follows rather than one field. Its height
+ * is the height its contents took on the previous frame, as with any ImGui
+ * child that sizes itself.
+ *
+ * @return Whether the body should be submitted. The caller has to call
+ * @c end_section_card either way.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool begin_section_card(const char* id,
+    float width);
+
+/** @brief The thin rule under a section card's header row, across the card. */
+HEDGR_UI_EXPORT void section_card_divider();
+
+/** @brief Closes a section card. */
+HEDGR_UI_EXPORT void end_section_card();
+
 /** @brief Writes a card's title line, with its glyph where it has one. */
 HEDGR_UI_EXPORT void card_title(
     const char* glyph, std::string_view title, ImU32 colour);

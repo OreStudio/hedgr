@@ -9,6 +9,7 @@
 #
 set(files
     "capture_tests.cpp"
+    "cells_tests.cpp"
     "chart_history_tests.cpp"
     "chart_plot_tests.cpp"
     "controls_tests.cpp"
@@ -17,6 +18,7 @@ set(files
     "ema_tests.cpp"
     "flags_tests.cpp"
     "frame_cost_tests.cpp"
+    "gallery_tests.cpp"
     "market_health_tests.cpp"
     "market_view_tests.cpp"
     "render_tests.cpp"

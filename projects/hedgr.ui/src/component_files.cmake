@@ -38,6 +38,7 @@ set(files
     "widget/capture.cpp"
     "image/svg_raster.cpp"
     "widget/cards.cpp"
+    "widget/cells.cpp"
     "widget/flags.cpp"
     "widget/label_pill.cpp"
     "widget/panel_defaults.cpp"
@@ -45,6 +46,7 @@ set(files
     "widget/password_meter.cpp"
     "widget/status_bar.cpp"
     "widget/status_foot.cpp"
+    "widget/tabs.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
@@ -76,6 +78,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/flags.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/capture.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/cards.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/cells.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/controls.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/hedgr.ui.widget.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/label_pill.hpp"
@@ -84,4 +87,5 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/password_meter.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/status_bar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/status_foot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/tabs.hpp"
 )
