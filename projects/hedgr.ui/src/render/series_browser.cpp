@@ -48,7 +48,7 @@ using hedgr::model::command::command_kind;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
-void draw_series_row(std::string_view label, float extra_indent,
+float draw_series_row(std::string_view label, float extra_indent,
     ImTextureID base_texture, ImTextureID quote_texture) {
     const ImVec2 rect_min = ImGui::GetItemRectMin();
     const ImVec2 rect_size = ImGui::GetItemRectSize();
@@ -72,6 +72,8 @@ void draw_series_row(std::string_view label, float extra_indent,
         rect_min.y + (rect_size.y - ImGui::GetTextLineHeight()) * 0.5f;
     draw->AddText(ImVec2(x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
         label.data(), label.data() + label.size());
+    return x + ImGui::CalcTextSize(label.data(),
+        label.data() + label.size()).x;
 }
 
 void open_chart(const render_input& input,
@@ -341,9 +343,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     state.market_selected_curve_label = label;
                     open_curve(input, *session, curve);
                 }
-                ImGui::SameLine();
-                ImGui::TextUnformatted(label.c_str());
-                ImGui::SameLine();
+                const float row_y = ImGui::GetItemRectMin().y;
+                request_flags(input, *session, label);
+                const auto pair = hedgr::ui::widget::currencies_of(label);
+                const float label_end = draw_series_row(label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
+                ImGui::SetCursorScreenPos(ImVec2(label_end + 12.0f, row_y));
                 ImGui::TextDisabled("%zu tenors", std::size_t{1});
                 if (chosen)
                     ImGui::SetItemDefaultFocus();
@@ -373,14 +379,19 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             for (const auto at : curves) {
                 const auto& curve = rows[at];
                 const auto& label = curve_label_of(curve);
+                request_flags(input, *session, label);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::PushID(curve.id.c_str());
                 const bool chosen = curve.id
                     == state.market_selected_curve_key;
-                ImGui::Selectable(label.c_str(), chosen,
+                ImGui::Selectable("##curve", chosen,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick);
+                const auto pair = hedgr::ui::widget::currencies_of(label);
+                draw_series_row(label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
                 if (ImGui::IsItemHovered()
                     && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     state.market_selected_curve_key = curve.id;

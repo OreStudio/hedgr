@@ -676,3 +676,143 @@ TEST_CASE("one steady series browser frame over 5000 rows",
         draw();
     };
 }
+
+namespace {
+
+/** @brief What one frame of the market browser drew for a single listed row. */
+struct listed_row final {
+    std::size_t flag_draws = 0;
+    float text_x = 0.0f;
+    std::vector<std::string> asked;
+};
+
+/**
+ * @brief Draws the browser over one series of @p asset_class labelled @p label.
+ *
+ * A flag is a draw command textured by the desk's texture, and the font draws
+ * every other glyph, so the two are told apart by texture. The row's text
+ * starts at the leftmost glyph below the table header, in the first column.
+ * A glyph is a vertex in the text colour that does not sample the font's white
+ * pixel, which rectangles and the built-in flags do.
+ */
+listed_row draw_listed_row(desk& desk, std::string_view asset_class,
+    std::string_view label) {
+    listed_row result;
+    desk.market.apply_catalogue("i", "a",
+        {model::domain::market_series_row{.id = "s-0", .uri = "oresmd://s-0",
+            .label = std::string{label}, .asset_class = std::string{asset_class},
+            .producer_kind = "SYNTHETIC", .curve_key = "s-0",
+            .curve_label = std::string{label}}});
+    const auto handle = desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    state.market_asset_class = std::string{asset_class};
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+
+    /* The first frame lays the table out; the second is the steady state. */
+    for (int i = 0; i < 2; ++i) {
+        result.asked.clear();
+        frame([&] {
+            render::render_series_browser(handle, input, state, status, lock);
+        });
+        for (const auto& request : desk.commands.drain())
+            if (request.kind == model::command::command_kind::load_image)
+                result.asked.push_back(request.image_id);
+    }
+
+    const auto flag = static_cast<ImTextureID>(1);
+    const auto white = ImGui::GetFontTexUvWhitePixel();
+    const auto text = ImGui::GetColorU32(ImGuiCol_Text);
+    result.flag_draws = 0;
+    result.text_x = std::numeric_limits<float>::max();
+    const auto* data = ImGui::GetDrawData();
+    for (const auto* list : data->CmdLists) {
+        const std::string owner = list->_OwnerName;
+        if (owner.find("##curves") == std::string::npos
+            && owner.find("##series") == std::string::npos)
+            continue;
+        std::vector<ImVec2> glyphs;
+        for (const auto& cmd : list->CmdBuffer) {
+            if (cmd.GetTexID() == flag) {
+                ++result.flag_draws;
+                continue;
+            }
+            for (unsigned int i = 0; i < cmd.ElemCount; ++i) {
+                const auto& vertex = list->VtxBuffer[
+                    list->IdxBuffer[static_cast<int>(cmd.IdxOffset + i)]];
+                if ((vertex.uv.x != white.x || vertex.uv.y != white.y)
+                    && vertex.col == text)
+                    glyphs.push_back(vertex.pos);
+            }
+        }
+        float top = std::numeric_limits<float>::max();
+        for (const auto& p : glyphs)
+            top = std::min(top, p.y);
+        for (const auto& p : glyphs)
+            if (p.y >= top + ImGui::GetTextLineHeight() * 0.9f && p.x < 200.0f)
+                result.text_x = std::min(result.text_x, p.x);
+    }
+    return result;
+}
+
+}
+
+TEST_CASE("an IR curve row draws the flag of its currency",
+    "[frame][flags][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"TWD", "img-tw"}});
+    static_cast<void>(desk.images.put("t", "img-tw", {.mime_type = "image/svg+xml",
+        .data = std::vector<std::uint8_t>(4, 3)}));
+
+    const auto drawn = draw_listed_row(desk, "IR", "IR TWD IR_SWAP");
+
+    CHECK(drawn.flag_draws == 1);
+    CHECK(drawn.asked.empty());
+    CHECK(desk.textures.gets > 0);
+}
+
+TEST_CASE("an IR curve row asks for the image of a currency it has not loaded",
+    "[frame][flags][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {{"TWD", "img-tw"}});
+
+    const auto drawn = draw_listed_row(desk, "IR", "IR TWD IR_SWAP");
+
+    CHECK(drawn.asked == std::vector<std::string>{"img-tw"});
+    CHECK(drawn.flag_draws == 0);
+}
+
+TEST_CASE("an IR curve row falls back to the built-in flag",
+    "[frame][flags][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {});
+
+    const auto drawn = draw_listed_row(desk, "IR", "IR HUF IR_SWAP");
+    const auto bare = draw_listed_row(desk, "IR", "IR ZZZ IR_SWAP");
+
+    CHECK(drawn.asked.empty());
+    CHECK(drawn.flag_draws == 0);
+    CHECK(desk.textures.gets == 0);
+    CHECK(drawn.text_x == bare.text_x + 14.0f);
+}
+
+TEST_CASE("an IR curve row with no flag keeps the series row's text indent",
+    "[frame][flags][browser]") {
+    headless_imgui imgui;
+    desk desk;
+    desk.currency_images.set("t", {});
+
+    const auto curve = draw_listed_row(desk, "IR", "IR ZZZ IR_SWAP");
+    /* The same first glyph, so the bearing cancels out of the comparison. */
+    const auto series = draw_listed_row(desk, "FX", "IR ZZZ/QQQ");
+
+    CHECK(curve.asked.empty());
+    CHECK(curve.flag_draws == 0);
+    CHECK(curve.text_x < 200.0f);
+    CHECK(curve.text_x == series.text_x);
+}
