@@ -81,6 +81,29 @@ struct series_info final {
     bool listed = false;
 };
 
+/**
+ * @brief What a row knows of the deeper reads made for its chart spans.
+ *
+ * The first backfill reads the newest observations only. A longer span asks for
+ * more, one read at a time, and this is the record that stops the same ask
+ * being made again.
+ */
+struct series_history final {
+    /** @brief Whether a deeper read is in flight for the row. */
+    bool reading = false;
+
+    /**
+     * @brief How far back the deployment was asked, or zero for never.
+     *
+     * An epoch instant. A read that failed leaves it alone, so the next
+     * explicit ask retries.
+     */
+    std::int64_t floor_ns = 0;
+
+    /** @brief Whether the last answer stopped at the read's bound. */
+    bool truncated = false;
+};
+
 /** @brief The three names that identify a series, borrowed from its row. */
 struct series_key final {
     std::string_view instance_id;
@@ -262,6 +285,25 @@ public:
     bool seed(series_handle h, std::span<const domain::market_point> points,
         std::int64_t observed_at_ns);
 
+    /** @brief Marks a deeper read as started. A stale handle is ignored. */
+    void begin_history(series_handle h);
+
+    /**
+     * @brief Records that a deeper read for spans reaching back to @p from_ns
+     * answered, and whether it stopped at its bound.
+     *
+     * The floor only moves back, so a shallower answer never forgets a deeper
+     * ask. Does not stamp the row: the seed of the points does when they change
+     * what a plot shows.
+     */
+    void finish_history(series_handle h, std::int64_t from_ns, bool truncated);
+
+    /** @brief Marks a deeper read as ended without an answer worth keeping. */
+    void abandon_history(series_handle h);
+
+    /** @brief The row's deeper-read record, empty for a stale handle. */
+    [[nodiscard]] series_history history(series_handle h) const noexcept;
+
     /** @brief Records a failed points read and stamps the row. */
     void fail(series_handle h, std::string message,
         std::int64_t observed_at_ns);
@@ -324,6 +366,7 @@ private:
             series_ring{domain::market_medium_capacity},
             series_ring{domain::market_coarse_capacity}};
         std::string failure;
+        series_history history;
         std::int64_t observed_at_ns = 0;
         std::uint64_t stamp = 0;
         std::uint64_t released_at = 0;

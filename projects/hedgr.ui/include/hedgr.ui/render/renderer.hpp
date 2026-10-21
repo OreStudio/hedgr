@@ -350,6 +350,17 @@ struct window_ui_state final {
     /** @brief A chart window's plot arrays, rebuilt when its points change. */
     chart_plot plot;
 
+    /**
+     * @brief The span, in nanoseconds, the chart last asked history for.
+     *
+     * Negative until the chart asks. The ask is a command, sent when the span
+     * differs from this, so a steady frame sends nothing.
+     */
+    std::int64_t history_asked_ns = -1;
+
+    /** @brief Whether the last frame saw a history read in flight. */
+    bool history_was_reading = false;
+
     /** @brief A term structure window's ladder, rebuilt when its read changes. */
     term_ladder ladder;
 

@@ -211,6 +211,13 @@ struct market_point final {
 struct market_series_read final {
     /** @brief The points, in time order. */
     std::vector<market_point> points;
+
+    /**
+     * @brief Whether a history read stopped at its bound with more to read.
+     *
+     * Always false for a newest-N read, which has no notion of "the rest".
+     */
+    bool truncated = false;
 };
 
 /**
@@ -458,6 +465,25 @@ public:
     [[nodiscard]] result<market_series_read>
     market_series_points(std::string_view series_id,
         std::uint32_t limit = 600) const;
+
+    /**
+     * @brief One series' observations from @p from_ns up to @p to_ns, the
+     * newest first up to a bound.
+     *
+     * Pages the deployment's by-series read with a time range, in pages of
+     * @p page observations and at most @p max_pages of them. When the bound is
+     * hit with the last page still full the read is marked truncated and the
+     * oldest observations of the range are the ones missing.
+     *
+     * @pre the session is authenticated.
+     * @param series_id the series' key.
+     * @param from_ns the earliest instant wanted, epoch nanoseconds.
+     * @param to_ns the latest instant wanted, epoch nanoseconds.
+     * @return the points oldest first, or why they could not be read.
+     */
+    [[nodiscard]] result<market_series_read>
+    market_series_history(std::string_view series_id, std::int64_t from_ns,
+        std::int64_t to_ns, std::uint32_t page, std::uint32_t max_pages) const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

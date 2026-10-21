@@ -29,8 +29,10 @@
 #include "hedgr.session/transport/session_options.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <chrono>
 #include <functional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -122,12 +124,66 @@ struct read_case final {
     return fact;
 }
 
+constexpr std::int64_t second = 1'000'000'000;
+constexpr std::int64_t hour = 3600 * second;
+constexpr std::int64_t base = 1'800'000'000 * second;
+
+/**
+ * @brief The first backfill of a dense series: 2,000 one second observations.
+ *
+ * The fine level holds 33 minutes, which is the depth a one hour chart finds
+ * short.
+ */
+[[nodiscard]] hedgr::model::state::series_handle seed_backfill(fixture& f) {
+    const auto row = f.series.intern(instance_id, account_id, "s-1");
+    std::vector<domain::market_point> points;
+    for (int i = 0; i < 2000; ++i)
+        points.push_back({.at_ns = base + i * second, .value = 1.0 + i});
+    f.series.seed(row, points, 1);
+    return row;
+}
+
+[[nodiscard]] hedgr::model::command::command history_command(
+    std::int64_t span_ns) {
+    hedgr::model::command::command cmd;
+    cmd.kind = hedgr::model::command::command_kind::load_history;
+    cmd.instance_id = instance_id;
+    cmd.account_id = account_id;
+    cmd.series_id = "s-1";
+    cmd.history_span_ns = span_ns;
+    return cmd;
+}
+
+/** @brief The answer a history read pushes, with @p count older observations. */
+[[nodiscard]] event::event history_answer(std::int64_t from_ns, int count,
+    bool truncated = false) {
+    event::event fact;
+    fact.kind = event::event_kind::series_history;
+    fact.instance_id = instance_id;
+    fact.account_id = account_id;
+    fact.series_id = "s-1";
+    fact.history_from_ns = from_ns;
+    fact.history_truncated = truncated;
+    fact.observed_at_ns = 2;
+    for (int i = count; i > 0; --i)
+        fact.points.push_back({.at_ns = base - i * second, .value = 0.5});
+    return fact;
+}
+
 [[nodiscard]] std::vector<read_case> read_cases() {
+    auto history = answer_of(event::event_kind::series_history);
+    history.series_id = "s-1";
     auto points = answer_of(event::event_kind::series_points);
     points.series_id = "s-1";
     auto image = answer_of(event::event_kind::image_loaded);
     image.image_id = "img-1";
     return {
+        {"history", true, request_id::history(instance_id, account_id, "s-1"),
+            [](fixture& f) {
+                static_cast<void>(seed_backfill(f));
+                f.reads.load_history(history_command(hour));
+            },
+            history},
         {"catalogue", true, request_id::catalogue(instance_id, account_id),
             [](fixture& f) {
                 static_cast<void>(f.reads.start(
@@ -198,10 +254,10 @@ TEST_CASE("an id of one kind never collides with another's", "[reads][registry]"
     CHECK(pending.empty());
 }
 
-TEST_CASE("exactly the five answering events name a read", "[reads][registry]") {
+TEST_CASE("exactly the six answering events name a read", "[reads][registry]") {
     using kind = event::event_kind;
     for (const auto answering : {kind::series_catalogue, kind::series_points,
-             kind::deployment_snapshot, kind::image_loaded,
+             kind::series_history, kind::deployment_snapshot, kind::image_loaded,
              kind::currency_image_map}) {
         CHECK(request_id::answered_by(answer_of(answering)).has_value());
     }
@@ -288,4 +344,148 @@ TEST_CASE("clearing the service forgets every mark", "[reads][registry]") {
 
     f.reads.clear();
     CHECK(f.reads.pending().empty());
+}
+
+TEST_CASE("a period the series already holds starts no read", "[reads][history]") {
+    fixture f;
+    f.open();
+    static_cast<void>(seed_backfill(f));
+
+    /* 2,000 one second observations hold a 15 minute span, and a minute. */
+    f.reads.load_history(history_command(15 * 60 * second));
+    f.reads.load_history(history_command(60 * second));
+
+    CHECK(f.reads.history_reads_started() == 0);
+    CHECK(f.reads.pending().empty());
+}
+
+TEST_CASE("a longer period starts one read of the depth it needs",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    const auto row = seed_backfill(f);
+
+    f.reads.load_history(history_command(hour));
+
+    CHECK(f.reads.history_reads_started() == 1);
+    CHECK(f.reads.pending().contains(
+        request_id::history(instance_id, account_id, "s-1")));
+    CHECK(f.series.history(row).reading);
+
+    /* The refused port answers at once, naming the range it was asked for. */
+    std::vector<event::event> answers;
+    while (answers.empty()) {
+        answers = f.events.drain();
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    REQUIRE(answers.size() == 1);
+    CHECK(answers[0].kind == event::event_kind::series_history);
+    CHECK(answers[0].history_from_ns == base + 1999 * second - hour);
+}
+
+TEST_CASE("a second period change while a read is in flight starts no other",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    static_cast<void>(seed_backfill(f));
+
+    f.reads.load_history(history_command(hour));
+    f.reads.load_history(history_command(0));
+    f.reads.load_history(history_command(24 * hour));
+
+    CHECK(f.reads.history_reads_started() == 1);
+}
+
+TEST_CASE("the answer is seeded and the same period is not asked again",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    const auto row = seed_backfill(f);
+    const auto fine = domain::market_level::fine;
+    REQUIRE(f.series.columns(row, fine).size == 2000);
+    f.reads.load_history(history_command(hour));
+
+    const auto from = base + 1999 * second - hour;
+    REQUIRE(f.reads.apply(history_answer(from, 1500)));
+
+    const auto held = f.series.columns(row, fine);
+    CHECK(held.size == 3500);
+    CHECK(held.at_ns[0] == base - 1500 * second);
+    CHECK_FALSE(f.series.history(row).reading);
+    CHECK(f.reads.pending().empty());
+
+    f.reads.load_history(history_command(hour));
+    CHECK(f.reads.history_reads_started() == 1);
+}
+
+TEST_CASE("an answer shorter than the period stops further reads",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    const auto row = seed_backfill(f);
+    f.reads.load_history(history_command(24 * hour));
+    REQUIRE(f.reads.history_reads_started() == 1);
+
+    /* The deployment holds ten minutes more and nothing older. */
+    const auto from = base + 1999 * second - 24 * hour;
+    REQUIRE(f.reads.apply(history_answer(from, 600)));
+    CHECK_FALSE(f.series.history(row).truncated);
+    CHECK(f.series.history(row).floor_ns == from);
+
+    for (int i = 0; i < 3; ++i)
+        f.reads.load_history(history_command(24 * hour));
+    CHECK(f.reads.history_reads_started() == 1);
+}
+
+TEST_CASE("a read that hit its bound is shown as such and is not repeated",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    const auto row = seed_backfill(f);
+    f.reads.load_history(history_command(hour));
+
+    REQUIRE(f.reads.apply(history_answer(base + 1999 * second - hour, 1800,
+        true)));
+    CHECK(f.series.history(row).truncated);
+
+    f.reads.load_history(history_command(hour));
+    CHECK(f.reads.history_reads_started() == 1);
+}
+
+TEST_CASE("a failed read is reported and retried by the next ask",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    const auto row = seed_backfill(f);
+    f.reads.load_history(history_command(hour));
+
+    auto failed = history_answer(base + 1999 * second - hour, 0);
+    failed.message = "the instance did not answer";
+    REQUIRE(f.reads.apply(failed));
+
+    CHECK(f.series.failure(row) == "the instance did not answer");
+    CHECK_FALSE(f.series.history(row).reading);
+    CHECK(f.series.history(row).floor_ns == 0);
+    CHECK(f.reads.pending().empty());
+    CHECK(f.series.columns(row, domain::market_level::fine).size == 2000);
+
+    f.reads.load_history(history_command(hour));
+    CHECK(f.reads.history_reads_started() == 2);
+}
+
+TEST_CASE("a history answer for a series nobody holds is counted and dropped",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    REQUIRE(f.reads.apply(history_answer(base, 10)));
+    CHECK(f.reads.unheld_points() == 1);
+    CHECK(f.series.size() == 0);
+}
+
+TEST_CASE("a period for a series the table does not hold starts no read",
+    "[reads][history]") {
+    fixture f;
+    f.open();
+    f.reads.load_history(history_command(hour));
+    CHECK(f.reads.history_reads_started() == 0);
 }

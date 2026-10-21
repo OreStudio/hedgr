@@ -23,6 +23,7 @@
 #include <chrono>
 #include <string>
 #include "hedgr.session/market/series_label.hpp"
+#include "ores.platform/time/datetime.hpp"
 
 namespace hedgr::session::transport {
 
@@ -35,6 +36,53 @@ newest_observations_request(const boost::uuids::uuid& series_id,
     r.offset = 0;
     r.limit = limit;
     return r;
+}
+
+namespace {
+
+[[nodiscard]] std::string wire_instant(std::int64_t ns, std::int64_t round) {
+    const auto micros = (ns + round) / 1000;
+    return ores::platform::time::datetime::to_iso8601_utc(
+        std::chrono::system_clock::time_point{
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                std::chrono::microseconds(micros))});
+}
+
+}
+
+ores::marketdata::messaging::list_by_series_id_market_observations_request
+history_observations_request(const boost::uuids::uuid& series_id,
+    std::int64_t from_ns, std::int64_t to_ns, std::uint32_t offset,
+    std::uint32_t limit) {
+    auto r = newest_observations_request(series_id, limit);
+    r.offset = offset;
+    ores::marketdata::messaging::market_observations_filter filter;
+    filter.observation_datetime_from = wire_instant(from_ns, 0);
+    filter.observation_datetime_to = wire_instant(to_ns, 999);
+    r.filter = std::move(filter);
+    return r;
+}
+
+result<market_series_read> read_history_pages(const observation_fetch& fetch,
+    const boost::uuids::uuid& series_id, std::int64_t from_ns,
+    std::int64_t to_ns, std::uint32_t page, std::uint32_t max_pages) {
+    std::vector<ores::marketdata::domain::market_observation> rows;
+    bool last_page_full = false;
+    std::uint32_t pages = 0;
+    while (pages < max_pages) {
+        const auto got = fetch(history_observations_request(series_id, from_ns,
+            to_ns, pages * page, page));
+        if (!got)
+            return std::unexpected(got.error());
+        ++pages;
+        rows.insert(rows.end(), got->begin(), got->end());
+        last_page_full = got->size() >= page;
+        if (!last_page_full)
+            break;
+    }
+    auto read = series_read_from(rows);
+    read.truncated = last_page_full && pages == max_pages;
+    return read;
 }
 
 market_series_read series_read_from(

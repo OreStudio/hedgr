@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -135,6 +136,81 @@ market_level_capacity(market_level level) noexcept {
         return market_coarse_capacity;
     }
     return market_fine_capacity;
+}
+
+/**
+ * @brief The level a chart span reads from.
+ *
+ * Up to two hours reads the fine level, up to two days the medium level, and
+ * anything longer, or the whole series (zero), the coarse level.
+ */
+[[nodiscard]] inline constexpr market_level
+market_level_for_span(std::int64_t span_ns) noexcept {
+    if (span_ns == 0)
+        return market_level::coarse;
+    if (span_ns <= 2 * market_coarse_ns)
+        return market_level::fine;
+    if (span_ns <= 2 * 24 * market_coarse_ns)
+        return market_level::medium;
+    return market_level::coarse;
+}
+
+/** @brief Observations one history page asks for. */
+inline constexpr std::size_t market_history_page = 2000;
+
+/**
+ * @brief The most pages one history read fetches.
+ *
+ * Bounds a read of a dense series: 20 pages is 40,000 observations, a few
+ * megabytes in flight, and each page stays the size the first backfill already
+ * proves the deployment answers.
+ */
+inline constexpr std::size_t market_history_max_pages = 20;
+
+/** @brief What a deeper read of a series would ask the deployment for. */
+struct history_plan final {
+    /** @brief The level the span reads from. */
+    market_level level = market_level::fine;
+
+    /** @brief The earliest instant the span needs, in epoch nanoseconds. */
+    std::int64_t from_ns = 0;
+
+    /** @brief The instant the read stops at, the level's oldest held bucket. */
+    std::int64_t to_ns = 0;
+};
+
+/**
+ * @brief The read a chart span needs beyond what the series holds, if any.
+ *
+ * A span is measured back from the newest point of its level, as the plot
+ * crops it, and never reaches further than the level's ring keeps. Nothing is
+ * needed when the level already holds a bucket at or before the start of the
+ * span, when an earlier read already asked at least that far back (so a series
+ * the deployment holds little of is not asked again), or when the level holds
+ * nothing to extend.
+ *
+ * @param span_ns the chart span, or zero for the whole series.
+ * @param level_oldest_ns the oldest held bucket of the span's level, or zero.
+ * @param level_newest_ns the newest held bucket of that level, or zero.
+ * @param floor_ns how far back an earlier read asked, or zero for none.
+ */
+[[nodiscard]] inline constexpr std::optional<history_plan>
+plan_history_read(std::int64_t span_ns, std::int64_t level_oldest_ns,
+    std::int64_t level_newest_ns, std::int64_t floor_ns) noexcept {
+    if (level_oldest_ns == 0 || level_newest_ns == 0)
+        return std::nullopt;
+    const auto level = market_level_for_span(span_ns);
+    const auto bucket = market_level_ns(level);
+    const auto kept = static_cast<std::int64_t>(market_level_capacity(level))
+        * bucket;
+    const auto wanted = span_ns == 0 ? kept : std::min(span_ns, kept);
+    const auto from_ns = level_newest_ns - wanted;
+    if (level_oldest_ns <= from_ns + bucket)
+        return std::nullopt;
+    if (floor_ns != 0 && floor_ns <= from_ns)
+        return std::nullopt;
+    return history_plan{.level = level, .from_ns = from_ns,
+        .to_ns = level_oldest_ns};
 }
 
 /** @brief One observation, in the deployment's own time and value. */

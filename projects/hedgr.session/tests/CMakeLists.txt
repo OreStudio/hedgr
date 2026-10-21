@@ -25,6 +25,7 @@ target_link_libraries(${name}.tests
         hedgr.session.lib
         hedgr.model.lib
         ores::nats
+        ores::platform
         ores::iam.client
         ores::iam.api
         ores::marketdata.api

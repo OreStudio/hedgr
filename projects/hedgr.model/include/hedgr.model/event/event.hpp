@@ -112,6 +112,13 @@ enum class event_kind : std::uint8_t {
      * password, so the store write never happens on the pool.
      */
     master_sealed = 18,
+    /**
+     * @brief A series' older observations were read, or the read failed.
+     *
+     * Answers the deeper read a chart span asked for, which has its own mark
+     * apart from the first backfill's @c series_points.
+     */
+    series_history = 19,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -190,6 +197,12 @@ struct event final {
 
     /** @brief The points, for series_points. */
     std::vector<domain::market_point> points;
+
+    /** @brief How far back a history read asked, epoch ns, for series_history. */
+    std::int64_t history_from_ns = 0;
+
+    /** @brief Whether the read stopped at its bound, for series_history. */
+    bool history_truncated = false;
 
     /** @brief When the read finished, on the monotonic clock, for market events. */
     std::int64_t observed_at_ns = 0;

@@ -489,6 +489,61 @@ void read_service::start_market_backfill(std::string_view instance_id,
     worker::spawn_market_read(pool_, std::move(job), events_);
 }
 
+void read_service::load_history(const model::command::command& cmd) {
+    const auto held = market_.find(cmd.instance_id, cmd.account_id,
+        cmd.series_id);
+    if (!held)
+        return;
+
+    const auto level = domain::market_level_for_span(cmd.history_span_ns);
+    const auto columns = market_.columns(*held, level);
+    const auto known = market_.history(*held);
+    const auto plan = domain::plan_history_read(cmd.history_span_ns,
+        columns.size ? columns.at_ns[0] : 0,
+        columns.size ? columns.at_ns[columns.size - 1] : 0, known.floor_ns);
+    if (!plan)
+        return;
+
+    const auto id = request_id::history(cmd.instance_id, cmd.account_id,
+        cmd.series_id);
+    if (pending_.contains(id)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "History for series '" << cmd.series_id
+            << "' not started: one is already in flight";
+        return;
+    }
+
+    auto read = session_read_for(cmd.instance_id, cmd.account_id,
+        read_gate::signed_in_with_token);
+    if (!read) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "History for series '" << cmd.series_id
+            << "' not started: no signed-in session with a token";
+        return;
+    }
+
+    worker::market_job job;
+    job.options = std::move(read->options);
+    job.key = domain::session_key{cmd.instance_id, cmd.account_id};
+    job.token = std::move(read->token);
+    job.principal = std::move(read->principal);
+    job.series_id = cmd.series_id;
+    job.history = true;
+    job.history_from_ns = plan->from_ns;
+    job.history_to_ns = plan->to_ns;
+
+    pending_.mark(id);
+    market_.begin_history(*held);
+    ++history_reads_started_;
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Reading history for series '" << cmd.series_id << "': span_ns="
+        << cmd.history_span_ns << " level=" << static_cast<int>(plan->level)
+        << " held_oldest_at_ns=" << plan->to_ns
+        << " from_ns=" << plan->from_ns << " max_observations="
+        << domain::market_history_page * domain::market_history_max_pages;
+    worker::spawn_market_read(pool_, std::move(job), events_);
+}
+
 void read_service::load_crm_names(const model::command::command& cmd) {
     start_crm_names_read(cmd.instance_id, cmd.account_id, cmd.party_id);
 }
@@ -597,6 +652,42 @@ bool read_service::apply(const model::event::event& ev) {
                 << "Backfill for series '" << ev.series_id
                 << "' failed: " << ev.message;
         }
+        return true;
+    }
+    case event::event_kind::series_history: {
+        const auto held =
+            market_.find(ev.instance_id, ev.account_id, ev.series_id);
+        if (!held) {
+            ++unheld_points_;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Dropped " << ev.points.size()
+                << " history points for series '" << ev.series_id
+                << "': no row is held for it";
+            return true;
+        }
+        if (!ev.message.empty()) {
+            market_.abandon_history(*held);
+            market_.fail(*held, ev.message, ev.observed_at_ns);
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "History for series '" << ev.series_id
+                << "' failed: " << ev.message;
+            return true;
+        }
+        market_.seed(*held, ev.points, ev.observed_at_ns);
+        market_.finish_history(*held, ev.history_from_ns, ev.history_truncated);
+        const char* outcome = ev.history_truncated
+            ? "stopped at the read bound, older observations were not read"
+            : ev.points.empty()
+                || ev.points.front().at_ns > ev.history_from_ns
+                ? "the server holds nothing older"
+                : "the span is covered";
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "History for series '" << ev.series_id << "' seeded from "
+            << ev.points.size() << " observations: from_ns="
+            << ev.history_from_ns << " outcome='" << outcome << "'"
+            << (ev.points.empty()
+                    ? std::string{}
+                    : std::format(" oldest_at_ns={}", ev.points.front().at_ns));
         return true;
     }
     case event::event_kind::deployment_snapshot:
