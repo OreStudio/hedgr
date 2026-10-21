@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -166,6 +167,23 @@ std::filesystem::path base_font_path() {
 }
 
 /**
+ * @brief The bold file of the family @p base belongs to, or an empty path.
+ *
+ * Every base candidate names its weight the same way: Inter-Regular.otf beside
+ * Inter-Bold.otf, DejaVuSans.ttf beside DejaVuSans-Bold.ttf.
+ */
+std::filesystem::path bold_font_path(const std::filesystem::path& base) {
+    if (base.empty())
+        return {};
+    std::string stem = base.stem().string();
+    constexpr std::string_view regular = "-Regular";
+    if (stem.ends_with(regular))
+        stem.resize(stem.size() - regular.size());
+    return first_existing(
+        {base.parent_path() / (stem + "-Bold" + base.extension().string())});
+}
+
+/**
  * @brief The coverage bytes of the icon sheet, or an empty vector.
  *
  * The sheet is a binary PGM, which is a small text header followed by one byte
@@ -217,6 +235,7 @@ namespace {
 namespace {
 
 ImFont* numeric_font_instance = nullptr;
+ImFont* bold_font_instance = nullptr;
 
 }
 
@@ -226,6 +245,18 @@ ImFont* numeric_font() {
     if (numeric_font_instance != nullptr)
         return numeric_font_instance;
     ImGuiIO& io = ImGui::GetIO();
+    return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
+}
+
+ImFont* bold_font() {
+    ImGuiIO& io = ImGui::GetIO();
+    /*
+     * Checked against the current atlas because the pointer outlives the
+     * context that loaded it, and a test process creates several.
+     */
+    if (bold_font_instance != nullptr
+        && io.Fonts->Fonts.contains(bold_font_instance))
+        return bold_font_instance;
     return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
 }
 
@@ -257,6 +288,14 @@ void load_ui_fonts(float base_size_px) {
      * merged, so the icon glyphs stay on the base font and the numbers' face
      * carries digits and nothing else.
      */
+    const auto bold = bold_font_path(base);
+    if (!bold.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Loaded the bold font from " << bold.string();
+        bold_font_instance =
+            io.Fonts->AddFontFromFileTTF(bold.string().c_str(), base_size_px);
+    }
+
     const auto numeric = numeric_font_path();
     if (!numeric.empty()) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
