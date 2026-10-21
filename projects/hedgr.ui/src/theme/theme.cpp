@@ -158,12 +158,11 @@ constexpr ImU32 service_missing_colour = IM_COL32(211, 47, 47, 255);
  * has asked yet, and the reference never has to draw one, so it keeps the
  * neutral value it already had rather than borrowing the reference's dimmed
  * text grey, which means something else.
+ *
+ * The green and the amber are in the header, beside the red, because the
+ * tone helpers below hand all three to widgets that are not about any one
+ * model state.
  */
-constexpr ImU32 good_colour = IM_COL32(106, 233, 149, 255);
-
-/* The warning fill under the Miss Rate label, 600x24 at x 600 y 1022. */
-constexpr ImU32 warning_colour = IM_COL32(240, 193, 87, 255);
-
 constexpr ImU32 unknown_colour = IM_COL32(128, 128, 128, 255);
 
 }
@@ -345,6 +344,57 @@ ImU32 card_title_icon_colour() noexcept {
      * colour at all.
      */
     return glow;
+}
+
+namespace {
+
+/** @brief The semantic colour behind a verdict, or zero for neutral. */
+[[nodiscard]] constexpr ImU32 tone_base(tone value) noexcept {
+    switch (value) {
+    case tone::good:
+        return good_colour;
+    case tone::bad:
+        return failure_colour;
+    case tone::warning:
+        return warning_colour;
+    case tone::neutral:
+        break;
+    }
+    return 0;
+}
+
+[[nodiscard]] constexpr ImU32 tint(ImU32 base, unsigned int alpha) noexcept {
+    return (base & ~IM_COL32_A_MASK) | (alpha << IM_COL32_A_SHIFT);
+}
+
+}
+
+tone_colours pill_colours(tone value) noexcept {
+    const ImU32 base = tone_base(value);
+    if (base == 0) {
+        return tone_colours{.fill = ImGui::ColorConvertFloat4ToU32(bg_frame),
+            .border = ImGui::ColorConvertFloat4ToU32(border),
+            .text = ImGui::ColorConvertFloat4ToU32(text)};
+    }
+    /*
+     * The TARGETING pill reads #122B27 inside and #2B5146 at its edge on a
+     * #12171D card, which is the green at about a seventh and at a little
+     * under half.
+     */
+    return tone_colours{.fill = tint(base, 0x24),
+        .border = tint(base, 0x73), .text = base};
+}
+
+tone_colours band_colours(tone value) noexcept {
+    const ImU32 base = tone_base(value);
+    if (base == 0) {
+        return tone_colours{.fill = ImGui::ColorConvertFloat4ToU32(bg_title),
+            .border = ImGui::ColorConvertFloat4ToU32(separator),
+            .text = ImGui::ColorConvertFloat4ToU32(text)};
+    }
+    /* The CURRENT P/L strip reads #131E24 on the same card. */
+    return tone_colours{.fill = tint(base, 0x12),
+        .border = tint(base, 0x40), .text = base};
 }
 
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {

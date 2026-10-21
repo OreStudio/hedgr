@@ -27,6 +27,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
+#include <cstdint>
 
 namespace hedgr::ui::theme {
 
@@ -111,6 +112,48 @@ HEDGR_UI_EXPORT void apply_theme();
  * statement.
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
+
+/** @brief The palette's green, for anything that reports a good outcome. */
+inline constexpr ImU32 good_colour = IM_COL32(106, 233, 149, 255);
+
+/**
+ * @brief The palette's amber, for anything partway or at risk.
+ *
+ * The warning fill under the Miss Rate label, 600x24 at x 600 y 1022.
+ */
+inline constexpr ImU32 warning_colour = IM_COL32(240, 193, 87, 255);
+
+/**
+ * @brief The outcome a pill or a strip reports, which picks its colours.
+ *
+ * Neutral is a value with no verdict, such as a timeframe. The other three
+ * are the state colours, never the accent: the accent marks a choice, and a
+ * verdict drawn in it would read as something the reader picked.
+ */
+enum class tone : std::uint8_t { neutral, good, bad, warning };
+
+/** @brief The three colours a toned shape is drawn with. */
+struct tone_colours final {
+    ImU32 fill = 0;
+    ImU32 border = 0;
+    ImU32 text = 0;
+};
+
+/**
+ * @brief A pill's colours for @p value: a dark tinted fill, a thin border and
+ * bright text in the tone's colour.
+ *
+ * Neutral takes the chip fill, the card border and the ordinary text.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT tone_colours pill_colours(tone value) noexcept;
+
+/**
+ * @brief A strip's colours for @p value.
+ *
+ * Fainter than a pill's, because a strip spans the card and a pill sits on
+ * top of it in the same tone. The text is the pill's.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT tone_colours band_colours(tone value) noexcept;
 
 /** @brief The live data-health badge. */
 inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
