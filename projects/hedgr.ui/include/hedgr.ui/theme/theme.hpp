@@ -31,14 +31,12 @@
 namespace hedgr::ui::theme {
 
 /**
- * @brief Applies the dark style read off the reference screenshot.
+ * @brief Applies the dark navy style read off the reference screenshot.
  *
  * Call once, after the ImGui context exists. The palette is sampled from
- * docs/samples rather than chosen, and each value in the implementation names
- * the region of that image it was read from. The surfaces are glass: the
- * second reference lets the render behind its panels show through, and the
- * measurement of it and the alphas that follow from it live in the
- * implementation beside the colours they modify.
+ * docs/samples/1792564434861.jpeg rather than chosen, and each value in the
+ * implementation names the point of that image it was read from. Every
+ * surface is opaque.
  */
 HEDGR_UI_EXPORT void apply_theme();
 
@@ -86,15 +84,14 @@ HEDGR_UI_EXPORT void apply_theme();
 /**
  * @brief The colour a card's title glyph is drawn in.
  *
- * The reference writes every card title's icon in the connected green while the
+ * The reference draws the glyph in each card's chips in a pale blue while the
  * title's own words are a step below the value, so the icon identifies the
- * field and the words only name it. It is a helper rather than a constant each
- * caller keeps, because the whole wall has to agree on it and a card that
- * reached for an accent of its own would drift from the one beside it.
+ * field and the words only name it. It carries no state colour, because a card
+ * about a failing instance must not wear the live green.
  *
- * The reference applies this to every card icon and to no other icon. Its
- * toolbar and its status bar are drawn in the ordinary text colour, so the
- * green means "the title of a card" rather than "a glyph".
+ * It is a helper rather than a constant each caller keeps, because the whole
+ * wall has to agree on it and a card that reached for an accent of its own
+ * would drift from the one beside it.
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImU32 card_title_icon_colour() noexcept;
 
@@ -108,23 +105,19 @@ HEDGR_UI_EXPORT void apply_theme();
  * next surface that reports one should not have to pick a neighbour to borrow
  * a colour from. The helpers agree on this value; this is the value.
  *
- * The reference screenshot shows no red anywhere, so this could not be
- * resampled and keeps the value it had. That is deliberate and not an
- * oversight, because red is the one meaning the reference never has to draw,
- * and borrowing its amber or its green for a refusal would make the two the
- * same statement.
+ * The navy reference draws red only as thin text on a compressed image, which
+ * reads duller than the colour behind it, so this keeps the value it had.
+ * Borrowing the amber or the green for a refusal would make the two the same
+ * statement.
  */
 inline constexpr ImU32 failure_colour = IM_COL32(255, 23, 68, 255);
 
 /** @brief The live data-health badge. */
 inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
 
-/** @brief Text on the accent fill of a selected toggle, dark enough to read. */
-inline const ImVec4 selection_text_colour(0.05f, 0.08f, 0.06f, 1.0f);
-
 /*
- * Term-structure history. The newest curve is the accent green the web
- * simulator uses; earlier curves are a grey-blue that fades with age, so a
+ * Term-structure history. The newest curve is the blue the web simulator
+ * uses; earlier curves are a grey-blue that fades with age, so a
  * reader can tell the live curve from the ones behind it at a glance.
  */
 inline constexpr ImU32 curve_latest_colour = IM_COL32(64, 156, 255, 255);
@@ -152,33 +145,33 @@ inline constexpr ImU32 edit_changed_colour = IM_COL32(0, 188, 212, 255);
 /**
  * @brief The colour of a navigation rail's group heading.
  *
- * Read off the reference's "MAIN", "TOOLS" and "SYSTEM" headings, which are set
- * in a green about a third darker than the connected dot rather than in the
- * general text colour. It is a separate entry because a heading is not text a
- * reader follows, it is the name of the set below it, and the reference says so
- * in colour as well as in size.
+ * The reference's label grey, read off its DATE label at x 33 to 69 y 302 to
+ * 314, the same value as the theme's dim text. The reference sets every label
+ * that names the set below it small, in capitals and dimmed, so a heading is
+ * quieter than the rows it heads. It was a green, which read as a health state
+ * on a rail that reports none.
  */
-inline constexpr ImU32 rail_heading_colour = IM_COL32(105, 180, 139, 255);
+inline constexpr ImU32 rail_heading_colour = IM_COL32(141, 146, 150, 255);
 
 /**
  * @brief The bright bar down the left edge of a chosen row.
  *
- * The reference marks its chosen navigation row with a bar this bright, a few
- * pixels inside the row's own left edge, and the bar is the part of the cue a
- * reader sees before the wash. It is brighter than @c green on purpose: the
- * wash sits over a panel and darkens the green, so a bar drawn in the dot's own
- * value would read as a second, duller thing beside the selected icon.
+ * A bar a few pixels inside the row's own left edge is the part of the cue a
+ * reader sees before the wash. It takes the reference's brightest blue, the
+ * fill of the count badge on its chosen tab at x 389 y 50, which is brighter
+ * than the accent on purpose: the navy wash under it would make a bar in the
+ * accent's own value read as a second, duller thing beside the selected icon.
  */
-inline constexpr ImU32 rail_selection_bar = IM_COL32(124, 241, 171, 255);
+inline constexpr ImU32 rail_selection_bar = IM_COL32(91, 165, 255, 255);
 
 /**
- * @brief The outline drawn around a chosen row, in the bar's green.
+ * @brief The outline drawn around a chosen row, in the bar's blue.
  *
  * The reference boxes the chosen row as well as washing it. A one pixel rule at
  * this alpha carries the cue without turning the row into a control, and an
  * alpha rather than a solid keeps the box from competing with the bar.
  */
-inline constexpr ImU32 rail_selection_border = IM_COL32(124, 241, 171, 150);
+inline constexpr ImU32 rail_selection_border = IM_COL32(91, 165, 255, 150);
 
 /**
  * @brief The colour of a session status.

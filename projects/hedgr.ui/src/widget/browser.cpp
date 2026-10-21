@@ -152,8 +152,8 @@ build_rail_groups(const widget::browser_model& model) {
  * @brief Writes a group heading on a line of its own.
  *
  * Shared by the rail and the toolbar, because the reference uses one treatment
- * for both: the name of a set of rows, in the heading green and in capitals, so
- * a reader learns one shape for "the rows under this belong together".
+ * for both: the name of a set of rows, dimmed and in capitals, so a reader
+ * learns one shape for "the rows under this belong together".
  */
 void draw_group_label(std::string_view text) {
     ImGui::Spacing();
@@ -1048,7 +1048,7 @@ void draw_list(const widget::browser_model& model, window_ui_state& window,
             const ImVec2 row_top = ImGui::GetCursorScreenPos();
             const bool selected = state.selected_leaf == leaf.id;
             /*
-             * The chosen row keeps the reference's green wash while the pointer
+             * The chosen row keeps the reference's navy wash while the pointer
              * is over it. ImGui reaches for the hover colour whether or not the
              * row is chosen, so the wash is pushed over it for this row alone;
              * an unchosen row keeps the theme's neutral hover.
