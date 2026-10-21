@@ -75,6 +75,40 @@ TEST_CASE("statuses that a person must tell apart have distinct colours",
     REQUIRE(authenticated != disconnected);
 }
 
+TEST_CASE("a selection or decoration cue never wears a state colour",
+    "[theme]") {
+    namespace theme = hedgr::ui::theme;
+    using hedgr::model::domain::reachability;
+    using hedgr::model::domain::readiness;
+
+    const auto rgb = [](ImU32 colour) { return colour & 0x00FFFFFFu; };
+
+    const std::vector<ImU32> states = {
+        theme::status_colour(session_status::authenticated),
+        theme::status_colour(session_status::connecting),
+        theme::status_colour(session_status::failed),
+        theme::reachability_colour(reachability::reachable),
+        theme::readiness_colour(readiness::ready),
+        theme::readiness_colour(readiness::bootstrapping),
+        theme::readiness_colour(readiness::service_missing),
+        theme::health_live_colour,
+        theme::failure_colour,
+    };
+    const std::vector<ImU32> cues = {
+        theme::card_title_icon_colour(),
+        theme::rail_heading_colour,
+        theme::rail_selection_bar,
+        theme::rail_selection_border,
+    };
+
+    for (const auto cue : cues) {
+        for (const auto state : states) {
+            INFO("cue " << std::hex << cue << " state " << state);
+            CHECK(rgb(cue) != rgb(state));
+        }
+    }
+}
+
 TEST_CASE("every session status has an icon", "[theme]") {
     for (std::size_t value = 0;
          value < hedgr::model::domain::session_status_count; ++value) {
