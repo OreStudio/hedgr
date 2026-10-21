@@ -71,7 +71,9 @@ boost::asio::awaitable<void> run_market(market_job job,
 
     auto fact = event::event{};
     fact.kind = job.catalogue ? event::event_kind::series_catalogue
+        : job.history         ? event::event_kind::series_history
                               : event::event_kind::series_points;
+    fact.history_from_ns = job.history_from_ns;
     fact.instance_id = key.instance_id;
     fact.account_id = key.account_id;
     fact.series_id = job.series_id;
@@ -96,6 +98,22 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .tenor = row.tenor,
                     .curve_key = row.curve_key,
                     .curve_label = row.curve_label});
+            }
+        } else {
+            fact.message = describe(read.error());
+        }
+    } else if (job.history) {
+        if (const auto read = client.market_series_history(job.series_id,
+                job.history_from_ns, job.history_to_ns,
+                static_cast<std::uint32_t>(domain::market_history_page),
+                static_cast<std::uint32_t>(domain::market_history_max_pages));
+            read) {
+            fact.history_truncated = read->truncated;
+            fact.points.reserve(read->points.size());
+            for (const auto& point : read->points) {
+                fact.points.push_back(domain::market_point{
+                    .at_ns = point.at_ns,
+                    .value = point.value});
             }
         } else {
             fact.message = describe(read.error());
@@ -128,6 +146,19 @@ boost::asio::awaitable<void> run_market(market_job job,
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Market catalogue for '" << key.instance_id << "' holds "
             << fact.series.size() << " series";
+    } else if (job.history) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Market history for series '" << job.series_id << "' on '"
+            << key.instance_id << "': " << fact.points.size()
+            << " observations from_ns=" << job.history_from_ns
+            << " to_ns=" << job.history_to_ns
+            << (fact.history_truncated ? " (stopped at the page bound)"
+                                       : " (range read in full)")
+            << (fact.points.empty()
+                    ? std::string{}
+                    : std::format(", oldest_at_ns={} newest_at_ns={}",
+                          fact.points.front().at_ns,
+                          fact.points.back().at_ns));
     } else {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Market points for series '" << job.series_id << "' on '"

@@ -58,6 +58,21 @@ struct market_job final {
 
     /** @brief The most points to ask for. */
     std::uint32_t limit = 600;
+
+    /**
+     * @brief Whether this reads a time range of the series by pages.
+     *
+     * A history read asks for the range from @c history_from_ns to
+     * @c history_to_ns in pages of the model's page size, up to its page bound,
+     * and answers with @c series_history. @c limit is not used.
+     */
+    bool history = false;
+
+    /** @brief The earliest instant a history read wants, epoch nanoseconds. */
+    std::int64_t history_from_ns = 0;
+
+    /** @brief The latest instant a history read wants, epoch nanoseconds. */
+    std::int64_t history_to_ns = 0;
 };
 
 /**

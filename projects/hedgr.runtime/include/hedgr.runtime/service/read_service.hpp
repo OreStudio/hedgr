@@ -182,6 +182,21 @@ public:
         std::string_view account_id, std::string_view series_id);
 
     /**
+     * @brief Reads older observations when a chart span needs them.
+     *
+     * The command names a series and a span. Nothing is read when the series'
+     * level already holds the span, when an earlier read already asked that far
+     * back, when a history read for the series is in flight, or when no session
+     * can read. Frame thread only; the answer is seeded by @c apply.
+     */
+    void load_history(const model::command::command& cmd);
+
+    /** @brief History reads started since the service was made. */
+    [[nodiscard]] std::size_t history_reads_started() const noexcept {
+        return history_reads_started_;
+    }
+
+    /**
      * @brief Reads each CRM batch an open cross-rates window shows, when due.
      *
      * The deadline belongs to the batch rather than the window, so any number
@@ -297,6 +312,9 @@ private:
 
     /** @brief Points answers dropped for a series nobody holds. */
     std::size_t unheld_points_ = 0;
+
+    /** @brief History reads handed to the pool. */
+    std::size_t history_reads_started_ = 0;
 
     /** @brief Which image each tenant currency names. */
     model::state::tenant_image_map currency_images_;

@@ -1368,6 +1368,73 @@ session_client::market_series_points(std::string_view series_id,
     }
 }
 
+result<market_series_read>
+session_client::market_series_history(std::string_view series_id,
+    std::int64_t from_ns, std::int64_t to_ns, std::uint32_t page,
+    std::uint32_t max_pages) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "an observation read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "an observation read needs a signed-in session");
+    }
+
+    boost::uuids::uuid id{};
+    try {
+        id = boost::lexical_cast<boost::uuids::uuid>(series_id);
+    } catch (const std::exception&) {
+        return fail(session_errc::protocol_error,
+            std::format("'{}' is not a series key", series_id));
+    }
+
+    using ores::marketdata::messaging::list_by_series_id_market_observations_request;
+    using ores::marketdata::messaging::list_by_series_id_market_observations_response;
+
+    const observation_fetch fetch = [this](
+        const list_by_series_id_market_observations_request& request)
+        -> result<std::vector<ores::marketdata::domain::market_observation>> {
+        const auto answer = ores::nats::service::authenticated_request_and_decode<
+            list_by_series_id_market_observations_response>(client(),
+            list_by_series_id_market_observations_request::nats_subject,
+            request, options_.request_timeout);
+        if (!answer) {
+            return fail(session_errc::protocol_error,
+                "the observation answer could not be decoded");
+        }
+        if (answer->result.outcome != ores::utility::domain::outcome::ok) {
+            return fail(session_errc::protocol_error,
+                answer->result.message.empty()
+                    ? std::string("the deployment refused the observations")
+                    : answer->result.message);
+        }
+        return answer->market_observations;
+    };
+
+    try {
+        auto read = read_history_pages(fetch, id, from_ns, to_ns, page,
+            max_pages);
+        if (read) {
+            BOOST_LOG_SEV(lg(), ores::logging::debug)
+                << "Read " << read->points.size()
+                << " history points for series '" << series_id << "'"
+                << (read->truncated ? " (truncated)" : "");
+        }
+        return read;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The history read for series '" << series_id
+            << "' failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The history read for series '" << series_id
+            << "' failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
 std::string session_client::subject(std::string_view suffix) const {
     return make_subject(options_, suffix);
 }

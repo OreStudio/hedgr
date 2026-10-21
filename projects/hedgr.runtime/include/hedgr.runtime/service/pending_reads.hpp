@@ -39,6 +39,7 @@ enum class request_kind : std::uint8_t {
     deployment,
     image,
     currency_image_map,
+    history,
 };
 
 /**
@@ -61,6 +62,12 @@ struct request_id final {
     [[nodiscard]] static request_id points(std::string_view instance_id,
         std::string_view account_id, std::string_view series_id) {
         return {request_kind::points,
+            model::state::make_tenant_key(pair(instance_id, account_id), series_id)};
+    }
+
+    [[nodiscard]] static request_id history(std::string_view instance_id,
+        std::string_view account_id, std::string_view series_id) {
+        return {request_kind::history,
             model::state::make_tenant_key(pair(instance_id, account_id), series_id)};
     }
 
@@ -93,6 +100,8 @@ struct request_id final {
             return catalogue(ev.instance_id, ev.account_id);
         case kind::series_points:
             return points(ev.instance_id, ev.account_id, ev.series_id);
+        case kind::series_history:
+            return history(ev.instance_id, ev.account_id, ev.series_id);
         case kind::deployment_snapshot:
             return deployment(ev.instance_id, ev.account_id);
         case kind::image_loaded:
@@ -158,7 +167,7 @@ private:
         return static_cast<std::size_t>(kind);
     }
 
-    std::array<std::unordered_set<std::string>, 5> marks_;
+    std::array<std::unordered_set<std::string>, 6> marks_;
 };
 
 }

@@ -37,6 +37,7 @@ target_link_libraries(${lib_target_name}
     PUBLIC
         hedgr.model.lib
         ores::nats
+        ores::platform
         ores::iam.client
         ores::iam.api
         ores::marketdata.api

@@ -410,6 +410,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::load_crm_names:
         read_service_.load_crm_names(cmd);
         break;
+    case command::command_kind::load_history:
+        read_service_.load_history(cmd);
+        break;
     case command::command_kind::probe_instance:
         if (auto refused = probe_service_.do_probe_instance(cmd))
             raise(std::move(refused->key), std::move(refused->message));
@@ -1031,6 +1034,7 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::image_loaded:
     case event::event_kind::currency_image_map:
     case event::event_kind::series_points:
+    case event::event_kind::series_history:
         /*
          * Never reached either, and for the same reason: each is applied above,
          * because none of them needs the session row.

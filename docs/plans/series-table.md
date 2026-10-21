@@ -1138,3 +1138,52 @@ What remains is the work that needed the key and the stamp this plan built.
   show it dominating, decimating to the plot's pixel width is its own change.
 - **The live checks** under "What cannot be verified" were not run. Every figure
   here is a headless CPU figure, none a frame time.
+
+## History depth
+
+The first backfill of a watched series reads its newest 2,000 observations and
+seeds all three levels from them. For a dense series that is 33 minutes of one
+second data, so a one hour or longer period plotted a ring that did not reach
+back as far as the period said. A longer period now reads older observations
+when the level it plots from does not hold the span.
+
+**What the deployment supports.** `list_by_series_id_market_observations_request`
+carries `offset`, `limit`, an `order` and a `filter` with
+`observation_datetime_from` and `observation_datetime_to`, inclusive instants as
+text (`market_observation_protocol.hpp:220-237`, the filter at `:67-75`). The
+service applies the filter, the order (observation time newest first when none
+is named, the row id as the tie-break) and the page in one SQL statement
+(`market_observation_repository.cpp:297-321`, `stated_order.hpp`). A time range
+and an offset are therefore both real, and an offset names the same row on every
+page while the range is fixed. The response carries `total`, which Hedgr does
+not need. No server cap on `limit` was found, and the NATS payload limit of the
+deployment was not checked, so a page stays at the 2,000 the backfill already
+proves.
+
+**The decision.** The chart sends `load_history` with its span when the span
+changes, and once more when a history read that was in flight ends cleanly. The
+runtime, in `read_service::load_history`, asks `plan_history_read` whether the
+span's level (`market_level_for_span`) holds a bucket at or before
+`newest - span`, capped at what the ring keeps. If not, and no earlier read
+already asked back that far (`series_history::floor_ns`), one worker reads the
+range from that instant to the level's oldest held bucket, in pages of 2,000,
+at most 20 pages. The answer is seeded through `series_table::seed`, so a held
+bucket wins by bucket id, and it records the floor.
+
+- One read per series at a time, by `request_id::history`. A change made while
+  one is in flight is dropped, and the chart sends it again when that read ends.
+- Bounded by the ring capacities (the span is clamped to them), by 20 pages of
+  2,000 observations per read, and by the floor, which allows at most one read
+  per distinct depth.
+- A read that returns less than asked ends the asking. The floor is set to the
+  instant that was asked for, so "the server holds nothing older" is not asked
+  again. A read that hit the page bound is also not repeated, and the chart says
+  the older observations were not read.
+- A failed read leaves the floor alone, shows the row's failure, and is retried
+  by the next explicit period change.
+
+**Known limits.** A series denser than 40,000 observations in the span shows its
+newest 40,000 and says so. The oldest held bucket can be partial, because the
+backfill cut it mid bucket and the held bucket wins the merge, so its open, high
+and low describe only part of it. Both are the price of reading by time over a
+protocol with no server-side aggregation.

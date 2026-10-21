@@ -309,6 +309,32 @@ bool series_table::seed(series_handle h,
     return changed;
 }
 
+void series_table::begin_history(series_handle h) {
+    if (auto* r = row_of(h))
+        r->history.reading = true;
+}
+
+void series_table::finish_history(series_handle h, std::int64_t from_ns,
+    bool truncated) {
+    auto* r = row_of(h);
+    if (r == nullptr)
+        return;
+    r->history.reading = false;
+    r->history.truncated = truncated;
+    if (r->history.floor_ns == 0 || from_ns < r->history.floor_ns)
+        r->history.floor_ns = from_ns;
+}
+
+void series_table::abandon_history(series_handle h) {
+    if (auto* r = row_of(h))
+        r->history.reading = false;
+}
+
+series_history series_table::history(series_handle h) const noexcept {
+    const auto* r = row_of(h);
+    return r == nullptr ? series_history{} : r->history;
+}
+
 void series_table::fail(series_handle h, std::string message,
     std::int64_t observed_at_ns) {
     auto* r = row_of(h);

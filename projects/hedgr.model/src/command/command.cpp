@@ -79,6 +79,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "configure_crm";
     case command_kind::load_crm_names:
         return "load_crm_names";
+    case command_kind::load_history:
+        return "load_history";
     }
     return "unknown";
 }

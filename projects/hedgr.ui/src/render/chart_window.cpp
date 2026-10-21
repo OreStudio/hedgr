@@ -149,15 +149,14 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
     return std::format("{:.{}f}", value, decimals);
 }
 
-/** @brief The history level a span reads from. */
-[[nodiscard]] domain::market_level level_for(std::int64_t span_ns) {
-    if (span_ns == 0)
-        return domain::market_level::coarse;
-    if (span_ns <= 2 * domain::market_coarse_ns)
-        return domain::market_level::fine;
-    if (span_ns <= 2 * 24 * domain::market_coarse_ns)
-        return domain::market_level::medium;
-    return domain::market_level::coarse;
+/** @brief A length of time in the fewest words the period combo uses. */
+[[nodiscard]] std::string duration_text(std::int64_t ns) {
+    const auto minutes = ns / domain::market_medium_ns;
+    if (minutes < 60)
+        return std::format("{}m", minutes);
+    if (minutes < 48 * 60)
+        return std::format("{}h", minutes / 60);
+    return std::format("{}d", minutes / (24 * 60));
 }
 
 }
@@ -206,8 +205,10 @@ void render_chart(window_handle handle, const render_input& input,
         || (series.observed_at_ns(*row) == 0 && series.failure(*row).empty());
 
     const auto span_ns = chart_span_ns(state.market_view.chart_span);
+    const auto history = row ? series.history(*row)
+                             : hedgr::model::state::series_history{};
     const hedgr::model::state::series_columns points = row
-        ? series.columns(*row, level_for(span_ns))
+        ? series.columns(*row, domain::market_level_for_span(span_ns))
         : hedgr::model::state::series_columns{};
     const std::int64_t as_of_ns = row ? series.newest_at_ns(*row) : 0;
     const auto health = domain::assess_data_health(as_of_ns,
@@ -220,7 +221,7 @@ void render_chart(window_handle handle, const render_input& input,
             .ema = state.market_view.chart_ema != 0},
         points);
     if (rebuilt) {
-        const auto level = level_for(span_ns);
+        const auto level = domain::market_level_for_span(span_ns);
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Chart '" << chart->series_id << "' replotted: span_ns="
             << span_ns << " level=" << static_cast<int>(level)
@@ -234,6 +235,9 @@ void render_chart(window_handle handle, const render_input& input,
             << " candle_width_ns=" << plot.candle_width_ns
             << " candles=" << plot.candles.size()
             << " observed_at_ns=" << (row ? series.observed_at_ns(*row) : 0)
+            << " history_reading=" << history.reading
+            << " history_floor_ns=" << history.floor_ns
+            << " history_truncated=" << history.truncated
             << " failure='"
             << (row ? std::string{series.failure(*row)} : std::string{})
             << "'";
@@ -250,6 +254,29 @@ void render_chart(window_handle handle, const render_input& input,
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
 
     set_health_foot(foot, health, as_of_ns, input.wall_now_ns, reading);
+
+    /*
+     * The runtime decides whether the series already holds the span. The chart
+     * only says which span it plots, once per change, and once more when a read
+     * that was in flight ends cleanly, because a change made during it was not
+     * started.
+     */
+    if (row && !reading) {
+        if (state.history_was_reading && !history.reading
+            && series.failure(*row).empty())
+            state.history_asked_ns = -1;
+        state.history_was_reading = history.reading;
+        if (state.history_asked_ns != span_ns) {
+            hedgr::model::command::command ask;
+            ask.kind = hedgr::model::command::command_kind::load_history;
+            ask.instance_id = std::string{input.sessions.instance_id(*session)};
+            ask.account_id = std::string{input.sessions.account_id(*session)};
+            ask.series_id = chart->series_id;
+            ask.history_span_ns = span_ns;
+            input.commands.push(std::move(ask));
+            state.history_asked_ns = span_ns;
+        }
+    }
     foot.controls.push_back(widget::foot_combo{
         .id = "period",
         .tooltip = "The span the chart plots",
@@ -293,6 +320,23 @@ void render_chart(window_handle handle, const render_input& input,
             ImGui::TextDisabled("\u00b7 All points");
             ImGui::SetItemTooltip("%s",
                 "The period is All, so every point in the series is plotted");
+        }
+    }
+    if (history.reading) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Reading older history...");
+    } else if (!no_points && span_ns > 0 && history.floor_ns != 0) {
+        const auto shown_ns = plotted > 1
+            ? points.at_ns[points.size - 1] - points.at_ns[start] : 0;
+        if (shown_ns + domain::market_level_ns(
+                domain::market_level_for_span(span_ns)) < span_ns) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("\u00b7 shows %s of %s",
+                duration_text(shown_ns).c_str(),
+                duration_text(span_ns).c_str());
+            ImGui::SetItemTooltip("%s", history.truncated
+                ? "The read stopped at its bound, so older observations were not read"
+                : "The server holds no older observations for this series");
         }
     }
     ImGui::SameLine();

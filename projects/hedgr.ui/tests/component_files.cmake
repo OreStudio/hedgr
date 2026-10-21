@@ -9,6 +9,7 @@
 #
 set(files
     "capture_tests.cpp"
+    "chart_history_tests.cpp"
     "chart_plot_tests.cpp"
     "controls_tests.cpp"
     "crm_grid_tests.cpp"

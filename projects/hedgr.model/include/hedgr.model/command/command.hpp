@@ -115,6 +115,13 @@ enum class command_kind : std::uint8_t {
     configure_crm = 26,
     /** @brief Read the enabled CRM names for a party. */
     load_crm_names = 27,
+    /**
+     * @brief Read a series' history back far enough for a chart span.
+     *
+     * Carries the series and the span in @c history_span_ns. The runtime reads
+     * only when the series does not already hold the span.
+     */
+    load_history = 28,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -215,6 +222,9 @@ struct command final {
 
     /** @brief Whether a CRM window asks for reciprocal backfill. */
     bool crm_reciprocal = false;
+
+    /** @brief The chart span to read history for, zero for all, for load_history. */
+    std::int64_t history_span_ns = 0;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;
