@@ -25,7 +25,6 @@
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
-#include "hedgr.ui/render/shared_crosshair.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -245,37 +244,6 @@ void chart_view_changed(window_handle handle, const render_input& input,
 
 /** @brief How a chart lays itself out, which follows from where it sits. */
 enum class chart_layout { full, compact };
-
-/**
- * @brief A docked chart's share of the crosshair, inside its open plot.
- *
- * The chart under the pointer writes the time for the next frame, since it
- * already draws its own crosshair. Every other chart of the session draws a
- * line and a time tag at the time the last frame wrote, when its axis reaches
- * it. The tag is formatted into a fixed buffer so a hovering desk allocates
- * nothing.
- */
-void share_crosshair(const render_input& input,
-    hedgr::model::state::session_handle session, const char* pattern) {
-    if (ImPlot::IsPlotHovered()) {
-        input.crosshair.write(session, ImPlot::GetPlotMousePos().x);
-        return;
-    }
-    const auto seconds = input.crosshair.read(session);
-    if (!seconds || !ImPlot::GetPlotLimits().X.Contains(*seconds))
-        return;
-    double at = *seconds;
-    const ImVec4 colour = ImGui::ColorConvertU32ToFloat4(shared_crosshair_colour);
-    ImPlotSpec line;
-    line.LineColor = colour;
-    line.LineWeight = 1.0f;
-    line.Flags = ImPlotItemFlags_NoLegend;
-    ImPlot::PlotInfLines("##shared", &at, 1, line);
-    std::array<char, 32> text{};
-    format_time(at, text.data(), static_cast<int>(text.size()),
-        const_cast<char*>(pattern));
-    ImPlot::TagX(at, colour, "%s", text.data());
-}
 
 /** @brief What the header states about the series, derived once a frame. */
 struct chart_summary final {
@@ -891,8 +859,6 @@ void render_chart(window_handle handle, const render_input& input,
 
                 ImPlot::TagY(last, tag_colour, "%s",
                     format_price(last).c_str());
-                if (layout == chart_layout::compact)
-                    share_crosshair(input, *session, pattern);
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();

@@ -186,7 +186,6 @@ void workspace::unlock_with(std::string_view master_password) {
 }
 
 void workspace::render(const render_input& input) {
-    input.crosshair.next_frame();
     /*
      * The control is told the state it is drawing before any window gets the
      * chance to draw it, and its answer is read after the walk. It lives on
