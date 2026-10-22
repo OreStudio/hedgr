@@ -121,6 +121,9 @@ public:
     /** @brief Points a CRM window at another matrix. True when it changed one. */
     [[nodiscard]] bool configure_crm(const model::command::command& cmd);
 
+    /** @brief Gives a chart window its own view. True when it changed one. */
+    [[nodiscard]] bool configure_chart(const model::command::command& cmd);
+
     /**
      * @brief Binds every restored window saved against one session pair.
      *
@@ -154,6 +157,9 @@ public:
 
     /** @brief Writes every window. The refusal to raise, or nothing. Needs a store. */
     [[nodiscard]] std::optional<refusal> save_windows();
+
+    /** @brief Writes one window, if there is one. Needs a store. */
+    [[nodiscard]] std::optional<refusal> save_window(std::string_view window_id);
 
 private:
     /**

@@ -407,6 +407,13 @@ void instance_manager::handle(command::command& cmd) {
         if (window_service_.configure_crm(cmd))
             static_cast<void>(save_windows());
         break;
+    case command::command_kind::configure_chart:
+        /* One row rather than the wall, since every chart sends its first view. */
+        if (window_service_.configure_chart(cmd) && window_service_.has_store()) {
+            if (auto refused = window_service_.save_window(cmd.window_id))
+                raise(std::move(refused->key), std::move(refused->message));
+        }
+        break;
     case command::command_kind::load_crm_names:
         read_service_.load_crm_names(cmd);
         break;

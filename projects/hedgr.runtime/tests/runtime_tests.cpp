@@ -2982,3 +2982,59 @@ TEST_CASE("a probe waits while a live session holds another wire format",
     }, std::chrono::seconds(10)));
     manager.stop();
 }
+
+TEST_CASE("each chart keeps its own view across a restart", "[windows]") {
+    using hedgr::model::domain::chart_style;
+    using hedgr::model::domain::chart_view;
+    constexpr std::int64_t hour = std::int64_t{3600} * 1'000'000'000;
+    const temporary_database database("chart-views");
+    const auto view_of = [](const instance_manager& manager,
+                             std::string_view id) -> std::optional<chart_view> {
+        const auto window = manager.windows().find(id);
+        REQUIRE(window.has_value());
+        const auto* chart =
+            std::get_if<chart_state>(&manager.windows().state(*window));
+        REQUIRE(chart != nullptr);
+        return chart->view;
+    };
+    const auto configure = [](std::string id, chart_view view) {
+        command request;
+        request.kind = command_kind::configure_chart;
+        request.window_id = std::move(id);
+        request.chart_view = view;
+        return request;
+    };
+    const chart_view daily{.span_ns = 24 * hour, .style = chart_style::candles,
+        .ema = true};
+    const chart_view hourly{.span_ns = hour, .style = chart_style::line};
+
+    {
+        instance_manager manager;
+        REQUIRE(manager.start(database.path(), seed_options()).has_value());
+        add_unreachable_instance(manager, "inst-refused");
+        command save_account;
+        save_account.kind = command_kind::save_account;
+        save_account.account_row = make_account("ident-1", "inst-refused");
+        push_command(manager, save_account);
+        sign_in_unreachable(manager, "inst-refused", "ident-1");
+        push_command(manager, open_window(window_kind::chart, "inst-refused",
+            "ident-1", "s-1"));
+        push_command(manager, open_window(window_kind::chart, "inst-refused",
+            "ident-1", "s-2"));
+        CHECK_FALSE(view_of(manager, "chart:inst-refused:ident-1:s-1"));
+
+        push_command(manager,
+            configure("chart:inst-refused:ident-1:s-1", daily));
+        push_command(manager,
+            configure("chart:inst-refused:ident-1:s-2", hourly));
+        CHECK(view_of(manager, "chart:inst-refused:ident-1:s-1") == daily);
+        CHECK(view_of(manager, "chart:inst-refused:ident-1:s-2") == hourly);
+        manager.stop();
+    }
+
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    CHECK(view_of(manager, "chart:inst-refused:ident-1:s-1") == daily);
+    CHECK(view_of(manager, "chart:inst-refused:ident-1:s-2") == hourly);
+    manager.stop();
+}
