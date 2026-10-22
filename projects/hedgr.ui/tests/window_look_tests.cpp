@@ -462,6 +462,18 @@ TEST_CASE("a tenant's status is a pill in its state's tone",
     CHECK(has_colour(vertices, theme::pill_colours(theme::tone::quiet).fill));
 }
 
+TEST_CASE("the tenants tab counts the roster in an accent badge",
+    "[look][command-centre]") {
+    tenants_fixture centre;
+    const auto vertices = settled([&] { centre.draw(); }, all_vertices);
+    const ImU32 number = ImGui::ColorConvertFloat4ToU32(theme::base_surface());
+    const ImVec2 white = ImGui::GetDrawListSharedData()->TexUvWhitePixel;
+    const auto glyphs = std::ranges::count_if(vertices, [&](const ImDrawVert& v) {
+        return v.col == number && (v.uv.x != white.x || v.uv.y != white.y);
+    });
+    CHECK(glyphs == 4);
+}
+
 /*
  * Hidden from the suite: it paints the market windows for a person to look at
  * and asserts nothing about them. Run it by name with HEDGR_WINDOW_GALLERY set

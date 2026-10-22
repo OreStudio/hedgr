@@ -541,6 +541,76 @@ TEST_CASE("the chosen tab is underlined in the accent", "[cells][tabs]") {
     });
 }
 
+/** @brief The glyph quads @p vertices draw in @p colour. */
+std::size_t glyphs_in(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
+    const auto count = std::ranges::count_if(vertices,
+        [&](const ImDrawVert& v) { return !is_solid(v) && v.col == colour; });
+    return static_cast<std::size_t>(count) / 4u;
+}
+
+TEST_CASE("a tab count badge is an accent capsule holding its number",
+    "[cells][tabs][badge]") {
+    themed context;
+    struct drawn_tab final {
+        ImVec2 min;
+        ImVec2 max;
+        std::vector<ImDrawVert> badge;
+    };
+    drawn_tab tracked;
+    drawn_tab pairs;
+    float badge = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        frame([&] {
+            REQUIRE(ImGui::BeginTabBar("tabs"));
+            badge = widget::tab_badge_count_width(58);
+            widget::reserve_tab_badge("Tracked", false, badge);
+            const bool selected = ImGui::BeginTabItem("Tracked");
+            tracked.min = ImGui::GetItemRectMin();
+            tracked.max = ImGui::GetItemRectMax();
+            tracked.badge =
+                vertices_of([] { widget::tab_badge_count("Tracked", 58); });
+            if (selected)
+                ImGui::EndTabItem();
+
+            widget::reserve_tab_badge("Pairs", true,
+                widget::tab_badge_label_width("PRO"));
+            bool open = true;
+            if (ImGui::BeginTabItem("Pairs", &open))
+                ImGui::EndTabItem();
+            pairs.min = ImGui::GetItemRectMin();
+            pairs.max = ImGui::GetItemRectMax();
+            pairs.badge =
+                vertices_of([] { widget::tab_badge_label("Pairs", "PRO"); });
+            ImGui::EndTabBar();
+        });
+    }
+
+    CHECK(badge > widget::tab_badge_count_width(7));
+    CHECK(tracked.max.x - tracked.min.x
+        == Approx(ImGui::TabItemCalcSize("Tracked", false).x + badge));
+    const ImU32 number = ImGui::ColorConvertFloat4ToU32(theme::base_surface());
+    CHECK(has_colour(tracked.badge, accent()));
+    CHECK(glyphs_in(tracked.badge, number) == 2u);
+    const float label_end = tracked.min.x + ImGui::GetStyle().FramePadding.x
+        + ImGui::CalcTextSize("Tracked").x;
+    for (const auto& v : tracked.badge) {
+        CHECK(v.pos.x > label_end);
+        CHECK(v.pos.x <= tracked.max.x);
+        CHECK(v.pos.y >= tracked.min.y);
+        CHECK(v.pos.y <= tracked.max.y);
+    }
+
+    const ImU32 dim = ImGui::GetColorU32(theme::dim_text());
+    CHECK(glyphs_in(pairs.badge, dim) == 3u);
+    CHECK(has_colour(pairs.badge, ImGui::GetColorU32(ImGuiCol_TextDisabled)));
+    CHECK_FALSE(has_hue(pairs.badge, accent()));
+    CHECK_FALSE(has_hue(pairs.badge, theme::warning_colour));
+    CHECK(max_x(pairs.badge) <= pairs.max.x);
+    CHECK(pairs.max.x - pairs.min.x
+        == Approx(ImGui::TabItemCalcSize("Pairs", true).x
+            + widget::tab_badge_label_width("PRO")));
+}
+
 TEST_CASE("a steady frame of 200 cells allocates nothing", "[cells][frame]") {
     themed context;
     ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1400.0f);
@@ -555,6 +625,22 @@ TEST_CASE("a steady frame of 200 cells allocates nothing", "[cells][frame]") {
         ImGui::Begin("cells");
         widget::hero_strip("Current P/L", "+0.59%", theme::tone::good,
             "TARGETING TP2", "Profit since entry");
+        if (ImGui::BeginTabBar("tabs")) {
+            widget::reserve_tab_badge("Tracked", false,
+                widget::tab_badge_count_width(58));
+            const bool selected = ImGui::BeginTabItem("Tracked");
+            widget::tab_badge_count("Tracked", 58);
+            if (selected)
+                ImGui::EndTabItem();
+            widget::reserve_tab_badge("Pairs", false,
+                widget::tab_badge_label_width("PRO"));
+            if (ImGui::BeginTabItem("Pairs"))
+                ImGui::EndTabItem();
+            widget::tab_badge_label("Pairs", "PRO");
+            ImGui::EndTabBar();
+        }
+        widget::headline_value("1.27345");
+        widget::value_pill("ALPHA", theme::tone::quiet);
         for (int i = 0; i < cells; ++i) {
             if (i % columns != 0)
                 ImGui::SameLine(0.0f, 0.0f);
