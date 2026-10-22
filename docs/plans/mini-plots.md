@@ -492,7 +492,7 @@ Check: look tests on a docked chart (pills, tones, no foot), and an allocation
 test showing a steady docked chart frame allocates nothing. A capture of a 2x2
 docked desk for the gallery.
 
-Delivered on `mini-plots-compact-chart`. A steady docked chart frame allocates
+Delivered in #76. A steady docked chart frame allocates
 nothing (it allocated 7 per chart before, the same as a floating one, which is
 unchanged at 7). With the 15 px UI font the compact header is 24 px against
 31 px for the full one, and the full chart's foot takes another 36 px. The
