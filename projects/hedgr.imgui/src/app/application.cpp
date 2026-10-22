@@ -839,6 +839,7 @@ void application::render_loop(GLFWwindow* window) {
             .runtime_error = manager_.last_error(),
             .instance_icons = &instance_icons_,
             .market_view = workspace_.market_view(),
+            .crosshair = workspace_.crosshair(),
             .wall_now_ns = wall_now_ns(),
         };
         textures_.begin_frame();

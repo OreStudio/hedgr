@@ -547,6 +547,29 @@ Check: a headless test that feeds a mouse position over one plot and asserts the
 other draws its line at that time on the next frame. A frame-cost check that an
 idle desk is unchanged.
 
+Delivered in the next PR after #77. What differed from the plan:
+
+- The value lives in `shared_crosshair` (`render/shared_crosshair.hpp`), owned
+  by the workspace and handed to renderers by reference in `render_input`, as
+  `market_view` is. `workspace::render` swaps the buffers at the top of each
+  frame. It holds one time and the session that wrote it, since there is one
+  pointer. D6 is taken as recommended, so a chart reads it only when the
+  session matches, and a floating chart neither writes nor draws it.
+- The hovered chart draws no shared line, because ImPlot already draws its
+  own crosshair there. The others draw a thin vertical line (`PlotInfLines`)
+  and a tag (`ImPlot::TagX`), both in one colour, only when the time is
+  inside that chart's X axis, so a tile on a shorter period shows nothing for
+  a time it does not reach. The tag is formatted into a 32 byte buffer with
+  the axis's own pattern.
+- ImGui reports a plot as hovered one frame after the pointer arrives, so a
+  tile shows the line two frames after the pointer moves, not one. Not
+  visible at 60 frames a second.
+- Tests: five headless cases in `docking_tests.cpp` (line at the matching
+  pixel, either window order, pointer leaves, another session, floating
+  chart) and a frame-cost case that a docked frame with the crosshair on
+  allocates nothing. The idle desk is unchanged: the only added work is one
+  copy of an optional and the checks inside a docked plot.
+
 ### 6. Tear-out windows by default
 
 Run `HEDGR_PLATFORM=x11` by hand: tear a chart out, dock it back, restart and

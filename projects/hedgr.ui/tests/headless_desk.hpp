@@ -95,6 +95,7 @@ struct desk final {
     std::unordered_set<std::string> failed_images;
     std::unordered_set<std::string> pending_images;
     render::market_view_state market_view;
+    render::shared_crosshair crosshair;
     counting_textures textures;
     model::state::session_handle session;
 
@@ -132,6 +133,7 @@ struct desk final {
             .commands = commands,
             .store_lock = model::domain::store_lock::unlocked,
             .market_view = market_view,
+            .crosshair = crosshair,
         };
     }
 

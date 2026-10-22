@@ -259,6 +259,7 @@ struct empty_state final {
     std::unordered_set<std::string> failed_images;
     std::unordered_set<std::string> pending_images;
     market_view_state market_view;
+    hedgr::ui::render::shared_crosshair crosshair;
 };
 
 /** @brief A render_input over empty tables, carrying @p lock. */
@@ -285,6 +286,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .commands = state.commands,
         .store_lock = lock,
         .market_view = state.market_view,
+        .crosshair = state.crosshair,
     };
 }
 
