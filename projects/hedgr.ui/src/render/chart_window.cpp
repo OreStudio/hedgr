@@ -468,16 +468,16 @@ struct header_icons_drawn final {
         start.x + ImGui::GetContentRegionAvail().x - width);
 
     header_icons_drawn drawn{.width = width + gap};
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x,
-        std::max(0.0f, (height - ImGui::GetFontSize()) * 0.5f)));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::SetCursorScreenPos(ImVec2(left, start.y));
     for (std::size_t i = 0; i < icons.size(); ++i) {
         if (i != 0)
             ImGui::SameLine(0.0f, gap);
-        if (widget::icon_button(icons[i].id, icons[i].glyph, icons[i].tooltip))
+        if (widget::icon_button(icons[i].id, icons[i].glyph, icons[i].tooltip,
+                true, height))
             drawn.asked = icons[i].request;
     }
-    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
 
     ImGui::SetCursorScreenPos(start);
     ImGui::PushClipRect(start, ImVec2(left - gap, FLT_MAX), true);
