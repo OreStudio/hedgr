@@ -510,7 +510,7 @@ there is a desk space to dock into.
 Check: a headless test that a pop-out request leaves the window floating on the
 next frame and a dock request leaves it docked.
 
-Delivered in #N. What differed from the plan:
+Delivered in #77. What differed from the plan:
 
 - The Dock icon sits at the right end of the floating chart's header, not in
   the foot. Pop out and close sit at the right end of the compact header. The
