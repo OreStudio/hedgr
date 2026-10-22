@@ -42,6 +42,14 @@ namespace hedgr::ui::theme {
 HEDGR_UI_EXPORT void apply_theme();
 
 /**
+ * @brief The ground under every window: the reference's page between cards.
+ *
+ * The frame is cleared to it and the splash is drawn on it, so the two read
+ * the theme rather than each keeping a copy of the value.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 base_surface() noexcept;
+
+/**
  * @brief The surface a status line sits on.
  *
  * The reference runs a strip along the foot of the window that is darker than

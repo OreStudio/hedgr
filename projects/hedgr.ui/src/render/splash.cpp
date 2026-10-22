@@ -19,6 +19,7 @@
  */
 #include "hedgr.ui/render/splash.hpp"
 
+#include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "ores.platform/process/executable.hpp"
 #include <algorithm>
@@ -26,14 +27,6 @@
 #include <vector>
 
 namespace {
-
-/*
- * The near black ground the frame is cleared to, sampled from the reference
- * interface. Repeating the value here rather than reaching for it through the
- * application keeps the splash drawable by the component that owns it, and the
- * two are the same colour a reader would have to compare anyway.
- */
-constexpr ImU32 splash_ground = IM_COL32(16, 17, 19, 255);
 
 /**
  * @brief Where the splash artwork lives at run time.
@@ -89,7 +82,8 @@ void draw_splash(std::uint64_t texture, int image_width, int image_height) {
     const ImVec2 origin = viewport->Pos;
     const ImVec2 extent(viewport->Pos.x + viewport->Size.x,
         viewport->Pos.y + viewport->Size.y);
-    list->AddRectFilled(origin, extent, splash_ground);
+    list->AddRectFilled(origin, extent,
+        ImGui::ColorConvertFloat4ToU32(hedgr::ui::theme::base_surface()));
 
     if (texture != 0 && image_width > 0 && image_height > 0) {
         /*

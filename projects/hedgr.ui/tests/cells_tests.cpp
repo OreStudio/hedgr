@@ -29,7 +29,9 @@
 #include <array>
 #include <cfloat>
 #include <catch2/catch_all.hpp>
+#include <cmath>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace {
@@ -223,6 +225,50 @@ TEST_CASE("a value pill is drawn in its tone's colours at its measured size",
         CHECK(widget::value_pill_size("8-HOUR").y
             == Approx(widget::value_pill_size("8").y));
     });
+}
+
+TEST_CASE("a pill and a caption sit in the middle of a taller line",
+    "[cells][pill]") {
+    themed context;
+    frame([] {
+        const float fresh_top = ImGui::GetCursorScreenPos().y;
+        widget::value_pill("FRESH");
+        CHECK(ImGui::GetItemRectMin().y == Approx(std::floor(fresh_top)));
+
+        ImGui::AlignTextToFramePadding();
+        const float top = ImGui::GetCursorScreenPos().y;
+        const float line = ImGui::GetFrameHeight();
+        widget::value_pill("LIVE");
+        const float pill = widget::value_pill_size("LIVE").y;
+        CHECK(ImGui::GetItemRectMin().y
+            == Approx(std::floor(top) + std::floor((line - pill) * 0.5f)));
+        CHECK(ImGui::GetItemRectSize().y == Approx(pill));
+
+        ImGui::SameLine();
+        widget::caption("Points");
+        const float caption = widget::caption_size("Points").y;
+        CHECK(ImGui::GetItemRectMin().y
+            == Approx(std::floor(top) + std::floor((line - caption) * 0.5f)));
+
+        ImGui::SameLine();
+        ImGui::Button("next");
+        CHECK(ImGui::GetItemRectMin().y == Approx(top));
+    });
+}
+
+TEST_CASE("a caption and a pill hand their text to ImGui's log",
+    "[cells][pill]") {
+    themed context;
+    std::string text;
+    frame([&] {
+        ImGui::LogToBuffer();
+        widget::caption("Type");
+        ImGui::SameLine();
+        widget::value_pill("SHORT", theme::tone::bad);
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
+    });
+    CHECK(text.find("Type SHORT") != std::string::npos);
 }
 
 TEST_CASE("labelled cells of one width form aligned columns",

@@ -52,8 +52,9 @@ namespace hedgr::ui::widget {
  * @brief Draws a small, dim, letter-spaced capital label and advances past it.
  *
  * Records one item of @c caption_size, so SameLine and the width queries see
- * the tracking. Lower case ASCII is drawn in capitals; the caller's text is
- * not copied.
+ * the tracking. On a line taller than itself, as after AlignTextToFramePadding,
+ * it sits in the middle of the line as text does. Lower case ASCII is drawn in
+ * capitals; the caller's text is not copied.
  *
  * @param help Shown on hover over the caption, empty for no help glyph.
  */
@@ -71,8 +72,9 @@ inline constexpr float value_pill_border = 1.0f;
 /**
  * @brief Draws a bordered chip with bold text and advances past it.
  *
- * Neutral is the chip fill for a value with no verdict. Good, bad and warning
- * take the theme's state colours, never the accent.
+ * Centred on a line taller than itself, as a caption is. Neutral is the chip
+ * fill for a value with no verdict. Good, bad and warning take the theme's
+ * state colours, never the accent.
  */
 HEDGR_UI_EXPORT void value_pill(std::string_view text,
     theme::tone tone = theme::tone::neutral);

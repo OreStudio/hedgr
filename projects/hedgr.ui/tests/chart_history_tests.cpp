@@ -145,7 +145,7 @@ TEST_CASE("a chart says a deeper read is in flight and keeps its plot",
     const auto text = c.frame();
 
     CHECK(says(text, "Reading older history..."));
-    CHECK(says(text, "2000 points"));
+    CHECK(says(text, "Points 2000"));
 }
 
 TEST_CASE("a chart asks again after the read that was in flight ends cleanly",
@@ -195,7 +195,7 @@ TEST_CASE("a seeded answer is plotted over the longer span by the next frame",
     "[chart][history]") {
     chart c;
     c.backfill();
-    CHECK(says(c.frame(), "2000 points"));
+    CHECK(says(c.frame(), "Points 2000"));
 
     std::vector<model::domain::market_point> older;
     for (int i = 1500; i > 0; --i)
@@ -204,7 +204,7 @@ TEST_CASE("a seeded answer is plotted over the longer span by the next frame",
     c.desk.market.finish_history(c.series, now - hour, false);
 
     const auto text = c.frame();
-    CHECK(says(text, "3500 points"));
+    CHECK(says(text, "Points 3500"));
     CHECK(says(text, "shows 58m of 1h"));
 }
 

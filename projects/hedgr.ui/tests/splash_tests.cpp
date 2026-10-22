@@ -17,7 +17,11 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "headless_desk.hpp"
 #include "hedgr.ui/render/splash.hpp"
+#include "hedgr.ui/theme/theme.hpp"
+#include "imgui.h"
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 
@@ -97,4 +101,17 @@ TEST_CASE("a clock reading before the start keeps the splash up", "[splash]") {
 
     CHECK(timing.visible(start_ns - 1, false));
     CHECK(timing.visible(start_ns - 1, true));
+}
+
+TEST_CASE("the splash is drawn on the theme's ground", "[splash]") {
+    hedgr::testing::headless_imgui imgui;
+    ImGui::NewFrame();
+    hedgr::ui::render::draw_splash(0, 0, 0);
+    const auto& vertices = ImGui::GetForegroundDrawList()->VtxBuffer;
+    const ImU32 ground =
+        ImGui::ColorConvertFloat4ToU32(hedgr::ui::theme::base_surface());
+    CHECK(vertices.Size > 0);
+    CHECK(std::all_of(vertices.begin(), vertices.end(),
+        [&](const ImDrawVert& v) { return v.col == ground; }));
+    ImGui::EndFrame();
 }

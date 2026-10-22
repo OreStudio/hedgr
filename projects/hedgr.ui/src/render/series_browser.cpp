@@ -25,6 +25,7 @@
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "imgui.h"
@@ -197,7 +198,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         const std::string session_party_name{
             input.sessions.party_name(*session)};
 
-        ImGui::TextUnformatted("Party");
+        ImGui::AlignTextToFramePadding();
+        widget::caption("Party");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(300.0f);
         if (ImGui::BeginCombo("##party", current)) {
@@ -324,7 +326,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             rows);
         const auto& curves = state.series_view.rows;
 
-        ImGui::TextUnformatted("Curve");
+        ImGui::AlignTextToFramePadding();
+        widget::caption("Curve");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(520.0f);
         const char* preview = state.market_selected_curve_label.empty()
@@ -438,7 +441,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
     }
 
-    ImGui::TextUnformatted("Series");
+    ImGui::AlignTextToFramePadding();
+    widget::caption("Series");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(420.0f);
     const char* preview = state.market_selected_series_label.empty()

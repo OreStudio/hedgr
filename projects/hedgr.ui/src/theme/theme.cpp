@@ -319,6 +319,10 @@ void apply_theme() {
     plot.Colormap = ImPlotColormap_Deep;
 }
 
+ImVec4 base_surface() noexcept {
+    return bg_base;
+}
+
 ImVec4 status_surface() noexcept {
     return bg_status;
 }
