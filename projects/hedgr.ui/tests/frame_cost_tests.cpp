@@ -383,7 +383,6 @@ struct chart_desk final {
     /** @brief Draws every chart once and returns the vertices submitted. */
     int draw() {
         auto input = desk.input();
-        desk.crosshair.next_frame();
         ImGui::NewFrame();
         if (docked && !docks_built) {
             dock_in_pairs();
@@ -463,30 +462,14 @@ TEST_CASE("a steady chart frame allocates the same for every chart",
     WARN("steady allocations per chart: " << few / 10);
 }
 
-TEST_CASE("a steady docked chart frame allocates nothing", "[frame][chart][docking]") {
+TEST_CASE("a steady docked chart frame costs the same as a floating one",
+    "[frame][chart][docking]") {
     const auto few = allocations_with_charts(10, true);
     const auto many = allocations_with_charts(110, true);
     INFO("allocations with 10 docked charts: " << few << ", with 110: " << many);
-    CHECK(few == 0);
-    CHECK(many == 0);
-}
-
-TEST_CASE("a steady docked frame with the shared crosshair on allocates nothing",
-    "[frame][chart][docking][crosshair]") {
-    chart_desk charts{10, true};
-    for (int i = 0; i < 3; ++i)
-        charts.draw();
-    ImGui::GetIO().AddMousePosEvent(450.0f, 250.0f);
-    for (int i = 0; i < 4; ++i)
-        charts.draw();
-    REQUIRE(charts.desk.crosshair.read(charts.desk.session).has_value());
-
-    const auto before = hedgr::testing::allocations();
-    charts.draw();
-    const auto allocations = hedgr::testing::allocations() - before;
-
-    CHECK(charts.desk.crosshair.read(charts.desk.session).has_value());
-    CHECK(allocations == 0);
+    CHECK(few % 10 == 0);
+    CHECK(many == few / 10 * 110);
+    CHECK(few == allocations_with_charts(10));
 }
 
 TEST_CASE("a frame after every series ticked allocates the same for every chart",

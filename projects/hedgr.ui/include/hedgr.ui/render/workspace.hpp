@@ -23,7 +23,6 @@
 #include "hedgr.model/state/composite_key.hpp"
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
-#include "hedgr.ui/render/shared_crosshair.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
@@ -96,9 +95,6 @@ public:
     [[nodiscard]] market_view_state& market_view() noexcept {
         return market_view_;
     }
-
-    /** @brief The cursor time docked charts of one session share. */
-    [[nodiscard]] shared_crosshair& crosshair() noexcept { return crosshair_; }
 
     /** @brief Reads the remembered choices, leaving them on failure. */
     void load_market_view(const std::filesystem::path& path);
@@ -188,8 +184,6 @@ private:
 
     /** @brief The choices the market-data screens share across windows. */
     market_view_state market_view_;
-
-    shared_crosshair crosshair_;
 
     ImGuiID dock_space_ = 0;
 

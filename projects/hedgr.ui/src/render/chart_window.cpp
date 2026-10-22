@@ -25,7 +25,6 @@
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
-#include "hedgr.ui/render/shared_crosshair.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -246,37 +245,6 @@ void chart_view_changed(window_handle handle, const render_input& input,
 /** @brief How a chart lays itself out, which follows from where it sits. */
 enum class chart_layout { full, compact };
 
-/**
- * @brief A docked chart's share of the crosshair, inside its open plot.
- *
- * The chart under the pointer writes the time for the next frame, since it
- * already draws its own crosshair. Every other chart of the session draws a
- * line and a time tag at the time the last frame wrote, when its axis reaches
- * it. The tag is formatted into a fixed buffer so a hovering desk allocates
- * nothing.
- */
-void share_crosshair(const render_input& input,
-    hedgr::model::state::session_handle session, const char* pattern) {
-    if (ImPlot::IsPlotHovered()) {
-        input.crosshair.write(session, ImPlot::GetPlotMousePos().x);
-        return;
-    }
-    const auto seconds = input.crosshair.read(session);
-    if (!seconds || !ImPlot::GetPlotLimits().X.Contains(*seconds))
-        return;
-    double at = *seconds;
-    const ImVec4 colour = ImGui::ColorConvertU32ToFloat4(shared_crosshair_colour);
-    ImPlotSpec line;
-    line.LineColor = colour;
-    line.LineWeight = 1.0f;
-    line.Flags = ImPlotItemFlags_NoLegend;
-    ImPlot::PlotInfLines("##shared", &at, 1, line);
-    std::array<char, 32> text{};
-    format_time(at, text.data(), static_cast<int>(text.size()),
-        const_cast<char*>(pattern));
-    ImPlot::TagX(at, colour, "%s", text.data());
-}
-
 /** @brief What the header states about the series, derived once a frame. */
 struct chart_summary final {
     std::string_view label;
@@ -457,27 +425,47 @@ struct header_icons_drawn final {
  * The icons come first so a narrow tile loses the end of its header text and
  * never a control. The caller draws the row and then pops the clip.
  */
+[[nodiscard]] bool tile_icon(const header_icon& icon, ImVec2 origin,
+    float side) {
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::PushID(icon.id);
+    const bool pressed = ImGui::InvisibleButton(icon.glyph, ImVec2(side, side));
+    ImGui::PopID();
+    ImGui::SetItemTooltip("%s", icon.tooltip);
+
+    const bool hovered = ImGui::IsItemHovered();
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImVec2 max(origin.x + side, origin.y + side);
+    if (hovered)
+        draw->AddRectFilled(origin, max,
+            ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+            ImGui::GetStyle().FrameRounding);
+    const ImVec2 glyph = ImGui::CalcTextSize(icon.glyph);
+    draw->AddText(ImVec2(origin.x + std::floor((side - glyph.x) * 0.5f),
+                       origin.y + std::floor((side - glyph.y) * 0.5f)),
+        ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled),
+        icon.glyph);
+    return pressed;
+}
+
 [[nodiscard]] header_icons_drawn begin_header_row(
     std::span<const header_icon> icons, float height) {
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float gap = style.ItemInnerSpacing.x;
+    const float side = std::ceil(ImGui::GetFontSize() * 1.3f);
     const float width =
-        static_cast<float>(icons.size()) * (height + gap) - gap;
+        static_cast<float>(icons.size()) * (side + gap) - gap;
     const float left = std::max(start.x,
         start.x + ImGui::GetContentRegionAvail().x - width);
+    const float top = start.y + std::max(0.0f, std::floor((height - side) * 0.5f));
 
     header_icons_drawn drawn{.width = width + gap};
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x,
-        std::max(0.0f, (height - ImGui::GetFontSize()) * 0.5f)));
-    ImGui::SetCursorScreenPos(ImVec2(left, start.y));
     for (std::size_t i = 0; i < icons.size(); ++i) {
-        if (i != 0)
-            ImGui::SameLine(0.0f, gap);
-        if (widget::icon_button(icons[i].id, icons[i].glyph, icons[i].tooltip))
+        const ImVec2 origin(left + static_cast<float>(i) * (side + gap), top);
+        if (tile_icon(icons[i], origin, side))
             drawn.asked = icons[i].request;
     }
-    ImGui::PopStyleVar();
 
     ImGui::SetCursorScreenPos(start);
     ImGui::PushClipRect(start, ImVec2(left - gap, FLT_MAX), true);
@@ -520,8 +508,7 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PushID("chart");
     /*
      * The foot's identity is a few strings, so it is built only where a foot
-     * is drawn. A compact chart draws none and allocates nothing on a steady
-     * frame.
+     * is drawn.
      */
     const auto make_foot = [&] {
         widget::foot_state foot;
@@ -653,9 +640,8 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     /*
-     * One row of chrome above the plot. A full chart keeps its settings on the
-     * foot; a compact one has no foot, so its settings are a right click away
-     * and the plot gets the rest of the tile.
+     * One row of chrome above the plot. Both layouts keep the foot; a compact
+     * tile also has its settings a right click away.
      */
     std::optional<widget::foot_state> foot;
     bool open_view_menu = false;
@@ -689,7 +675,7 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     float foot_height = 0.0f;
-    if (layout == chart_layout::full) {
+    {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
         foot->controls.push_back(widget::foot_combo{
@@ -891,8 +877,6 @@ void render_chart(window_handle handle, const render_input& input,
 
                 ImPlot::TagY(last, tag_colour, "%s",
                     format_price(last).c_str());
-                if (layout == chart_layout::compact)
-                    share_crosshair(input, *session, pattern);
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();
@@ -909,10 +893,9 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PopStyleVar();
 
     const auto before = state.market_view;
-    if (layout == chart_layout::full) {
-        if (widget::draw_status_foot(status, input.now_ns, *foot))
-            chart_view_changed(handle, input, state, before);
-    } else {
+    if (widget::draw_status_foot(status, input.now_ns, *foot))
+        chart_view_changed(handle, input, state, before);
+    if (layout == chart_layout::compact) {
         if (open_view_menu)
             ImGui::OpenPopup("chart-view");
         if (draw_view_menu(state.market_view))
