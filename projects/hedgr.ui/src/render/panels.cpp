@@ -285,7 +285,8 @@ void draw_series_flags(const render_input& input,
     const auto pair = hedgr::ui::widget::currencies_of(label);
     const auto base_texture = image_texture(input, session, pair.base);
     const auto quote_texture = image_texture(input, session, pair.quote);
-    const float flag_h = hedgr::ui::widget::value_pill_size(label).y;
+    const float pill_h = hedgr::ui::widget::value_pill_size(label).y;
+    const float flag_h = pill_h * hedgr::ui::theme::flag_height_fraction;
     const float flags_width =
         hedgr::ui::widget::flag_pair_width(flag_h, base_texture, quote_texture);
     if (flags_width == 0.0f)
@@ -295,9 +296,11 @@ void draw_series_flags(const render_input& input,
     if (ImGui::GetCursorPosX() < right - flags_width)
         ImGui::SetCursorPosX(right - flags_width);
 
-    hedgr::ui::widget::draw_flag_pair(ImGui::GetWindowDrawList(),
-        ImGui::GetCursorScreenPos(), flag_h, base_texture, quote_texture);
-    ImGui::Dummy(ImVec2(flags_width, flag_h));
+    auto origin = ImGui::GetCursorScreenPos();
+    origin.y += (pill_h - flag_h) * 0.5f;
+    hedgr::ui::widget::draw_flag_pair(ImGui::GetWindowDrawList(), origin,
+        flag_h, base_texture, quote_texture);
+    ImGui::Dummy(ImVec2(flags_width, pill_h));
 }
 
 bool sign_in_needs_password(domain::store_lock lock,
