@@ -33,6 +33,7 @@
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
+#include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/capture.hpp"
@@ -76,6 +77,9 @@ constexpr float entry_hovered_size = 150.0f;
  * quickness the operator complained of.
  */
 constexpr float entry_anim_step = 0.03f;
+
+/** @brief The id the undock control is pushed under, in the bar's id space. */
+constexpr const char* undock_all_id = "undock-all";
 
 /**
  * @brief The picture an entry draws, or zero for the kind's own glyph.
@@ -215,6 +219,30 @@ struct entry_interaction final {
 };
 
 /**
+ * @brief Draws a tile of the theme's surface colour with @p glyph centred in it.
+ *
+ * The glyph comes from the icon set and is centred by measuring it, because a
+ * bitmap glyph has one size and the entry is the library's to size. Drawing it
+ * dimmed keeps it a placeholder rather than a control of its own. The cursor is
+ * left where it was found.
+ */
+void draw_glyph_tile(const char* glyph, float size) {
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::GetWindowDrawList()->AddRectFilled(origin,
+        ImVec2(origin.x + size, origin.y + size),
+        ImGui::GetColorU32(ImGuiCol_FrameBg), ImGui::GetStyle().FrameRounding);
+
+    const ImVec2 glyph_size = ImGui::CalcTextSize(glyph);
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + (size - glyph_size.x) * 0.5f,
+        origin.y + (size - glyph_size.y) * 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextUnformatted(glyph);
+    ImGui::PopStyleColor();
+    ImGui::SetCursorScreenPos(origin);
+}
+
+/**
  * @brief Draws one entry and reports whether it was clicked or hovered.
  *
  * The picture fills the entry's rectangle, and an entry with no picture draws
@@ -237,29 +265,10 @@ struct entry_interaction final {
     ImDrawList* list = ImGui::GetWindowDrawList();
 
     const std::uint64_t texture = entry_texture(input, row);
-    if (texture != 0) {
+    if (texture != 0)
         list->AddImage(static_cast<ImTextureID>(texture), origin, corner);
-    } else {
-        list->AddRectFilled(origin, corner, ImGui::GetColorU32(ImGuiCol_FrameBg),
-            ImGui::GetStyle().FrameRounding);
-
-        /*
-         * The glyph comes from the icon set and is centred by measuring it,
-         * because a bitmap glyph has one size and the entry is the library's to
-         * size. Drawing it dimmed keeps it a placeholder rather than a control
-         * of its own.
-         */
-        const char* glyph = theme::window_kind_icon(row.target_kind);
-        const ImVec2 glyph_size = ImGui::CalcTextSize(glyph);
-        ImGui::SetCursorScreenPos(
-            ImVec2(origin.x + (size - glyph_size.x) * 0.5f,
-                origin.y + (size - glyph_size.y) * 0.5f));
-        ImGui::PushStyleColor(ImGuiCol_Text,
-            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-        ImGui::TextUnformatted(glyph);
-        ImGui::PopStyleColor();
-        ImGui::SetCursorScreenPos(origin);
-    }
+    else
+        draw_glyph_tile(theme::window_kind_icon(row.target_kind), size);
 
     ImGui::InvisibleButton(id, ImVec2(size, size));
 
@@ -325,21 +334,22 @@ bool hover_is_new_entry(std::string_view previous,
     return !hovered.empty() && hovered != previous;
 }
 
-float shortcut_bar_height(const render_input& input) {
-    if (input.shortcuts.size() == 0 || !shows_instances(input))
+float shortcut_bar_height(const render_input& input, bool desk_docked) {
+    if ((input.shortcuts.size() == 0 && !desk_docked)
+        || !shows_instances(input))
         return 0.0f;
     return entry_size + 2.0f * ImGui::GetStyle().WindowPadding.y;
 }
 
-void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result,
-    shortcut_bar_state& state) {
+void draw_shortcut_bar(const render_input& input, bool desk_docked,
+    shortcut_bar_result& result, shortcut_bar_state& state) {
     /*
      * An empty bar draws nothing, and so does one whose store is shut: the
      * entries are catalogue and the catalogue is what the master password
      * opens. Drawing a bar of entries the interface cannot read would be a bar
      * of another session's shortcuts.
      */
-    if (shortcut_bar_height(input) == 0.0f)
+    if (shortcut_bar_height(input, desk_docked) == 0.0f)
         return;
 
     /*
@@ -396,6 +406,23 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result,
 
         if (interaction.clicked)
             activate_entry(input, row, result);
+    }
+
+    /*
+     * The last control, present while anything is docked in the desk and
+     * after the shortcuts, so it never moves an entry a reader has learnt.
+     * It is on the bar because the bar is the one surface that is not itself a
+     * window and so is still there when every window is docked.
+     */
+    if (desk_docked && ImGui::CoolBarItem()) {
+        const float size = ImGui::GetCoolBarItemWidth();
+        ImGui::PushID(undock_all_id);
+        draw_glyph_tile(hedgr::ui::icon::move, size);
+        ImGui::InvisibleButton("entry", ImVec2(size, size));
+        ImGui::SetItemTooltip("Undock all windows from the desk");
+        if (ImGui::IsItemClicked())
+            result.undock_all = true;
+        ImGui::PopID();
     }
 
     /*

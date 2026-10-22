@@ -33,6 +33,7 @@
 #include "imgui_internal.h"
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <format>
@@ -119,6 +120,32 @@ void draw_background(const hedgr::ui::render::render_input& input) {
         viewport.WorkPos.y + viewport.WorkSize.y - size.y);
     return ImVec2(std::clamp(at.x, low.x, std::max(low.x, high.x)),
         std::clamp(at.y, low.y, std::max(low.y, high.y)));
+}
+
+/**
+ * @brief The size a window floats at when it leaves the desk.
+ *
+ * What it last floated at, or @p fallback when it has floated nowhere this
+ * run, and never larger than the work area.
+ */
+[[nodiscard]] ImVec2 floating_size_for(ImVec2 last, ImVec2 fallback,
+    const ImGuiViewport& viewport) {
+    const ImVec2 wanted = last.x > 0.0f ? last : fallback;
+    return ImVec2(std::min(wanted.x, viewport.WorkSize.x),
+        std::min(wanted.y, viewport.WorkSize.y));
+}
+
+/** @brief Whether any window is docked in the tree under @p node. */
+[[nodiscard]] bool holds_windows(const ImGuiDockNode* node) {
+    return node != nullptr
+        && (!node->Windows.empty() || holds_windows(node->ChildNodes[0])
+            || holds_windows(node->ChildNodes[1]));
+}
+
+/** @brief Whether @p window is docked anywhere in the dock tree of @p space. */
+[[nodiscard]] bool docked_in(const ImGuiWindow* window, ImGuiID space) {
+    return window != nullptr && window->DockNode != nullptr
+        && ImGui::DockNodeGetRootNode(window->DockNode)->ID == space;
 }
 
 /**
@@ -296,6 +323,7 @@ void workspace::render(const render_input& input) {
     const std::string focus_request = input.windows.take_focus_request();
     const auto refresh_column = input.windows.next_refresh_column();
 
+    int undocked = 0;
     for (std::size_t index = 0; index < layout.alive.size(); ++index) {
         if (layout.alive[index] == 0)
             continue;
@@ -416,7 +444,34 @@ void workspace::render(const render_input& input) {
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
-        if (move_ && move_->window == handle) {
+        if (move_ && move_->all) {
+            /*
+             * Undock all: every window docked in the desk floats, one title bar
+             * lower than the last so the stack can be told apart. A window
+             * that is already floating is not named by this move.
+             */
+            if (docked_in(ImGui::FindWindowByName(begin_label_.c_str()),
+                    dock_space_)) {
+                const ImGuiViewport& viewport = *ImGui::GetMainViewport();
+                const auto known = ui_state_.find(
+                    hedgr::model::state::key_parts<1>{input.windows.id(handle)});
+                const ImVec2 size = floating_size_for(
+                    known != ui_state_.end() ? known->second.floating_size
+                                             : ImVec2(),
+                    default_size, viewport);
+                const float step = ImGui::GetFrameHeight();
+                const float room = std::min(viewport.WorkSize.x - size.x,
+                    viewport.WorkSize.y - size.y);
+                const float lap = std::floor(std::max(room, 0.0f) / step) + 1.0f;
+                const float offset =
+                    std::fmod(static_cast<float>(undocked++), lap) * step;
+                ImGui::SetNextWindowDockID(0);
+                ImGui::SetNextWindowPos(popped_position(
+                    ImVec2(viewport.WorkPos.x + offset,
+                        viewport.WorkPos.y + offset), size, viewport));
+                ImGui::SetNextWindowSize(size);
+            }
+        } else if (move_ && move_->window == handle) {
             if (move_->into_desk) {
                 ImGui::SetNextWindowDockID(move_->to);
             } else {
@@ -505,10 +560,8 @@ void workspace::render(const render_input& input) {
              * at, or at its opening size if it has floated nowhere this run.
              */
             const ImGuiViewport& viewport = *ImGui::GetWindowViewport();
-            const ImVec2 wanted = state.floating_size.x > 0.0f
-                ? state.floating_size : default_size;
-            const ImVec2 size(std::min(wanted.x, viewport.WorkSize.x),
-                std::min(wanted.y, viewport.WorkSize.y));
+            const ImVec2 size = floating_size_for(state.floating_size,
+                default_size, viewport);
             next_move_ = dock_move{.window = handle,
                 .pos = popped_position(ImGui::GetWindowPos(), size, viewport),
                 .size = size};
@@ -570,9 +623,11 @@ void workspace::render(const render_input& input) {
      * because the window it concerns has already been submitted by now.
      */
     shortcut_bar_result bar;
-    draw_shortcut_bar(input, bar, shortcut_bar_);
+    draw_shortcut_bar(input, desk_docked_, bar, shortcut_bar_);
     if (bar.focus_instances)
         focus_instances_ = true;
+    if (bar.undock_all)
+        next_move_ = dock_move{.all = true};
 
     /*
      * Last, and after the control that may have just asked for it, so the form
@@ -583,6 +638,13 @@ void workspace::render(const render_input& input) {
 
     /* A move outlives one frame at most, so one whose window went is dropped. */
     move_ = std::exchange(next_move_, std::nullopt);
+
+    /*
+     * Read once per frame, after every window has docked or left, so the dock
+     * space and the bar agree on whether the control is there. A frame behind
+     * the click that docks the first window, which nobody can see.
+     */
+    desk_docked_ = holds_windows(ImGui::DockBuilderGetNode(dock_space_));
 }
 
 void workspace::draw_dock_space(const render_input& input) {
@@ -601,7 +663,7 @@ void workspace::draw_dock_space(const render_input& input) {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,
-        std::max(0.0f, viewport->WorkSize.y - shortcut_bar_height(input))));
+        std::max(0.0f, viewport->WorkSize.y - shortcut_bar_height(input, desk_docked_))));
     ImGui::SetNextWindowViewport(viewport->ID);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize

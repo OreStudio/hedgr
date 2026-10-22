@@ -401,3 +401,126 @@ TEST_CASE("the startup notice and the shortcut bar stay out of the desk",
         CHECK_FALSE(prompt->DockIsActive);
     }
 }
+
+namespace {
+
+/** @brief Whether any window is docked under the desk's dock space. */
+bool holds_docked_windows(ImGuiID space) {
+    const auto walk = [](const auto& self, const ImGuiDockNode* node) -> bool {
+        return node != nullptr
+            && (!node->Windows.empty() || self(self, node->ChildNodes[0])
+                || self(self, node->ChildNodes[1]));
+    };
+    return walk(walk, ImGui::DockBuilderGetNode(space));
+}
+
+/** @brief Clicks the bar's undock control, found by hovering along the bar. */
+bool click_undock_all(dock_desk& d) {
+    const ImGuiWindow* bar = desk_window("##hedgr-shortcuts");
+    if (bar == nullptr)
+        return false;
+    const ImGuiID button = ImHashStr("entry", 0,
+        ImHashStr("undock-all", 0, bar->ID));
+    const float y = bar->Pos.y + bar->Size.y * 0.5f;
+    for (float x = bar->Pos.x + bar->Size.x - 1.0f; x > bar->Pos.x; x -= 2.0f) {
+        hover(d.workspace, d.input, ImVec2(x, y));
+        if (ImGui::GetCurrentContext()->HoveredId == button) {
+            click(d.workspace, d.input, ImVec2(x, y));
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief Docks five windows into the desk as a grid with a tabbed node.
+ *
+ * One window on the left, one top right, and three as tabs under it, so the
+ * tree holds a split inside a split and a node with several tabs. The one on
+ * the left is the last opened, so the walk reaches the nested ones first, while
+ * the tree is still whole.
+ */
+void dock_grid_with_tabs(dock_desk& d) {
+    const ImGuiID space = d.workspace.dock_space();
+    const ImGuiDockNode* centre = ImGui::DockBuilderGetCentralNode(space);
+    REQUIRE(centre != nullptr);
+    ImGuiID right = 0;
+    const ImGuiID left = ImGui::DockBuilderSplitNode(centre->ID, ImGuiDir_Left,
+        0.5f, nullptr, &right);
+    ImGuiID bottom = 0;
+    const ImGuiID top = ImGui::DockBuilderSplitNode(right, ImGuiDir_Up, 0.5f,
+        nullptr, &bottom);
+    ImGui::DockBuilderDockWindow("###e", left);
+    ImGui::DockBuilderDockWindow("###a", top);
+    ImGui::DockBuilderDockWindow("###b", bottom);
+    ImGui::DockBuilderDockWindow("###c", bottom);
+    ImGui::DockBuilderDockWindow("###d", bottom);
+    d.settle();
+}
+
+}
+
+TEST_CASE("the undock control floats every docked window and only those",
+    "[docking][workspace]") {
+    dock_desk d{"a", "b", "c", "d", "e", "f"};
+    static_cast<void>(d.desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{}, "g"));
+    d.settle();
+    REQUIRE(d.workspace.dock_space() != 0);
+    dock_grid_with_tabs(d);
+    const char* docked[] = {"###a", "###b", "###c", "###d", "###e"};
+    for (const char* id : docked)
+        REQUIRE(d.in_desk(id));
+    const ImGuiWindow* floating = desk_window("###f");
+    REQUIRE(floating != nullptr);
+    const ImVec2 floating_pos = floating->Pos;
+    const ImVec2 floating_size = floating->Size;
+    REQUIRE(desk_window("###a")->DockNode
+        != desk_window("###c")->DockNode);
+    REQUIRE(desk_window("###b")->DockNode == desk_window("###d")->DockNode);
+    REQUIRE(desk_window("###b")->DockNode->ParentNode->ParentNode != nullptr);
+
+    REQUIRE(click_undock_all(d));
+    d.settle();
+
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    std::vector<ImVec2> origins;
+    for (const char* id : docked) {
+        const ImGuiWindow* w = desk_window(id);
+        REQUIRE(w != nullptr);
+        INFO(id);
+        CHECK_FALSE(w->DockIsActive);
+        CHECK(w->DockId == 0);
+        CHECK(w->Pos.x >= viewport->WorkPos.x);
+        CHECK(w->Pos.y >= viewport->WorkPos.y);
+        CHECK(w->Pos.x + w->Size.x
+            <= viewport->WorkPos.x + viewport->WorkSize.x);
+        CHECK(w->Pos.y + w->Size.y
+            <= viewport->WorkPos.y + viewport->WorkSize.y);
+        CHECK(w->Size.x == 560.0f);
+        CHECK(w->Size.y == 400.0f);
+        for (const ImVec2& other : origins)
+            CHECK((other.x != w->Pos.x || other.y != w->Pos.y));
+        origins.push_back(w->Pos);
+    }
+    CHECK(desk_window("###f")->Pos.x == floating_pos.x);
+    CHECK(desk_window("###f")->Pos.y == floating_pos.y);
+    CHECK(desk_window("###f")->Size.x == floating_size.x);
+    CHECK(desk_window("###f")->Size.y == floating_size.y);
+    CHECK_FALSE(desk_window("###g")->DockIsActive);
+    CHECK_FALSE(desk_window("##hedgr-shortcuts")->DockIsActive);
+    CHECK_FALSE(holds_docked_windows(d.workspace.dock_space()));
+}
+
+TEST_CASE("the undock control is on the bar only while something is docked",
+    "[docking][workspace]") {
+    dock_desk d{"a"};
+    CHECK(desk_window("##hedgr-shortcuts") == nullptr);
+    REQUIRE(d.dock("###a"));
+    d.settle();
+    CHECK(desk_window("##hedgr-shortcuts") != nullptr);
+    REQUIRE(click_undock_all(d));
+    d.settle();
+    CHECK_FALSE(d.in_desk("###a"));
+    CHECK(desk_window("##hedgr-shortcuts") == nullptr);
+}

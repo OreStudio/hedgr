@@ -538,6 +538,20 @@ Delivered in #77. What differed from the plan:
   floated at, or at its opening size when it has not floated this run, kept
   inside the work area.
 
+Added after #77: an **undock all** control. ImGui undocks one window, or one
+node's tabs, by drag, and only charts have a Pop out icon, so a desk docked into
+a grid had no way back as a group. The control is the last entry on the
+shortcut bar (Arrow Upload, the pop-out glyph, tooltip "Undock all windows from
+the desk"). The bar is the one surface that is not a window, so it is still
+there when every window is docked. It draws, even with no shortcuts, only while
+something is docked in the desk. A click sets a `dock_move` with `all` for the
+next frame. Each window docked in the desk's tree floats at the size it last
+floated at (or its opening size), inside the work area, one title-bar height
+lower than the last. Floating windows, the startup notice, the lock prompt and
+the bar are not in that set. No `DockBuilderRemoveNode`: the headless test shows
+the tree holds no windows afterwards and ImGui collapses the empty nodes itself.
+Windows docked in a floating dock node outside the desk's tree are left alone.
+
 ### 5. Shared crosshair
 
 Built in #78 and removed again after trying it (2026-10-22): the user did not want

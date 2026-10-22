@@ -114,6 +114,8 @@ private:
      */
     struct dock_move final {
         hedgr::model::state::window_handle window;
+        /** @brief Every window docked in the desk, out to its floating size. */
+        bool all = false;
         /** @brief Into the desk's dock space, or out to @c pos and @c size. */
         bool into_desk = false;
         /** @brief The node it docks into, chosen before the dock space draws. */
@@ -186,6 +188,9 @@ private:
     market_view_state market_view_;
 
     ImGuiID dock_space_ = 0;
+
+    /** @brief Whether any window was docked in the desk at the last frame's end. */
+    bool desk_docked_ = false;
 
     /** @brief The move asked for this frame, and the one to do this frame. */
     std::optional<dock_move> next_move_;
