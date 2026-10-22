@@ -42,8 +42,8 @@ using hedgr::testing::frame;
 using hedgr::testing::headless_imgui;
 using Catch::Approx;
 
-constexpr std::array all_tones{theme::tone::neutral, theme::tone::good,
-    theme::tone::bad, theme::tone::warning};
+constexpr std::array all_tones{theme::tone::neutral, theme::tone::quiet,
+    theme::tone::good, theme::tone::bad, theme::tone::warning};
 
 /** @brief The vertices @p draw adds to the current window's draw list. */
 template<class Draw>
@@ -81,6 +81,12 @@ bool has_hue(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
 bool is_solid(const ImDrawVert& v) {
     const ImVec2 white = ImGui::GetDrawListSharedData()->TexUvWhitePixel;
     return v.uv.x == white.x && v.uv.y == white.y;
+}
+
+/** @brief How bright @p colour reads, in Rec. 709 weights. */
+float luminance(ImU32 colour) {
+    const ImVec4 c = ImGui::ColorConvertU32ToFloat4(colour);
+    return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
 }
 
 ImU32 accent() {
@@ -331,6 +337,30 @@ TEST_CASE("a value pill is drawn in its tone's colours at its measured size",
             > widget::value_pill_size("8").x);
         CHECK(widget::value_pill_size("8-HOUR").y
             == Approx(widget::value_pill_size("8").y));
+    });
+}
+
+TEST_CASE("a quiet pill is dim text on a dimmer chip than a neutral one",
+    "[cells][pill][quiet]") {
+    themed context;
+    frame([] {
+        const auto bright = theme::pill_colours(theme::tone::neutral);
+        const auto quiet = theme::pill_colours(theme::tone::quiet);
+        CHECK(luminance(quiet.text) < luminance(bright.text) - 0.2f);
+        CHECK(luminance(quiet.fill) < luminance(bright.fill));
+        CHECK(quiet.text == ImGui::GetColorU32(theme::dim_text()));
+
+        const auto strong = vertices_of(
+            [] { widget::value_pill("STRONG", theme::tone::neutral); });
+        const auto alpha_pill = vertices_of(
+            [] { widget::value_pill("ALPHA", theme::tone::quiet); });
+        CHECK(has_colour(alpha_pill, quiet.text));
+        CHECK(has_colour(alpha_pill, quiet.fill));
+        CHECK_FALSE(has_colour(alpha_pill, bright.text));
+        CHECK(has_colour(strong, bright.text));
+        CHECK_FALSE(has_colour(strong, quiet.text));
+        CHECK(widget::value_pill_size("ALPHA").y
+            == Approx(ImGui::GetItemRectSize().y));
     });
 }
 

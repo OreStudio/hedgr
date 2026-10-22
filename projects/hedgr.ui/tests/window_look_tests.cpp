@@ -422,6 +422,7 @@ TEST_CASE("a CRM of fresh cells counts them in a good pill", "[look][crm]") {
     crm_fixture crm{[](std::size_t) { return std::string{"fresh"}; }};
     const auto vertices = settled([&] { crm.draw(); }, frame_vertices);
     CHECK(has_pill(vertices, theme::tone::good));
+    CHECK(has_colour(vertices, theme::pill_colours(theme::tone::quiet).fill));
     CHECK_FALSE(has_pill(vertices, theme::tone::warning));
     CHECK_FALSE(has_pill(vertices, theme::tone::bad));
 }
@@ -458,6 +459,7 @@ TEST_CASE("a tenant's status is a pill in its state's tone",
     CHECK(has_pill(vertices, theme::tone::good));
     CHECK(has_pill(vertices, theme::tone::bad));
     CHECK_FALSE(has_pill(vertices, theme::tone::warning));
+    CHECK(has_colour(vertices, theme::pill_colours(theme::tone::quiet).fill));
 }
 
 /*

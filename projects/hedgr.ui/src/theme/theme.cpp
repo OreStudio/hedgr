@@ -73,6 +73,7 @@ const ImVec4 bg_panel = with_alpha(colour(0x0f141aff), panel_alpha); // card int
 const ImVec4 bg_status = with_alpha(colour(0x0a0e11ff), chrome_alpha); // shadow under a card, x 240 y 429
 const ImVec4 bg_title = with_alpha(colour(0x13181eff), chrome_alpha); // head of a card's fill, x 240 y 448
 const ImVec4 bg_frame = with_alpha(colour(0x1c2127ff), field_alpha); // STRONG chip, x 176 to 199 y 391
+const ImVec4 bg_chip_quiet = with_alpha(colour(0x161b21ff), field_alpha); // ALPHA chip, a step below STRONG; derived
 const ImVec4 bg_frame_hover = with_alpha(colour(0x22282fff), field_alpha); // derived
 const ImVec4 bg_frame_active = with_alpha(colour(0x282e36ff), field_alpha); // derived
 const ImVec4 bg_button = with_alpha(colour(0x1b222cff), chrome_alpha); // DETAILS button, x 384 to 447 y 125
@@ -365,6 +366,7 @@ namespace {
     case tone::warning:
         return warning_colour;
     case tone::neutral:
+    case tone::quiet:
         break;
     }
     return 0;
@@ -377,6 +379,12 @@ namespace {
 }
 
 tone_colours pill_colours(tone value) noexcept {
+    if (value == tone::quiet) {
+        return tone_colours{
+            .fill = ImGui::ColorConvertFloat4ToU32(bg_chip_quiet),
+            .border = ImGui::ColorConvertFloat4ToU32(separator),
+            .text = ImGui::ColorConvertFloat4ToU32(text_dim)};
+    }
     const ImU32 base = tone_base(value);
     if (base == 0) {
         return tone_colours{.fill = ImGui::ColorConvertFloat4ToU32(bg_frame),
@@ -397,7 +405,8 @@ tone_colours band_colours(tone value) noexcept {
     if (base == 0) {
         return tone_colours{.fill = ImGui::ColorConvertFloat4ToU32(bg_title),
             .border = ImGui::ColorConvertFloat4ToU32(separator),
-            .text = ImGui::ColorConvertFloat4ToU32(text)};
+            .text = ImGui::ColorConvertFloat4ToU32(
+                value == tone::quiet ? text_dim : text)};
     }
     /* The CURRENT P/L strip reads #131E24 on the same card. */
     return tone_colours{.fill = tint(base, 0x12),

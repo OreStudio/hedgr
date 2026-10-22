@@ -130,7 +130,7 @@ void menu_screen(hedgr::ui::render::command_centre_ui_state& state,
         return theme::tone::warning;
     if (status == "suspended")
         return theme::tone::bad;
-    return theme::tone::neutral;
+    return theme::tone::quiet;
 }
 
 /**

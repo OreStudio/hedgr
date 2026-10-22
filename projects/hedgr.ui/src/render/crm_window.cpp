@@ -45,7 +45,8 @@ namespace {
 
 /**
  * @brief One verdict's count as a pill, in the verdict's tone while any cell
- * carries it and neutral at zero, so an empty bucket claims no state.
+ * carries it and quiet at zero, so an empty bucket claims no state and steps
+ * back behind the buckets that hold cells.
  */
 void count_pill(std::string_view verdict, std::size_t count,
     theme::tone tone, const char* help) {
@@ -55,7 +56,7 @@ void count_pill(std::string_view verdict, std::size_t count,
     widget::value_pill(
         std::string_view(text.data(),
             static_cast<std::size_t>(written.out - text.data())),
-        count > 0 ? tone : theme::tone::neutral);
+        count > 0 ? tone : theme::tone::quiet);
     ImGui::SetItemTooltip("%s", help);
 }
 
