@@ -22,6 +22,7 @@
 #include "hedgr.imgui/app/capture_input.hpp"
 #include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.imgui/app/layout_file.hpp"
+#include "hedgr.imgui/app/minimised_frames.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
@@ -458,20 +459,23 @@ GLFWwindow* application::initialise_graphics() {
      * window stays inside the main one.
      */
     io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
-    /*
-     * ImGui writes a window's position back here when the process leaves, so
-     * this path is where a layout lives and a capture that wants the same
-     * arrangement twice has to own it through the environment.
-     */
-    const char* ini = std::getenv("HEDGR_IMGUI_INI");
-    ini_path_ = layout_file_path(cfg_.database_path,
-        ini != nullptr ? ini : "").string();
-    io.IniFilename = ini_path_.c_str();
-
     ui::theme::apply_theme();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version_.c_str());
+
+    /*
+     * ImGui writes a window's position back here when the process leaves, so
+     * this path is where a layout lives and a capture that wants the same
+     * arrangement twice has to own it through the environment. It is chosen
+     * after the backend initialises because only then is it known whether
+     * positions are desktop coordinates.
+     */
+    const char* ini = std::getenv("HEDGR_IMGUI_INI");
+    ini_path_ = layout_file_path(cfg_.database_path, ini != nullptr ? ini : "",
+        (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) != 0)
+        .string();
+    io.IniFilename = ini_path_.c_str();
     BOOST_LOG_SEV(lg(), info) << "Platform " << io.BackendPlatformName
         << "; windows "
         << ((io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) != 0
@@ -752,8 +756,15 @@ void application::render_loop(GLFWwindow* window) {
          * delay for work that arrives without one. A capture is never paused
          * because it counts frames. Wayland never reports a window iconified,
          * so there only a zero sized framebuffer takes this path.
+         *
+         * Windows torn out into their own OS windows stay on screen when the
+         * main one is minimised, so with any of them open the frame is drawn
+         * and the pause moves to after the swap, which bounds a driver that
+         * has stopped pacing it.
          */
-        if (!capturing && is_minimised(window)) {
+        const bool minimised = is_minimised(window);
+        if (skips_frame_while_minimised(minimised, capturing,
+                ImGui::GetPlatformIO().Viewports.Size)) {
             manager_.pump();
             (void)sound_.submit(hedgr::model::signal::bus().drain());
             glfwWaitEventsTimeout(minimised_wait_s);
@@ -921,6 +932,8 @@ void application::render_loop(GLFWwindow* window) {
 
         if (capture_interval > 0.0)
             glfwWaitEventsTimeout(capture_interval);
+        else if (minimised)
+            glfwWaitEventsTimeout(torn_out_frame_wait_s);
     }
 }
 

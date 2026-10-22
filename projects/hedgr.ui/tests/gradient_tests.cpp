@@ -115,6 +115,43 @@ TEST_CASE("a workspace window is lighter at its top than at its foot",
     CHECK(brightness(corner) == Catch::Approx(brightness(page)).margin(0.02));
 }
 
+TEST_CASE("a square window, as ImGui draws one in a torn-out viewport, keeps "
+    "its gradient and fills its corner", "[gradient][workspace][viewport]") {
+    themed context;
+    ImGui::GetStyle().WindowRounding = 0.0f;
+    desk desk;
+    static_cast<void>(desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"}));
+    render::workspace workspace;
+    auto input = desk.input();
+    const auto raster = paint([&] {
+        ImGui::NewFrame();
+        workspace.render(input);
+        ImGui::Render();
+    });
+
+    const ImGuiWindow* window = nullptr;
+    for (const ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) {
+        if ((w->Flags & ImGuiWindowFlags_ChildWindow) == 0 && w->Active
+            && std::string_view(w->Name).ends_with("###w"))
+            window = w;
+    }
+    REQUIRE(window != nullptr);
+    REQUIRE_FALSE(window->Collapsed);
+
+    const int x = static_cast<int>(window->Pos.x) + 4;
+    const int top = static_cast<int>(window->InnerRect.Min.y) + 2;
+    const int foot = static_cast<int>(window->Pos.y + window->Size.y) - 10;
+    CHECK(brightness(raster.pixel(x, top))
+        > brightness(raster.pixel(x, foot)) + perceptible);
+
+    const ImVec4 corner = raster.pixel(static_cast<int>(window->Pos.x) + 1,
+        static_cast<int>(window->Pos.y + window->Size.y) - 2);
+    const ImVec4 page = theme::base_surface();
+    INFO("a square foot corner is the fill, so the page does not show");
+    CHECK(brightness(corner) != Catch::Approx(brightness(page)).margin(0.02));
+}
+
 TEST_CASE("a section card is lighter at its top than at its foot",
     "[gradient][card]") {
     themed context;

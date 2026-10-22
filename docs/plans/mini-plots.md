@@ -572,18 +572,48 @@ Delivered in the next PR after #77. What differed from the plan:
 
 ### 6. Tear-out windows by default
 
-Run `HEDGR_PLATFORM=x11` by hand: tear a chart out, dock it back, restart and
-see it return, minimise the main window. Then fix what the run shows. The known
-candidates are all inferred. Torn-out windows keep the theme's rounded corners and
-show the clear colour behind them (ImGui's examples set `WindowRounding` to 0
-and an opaque window background when viewports are on); the minimised wait
-(`application.cpp:723-728`) stops drawing torn-out windows while the main one
-is iconified; window positions in `imgui.ini` are desktop coordinates on X11
-and main-window coordinates on Wayland, so switching platform moves windows.
-Then make X11 the default when `DISPLAY` is set and keep
-`HEDGR_PLATFORM=wayland` as the way back, or keep Wayland the default if the
-run says XWayland costs more than it gives. Captures stay on whichever platform
-they run on today.
+The code half is delivered. The manual run and the default decision remain.
+
+Delivered, from the three inferred candidates:
+
+- **Rounded corners and clear colour behind a torn-out window.** No theme
+  change was needed. `ImGui::Begin` forces `WindowRounding` to 0 for any window
+  whose dock tree root owns a viewport (`imgui.cpp:8401`, `ViewportOwned`), and
+  the theme's `WindowBg` is already opaque (`window_alpha` is 1). The inference
+  in the first draft of this step was wrong on both counts (read from source,
+  not run). `shade_window_background` fills whatever quad the window drew, so a
+  square window keeps its gradient; `gradient_tests.cpp` pins that with
+  `WindowRounding` at 0.
+- **Minimised main window.** With any torn-out window open the loop keeps
+  drawing while the main window is iconified, and waits 1/30 s after each
+  frame, so a driver that stops pacing the main swap cannot spin a core. With
+  none open it idles as before (`minimised_frames.hpp`).
+- **Positions in `imgui.ini`.** A platform that places windows by desktop
+  position (ImGui's `PlatformHasViewports`, so X11) now saves to
+  `imgui-desktop.ini` beside the store. Wayland keeps `imgui.ini`. Switching
+  platform therefore never reads the other's positions, and the first X11 run
+  starts from an empty layout. `HEDGR_IMGUI_INI` still wins on both.
+
+Manual checklist for the `HEDGR_PLATFORM=x11` run (nobody has run these):
+
+1. Launch with `HEDGR_PLATFORM=x11`. The log says windows can be torn out and a
+   file `imgui-desktop.ini` appears beside the store on exit.
+2. Drag a chart outside the main window. It becomes its own OS window with
+   square corners, an opaque body and the same gradient, and it keeps
+   updating.
+3. Drag it back onto a dock target. It docks and draws compact again.
+4. Tear one out, quit, relaunch. It returns where it was.
+5. Minimise the main window with one torn out. The torn-out window keeps
+   drawing and `top` shows the process well below one core. Restore it.
+6. Minimise with nothing torn out. CPU idles as before.
+7. Launch once without `HEDGR_PLATFORM`. Windows are where the Wayland layout
+   left them, not moved by the X11 session.
+
+What remains is the default. If the run is clean, make X11 the default when
+`DISPLAY` is set and keep `HEDGR_PLATFORM=wayland` as the way back (the
+`HEDGR_PLATFORM` handling in `application.cpp` only understands `x11` today).
+If XWayland costs more than it gives, keep Wayland. Captures stay on whichever
+platform they run on today.
 
 Check: the manual run above, and a capture on the default platform unchanged.
 
