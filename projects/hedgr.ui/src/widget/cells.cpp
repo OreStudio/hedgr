@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <optional>
 
 namespace hedgr::ui::widget {
 
@@ -63,6 +64,17 @@ struct face final {
     ImFont* font = nullptr;
     float size = 0.0f;
 };
+
+/**
+ * @brief Hands drawn text to ImGui's log, as ImGui's own text does.
+ *
+ * These widgets draw straight into the draw list, which ImGui's log never
+ * sees, so a window logged or captured as text would lose its values.
+ */
+void log_text(ImVec2 at, std::string_view text) {
+    if (ImGui::GetCurrentContext()->LogEnabled)
+        ImGui::LogRenderedText(&at, text.data(), text.data() + text.size());
+}
 
 [[nodiscard]] face bold_at(float scale) {
     return face{hedgr::ui::icon::bold_font(), ImGui::GetFontSize() * scale};
@@ -126,6 +138,7 @@ void draw_caption_at(ImDrawList* draw, const face& f, ImVec2 origin,
     const ImU32 colour = ImGui::GetColorU32(theme::dim_text());
     const float top = ImFloor(origin.y + (row_height - f.size) * 0.5f);
     const float step = tracking(f);
+    log_text(ImVec2(origin.x, top), text);
 
     float x = origin.x;
     for_each_capital(text, [&](ImWchar code) {
@@ -178,6 +191,7 @@ void draw_pill_at(ImDrawList* draw, const face& f, ImVec2 origin,
     draw->AddRect(min, max, colours.border, value_pill_rounding, 0,
         value_pill_border);
     const ImVec4 clip(min.x, min.y, max.x, max.y);
+    log_text(min, text);
     draw->AddText(f.font, f.size,
         ImVec2(min.x + pill_padding_x(f), min.y + pill_padding_y(f)),
         colours.text, text.data(), text.data() + text.size(), 0.0f, &clip);
@@ -185,6 +199,28 @@ void draw_pill_at(ImDrawList* draw, const face& f, ImVec2 origin,
 
 [[nodiscard]] ImVec2 snapped_cursor() {
     return ImFloor(ImGui::GetCursorScreenPos());
+}
+
+/**
+ * @brief Records an inline item of @p size in the middle of the line it joins,
+ * and returns where to draw it, or nothing when it is clipped.
+ *
+ * A line that AlignTextToFramePadding or a taller item began is taller than a
+ * caption or a pill. ImGui::Text centres itself on such a line, so a pill in a
+ * row of text and buttons does the same rather than hanging from its top. On a
+ * fresh line the offset is zero.
+ */
+[[nodiscard]] std::optional<ImVec2> place_inline(ImVec2 size) {
+    ImGuiWindow* const window = ImGui::GetCurrentWindow();
+    const float top = std::max(0.0f,
+        std::floor((window->DC.CurrLineSize.y - size.y) * 0.5f));
+    const ImVec2 cursor = ImFloor(window->DC.CursorPos);
+    const ImVec2 origin(cursor.x, cursor.y + top);
+    ImGui::ItemSize(ImVec2(size.x, size.y + top));
+    if (!ImGui::ItemAdd(
+            ImRect(origin, ImVec2(origin.x + size.x, origin.y + size.y)), 0))
+        return std::nullopt;
+    return origin;
 }
 
 void help_tooltip(std::string_view help) {
@@ -228,13 +264,12 @@ ImVec2 caption_size(std::string_view text, std::string_view help) {
 void caption(std::string_view text, std::string_view help) {
     const face f = bold_at(caption_scale);
     const ImVec2 size = measure_caption(f, text, !help.empty());
-    if (ImGui::IsRectVisible(size)) {
-        const ImVec2 origin = snapped_cursor();
-        draw_caption_at(ImGui::GetWindowDrawList(), f, origin, text,
+    if (const auto origin = place_inline(size)) {
+        draw_caption_at(ImGui::GetWindowDrawList(), f, *origin, text,
             !help.empty(), size.y,
-            ImVec4(origin.x, origin.y, origin.x + size.x, origin.y + size.y));
+            ImVec4(origin->x, origin->y, origin->x + size.x,
+                origin->y + size.y));
     }
-    ImGui::Dummy(size);
     help_tooltip(help);
 }
 
@@ -245,10 +280,9 @@ ImVec2 value_pill_size(std::string_view text) {
 void value_pill(std::string_view text, theme::tone tone) {
     const face f = bold_at(pill_scale);
     const ImVec2 size = measure_pill(f, text);
-    if (ImGui::IsRectVisible(size))
-        draw_pill_at(ImGui::GetWindowDrawList(), f, snapped_cursor(), text,
-            tone, size.x);
-    ImGui::Dummy(size);
+    if (const auto origin = place_inline(size))
+        draw_pill_at(ImGui::GetWindowDrawList(), f, *origin, text, tone,
+            size.x);
 }
 
 float labelled_value_height() {
@@ -261,6 +295,7 @@ void labelled_value(std::string_view label, std::string_view value,
     cell(label, help, width,
         [&](ImDrawList* draw, ImVec2 origin, const ImVec4& clip) {
             const face f = bold_at(pill_scale);
+            log_text(origin, value);
             draw->AddText(f.font, f.size,
                 ImVec2(origin.x, origin.y + pill_padding_y(f)),
                 ImGui::GetColorU32(ImGuiCol_Text), value.data(),
@@ -320,6 +355,7 @@ void hero_strip(std::string_view label, std::string_view value,
         const float value_width = value_face.font->CalcTextSizeA(
             value_face.size, FLT_MAX, 0.0f, value.data(),
             value.data() + value.size()).x;
+        log_text(ImVec2(right - value_width, origin.y), value);
         draw->AddText(value_face.font, value_face.size,
             ImFloor(ImVec2(right - value_width,
                 origin.y + (height - value_face.size) * 0.5f)),
