@@ -343,9 +343,18 @@ struct window_ui_state final {
      * A window keeps its own choices. They are seeded from the frame's
      * remembered defaults when the window first draws, and a change here
      * updates those defaults for the next window without disturbing the
-     * windows already open.
+     * windows already open. A chart's choices are overwritten each frame by
+     * the view saved in its state, once it has one.
      */
     market_view_state market_view;
+
+    /**
+     * @brief The chart row that asked the runtime to save its first view.
+     *
+     * A handle rather than a flag because this scratch outlives the row: a
+     * chart closed and opened again is a new row with no view, and asks again.
+     */
+    hedgr::model::state::window_handle chart_view_sent_for;
 
     /** @brief A chart window's plot arrays, rebuilt when its points change. */
     chart_plot plot;
