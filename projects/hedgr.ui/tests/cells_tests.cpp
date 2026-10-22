@@ -19,6 +19,7 @@
  */
 #include "allocation_counter.hpp"
 #include "headless_desk.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -291,6 +292,19 @@ TEST_CASE("a headline value is taller than body text and holds its width",
             if (tone != theme::tone::neutral)
                 CHECK_FALSE(has_hue(headline, theme::pill_colours(tone).text));
         }
+
+        /*
+         * The headless face is monospaced, so the test narrows its 1 to stand
+         * in for a proportional bold face.
+         */
+        ImFontBaked* const baked = hedgr::ui::icon::bold_font()->GetFontBaked(
+            ImGui::GetFontSize() * 1.35f);
+        REQUIRE(baked->FindGlyph('1') != nullptr);
+        const float narrow = baked->GetCharAdvance('0') * 0.5f;
+        baked->FindGlyph('1')->AdvanceX = narrow;
+        if (baked->IndexAdvanceX.Size > '1')
+            baked->IndexAdvanceX['1'] = narrow;
+        REQUIRE(baked->GetCharAdvance('1') < baked->GetCharAdvance('0'));
 
         widget::headline_value("1.1111");
         const float ones = ImGui::GetItemRectSize().x;
