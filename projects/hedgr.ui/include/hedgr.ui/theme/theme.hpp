@@ -323,6 +323,48 @@ inline constexpr float flag_pair_gap = 2.0f;
 /** @brief A header's flag height as a fraction of the price pill's, so the flags sit quieter than the pill. */
 inline constexpr float flag_height_fraction = 0.75f;
 
+/** @brief The accent, the colour of the chosen and of the line a plot draws. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 accent_colour() noexcept;
+
+/**
+ * @brief The faint dashed rules across a plot, in the dim text grey at a low
+ * alpha, so a rule is a guide and never a line of data.
+ */
+inline constexpr ImU32 plot_grid_colour = IM_COL32(141, 146, 150, 56);
+
+/** @brief The crosshair a plot draws under the pointer. */
+inline constexpr ImU32 plot_crosshair_colour = IM_COL32(141, 146, 150, 128);
+
+/** @brief The length of a grid dash and the gap after it, in pixels. */
+inline constexpr float plot_grid_dash = 4.0f;
+inline constexpr float plot_grid_gap = 5.0f;
+
+/** @brief The length of a dot on the last price line and the gap after it. */
+inline constexpr float plot_price_dot = 1.5f;
+inline constexpr float plot_price_gap = 3.0f;
+
+/** @brief The alpha of the dotted line across a plot at the last price. */
+inline constexpr float plot_price_line_alpha = 0.85f;
+
+/** @brief The weight of the line a plot draws for a series. */
+inline constexpr float plot_line_weight = 1.5f;
+
+/** @brief The room between a plot and its tick labels, so labels breathe. */
+inline constexpr float plot_label_padding_x = 12.0f;
+inline constexpr float plot_label_padding_y = 8.0f;
+
+/** @brief How many labels the bottom axis shows. */
+inline constexpr int plot_x_label_count = 4;
+
+/** @brief The corner radius of a segmented control and of its chosen segment. */
+inline constexpr float segment_rounding = 6.0f;
+
+/** @brief The room round the segments inside the group, in pixels. */
+inline constexpr float segment_inset = 2.0f;
+
+/** @brief The fill of the chosen segment: a step above the group behind it. */
+inline constexpr ImU32 segment_selected_fill = IM_COL32(0x2a, 0x31, 0x3b, 255);
+
 /**
  * @brief The colour of a session status.
  *

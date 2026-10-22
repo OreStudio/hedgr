@@ -29,10 +29,12 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
+#include "hedgr.ui/widget/segmented.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include "implot.h"
+#include "implot_internal.h"
 #include <algorithm>
 #include <array>
 #include <cfloat>
@@ -176,6 +178,27 @@ template<class... Args>
     return format_number("{:.{}f}", value, decimals);
 }
 
+/** @brief An axis tick, worded as the last price tag is. */
+int format_price_tick(double value, char* buffer, int size, void*) {
+    const auto text = format_price(value);
+    const auto written = std::min(text.size, static_cast<std::size_t>(size - 1));
+    std::copy_n(text.buffer.data(), written, buffer);
+    buffer[written] = '\0';
+    return static_cast<int>(written);
+}
+
+/**
+ * @brief Draws a horizontal line across [@p left, @p right] as dashes, snapped
+ * to the pixel row so a one pixel line is crisp.
+ */
+void dashed_hline(ImDrawList* draw, float left, float right, float y,
+    ImU32 colour, float dash, float gap) {
+    const float row = std::floor(y) + 0.5f;
+    for (float x = left; x < right; x += dash + gap)
+        draw->AddLine(ImVec2(x, row), ImVec2(std::min(x + dash, right), row),
+            colour, 1.0f);
+}
+
 /**
  * @brief The verdict the change pill wears.
  *
@@ -315,18 +338,15 @@ constexpr std::array floating_icons{
     header_icon{"dock", icon::panel, "Dock into the desk", tile_request::dock},
 };
 
-/** @brief What the header's icons asked, and the width they keep. */
+/** @brief What the header's controls asked, and the width they keep. */
 struct header_icons_drawn final {
     tile_request asked = tile_request::none;
+    bool period_changed = false;
     float width = 0.0f;
 };
 
 /**
- * @brief Draws @p icons at the right end of the header row, @p height tall,
- * and clips the rest of the row short of them.
- *
- * The icons come first so a narrow tile loses the end of its header text and
- * never a control. The caller draws the row and then pops the clip.
+ * @brief The icon that asks for the window to dock, drawn @p side square.
  */
 [[nodiscard]] bool tile_icon(const header_icon& icon, ImVec2 origin,
     float side) {
@@ -351,27 +371,42 @@ struct header_icons_drawn final {
     return pressed;
 }
 
+/**
+ * @brief Draws the period selector and then @p icons at the right end of the
+ * header row, @p height tall, and clips the rest of the row short of them.
+ *
+ * The controls come first so a narrow tile loses the end of its header text
+ * and never a control. The caller draws the row and then pops the clip.
+ */
 [[nodiscard]] header_icons_drawn begin_header_row(
-    std::span<const header_icon> icons, float height) {
+    std::span<const header_icon> icons, const widget::segmented_control& period,
+    float height) {
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float gap = style.ItemInnerSpacing.x;
-    const float side = std::ceil(ImGui::GetFontSize() * 1.3f);
-    const float width =
-        static_cast<float>(icons.size()) * (side + gap) - gap;
-    const float left = std::max(start.x,
-        start.x + ImGui::GetContentRegionAvail().x - width);
+    const float side = widget::segmented_height();
+    const float icons_width = icons.empty()
+        ? 0.0f
+        : static_cast<float>(icons.size()) * (side + gap) - gap;
+    const float period_width = widget::segmented_width(period);
+    const float right = start.x + ImGui::GetContentRegionAvail().x;
+    const float icons_left = std::max(start.x, right - icons_width);
+    const float period_left = std::max(start.x, icons_left
+        - (icons.empty() ? 0.0f : gap) - period_width);
     const float top = start.y + std::max(0.0f, std::floor((height - side) * 0.5f));
 
-    header_icons_drawn drawn{.width = width + gap};
+    header_icons_drawn drawn{.width = right - period_left + gap};
     for (std::size_t i = 0; i < icons.size(); ++i) {
-        const ImVec2 origin(left + static_cast<float>(i) * (side + gap), top);
+        const ImVec2 origin(icons_left + static_cast<float>(i) * (side + gap),
+            top);
         if (tile_icon(icons[i], origin, side))
             drawn.asked = icons[i].request;
     }
+    drawn.period_changed = widget::draw_segmented(period,
+        ImVec2(period_left, top));
 
     ImGui::SetCursorScreenPos(start);
-    ImGui::PushClipRect(start, ImVec2(left - gap, FLT_MAX), true);
+    ImGui::PushClipRect(start, ImVec2(period_left - gap, FLT_MAX), true);
     return drawn;
 }
 
@@ -482,9 +517,7 @@ void render_chart(window_handle handle, const render_input& input,
     const bool no_points = points.size == 0;
     const double first = no_points ? 0.0 : points.value[start];
     const double last = no_points ? 0.0 : points.value[points.size - 1];
-    const double change = last - first;
-    const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
-    const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
+    const ImVec4 line_colour = theme::accent_colour();
 
     /*
      * The runtime decides whether the series already holds the span. The chart
@@ -531,15 +564,24 @@ void render_chart(window_handle handle, const render_input& input,
      * The Dock icon is for a chart that is not docked yet.
      */
     const bool docked = ImGui::IsWindowDocked();
-    const auto icons = docked
-        ? header_icons_drawn{}
-        : begin_header_row(floating_icons, ImGui::GetFrameHeight());
+    const market_view_state view_before = state.market_view;
+    const widget::segmented_control period{.id = "period",
+        .tooltip = "The span the chart plots",
+        .options = chart_span_labels.data(),
+        .option_count = static_cast<int>(chart_span_labels.size()),
+        .shown = chart_span_shown,
+        .selected = &state.market_view.chart_span};
+    const auto icons = begin_header_row(
+        docked ? std::span<const header_icon>{}
+               : std::span<const header_icon>{floating_icons},
+        period, ImGui::GetFrameHeight());
     state.tile = icons.asked;
     draw_full_header(summary);
     ImGui::SameLine();
     draw_series_flags(input, *session, chart->label, icons.width);
-    if (!docked)
-        ImGui::PopClipRect();
+    ImGui::PopClipRect();
+    if (icons.period_changed)
+        chart_view_changed(handle, input, state, view_before);
 
     if (row && !series.failure(*row).empty()) {
         const auto failure = series.failure(*row);
@@ -553,12 +595,6 @@ void render_chart(window_handle handle, const render_input& input,
     {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
-        foot->controls.push_back(widget::foot_combo{
-            .id = "period",
-            .tooltip = "The span the chart plots",
-            .options = chart_span_labels.data(),
-            .option_count = static_cast<int>(chart_span_labels.size()),
-            .selected = &state.market_view.chart_span});
         foot->controls.push_back(widget::foot_combo{
             .id = "style",
             .tooltip = "Draw candles or a line",
@@ -595,14 +631,30 @@ void render_chart(window_handle handle, const render_input& input,
 
             constexpr ImPlotFlags plot_flags = ImPlotFlags_Crosshairs
                 | ImPlotFlags_NoTitle | ImPlotFlags_NoLegend
-                | ImPlotFlags_NoMenus;
-            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_None;
-            constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite;
+                | ImPlotFlags_NoMenus | ImPlotFlags_NoFrame;
+            /*
+             * No grid of ImPlot's own: its rules are solid and run both ways,
+             * and the plot draws its dashed horizontal ones itself.
+             */
+            constexpr ImPlotAxisFlags x_flags = ImPlotAxisFlags_NoGridLines
+                | ImPlotAxisFlags_NoTickMarks | ImPlotAxisFlags_NoHighlight;
+            constexpr ImPlotAxisFlags y_flags = ImPlotAxisFlags_Opposite
+                | x_flags;
 
+            const ImVec4 clear(0.0f, 0.0f, 0.0f, 0.0f);
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(2.0f, 2.0f));
             ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
+            ImPlot::PushStyleVar(ImPlotStyleVar_LabelPadding,
+                ImVec2(theme::plot_label_padding_x,
+                    theme::plot_label_padding_y));
+            ImPlot::PushStyleColor(ImPlotCol_FrameBg, clear);
+            ImPlot::PushStyleColor(ImPlotCol_PlotBg, clear);
+            ImPlot::PushStyleColor(ImPlotCol_PlotBorder, clear);
             ImPlot::PushStyleColor(ImPlotCol_AxisGrid,
-                ImVec4(0.33f, 0.35f, 0.38f, 0.35f));
+                ImGui::ColorConvertU32ToFloat4(theme::plot_grid_colour));
+            ImPlot::PushStyleColor(ImPlotCol_AxisText, theme::dim_text());
+            ImPlot::PushStyleColor(ImPlotCol_Crosshairs,
+                ImGui::ColorConvertU32ToFloat4(theme::plot_crosshair_colour));
             ImGui::PushFont(icon::numeric_font());
             if (ImPlot::BeginPlot("##series", ImVec2(-1.0f, -1.0f),
                     plot_flags)) {
@@ -614,26 +666,17 @@ void render_chart(window_handle handle, const render_input& input,
                  */
                 const double seconds = plotted > 1
                     ? xs[plotted - 1] - xs[0] : 0.0;
-                const char* pattern = seconds <= 6.0 * 3600.0 ? "%H:%M:%S"
-                    : seconds <= 90.0 * 24.0 * 3600.0 ? "%d %b %H:%M"
-                    : "%d %b %Y";
+                const char* pattern = seconds <= 15.0 * 60.0 ? "%H:%M:%S"
+                    : seconds <= 36.0 * 3600.0 ? "%H:%M"
+                    : seconds <= 90.0 * 24.0 * 3600.0 ? "%a %d"
+                    : "%b %Y";
                 ImPlot::SetupAxisFormat(ImAxis_X1, format_time,
                     const_cast<char*>(pattern));
-                ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
-                if (!use_candles) {
-                    const double x_span = plotted > 1
-                        ? xs[plotted - 1] - xs[0] : 0.0;
-                    const double x_pad = x_span > 0.0
-                        ? x_span * chart_end_padding_share
-                        : chart_single_point_padding_s;
-                    ImPlot::SetupAxisLimits(ImAxis_X1,
-                        xs[0] - x_pad * chart_start_padding_share,
-                        xs[plotted - 1] + x_pad,
-                        ImPlotCond_Always);
-                    ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
-                        high + span * 0.08, ImPlotCond_Always);
-                }
-
+                ImPlot::SetupAxisFormat(ImAxis_Y1, format_price_tick, nullptr);
+                const double width_s =
+                    static_cast<double>(plot.candle_width_ns) / 1.0e9;
+                double x_min = 0.0;
+                double x_max = 0.0;
                 if (use_candles) {
                     double candle_low = candle_points.front().low;
                     double candle_high = candle_points.front().high;
@@ -642,17 +685,60 @@ void render_chart(window_handle handle, const render_input& input,
                         candle_high = std::max(candle_high, candle.high);
                     }
                     const double pad = (candle_high - candle_low) * 0.08;
-                    const double width_s =
-                        static_cast<double>(plot.candle_width_ns) / 1.0e9;
-                    ImPlot::SetupAxisLimits(ImAxis_X1,
-                        static_cast<double>(candle_points.front().at_ns) / 1.0e9
-                            - width_s,
-                        static_cast<double>(candle_points.back().at_ns) / 1.0e9
-                            + width_s * 2.0,
-                        ImPlotCond_Always);
+                    x_min = static_cast<double>(candle_points.front().at_ns)
+                            / 1.0e9 - width_s;
+                    x_max = static_cast<double>(candle_points.back().at_ns)
+                            / 1.0e9 + width_s * 2.0;
                     ImPlot::SetupAxisLimits(ImAxis_Y1, candle_low - pad,
                         candle_high + pad, ImPlotCond_Always);
+                } else {
+                    const double x_span = plotted > 1
+                        ? xs[plotted - 1] - xs[0] : 0.0;
+                    const double x_pad = x_span > 0.0
+                        ? x_span * chart_end_padding_share
+                        : chart_single_point_padding_s;
+                    x_min = xs[0] - x_pad * chart_start_padding_share;
+                    x_max = xs[plotted - 1] + x_pad;
+                    ImPlot::SetupAxisLimits(ImAxis_Y1, floor,
+                        high + span * 0.08, ImPlotCond_Always);
+                }
+                ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max,
+                    ImPlotCond_Always);
 
+                /*
+                 * The bottom axis names a few places in the span, away from
+                 * the edges so a label is never cut off by the plot's.
+                 */
+                std::array<double, theme::plot_x_label_count> places{};
+                for (std::size_t i = 0; i < places.size(); ++i)
+                    places[i] = x_min + (x_max - x_min)
+                        * (static_cast<double>(i) + 0.5)
+                        / static_cast<double>(places.size());
+                ImPlot::SetupAxisTicks(ImAxis_X1, places.data(),
+                    static_cast<int>(places.size()));
+                ImPlot::SetupFinish();
+
+                const ImVec4 tag_colour = health_tint(health, line_colour);
+
+                /*
+                 * The grid is the horizontal rules at the Y ticks, dashed and
+                 * faint, under everything the plot draws.
+                 */
+                {
+                    auto* rules = ImPlot::GetPlotDrawList();
+                    ImPlot::PushPlotClipRect();
+                    const ImVec2 origin = ImPlot::GetPlotPos();
+                    const float right = origin.x + ImPlot::GetPlotSize().x;
+                    for (const auto& tick :
+                        ImPlot::GetCurrentPlot()->Axes[ImAxis_Y1].Ticker.Ticks)
+                        dashed_hline(rules, origin.x, right,
+                            ImPlot::PlotToPixels(0.0, tick.PlotPos).y,
+                            theme::plot_grid_colour, theme::plot_grid_dash,
+                            theme::plot_grid_gap);
+                    ImPlot::PopPlotClipRect();
+                }
+
+                if (use_candles) {
                     auto* plot_draw = ImPlot::GetPlotDrawList();
                     ImPlot::PushPlotClipRect();
                     for (const auto& candle : candle_points) {
@@ -703,19 +789,23 @@ void render_chart(window_handle handle, const render_input& input,
                  * axis, which is how a trading screen states it. The tag reads
                  * the same number as the header.
                  */
-                const ImVec4 tag_colour = health_tint(health, line_colour);
-                ImPlotSpec last_line;
-                last_line.LineColor = tag_colour;
-                last_line.LineWeight = 1.0f;
-                last_line.Flags = static_cast<ImPlotItemFlags>(
-                    static_cast<int>(ImPlotItemFlags_NoLegend)
-                    | static_cast<int>(ImPlotInfLinesFlags_Horizontal));
-                ImPlot::PlotInfLines("##last", &last, 1, last_line);
+                {
+                    auto* rule = ImPlot::GetPlotDrawList();
+                    ImPlot::PushPlotClipRect();
+                    const ImVec2 origin = ImPlot::GetPlotPos();
+                    ImVec4 dotted = tag_colour;
+                    dotted.w = theme::plot_price_line_alpha;
+                    dashed_hline(rule, origin.x, origin.x + ImPlot::GetPlotSize().x,
+                        ImPlot::PlotToPixels(0.0, last).y,
+                        ImGui::ColorConvertFloat4ToU32(dotted),
+                        theme::plot_price_dot, theme::plot_price_gap);
+                    ImPlot::PopPlotClipRect();
+                }
 
                 if (!use_candles) {
                     ImPlotSpec line;
                     line.LineColor = line_colour;
-                    line.LineWeight = 1.5f;
+                    line.LineWeight = theme::plot_line_weight;
                     ImPlot::PlotLine("##line", xs, ys,
                         static_cast<int>(plotted), line);
                 }
@@ -755,8 +845,8 @@ void render_chart(window_handle handle, const render_input& input,
                 ImPlot::EndPlot();
             }
             ImGui::PopFont();
-            ImPlot::PopStyleColor();
-            ImPlot::PopStyleVar(2);
+            ImPlot::PopStyleColor(6);
+            ImPlot::PopStyleVar(3);
         }
     }
     ImGui::EndChild();

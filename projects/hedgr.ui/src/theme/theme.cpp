@@ -343,6 +343,10 @@ ImVec4 dim_text() noexcept {
     return text_dim;
 }
 
+ImVec4 accent_colour() noexcept {
+    return accent;
+}
+
 ImU32 card_title_icon_colour() noexcept {
     /*
      * The reference's pale blue glow, the colour of the glyph in a card's
