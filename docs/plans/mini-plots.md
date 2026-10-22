@@ -475,6 +475,12 @@ runtime writes the row. New windows still seed from the last choice.
 Check: a store round trip test, an old row without the fields loading with
 defaults, and a restart that brings four charts back on four periods.
 
+Delivered in #75. The fields are one optional `chart_view` (span in
+nanoseconds, style, EMA). A chart without one, new or saved before the change,
+draws with the `market-view.ini` defaults and saves them as its own on its
+first frame. The `configure_chart` command writes one window row. The restart
+check is a runtime test of two charts, not four.
+
 ### 3. The compact chart
 
 `render_chart` branches on `ImGui::IsWindowDocked()`. The compact branch draws
