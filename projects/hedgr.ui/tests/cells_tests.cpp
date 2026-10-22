@@ -277,6 +277,19 @@ float glyph_extent(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
     return bottom > top ? bottom - top : 0.0f;
 }
 
+TEST_CASE("a font loaded in one context is not handed out in the next",
+    "[cells][fonts]") {
+    {
+        headless_imgui first;
+        hedgr::ui::icon::load_ui_fonts(15.0f);
+    }
+    headless_imgui second;
+    for (ImFont* const font :
+        {hedgr::ui::icon::numeric_font(), hedgr::ui::icon::bold_font()}) {
+        CHECK((font == nullptr || ImGui::GetIO().Fonts->Fonts.contains(font)));
+    }
+}
+
 TEST_CASE("a headline value is taller than body text and holds its width",
     "[cells][headline]") {
     themed context;
