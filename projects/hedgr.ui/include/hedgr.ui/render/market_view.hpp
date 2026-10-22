@@ -20,6 +20,7 @@
 #ifndef HEDGR_UI_RENDER_MARKET_VIEW_HPP
 #define HEDGR_UI_RENDER_MARKET_VIEW_HPP
 
+#include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
 #include <array>
 #include <cstddef>
@@ -87,9 +88,9 @@ inline constexpr int term_history_max = 10;
  * @brief The market-data choices that outlive the window that made them.
  *
  * A reader who chooses candles and a one-hour period is telling the interface
- * how they read a chart, not describing one window. The next chart opens with
- * the same choices, and the file this state is written to keeps them across a
- * restart.
+ * how they read a chart. The next chart opens with the same choices, and the
+ * file this state is written to keeps them across a restart. A chart that is
+ * already open keeps its own choices in its window state.
  */
 struct market_view_state final {
     /** @brief The selected span, as an index into @c chart_spans. */
@@ -119,6 +120,25 @@ struct market_view_state final {
             return static_cast<int>(i);
     }
     return 1;
+}
+
+/** @brief The chart choices in @p state, as a chart window saves them. */
+[[nodiscard]] inline hedgr::model::domain::chart_view
+chart_view_of(const market_view_state& state) {
+    return {.span_ns = chart_span_ns(state.chart_span),
+        .style = state.chart_style == 0
+            ? hedgr::model::domain::chart_style::candles
+            : hedgr::model::domain::chart_style::line,
+        .ema = state.chart_ema != 0};
+}
+
+/** @brief Sets the chart choices in @p state to a chart window's own view. */
+inline void apply_chart_view(const hedgr::model::domain::chart_view& view,
+    market_view_state& state) {
+    state.chart_span = chart_span_index(view.span_ns);
+    state.chart_style =
+        view.style == hedgr::model::domain::chart_style::candles ? 0 : 1;
+    state.chart_ema = view.ema ? 1 : 0;
 }
 
 /**

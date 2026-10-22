@@ -468,6 +468,17 @@ bool window_service::configure_crm(const command::command& cmd) {
     return true;
 }
 
+bool window_service::configure_chart(const command::command& cmd) {
+    const auto handle = windows_.find(cmd.window_id);
+    if (!handle)
+        return false;
+    auto* chart = std::get_if<domain::chart_state>(&windows_.state(*handle));
+    if (chart == nullptr || chart->view == cmd.chart_view)
+        return false;
+    chart->view = cmd.chart_view;
+    return true;
+}
+
 void window_service::rebind(std::string_view instance_id,
     std::string_view account_id, model_state::session_handle session) {
     const auto& layout = windows_.layout();
@@ -505,15 +516,33 @@ void window_service::unbind(model_state::session_handle session) {
     }
 }
 
-std::optional<refusal> window_service::save_windows() {
-    for (const auto& spec : windows_.specs(sessions_)) {
-        if (auto saved = window_repo_->save(spec); !saved) {
-            return refusal{{condition_source::window_wall, {}},
-                store_failure(
-                    std::format("cannot save window {}", spec.id), saved.error())};
-        }
+namespace {
+
+std::optional<refusal> save_spec(store::repository::window_repository& repo,
+    const domain::window_spec& spec) {
+    if (auto saved = repo.save(spec); !saved) {
+        return refusal{{condition_source::window_wall, {}},
+            store_failure(
+                std::format("cannot save window {}", spec.id), saved.error())};
     }
     return std::nullopt;
+}
+
+}
+
+std::optional<refusal> window_service::save_windows() {
+    for (const auto& spec : windows_.specs(sessions_)) {
+        if (auto refused = save_spec(*window_repo_, spec))
+            return refused;
+    }
+    return std::nullopt;
+}
+
+std::optional<refusal> window_service::save_window(std::string_view window_id) {
+    const auto handle = windows_.find(window_id);
+    if (!handle)
+        return std::nullopt;
+    return save_spec(*window_repo_, windows_.spec(*handle, sessions_));
 }
 
 }

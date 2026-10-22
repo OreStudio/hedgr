@@ -24,8 +24,10 @@
 #include "imgui_internal.h"
 #include <catch2/catch_all.hpp>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 /*
@@ -51,9 +53,10 @@ struct chart final {
     model::state::series_handle series;
     render::window_ui_state state;
 
-    chart() {
+    explicit chart(std::optional<model::domain::chart_view> view = {}) {
         handle = desk.open(window_kind::chart,
-            model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
+            model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s",
+                .view = view});
         series = desk.market.intern("i", "a", "s");
         desk.windows.set_series(handle, std::span{&series, 1});
         state.market_view.chart_span = render::chart_span_index(hour);
@@ -85,9 +88,15 @@ struct chart final {
 
     /** @brief The history commands pushed since the last call. */
     std::vector<model::command::command> asked() {
+        return drained(model::command::command_kind::load_history);
+    }
+
+    /** @brief The commands of @p kind pushed since the last call. */
+    std::vector<model::command::command> drained(
+        model::command::command_kind kind) {
         std::vector<model::command::command> r;
         for (auto& c : desk.commands.drain()) {
-            if (c.kind == model::command::command_kind::load_history)
+            if (c.kind == kind)
                 r.push_back(std::move(c));
         }
         return r;
@@ -220,4 +229,95 @@ TEST_CASE("a chart says when the server held less than the period",
     /* A span the series covers says nothing extra. */
     c.state.market_view.chart_span = render::chart_span_index(15 * 60 * second);
     CHECK_FALSE(says(c.frame(), "shows"));
+}
+
+TEST_CASE("a restored chart asks history for its saved span, not the default",
+    "[chart][history][view]") {
+    chart c{model::domain::chart_view{.span_ns = 24 * hour,
+        .style = model::domain::chart_style::candles, .ema = true}};
+    c.backfill();
+
+    static_cast<void>(c.frame());
+    const auto asked = c.asked();
+    REQUIRE(asked.size() == 1);
+    CHECK(asked[0].history_span_ns == 24 * hour);
+    CHECK(c.state.market_view.chart_span == render::chart_span_index(24 * hour));
+    CHECK(c.state.market_view.chart_style == 0);
+    CHECK(c.state.market_view.chart_ema == 1);
+    CHECK(c.state.plot.key.span_ns == 24 * hour);
+    CHECK(c.state.plot.key.candles);
+    CHECK(c.state.plot.key.ema);
+}
+
+TEST_CASE("a chart with no view of its own saves the one it opened on, once",
+    "[chart][view]") {
+    chart c;
+    c.backfill();
+
+    static_cast<void>(c.frame());
+    const auto saved = c.drained(model::command::command_kind::configure_chart);
+    REQUIRE(saved.size() == 1);
+    CHECK(saved[0].window_id == "w");
+    CHECK(saved[0].chart_view == render::chart_view_of(c.state.market_view));
+    CHECK(saved[0].chart_view.span_ns == hour);
+
+    for (int i = 0; i < 3; ++i)
+        static_cast<void>(c.frame());
+    CHECK(c.drained(model::command::command_kind::configure_chart).empty());
+
+    /* Closed and opened again, the chart is a new row with no view. */
+    c.desk.windows.remove(c.handle);
+    c.handle = c.desk.open(window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
+    c.desk.windows.set_series(c.handle, std::span{&c.series, 1});
+    static_cast<void>(c.frame());
+    CHECK(c.drained(model::command::command_kind::configure_chart).size() == 1);
+}
+
+TEST_CASE("two charts on one desk keep their own periods", "[chart][view]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+    const auto open = [&](std::string id, std::string series_id,
+                          std::int64_t span_ns) {
+        const auto handle = desk.open(window_kind::chart,
+            model::domain::chart_state{.label = series_id,
+                .series_id = series_id,
+                .view = model::domain::chart_view{.span_ns = span_ns}},
+            std::move(id));
+        const auto series = desk.market.intern("i", "a", series_id);
+        std::vector<model::domain::market_point> points;
+        for (int i = 0; i < 100; ++i)
+            points.push_back({.at_ns = now - (99 - i) * second, .value = 1.0});
+        desk.market.seed(series, points, 1);
+        desk.windows.set_series(handle, std::span{&series, 1});
+        return handle;
+    };
+    const auto daily = open("w-1", "s-1", 24 * hour);
+    const auto hourly = open("w-2", "s-2", hour);
+
+    /* Both windows start from the same remembered defaults. */
+    render::window_ui_state daily_state;
+    render::window_ui_state hourly_state;
+    daily_state.market_view = desk.market_view;
+    hourly_state.market_view = desk.market_view;
+
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    input.wall_now_ns = now;
+    hedgr::testing::frame([&] {
+        render::renderer_for(window_kind::chart)(daily, input, daily_state,
+            status, lock);
+        render::renderer_for(window_kind::chart)(hourly, input, hourly_state,
+            status, lock);
+    });
+
+    std::vector<std::pair<std::string, std::int64_t>> asked;
+    for (auto& c : desk.commands.drain()) {
+        CHECK(c.kind == model::command::command_kind::load_history);
+        asked.emplace_back(c.series_id, c.history_span_ns);
+    }
+    const std::vector<std::pair<std::string, std::int64_t>> expected{
+        {"s-1", 24 * hour}, {"s-2", hour}};
+    CHECK(asked == expected);
 }

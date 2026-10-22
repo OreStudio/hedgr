@@ -203,6 +203,22 @@ template<class... Args>
     return std::format("{}d", minutes / (24 * 60));
 }
 
+/**
+ * @brief Asks the runtime to save the chart's choices as its own view.
+ *
+ * The window state is the runtime's to write, so the chart sends the view and
+ * draws from its scratch until the saved view comes back on the next frame.
+ */
+void save_chart_view(window_handle handle, const render_input& input,
+    window_ui_state& state) {
+    hedgr::model::command::command request;
+    request.kind = hedgr::model::command::command_kind::configure_chart;
+    request.window_id = std::string{input.windows.id(handle)};
+    request.chart_view = chart_view_of(state.market_view);
+    input.commands.push(std::move(request));
+    state.chart_view_sent_for = handle;
+}
+
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -233,6 +249,15 @@ void render_chart(window_handle handle, const render_input& input,
         ImGui::PopID();
         return;
     }
+
+    /*
+     * A chart with no view of its own yet saves the defaults it opened on, so
+     * another chart changing those defaults later does not move this one.
+     */
+    if (chart->view)
+        apply_chart_view(*chart->view, state.market_view);
+    else if (state.chart_view_sent_for != handle)
+        save_chart_view(handle, input, state);
 
     const auto session = signed_in_session(input, handle);
     if (!session) {
@@ -597,6 +622,7 @@ void render_chart(window_handle handle, const render_input& input,
             input.market_view.chart_style = state.market_view.chart_style;
         if (state.market_view.chart_ema != before.chart_ema)
             input.market_view.chart_ema = state.market_view.chart_ema;
+        save_chart_view(handle, input, state);
     }
     ImGui::PopID();
 }

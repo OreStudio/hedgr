@@ -21,6 +21,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/domain/window_json_io.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <string>
 #include <variant>
 
@@ -82,4 +83,39 @@ TEST_CASE("a saved window state missing fields reads with their defaults",
     REQUIRE(state != nullptr);
     REQUIRE(state->series_id == "trades");
     REQUIRE(state->max_points == domain::chart_state{}.max_points);
+}
+
+TEST_CASE("a chart's own view survives the stored form", "[window]") {
+    constexpr std::int64_t day = std::int64_t{24} * 3600 * 1'000'000'000;
+    const domain::window_state state = domain::chart_state{
+        .label = "FX GBP/USD", .series_id = "s-1",
+        .view = domain::chart_view{.span_ns = day,
+            .style = domain::chart_style::candles, .ema = true}};
+
+    const auto encoded =
+        domain::window_state_to_json(domain::window_kind::chart, state);
+    REQUIRE(encoded.has_value());
+    CHECK(encoded->find("\"candles\"") != std::string::npos);
+
+    const auto decoded =
+        domain::window_state_from_json(domain::window_kind::chart, *encoded);
+    REQUIRE(decoded.has_value());
+    const auto* chart = std::get_if<domain::chart_state>(&*decoded);
+    REQUIRE(chart != nullptr);
+    REQUIRE(chart->view.has_value());
+    CHECK(chart->view->span_ns == day);
+    CHECK(chart->view->style == domain::chart_style::candles);
+    CHECK(chart->view->ema);
+}
+
+TEST_CASE("a chart saved before charts kept a view reads with none",
+    "[window]") {
+    const auto decoded = domain::window_state_from_json(
+        domain::window_kind::chart,
+        R"({"label":"FX GBP/USD","series_id":"s-1","max_points":600})");
+    REQUIRE(decoded.has_value());
+    const auto* chart = std::get_if<domain::chart_state>(&*decoded);
+    REQUIRE(chart != nullptr);
+    CHECK(chart->series_id == "s-1");
+    CHECK_FALSE(chart->view.has_value());
 }

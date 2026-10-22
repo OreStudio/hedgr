@@ -122,6 +122,8 @@ enum class command_kind : std::uint8_t {
      * only when the series does not already hold the span.
      */
     load_history = 28,
+    /** @brief Save a chart window's own view, carried in @c chart_view. */
+    configure_chart = 29,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -225,6 +227,9 @@ struct command final {
 
     /** @brief The chart span to read history for, zero for all, for load_history. */
     std::int64_t history_span_ns = 0;
+
+    /** @brief A chart window's view, for configure_chart. */
+    domain::chart_view chart_view;
 
     /** @brief Free-form detail, for a command that carries one. */
     std::string payload;

@@ -81,6 +81,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "load_crm_names";
     case command_kind::load_history:
         return "load_history";
+    case command_kind::configure_chart:
+        return "configure_chart";
     }
     return "unknown";
 }
