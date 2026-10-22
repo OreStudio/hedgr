@@ -242,9 +242,10 @@ ImFont* bold_font_instance = nullptr;
 namespace hedgr::ui::icon {
 
 ImFont* numeric_font() {
-    if (numeric_font_instance != nullptr)
-        return numeric_font_instance;
     ImGuiIO& io = ImGui::GetIO();
+    if (numeric_font_instance != nullptr
+        && io.Fonts->Fonts.contains(numeric_font_instance))
+        return numeric_font_instance;
     return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
 }
 
