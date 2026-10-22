@@ -43,6 +43,15 @@
 #include <implot.h>
 #include <stb_image.h>
 
+/*
+ * Every build tree compiles against one shared vcpkg install, so a tree
+ * configured against an ImGui without the docking branch would build and then
+ * drop the dock layout from imgui.ini. It fails here instead.
+ */
+#ifndef IMGUI_HAS_DOCK
+#error "Hedgr needs ImGui's docking branch: the imgui port's docking-experimental feature."
+#endif
+
 #include <boost/log/trivial.hpp>
 #include <chrono>
 #include <cstdint>
@@ -316,10 +325,24 @@ GLFWwindow* application::initialise_graphics() {
      * when the session offers one, since that is the session's own display
      * server rather than a compatibility layer; if it cannot be reached, let
      * GLFW choose among whatever remains.
+     *
+     * HEDGR_PLATFORM=x11 asks for X11 even on a Wayland session. The ImGui
+     * GLFW backend cannot place windows on Wayland and so refuses to tear a
+     * window out into its own OS window there; through XWayland it can.
      */
 #if defined(GLFW_PLATFORM_WAYLAND)
-    const bool prefer_wayland = std::getenv("WAYLAND_DISPLAY") != nullptr;
-    if (prefer_wayland)
+    const char* platform = std::getenv("HEDGR_PLATFORM");
+    const bool force_x11 =
+        platform != nullptr && std::string_view(platform) == "x11";
+    if (platform != nullptr && *platform != '\0' && !force_x11) {
+        BOOST_LOG_SEV(lg(), warn) << "HEDGR_PLATFORM=" << platform
+                                  << " is not understood; only x11 is.";
+    }
+    const bool prefer_wayland =
+        !force_x11 && std::getenv("WAYLAND_DISPLAY") != nullptr;
+    if (force_x11)
+        glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11);
+    else if (prefer_wayland)
         glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_WAYLAND);
 #endif
 
@@ -428,6 +451,13 @@ GLFWwindow* application::initialise_graphics() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    /*
+     * Asked for everywhere and granted by the backend only where it can place
+     * windows: on Wayland ImGui clears the flag on the first frame and every
+     * window stays inside the main one.
+     */
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
     /*
      * ImGui writes a window's position back here when the process leaves, so
      * this path is where a layout lives and a capture that wants the same
@@ -442,6 +472,11 @@ GLFWwindow* application::initialise_graphics() {
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version_.c_str());
+    BOOST_LOG_SEV(lg(), info) << "Platform " << io.BackendPlatformName
+        << "; windows "
+        << ((io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) != 0
+            ? "can" : "cannot (set HEDGR_PLATFORM=x11)")
+        << " be torn out into their own OS windows.";
 
     /*
      * After the backend, because the atlas registers its icons as custom
@@ -857,6 +892,16 @@ void application::render_loop(GLFWwindow* window) {
         glClearColor(ground.x, ground.y, ground.z, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        /*
+         * Windows torn out of the main one are drawn into their own GLFW
+         * windows, which share this context's textures. Drawing them switches
+         * the current context, so it is put back before the capture reads the
+         * main back buffer and before the swap.
+         */
+        ImGui::UpdatePlatformWindows();
+        ImGui::RenderPlatformWindowsDefault();
+        glfwMakeContextCurrent(window);
 
         /*
          * One frame dump, then out. Frame eight rather than one so the layout
