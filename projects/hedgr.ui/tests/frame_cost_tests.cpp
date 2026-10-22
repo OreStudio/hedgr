@@ -26,6 +26,7 @@
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "implot.h"
 #include <algorithm>
 #include <catch2/catch_all.hpp>
@@ -330,7 +331,14 @@ struct chart_desk final {
     render::lock_control lock;
     std::int64_t next_at_ns = series_start_ns;
 
-    explicit chart_desk(std::size_t count) {
+    /** @brief Whether the charts are docked, two to a dock node. */
+    bool docked = false;
+    bool docks_built = false;
+
+    explicit chart_desk(std::size_t count, bool docked_charts = false)
+        : docked(docked_charts) {
+        if (docked)
+            ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         for (std::size_t i = 0; i < count; ++i) {
             const auto id = std::format("s-{}", i);
             const auto handle = desk.market.intern("i", "a", id);
@@ -376,9 +384,16 @@ struct chart_desk final {
     int draw() {
         auto input = desk.input();
         ImGui::NewFrame();
+        if (docked && !docks_built) {
+            dock_in_pairs();
+            docks_built = true;
+        }
         for (std::size_t i = 0; i < windows.size(); ++i) {
-            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-            ImGui::SetNextWindowSize(ImVec2(900.0f, 500.0f));
+            /* A window given a position every frame would leave its dock. */
+            if (!docked) {
+                ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+                ImGui::SetNextWindowSize(ImVec2(900.0f, 500.0f));
+            }
             ImGui::Begin(names[i].c_str());
             render::render_chart(windows[i], input, *states[i], status, lock);
             ImGui::End();
@@ -386,11 +401,28 @@ struct chart_desk final {
         ImGui::Render();
         return ImGui::GetDrawData()->TotalVtxCount;
     }
+
+    /** @brief Splits one dock node per two charts, a chart in each half. */
+    void dock_in_pairs() {
+        for (std::size_t i = 0; i < names.size(); i += 2) {
+            const ImGuiID root = ImGui::GetID(std::format("dock-{}", i).c_str());
+            ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(root, ImVec2(0.0f, 0.0f));
+            ImGui::DockBuilderSetNodeSize(root, ImVec2(1800.0f, 500.0f));
+            ImGuiID right = 0;
+            const ImGuiID left = ImGui::DockBuilderSplitNode(root,
+                ImGuiDir_Left, 0.5f, nullptr, &right);
+            ImGui::DockBuilderDockWindow(names[i].c_str(), left);
+            if (i + 1 < names.size())
+                ImGui::DockBuilderDockWindow(names[i + 1].c_str(), right);
+            ImGui::DockBuilderFinish(root);
+        }
+    }
 };
 
 /** @brief Allocations of one steady frame with @p count charts over full rings. */
-std::size_t allocations_with_charts(std::size_t count) {
-    chart_desk charts{count};
+std::size_t allocations_with_charts(std::size_t count, bool docked = false) {
+    chart_desk charts{count, docked};
     int vertices = 0;
     for (int i = 0; i < 3; ++i)
         vertices = charts.draw();
@@ -403,6 +435,10 @@ std::size_t allocations_with_charts(std::size_t count) {
     CHECK(steady == vertices);
     CHECK(static_cast<std::size_t>(steady) >= count * (ring_points - 1) * 6);
     for (std::size_t i = 0; i < count; ++i) {
+        const ImGuiWindow* window = ImGui::FindWindowByName(
+            charts.names[i].c_str());
+        REQUIRE(window != nullptr);
+        CHECK(window->DockIsActive == docked);
         CHECK(charts.states[i]->plot.key.version
             == charts.desk.market.version(charts.series[i]));
         CHECK(charts.states[i]->plot.key.version != 0);
@@ -424,6 +460,14 @@ TEST_CASE("a steady chart frame allocates the same for every chart",
     CHECK(few % 10 == 0);
     CHECK(many == few / 10 * 110);
     WARN("steady allocations per chart: " << few / 10);
+}
+
+TEST_CASE("a steady docked chart frame allocates nothing", "[frame][chart][docking]") {
+    const auto few = allocations_with_charts(10, true);
+    const auto many = allocations_with_charts(110, true);
+    INFO("allocations with 10 docked charts: " << few << ", with 110: " << many);
+    CHECK(few == 0);
+    CHECK(many == 0);
 }
 
 TEST_CASE("a frame after every series ticked allocates the same for every chart",

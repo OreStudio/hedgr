@@ -23,6 +23,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "implot.h"
 #include <cstddef>
 #include <cstdint>
@@ -154,6 +155,36 @@ inline void frame(Draw&& draw) {
     ImGui::SetNextWindowSize(ImVec2(1000.0f, 700.0f));
     ImGui::Begin("frame");
     draw();
+    ImGui::End();
+    ImGui::Render();
+}
+
+/**
+ * @brief Draws one frame of @p draw inside a window docked beside another.
+ *
+ * The same "frame" window, 1000 by 700, but split off a dock node the dock
+ * builder made on the first call, which is where an operator's drag ends.
+ */
+template<class Draw>
+inline void docked_frame(Draw&& draw) {
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ImGui::NewFrame();
+    const ImGuiID root = ImGui::GetID("test-dock");
+    if (ImGui::DockBuilderGetNode(root) == nullptr) {
+        ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
+        ImGui::DockBuilderSetNodePos(root, ImVec2(0.0f, 0.0f));
+        ImGui::DockBuilderSetNodeSize(root, ImVec2(1250.0f, 700.0f));
+        ImGuiID right = 0;
+        const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
+            0.8f, nullptr, &right);
+        ImGui::DockBuilderDockWindow("frame", left);
+        ImGui::DockBuilderDockWindow("neighbour", right);
+        ImGui::DockBuilderFinish(root);
+    }
+    ImGui::Begin("frame");
+    draw();
+    ImGui::End();
+    ImGui::Begin("neighbour");
     ImGui::End();
     ImGui::Render();
 }

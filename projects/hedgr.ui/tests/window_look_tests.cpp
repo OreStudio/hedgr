@@ -22,6 +22,7 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
+#include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -155,13 +156,20 @@ struct chart_fixture final : window_fixture {
         state.market_view.chart_span = 3;
     }
 
+    /** @brief Whether the chart is drawn into a docked window. */
+    bool docked = false;
+
     void draw(std::int64_t wall_now_ns) {
         auto input = desk.input();
         input.wall_now_ns = wall_now_ns;
         input.now_ns = wall_now_ns;
-        hedgr::testing::frame([&] {
+        const auto body = [&] {
             render::render_chart(window, input, state, status, lock);
-        });
+        };
+        if (docked)
+            hedgr::testing::docked_frame(body);
+        else
+            hedgr::testing::frame(body);
     }
 };
 
@@ -408,6 +416,209 @@ TEST_CASE("a chart heads its plot with one row and a large price",
     CHECK(price > extent(body, line_top, line_bottom) + 2.0f);
 }
 
+/** @brief The child window drawn this frame whose name holds @p part, if any. */
+const ImGuiWindow* active_child(std::string_view part) {
+    for (const ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) {
+        if (w->Active && std::string_view(w->Name).find(part)
+                != std::string_view::npos)
+            return w;
+    }
+    return nullptr;
+}
+
+/** @brief How far the chart's plot area starts below the top of its content. */
+float header_height() {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    return plot_top() - frame->DC.CursorStartPos.y;
+}
+
+TEST_CASE("a docked chart draws one compact header row and no foot",
+    "[look][chart][docking]") {
+    chart_fixture chart{0.0001};
+    chart.docked = true;
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    REQUIRE(frame->DockIsActive);
+    CHECK(active_child("##hedgr-status-line") == nullptr);
+    CHECK(active_child("##hedgr-status-space") == nullptr);
+
+    /* With no foot the plot runs to the bottom of the window's content. */
+    const ImGuiWindow* plot = active_child("##plot-area");
+    REQUIRE(plot != nullptr);
+    CHECK(plot->Pos.y + plot->Size.y
+        == Approx(frame->WorkRect.Max.y).margin(1.0));
+
+    /* A second row would add at least another pill's height. */
+    CHECK(header_height() < 2.0f * widget::value_pill_size("FX GBP/USD").y);
+}
+
+TEST_CASE("a floating chart still draws its foot", "[look][chart][docking]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    CHECK_FALSE(frame->DockIsActive);
+    const ImGuiWindow* foot = active_child("##hedgr-status-line");
+    REQUIRE(foot != nullptr);
+    const ImGuiWindow* plot = active_child("##plot-area");
+    REQUIRE(plot != nullptr);
+    CHECK(plot->Pos.y + plot->Size.y <= foot->Pos.y);
+}
+
+TEST_CASE("a docked chart's header is shorter than a floating chart's",
+    "[look][chart][docking]") {
+    float full = 0.0f;
+    {
+        chart_fixture chart{0.0001};
+        settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+        full = header_height();
+    }
+    chart_fixture chart{0.0001};
+    chart.docked = true;
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    const float compact = header_height();
+    INFO("full header " << full << "px, compact header " << compact << "px");
+    CHECK(compact > 0.0f);
+    CHECK(compact < full);
+    WARN("full header " << full << "px, compact header " << compact << "px");
+}
+
+TEST_CASE("a docked chart wears the same pills as a floating one",
+    "[look][chart][docking]") {
+    {
+        chart_fixture rising{0.0001};
+        rising.docked = true;
+        const auto vertices = settled([&] { rising.draw(newest_at_ns); },
+            frame_vertices);
+        CHECK(has_pill(vertices, theme::tone::good));
+        CHECK_FALSE(has_pill(vertices, theme::tone::bad));
+        const ImU32 fill = theme::pill_colours(theme::tone::neutral).fill;
+        CHECK(solid_width(vertices, fill)
+            >= widget::value_pill_size("FX GBP/USD").x - 1.5f);
+    }
+    {
+        chart_fixture delayed{-0.0001};
+        delayed.docked = true;
+        const auto vertices = settled(
+            [&] { delayed.draw(newest_at_ns + 10'000'000'000); },
+            frame_vertices);
+        CHECK(has_pill(vertices, theme::tone::warning));
+        CHECK_FALSE(has_pill(vertices, theme::tone::bad));
+    }
+}
+
+TEST_CASE("a docked chart wears an accent outline only while focused",
+    "[look][chart][docking]") {
+    chart_fixture chart{0.0001};
+    chart.docked = true;
+    const auto resting = settled([&] { chart.draw(newest_at_ns); },
+        frame_vertices);
+    CHECK_FALSE(has_colour(resting, theme::rail_selection_border));
+
+    ImGui::SetWindowFocus("frame");
+    const auto focused = settled([&] { chart.draw(newest_at_ns); },
+        frame_vertices);
+    CHECK(has_colour(focused, theme::rail_selection_border));
+}
+
+namespace {
+
+/** @brief Moves the mouse to @p at and draws a frame. */
+void hover(chart_fixture& chart, ImVec2 at) {
+    ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+    chart.draw(newest_at_ns);
+}
+
+/** @brief Presses and releases @p button at @p at, a frame for each. */
+void click(chart_fixture& chart, ImVec2 at, ImGuiMouseButton button) {
+    hover(chart, at);
+    ImGui::GetIO().AddMouseButtonEvent(button, true);
+    chart.draw(newest_at_ns);
+    ImGui::GetIO().AddMouseButtonEvent(button, false);
+    chart.draw(newest_at_ns);
+}
+
+/** @brief The popup open on top, or null. */
+const ImGuiWindow* open_popup() {
+    const auto& stack = ImGui::GetCurrentContext()->OpenPopupStack;
+    return stack.empty() ? nullptr : stack.back().Window;
+}
+
+/**
+ * @brief Clicks the menu item labelled @p label in the open popup.
+ *
+ * The item is found by hovering down the popup until ImGui reports the item's
+ * id as hovered, so the test depends on the label and not on the menu's
+ * layout.
+ */
+bool click_menu_item(chart_fixture& chart, const char* label) {
+    const ImGuiWindow* popup = open_popup();
+    if (popup == nullptr)
+        return false;
+    const ImGuiID item = ImHashStr(label, 0, popup->ID);
+    const float x = popup->Pos.x + popup->Size.x * 0.5f;
+    for (float y = popup->Pos.y; y < popup->Pos.y + popup->Size.y; y += 1.0f) {
+        hover(chart, ImVec2(x, y));
+        if (ImGui::GetCurrentContext()->HoveredId == item) {
+            click(chart, ImVec2(x, y), ImGuiMouseButton_Left);
+            return true;
+        }
+    }
+    return false;
+}
+
+ImVec2 centre_of(const ImGuiWindow* w) {
+    return ImVec2(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.5f);
+}
+
+}
+
+TEST_CASE("a right click on a docked chart's plot changes its view",
+    "[look][chart][docking]") {
+    chart_fixture chart{0.0001};
+    chart.docked = true;
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    static_cast<void>(chart.desk.commands.drain());
+    REQUIRE(chart.state.market_view.chart_span == 3);
+    REQUIRE(chart.state.market_view.chart_style == 1);
+
+    const ImGuiWindow* plot = active_child("##plot-area");
+    REQUIRE(plot != nullptr);
+    click(chart, centre_of(plot), ImGuiMouseButton_Right);
+    REQUIRE(open_popup() != nullptr);
+    REQUIRE(click_menu_item(chart, "1d"));
+
+    CHECK(chart.state.market_view.chart_span == 4);
+    CHECK(chart.desk.market_view.chart_span == 4);
+    std::vector<model::command::command> saved;
+    for (auto& c : chart.desk.commands.drain()) {
+        if (c.kind == model::command::command_kind::configure_chart)
+            saved.push_back(std::move(c));
+    }
+    REQUIRE(saved.size() == 1);
+    CHECK(saved[0].window_id == "w");
+    CHECK(saved[0].chart_view.span_ns == render::chart_spans[4].ns);
+
+    click(chart, centre_of(plot), ImGuiMouseButton_Right);
+    REQUIRE(click_menu_item(chart, "Candles"));
+    CHECK(chart.state.market_view.chart_style == 0);
+    CHECK(chart.state.market_view.chart_span == 4);
+}
+
+TEST_CASE("a right click on a floating chart's plot opens no menu",
+    "[look][chart][docking]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    const ImGuiWindow* plot = active_child("##plot-area");
+    REQUIRE(plot != nullptr);
+    click(chart, centre_of(plot), ImGuiMouseButton_Right);
+    CHECK(open_popup() == nullptr);
+}
+
 TEST_CASE("a term structure names its curve in a pill and wears no state",
     "[look][rates]") {
     term_fixture terms;
@@ -474,6 +685,83 @@ TEST_CASE("the tenants tab counts the roster in an accent badge",
     CHECK(glyphs == 4);
 }
 
+namespace {
+
+/** @brief Four charts on four periods, docked two by two through the workspace. */
+struct docked_desk_fixture final {
+    themed context;
+    desk desk;
+    hedgr::ui::render::workspace workspace;
+    int frames = 0;
+
+    docked_desk_fixture() {
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        const char* const labels[] = {"FX GBP/USD", "FX EUR/USD",
+            "FX USD/JPY", "FX AUD/USD"};
+        const double bases[] = {1.27, 1.08, 151.2, 0.66};
+        const std::int64_t spans[] = {5 * 60, 15 * 60, 3600, 3600};
+        for (std::size_t c = 0; c < 4; ++c) {
+            const auto id = std::format("s-{}", c);
+            const auto series = desk.market.intern("i", "a", id);
+            for (std::size_t p = 0; p < 600; ++p) {
+                const double wobble = std::sin(static_cast<double>(p + c * 40)
+                    / (9.0 + static_cast<double>(c) * 3.0));
+                static_cast<void>(desk.market.append(series,
+                    model::domain::market_level::fine,
+                    model::state::series_point{
+                        .at_ns = newest_at_ns
+                            - static_cast<std::int64_t>(599 - p) * 6'000'000'000,
+                        .value = bases[c] * (1.0 + 0.002 * wobble
+                            + 0.00001 * static_cast<double>(p))},
+                    1));
+            }
+            const auto window = desk.open(model::domain::window_kind::chart,
+                model::domain::chart_state{.label = labels[c],
+                    .series_id = id,
+                    .view = model::domain::chart_view{
+                        .span_ns = spans[c] * 1'000'000'000,
+                        .style = c == 3 ? model::domain::chart_style::candles
+                                        : model::domain::chart_style::line,
+                        .ema = c == 2}},
+                std::format("chart-{}", c));
+            desk.windows.set_series(window, std::span{&series, 1});
+        }
+    }
+
+    void draw() {
+        auto input = desk.input();
+        input.wall_now_ns = newest_at_ns;
+        input.now_ns = newest_at_ns;
+        ImGui::NewFrame();
+        if (frames++ == 0) {
+            const ImGuiID root = ImGui::GetID("gallery-dock");
+            ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(root, ImVec2(0.0f, 0.0f));
+            ImGui::DockBuilderSetNodeSize(root, ImVec2(1000.0f, 700.0f));
+            ImGuiID right = 0;
+            const ImGuiID left = ImGui::DockBuilderSplitNode(root,
+                ImGuiDir_Left, 0.5f, nullptr, &right);
+            ImGuiID left_bottom = 0;
+            const ImGuiID left_top = ImGui::DockBuilderSplitNode(left,
+                ImGuiDir_Up, 0.5f, nullptr, &left_bottom);
+            ImGuiID right_bottom = 0;
+            const ImGuiID right_top = ImGui::DockBuilderSplitNode(right,
+                ImGuiDir_Up, 0.5f, nullptr, &right_bottom);
+            ImGui::DockBuilderDockWindow("###chart-0", left_top);
+            ImGui::DockBuilderDockWindow("###chart-1", right_top);
+            ImGui::DockBuilderDockWindow("###chart-2", left_bottom);
+            ImGui::DockBuilderDockWindow("###chart-3", right_bottom);
+            ImGui::DockBuilderFinish(root);
+        }
+        if (frames == 2)
+            ImGui::SetWindowFocus("###chart-0");
+        workspace.render(input);
+        ImGui::Render();
+    }
+};
+
+}
+
 /*
  * Hidden from the suite: it paints the market windows for a person to look at
  * and asserts nothing about them. Run it by name with HEDGR_WINDOW_GALLERY set
@@ -521,5 +809,9 @@ TEST_CASE("window gallery", "[.gallery]") {
     {
         tenants_fixture centre;
         paint("tenants", centre, [](auto& f) { f.draw(); });
+    }
+    {
+        docked_desk_fixture grid;
+        paint("docked-charts", grid, [](auto& f) { f.draw(); });
     }
 }

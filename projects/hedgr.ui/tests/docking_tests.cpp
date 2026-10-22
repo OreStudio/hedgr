@@ -90,6 +90,37 @@ TEST_CASE("two desk windows docked side by side are both drawn, docked",
     CHECK_FALSE(right->DrawList->VtxBuffer.empty());
 }
 
+TEST_CASE("a chart alone in its dock node hides the tab bar and others keep it",
+    "[docking][workspace]") {
+    headless_imgui imgui;
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    desk desk;
+    static_cast<void>(desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"},
+        "left"));
+    static_cast<void>(desk.open(model::domain::window_kind::series_browser,
+        model::domain::series_browser_state{}, "right"));
+    render::workspace workspace;
+    auto input = desk.input();
+
+    for (int i = 0; i < 3; ++i) {
+        ImGui::NewFrame();
+        if (i == 0)
+            dock_side_by_side("###left", "###right");
+        workspace.render(input);
+        ImGui::Render();
+    }
+
+    const ImGuiWindow* chart = desk_window("###left");
+    const ImGuiWindow* browser = desk_window("###right");
+    REQUIRE(chart != nullptr);
+    REQUIRE(browser != nullptr);
+    REQUIRE(chart->DockNode != nullptr);
+    REQUIRE(browser->DockNode != nullptr);
+    CHECK(chart->DockNode->IsHiddenTabBar());
+    CHECK_FALSE(browser->DockNode->IsHiddenTabBar());
+}
+
 TEST_CASE("the lock prompt stays out of a dock", "[docking][workspace]") {
     headless_imgui imgui;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
