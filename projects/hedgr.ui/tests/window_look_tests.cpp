@@ -433,7 +433,7 @@ float header_height() {
     return plot_top() - frame->DC.CursorStartPos.y;
 }
 
-TEST_CASE("a docked chart draws one compact header row and no foot",
+TEST_CASE("a docked chart draws one compact header row and keeps its foot",
     "[look][chart][docking]") {
     chart_fixture chart{0.0001};
     chart.docked = true;
@@ -442,14 +442,12 @@ TEST_CASE("a docked chart draws one compact header row and no foot",
     const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
     REQUIRE(frame != nullptr);
     REQUIRE(frame->DockIsActive);
-    CHECK(active_child("##hedgr-status-line") == nullptr);
-    CHECK(active_child("##hedgr-status-space") == nullptr);
+    CHECK(active_child("##hedgr-status-line") != nullptr);
 
-    /* With no foot the plot runs to the bottom of the window's content. */
+    /* The foot sits under the plot, so the plot stops short of the bottom. */
     const ImGuiWindow* plot = active_child("##plot-area");
     REQUIRE(plot != nullptr);
-    CHECK(plot->Pos.y + plot->Size.y
-        == Approx(frame->WorkRect.Max.y).margin(1.0));
+    CHECK(plot->Pos.y + plot->Size.y < frame->WorkRect.Max.y - 1.0f);
 
     /* A second row would add at least another pill's height. */
     CHECK(header_height() < 2.0f * widget::value_pill_size("FX GBP/USD").y);

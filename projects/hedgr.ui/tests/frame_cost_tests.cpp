@@ -462,12 +462,14 @@ TEST_CASE("a steady chart frame allocates the same for every chart",
     WARN("steady allocations per chart: " << few / 10);
 }
 
-TEST_CASE("a steady docked chart frame allocates nothing", "[frame][chart][docking]") {
+TEST_CASE("a steady docked chart frame costs the same as a floating one",
+    "[frame][chart][docking]") {
     const auto few = allocations_with_charts(10, true);
     const auto many = allocations_with_charts(110, true);
     INFO("allocations with 10 docked charts: " << few << ", with 110: " << many);
-    CHECK(few == 0);
-    CHECK(many == 0);
+    CHECK(few % 10 == 0);
+    CHECK(many == few / 10 * 110);
+    CHECK(few == allocations_with_charts(10));
 }
 
 TEST_CASE("a frame after every series ticked allocates the same for every chart",

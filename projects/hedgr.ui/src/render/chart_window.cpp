@@ -508,8 +508,7 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PushID("chart");
     /*
      * The foot's identity is a few strings, so it is built only where a foot
-     * is drawn. A compact chart draws none and allocates nothing on a steady
-     * frame.
+     * is drawn.
      */
     const auto make_foot = [&] {
         widget::foot_state foot;
@@ -641,9 +640,8 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     /*
-     * One row of chrome above the plot. A full chart keeps its settings on the
-     * foot; a compact one has no foot, so its settings are a right click away
-     * and the plot gets the rest of the tile.
+     * One row of chrome above the plot. Both layouts keep the foot; a compact
+     * tile also has its settings a right click away.
      */
     std::optional<widget::foot_state> foot;
     bool open_view_menu = false;
@@ -677,7 +675,7 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     float foot_height = 0.0f;
-    if (layout == chart_layout::full) {
+    {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
         foot->controls.push_back(widget::foot_combo{
@@ -895,10 +893,9 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PopStyleVar();
 
     const auto before = state.market_view;
-    if (layout == chart_layout::full) {
-        if (widget::draw_status_foot(status, input.now_ns, *foot))
-            chart_view_changed(handle, input, state, before);
-    } else {
+    if (widget::draw_status_foot(status, input.now_ns, *foot))
+        chart_view_changed(handle, input, state, before);
+    if (layout == chart_layout::compact) {
         if (open_view_menu)
             ImGui::OpenPopup("chart-view");
         if (draw_view_menu(state.market_view))
