@@ -38,3 +38,20 @@ TEST_CASE("a named layout file wins over the store's", "[layout]") {
 
     CHECK(layout == std::filesystem::path("/tmp/capture/imgui.ini"));
 }
+
+TEST_CASE("desktop and main-window positions never share a layout file",
+    "[layout]") {
+    const std::filesystem::path store = "/srv/hedgr/data/hedgr.db";
+
+    const auto main_window = layout_file_path(store, "", false);
+    const auto desktop = layout_file_path(store, "", true);
+
+    CHECK(main_window == std::filesystem::path("/srv/hedgr/data/imgui.ini"));
+    CHECK(desktop == std::filesystem::path("/srv/hedgr/data/imgui-desktop.ini"));
+    CHECK(desktop != main_window);
+}
+
+TEST_CASE("a named layout file wins on either platform", "[layout]") {
+    CHECK(layout_file_path("/srv/hedgr/data/hedgr.db", "/tmp/c/imgui.ini", true)
+        == std::filesystem::path("/tmp/c/imgui.ini"));
+}

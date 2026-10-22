@@ -33,15 +33,24 @@ namespace hedgr::imgui::app {
  * is left wherever the binary was started.
  *
  * @param database_path The store the layout belongs to.
+ * A window's saved position is a desktop coordinate where the platform can
+ * place windows (X11) and a main-window coordinate where it cannot (Wayland).
+ * The two do not mean the same thing, so each keeps its own file and switching
+ * platform never moves a window by reading the other's positions. The file a
+ * Wayland run uses keeps the old name so existing layouts survive.
+ *
  * @param override_path The HEDGR_IMGUI_INI value, empty when unset. A capture
  *                      names its own file through it.
+ * @param desktop_positions True when windows are placed by desktop position,
+ *                          which is what ImGui's PlatformHasViewports reports.
  */
 [[nodiscard]] inline std::filesystem::path layout_file_path(
     const std::filesystem::path& database_path,
-    std::string_view override_path) {
+    std::string_view override_path, bool desktop_positions = false) {
     if (!override_path.empty())
         return std::filesystem::path(override_path);
-    return database_path.parent_path() / "imgui.ini";
+    return database_path.parent_path()
+        / (desktop_positions ? "imgui-desktop.ini" : "imgui.ini");
 }
 
 }
