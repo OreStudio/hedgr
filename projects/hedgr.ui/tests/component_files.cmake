@@ -14,6 +14,7 @@ set(files
     "chart_plot_tests.cpp"
     "controls_tests.cpp"
     "crm_grid_tests.cpp"
+    "docking_tests.cpp"
     "time_text_tests.cpp"
     "window_look_tests.cpp"
     "ema_tests.cpp"

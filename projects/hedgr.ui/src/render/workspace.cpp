@@ -597,7 +597,8 @@ void workspace::draw_startup_failure(const render_input& input) {
 
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
-        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
+        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_NoDocking;
 
     /*
      * The close button is the way out, and it is offered because the
@@ -680,7 +681,8 @@ void workspace::draw_lock_prompt(const render_input& input) {
 
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar
-        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings;
+        | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoSavedSettings
+        | ImGuiWindowFlags_NoDocking;
 
     /*
      * A window and not a modal. A trading system has several things happening
