@@ -44,12 +44,11 @@ namespace hedgr::ui::widget {
  * @param id ImGui id, unique among the buttons of one window.
  * @param glyph The icon, which must come from @c hedgr.ui.icon.
  * @param tooltip The action's name, shown on hover.
- * @param size Side of the square, or 0 for the frame height.
  * @return Whether the button was pressed this frame.
  */
 [[nodiscard]] inline bool icon_button(const char* id, const char* glyph,
-    const char* tooltip, bool enabled = true, float size = 0.0f) {
-    const float height = size > 0.0f ? size : ImGui::GetFrameHeight();
+    const char* tooltip, bool enabled = true) {
+    const float height = ImGui::GetFrameHeight();
     ImGui::PushID(id);
     if (!enabled)
         ImGui::BeginDisabled();

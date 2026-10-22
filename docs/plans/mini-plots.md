@@ -540,6 +540,9 @@ Delivered in #77. What differed from the plan:
 
 ### 5. Shared crosshair
 
+Built in #78 and removed again after trying it (2026-10-22): the user did not want
+every docked chart to follow the pointer. Not planned.
+
 The double-buffered cursor time in the workspace and the line and tag in
 compact charts.
 

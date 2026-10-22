@@ -425,27 +425,47 @@ struct header_icons_drawn final {
  * The icons come first so a narrow tile loses the end of its header text and
  * never a control. The caller draws the row and then pops the clip.
  */
+[[nodiscard]] bool tile_icon(const header_icon& icon, ImVec2 origin,
+    float side) {
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::PushID(icon.id);
+    const bool pressed = ImGui::InvisibleButton(icon.glyph, ImVec2(side, side));
+    ImGui::PopID();
+    ImGui::SetItemTooltip("%s", icon.tooltip);
+
+    const bool hovered = ImGui::IsItemHovered();
+    auto* draw = ImGui::GetWindowDrawList();
+    const ImVec2 max(origin.x + side, origin.y + side);
+    if (hovered)
+        draw->AddRectFilled(origin, max,
+            ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+            ImGui::GetStyle().FrameRounding);
+    const ImVec2 glyph = ImGui::CalcTextSize(icon.glyph);
+    draw->AddText(ImVec2(origin.x + std::floor((side - glyph.x) * 0.5f),
+                       origin.y + std::floor((side - glyph.y) * 0.5f)),
+        ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled),
+        icon.glyph);
+    return pressed;
+}
+
 [[nodiscard]] header_icons_drawn begin_header_row(
     std::span<const header_icon> icons, float height) {
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float gap = style.ItemInnerSpacing.x;
+    const float side = std::ceil(ImGui::GetFontSize() * 1.3f);
     const float width =
-        static_cast<float>(icons.size()) * (height + gap) - gap;
+        static_cast<float>(icons.size()) * (side + gap) - gap;
     const float left = std::max(start.x,
         start.x + ImGui::GetContentRegionAvail().x - width);
+    const float top = start.y + std::max(0.0f, std::floor((height - side) * 0.5f));
 
     header_icons_drawn drawn{.width = width + gap};
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::SetCursorScreenPos(ImVec2(left, start.y));
     for (std::size_t i = 0; i < icons.size(); ++i) {
-        if (i != 0)
-            ImGui::SameLine(0.0f, gap);
-        if (widget::icon_button(icons[i].id, icons[i].glyph, icons[i].tooltip,
-                true, height))
+        const ImVec2 origin(left + static_cast<float>(i) * (side + gap), top);
+        if (tile_icon(icons[i], origin, side))
             drawn.asked = icons[i].request;
     }
-    ImGui::PopStyleColor();
 
     ImGui::SetCursorScreenPos(start);
     ImGui::PushClipRect(start, ImVec2(left - gap, FLT_MAX), true);
