@@ -225,7 +225,7 @@ TEST_CASE("the base and quote flags sit the pair gap apart", "[flags]") {
     });
 }
 
-TEST_CASE("a heading's flags are as tall as the price pill", "[flags]") {
+TEST_CASE("a heading's flags are three quarters of the price pill, centred on it", "[flags]") {
     hedgr::testing::headless_imgui imgui;
     ImGui::GetStyle().AntiAliasedFill = false;
     hedgr::testing::desk desk;
@@ -244,6 +244,9 @@ TEST_CASE("a heading's flags are as tall as the price pill", "[flags]") {
             top = std::min(top, v.pos.y);
             bottom = std::max(bottom, v.pos.y);
         }
-        CHECK(bottom - top == Catch::Approx(pill));
+        CHECK(bottom - top == Catch::Approx(pill * theme::flag_height_fraction));
+        const float row_top = ImGui::GetItemRectMin().y;
+        CHECK(top - row_top == Catch::Approx(pill * 0.125f));
+        CHECK(ImGui::GetItemRectSize().y == Catch::Approx(pill));
     });
 }

@@ -139,8 +139,6 @@ namespace {
 
 constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 
-/** @brief The gap under a compact chart's header row, tighter than a full one's. */
-constexpr float compact_row_gap = 2.0f;
 
 /**
  * @brief A price, with the decimals its magnitude needs.
@@ -242,9 +240,6 @@ void chart_view_changed(window_handle handle, const render_input& input,
     save_chart_view(handle, input, state);
 }
 
-/** @brief How a chart lays itself out, which follows from where it sits. */
-enum class chart_layout { full, compact };
-
 /** @brief What the header states about the series, derived once a frame. */
 struct chart_summary final {
     std::string_view label;
@@ -308,91 +303,6 @@ void draw_full_header(const chart_summary& s) {
     }
 }
 
-/** @brief The compact header's tooltip: what the full header spells out. */
-void draw_compact_tooltip(const chart_summary& s) {
-    if (!ImGui::BeginTooltip())
-        return;
-    const auto word = domain::data_health_word(s.health);
-    ImGui::Text("%.*s", static_cast<int>(word.size()), word.data());
-    if (!s.no_points)
-        ImGui::Text("%zu points in view%s", s.plotted,
-            s.span_ns == 0 ? ", every point in the series" : "");
-    if (s.history.reading) {
-        ImGui::TextDisabled("Reading older history...");
-    } else if (s.short_shown_ns) {
-        ImGui::TextDisabled("Shows %s of %s. %s",
-            duration_text(*s.short_shown_ns).c_str(),
-            duration_text(s.span_ns).c_str(), short_history_reason(s.history));
-    }
-    ImGui::TextDisabled("%s", "Right click the plot for period, style and EMA");
-    ImGui::EndTooltip();
-}
-
-/**
- * @brief The compact header: the series, its period, and what it is worth, in
- * one tight row with the price at body size.
- *
- * @return Whether the period was clicked, which opens the view menu.
- */
-[[nodiscard]] bool draw_compact_header(const chart_summary& s,
-    int span_index) {
-    ImGui::BeginGroup();
-    widget::value_pill(s.label);
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s",
-        chart_span_labels[static_cast<std::size_t>(span_index)]);
-    const bool period_clicked = ImGui::IsItemClicked();
-    if (!s.no_points) {
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        const auto price = format_price(s.last);
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextUnformatted(price.view().data(),
-            price.view().data() + price.view().size());
-        ImGui::PopFont();
-        ImGui::SameLine();
-        widget::value_pill(format_number("{:+.2f}%", s.percent()).view(),
-            change_tone(s.health, s.change()));
-    }
-    ImGui::EndGroup();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        draw_compact_tooltip(s);
-    return period_clicked;
-}
-
-/** @brief One section of the view menu. @return Whether the choice changed. */
-bool choose(const char* heading, std::span<const char* const> labels,
-    int& selected) {
-    ImGui::SeparatorText(heading);
-    bool changed = false;
-    for (std::size_t i = 0; i < labels.size(); ++i) {
-        const int index = static_cast<int>(i);
-        if (ImGui::MenuItem(labels[i], nullptr, selected == index)
-            && selected != index) {
-            selected = index;
-            changed = true;
-        }
-    }
-    return changed;
-}
-
-/**
- * @brief The compact chart's period, style and EMA, as a popup.
- *
- * The same choices the full chart's foot offers, on the same scratch, so a
- * tile undocked into a full chart shows what was chosen on the tile.
- *
- * @return Whether a choice changed.
- */
-bool draw_view_menu(market_view_state& view) {
-    if (!ImGui::BeginPopup("chart-view"))
-        return false;
-    bool changed = choose("Period", chart_span_labels, view.chart_span);
-    changed |= choose("Style", chart_style_labels, view.chart_style);
-    changed |= choose("Overlay", chart_ema_labels, view.chart_ema);
-    ImGui::EndPopup();
-    return changed;
-}
-
 /** @brief An icon at the right end of a chart's header, and what it asks. */
 struct header_icon final {
     const char* id;
@@ -403,13 +313,6 @@ struct header_icon final {
 
 constexpr std::array floating_icons{
     header_icon{"dock", icon::panel, "Dock into the desk", tile_request::dock},
-};
-
-constexpr std::array docked_icons{
-    header_icon{"pop-out", icon::move, "Pop out into a floating window",
-        tile_request::pop_out},
-    header_icon{"close", icon::cancel, "Close this chart",
-        tile_request::close},
 };
 
 /** @brief What the header's icons asked, and the width they keep. */
@@ -472,21 +375,6 @@ struct header_icons_drawn final {
     return drawn;
 }
 
-/** @brief Outlines the current window in the accent, the active tile's mark. */
-void draw_focus_outline() {
-    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
-        return;
-    const ImVec2 min = ImGui::GetWindowPos();
-    const ImVec2 size = ImGui::GetWindowSize();
-    const ImVec2 max(min.x + size.x, min.y + size.y);
-    auto* draw = ImGui::GetWindowDrawList();
-    draw->PushClipRect(min, max, false);
-    draw->AddRect(ImVec2(min.x + 0.5f, min.y + 0.5f),
-        ImVec2(max.x - 0.5f, max.y - 0.5f), theme::rail_selection_border, 0.0f,
-        0, 1.0f);
-    draw->PopClipRect();
-}
-
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -515,8 +403,6 @@ void render_chart(window_handle handle, const render_input& input,
         foot.identity = identity_text(identity_of(input, handle));
         return foot;
     };
-    const auto layout = ImGui::IsWindowDocked() ? chart_layout::compact
-                                                : chart_layout::full;
 
     const auto& shape = input.windows.state(handle);
     const auto* chart = std::get_if<chart_state>(&shape);
@@ -640,32 +526,20 @@ void render_chart(window_handle handle, const render_input& input,
     }
 
     /*
-     * One row of chrome above the plot. Both layouts keep the foot; a compact
-     * tile also has its settings a right click away.
+     * One header row above the plot, the same docked or floating. Docking is
+     * ImGui's: the node's tab bar names the chart and a drag on it undocks.
+     * The Dock icon is for a chart that is not docked yet.
      */
-    std::optional<widget::foot_state> foot;
-    bool open_view_menu = false;
-    if (layout == chart_layout::full) {
-        const auto icons = begin_header_row(floating_icons,
-            ImGui::GetFrameHeight());
-        state.tile = icons.asked;
-        draw_full_header(summary);
-        ImGui::SameLine();
-        draw_series_flags(input, *session, chart->label, icons.width);
+    const bool docked = ImGui::IsWindowDocked();
+    const auto icons = docked
+        ? header_icons_drawn{}
+        : begin_header_row(floating_icons, ImGui::GetFrameHeight());
+    state.tile = icons.asked;
+    draw_full_header(summary);
+    ImGui::SameLine();
+    draw_series_flags(input, *session, chart->label, icons.width);
+    if (!docked)
         ImGui::PopClipRect();
-    } else {
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-            ImVec2(ImGui::GetStyle().ItemSpacing.x, compact_row_gap));
-        const auto icons = begin_header_row(docked_icons,
-            widget::value_pill_size(summary.label).y);
-        state.tile = icons.asked;
-        open_view_menu = draw_compact_header(summary,
-            state.market_view.chart_span);
-        ImGui::SameLine();
-        draw_series_flags(input, *session, chart->label, icons.width);
-        ImGui::PopClipRect();
-        ImGui::PopStyleVar();
-    }
 
     if (row && !series.failure(*row).empty()) {
         const auto failure = series.failure(*row);
@@ -674,6 +548,7 @@ void render_chart(window_handle handle, const render_input& input,
             "%.*s", static_cast<int>(failure.size()), failure.data());
     }
 
+    std::optional<widget::foot_state> foot;
     float foot_height = 0.0f;
     {
         foot = make_foot();
@@ -883,11 +758,6 @@ void render_chart(window_handle handle, const render_input& input,
             ImPlot::PopStyleColor();
             ImPlot::PopStyleVar(2);
         }
-        if (layout == chart_layout::compact
-            && ImGui::IsWindowHovered(
-                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
-            && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
-            open_view_menu = true;
     }
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -895,13 +765,6 @@ void render_chart(window_handle handle, const render_input& input,
     const auto before = state.market_view;
     if (widget::draw_status_foot(status, input.now_ns, *foot))
         chart_view_changed(handle, input, state, before);
-    if (layout == chart_layout::compact) {
-        if (open_view_menu)
-            ImGui::OpenPopup("chart-view");
-        if (draw_view_menu(state.market_view))
-            chart_view_changed(handle, input, state, before);
-        draw_focus_outline();
-    }
     ImGui::PopID();
 }
 

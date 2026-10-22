@@ -320,6 +320,9 @@ inline constexpr unsigned int flag_alpha = 217;
 /** @brief The gap between a base and a quote flag, close enough to read as one badge. */
 inline constexpr float flag_pair_gap = 2.0f;
 
+/** @brief A header's flag height as a fraction of the price pill's, so the flags sit quieter than the pill. */
+inline constexpr float flag_height_fraction = 0.75f;
+
 /**
  * @brief The colour of a session status.
  *

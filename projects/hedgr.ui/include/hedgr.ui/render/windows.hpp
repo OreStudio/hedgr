@@ -156,11 +156,10 @@ HEDGR_UI_EXPORT void render_series_browser(
  * @brief One market series as a candle or line plot, drawn from the series
  * table's columns.
  *
- * A floating chart is drawn full: a header with the points in view and a foot
- * holding the period, style and EMA. A chart docked into another window is a
- * tile and is drawn compact: one header row, no foot, and the same choices on
- * a right click over the plot. Docked or not is read from ImGui each frame,
- * so the operator chooses the layout by docking.
+ * A chart is always drawn full, docked or floating: a header with the points in
+ * view, the plot, and a foot holding the period, style and EMA. A docked chart
+ * has ImGui's tab bar and is dragged out by its tab. A floating chart also has a
+ * Dock icon in its header.
  */
 HEDGR_UI_EXPORT void render_chart(
     hedgr::model::state::window_handle handle, const render_input& input,

@@ -433,7 +433,7 @@ float header_height() {
     return plot_top() - frame->DC.CursorStartPos.y;
 }
 
-TEST_CASE("a docked chart draws one compact header row and keeps its foot",
+TEST_CASE("a docked chart draws the full header, plot and foot",
     "[look][chart][docking]") {
     chart_fixture chart{0.0001};
     chart.docked = true;
@@ -442,15 +442,13 @@ TEST_CASE("a docked chart draws one compact header row and keeps its foot",
     const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
     REQUIRE(frame != nullptr);
     REQUIRE(frame->DockIsActive);
-    CHECK(active_child("##hedgr-status-line") != nullptr);
-
-    /* The foot sits under the plot, so the plot stops short of the bottom. */
+    const ImGuiWindow* foot = active_child("##hedgr-status-line");
+    REQUIRE(foot != nullptr);
     const ImGuiWindow* plot = active_child("##plot-area");
     REQUIRE(plot != nullptr);
-    CHECK(plot->Pos.y + plot->Size.y < frame->WorkRect.Max.y - 1.0f);
-
-    /* A second row would add at least another pill's height. */
-    CHECK(header_height() < 2.0f * widget::value_pill_size("FX GBP/USD").y);
+    CHECK(plot->Pos.y + plot->Size.y <= foot->Pos.y);
+    CHECK(header_height() == Approx(ImGui::GetFrameHeight()
+        + ImGui::GetStyle().ItemSpacing.y));
 }
 
 TEST_CASE("a floating chart still draws its foot", "[look][chart][docking]") {
@@ -467,7 +465,7 @@ TEST_CASE("a floating chart still draws its foot", "[look][chart][docking]") {
     CHECK(plot->Pos.y + plot->Size.y <= foot->Pos.y);
 }
 
-TEST_CASE("a docked chart's header is shorter than a floating chart's",
+TEST_CASE("a docked chart's header is as tall as a floating chart's",
     "[look][chart][docking]") {
     float full = 0.0f;
     {
@@ -478,11 +476,8 @@ TEST_CASE("a docked chart's header is shorter than a floating chart's",
     chart_fixture chart{0.0001};
     chart.docked = true;
     settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
-    const float compact = header_height();
-    INFO("full header " << full << "px, compact header " << compact << "px");
-    CHECK(compact > 0.0f);
-    CHECK(compact < full);
-    WARN("full header " << full << "px, compact header " << compact << "px");
+    CHECK(full > 0.0f);
+    CHECK(header_height() == Approx(full));
 }
 
 TEST_CASE("a docked chart wears the same pills as a floating one",
@@ -509,20 +504,6 @@ TEST_CASE("a docked chart wears the same pills as a floating one",
     }
 }
 
-TEST_CASE("a docked chart wears an accent outline only while focused",
-    "[look][chart][docking]") {
-    chart_fixture chart{0.0001};
-    chart.docked = true;
-    const auto resting = settled([&] { chart.draw(newest_at_ns); },
-        frame_vertices);
-    CHECK_FALSE(has_colour(resting, theme::rail_selection_border));
-
-    ImGui::SetWindowFocus("frame");
-    const auto focused = settled([&] { chart.draw(newest_at_ns); },
-        frame_vertices);
-    CHECK(has_colour(focused, theme::rail_selection_border));
-}
-
 namespace {
 
 /** @brief Moves the mouse to @p at and draws a frame. */
@@ -546,75 +527,23 @@ const ImGuiWindow* open_popup() {
     return stack.empty() ? nullptr : stack.back().Window;
 }
 
-/**
- * @brief Clicks the menu item labelled @p label in the open popup.
- *
- * The item is found by hovering down the popup until ImGui reports the item's
- * id as hovered, so the test depends on the label and not on the menu's
- * layout.
- */
-bool click_menu_item(chart_fixture& chart, const char* label) {
-    const ImGuiWindow* popup = open_popup();
-    if (popup == nullptr)
-        return false;
-    const ImGuiID item = ImHashStr(label, 0, popup->ID);
-    const float x = popup->Pos.x + popup->Size.x * 0.5f;
-    for (float y = popup->Pos.y; y < popup->Pos.y + popup->Size.y; y += 1.0f) {
-        hover(chart, ImVec2(x, y));
-        if (ImGui::GetCurrentContext()->HoveredId == item) {
-            click(chart, ImVec2(x, y), ImGuiMouseButton_Left);
-            return true;
-        }
-    }
-    return false;
-}
-
 ImVec2 centre_of(const ImGuiWindow* w) {
     return ImVec2(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.5f);
 }
 
 }
 
-TEST_CASE("a right click on a docked chart's plot changes its view",
+TEST_CASE("a right click on a chart's plot opens no menu, docked or floating",
     "[look][chart][docking]") {
-    chart_fixture chart{0.0001};
-    chart.docked = true;
-    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
-    static_cast<void>(chart.desk.commands.drain());
-    REQUIRE(chart.state.market_view.chart_span == 3);
-    REQUIRE(chart.state.market_view.chart_style == 1);
-
-    const ImGuiWindow* plot = active_child("##plot-area");
-    REQUIRE(plot != nullptr);
-    click(chart, centre_of(plot), ImGuiMouseButton_Right);
-    REQUIRE(open_popup() != nullptr);
-    REQUIRE(click_menu_item(chart, "1d"));
-
-    CHECK(chart.state.market_view.chart_span == 4);
-    CHECK(chart.desk.market_view.chart_span == 4);
-    std::vector<model::command::command> saved;
-    for (auto& c : chart.desk.commands.drain()) {
-        if (c.kind == model::command::command_kind::configure_chart)
-            saved.push_back(std::move(c));
+    for (const bool docked : {false, true}) {
+        chart_fixture chart{0.0001};
+        chart.docked = docked;
+        settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+        const ImGuiWindow* plot = active_child("##plot-area");
+        REQUIRE(plot != nullptr);
+        click(chart, centre_of(plot), ImGuiMouseButton_Right);
+        CHECK(open_popup() == nullptr);
     }
-    REQUIRE(saved.size() == 1);
-    CHECK(saved[0].window_id == "w");
-    CHECK(saved[0].chart_view.span_ns == render::chart_spans[4].ns);
-
-    click(chart, centre_of(plot), ImGuiMouseButton_Right);
-    REQUIRE(click_menu_item(chart, "Candles"));
-    CHECK(chart.state.market_view.chart_style == 0);
-    CHECK(chart.state.market_view.chart_span == 4);
-}
-
-TEST_CASE("a right click on a floating chart's plot opens no menu",
-    "[look][chart][docking]") {
-    chart_fixture chart{0.0001};
-    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
-    const ImGuiWindow* plot = active_child("##plot-area");
-    REQUIRE(plot != nullptr);
-    click(chart, centre_of(plot), ImGuiMouseButton_Right);
-    CHECK(open_popup() == nullptr);
 }
 
 TEST_CASE("a term structure names its curve in a pill and wears no state",
