@@ -82,6 +82,26 @@ to_string(window_kind value) noexcept;
 [[nodiscard]] HEDGR_MODEL_EXPORT std::expected<window_kind, std::string>
 window_kind_from_string(std::string_view text);
 
+/** @brief How a chart draws its points. */
+enum class chart_style : std::uint8_t {
+    candles = 0,
+    line = 1,
+};
+
+/** @brief How one chart is read: its period, its style and its overlay. */
+struct chart_view final {
+    /** @brief The span the chart plots, in nanoseconds, or zero for all. */
+    std::int64_t span_ns = std::int64_t{5} * 60 * 1'000'000'000;
+
+    /** @brief Candles or a line. */
+    chart_style style = chart_style::line;
+
+    /** @brief Whether the moving average is drawn over the points. */
+    bool ema = false;
+
+    friend bool operator==(const chart_view&, const chart_view&) = default;
+};
+
 /** @brief State of a chart window. */
 struct chart_state final {
     /** @brief Human label of the series, shown in the title. */
@@ -92,6 +112,16 @@ struct chart_state final {
 
     /** @brief Ring capacity of the plotted series. */
     std::uint32_t max_points = 600;
+
+    /**
+     * @brief The chart's own view, once it has one.
+     *
+     * Empty for a chart opened a moment ago or saved before charts kept their
+     * own view. Such a chart draws with the interface's remembered defaults
+     * and saves them as its own on its first frame, so a later change to the
+     * defaults by another chart does not move it.
+     */
+    std::optional<chart_view> view;
 };
 
 /** @brief State of a term-structure window. */
