@@ -409,6 +409,8 @@ void workspace::render(const render_input& input) {
             ImGui::End();
             continue;
         }
+        hedgr::ui::theme::shade_window_background(
+            hedgr::ui::theme::window_gradient);
 
         if (!keep_open) {
             hedgr::model::command::command request;
@@ -610,6 +612,8 @@ void workspace::draw_startup_failure(const render_input& input) {
         ImGui::End();
         return;
     }
+    hedgr::ui::theme::shade_window_background(
+        hedgr::ui::theme::window_gradient);
 
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + notice_width - 40.0f);
 
@@ -697,6 +701,8 @@ void workspace::draw_lock_prompt(const render_input& input) {
         ImGui::End();
         return;
     }
+    hedgr::ui::theme::shade_window_background(
+        hedgr::ui::theme::window_gradient);
 
     if (creating) {
         ImGui::TextWrapped(

@@ -339,7 +339,7 @@ TEST_CASE("a hero strip spans the width and wears its tone",
         CHECK(ImGui::GetItemRectSize().y
             == Approx(widget::hero_strip_height()));
         CHECK(widget::hero_strip_height() > widget::value_pill_size("X").y);
-        CHECK(has_colour(good, theme::band_colours(theme::tone::good).fill));
+        CHECK(has_hue(good, theme::band_fade(theme::tone::good).from));
         CHECK(has_colour(good, theme::pill_colours(theme::tone::good).fill));
         CHECK(has_colour(good, theme::good_colour));
         CHECK_FALSE(has_hue(good, theme::failure_colour));
@@ -349,7 +349,7 @@ TEST_CASE("a hero strip spans the width and wears its tone",
         const auto bad = vertices_of([] {
             widget::hero_strip("Current P/L", "-1.20%", theme::tone::bad);
         });
-        CHECK(has_colour(bad, theme::band_colours(theme::tone::bad).fill));
+        CHECK(has_hue(bad, theme::band_fade(theme::tone::bad).from));
         CHECK(has_colour(bad, theme::failure_colour));
         CHECK_FALSE(has_hue(bad, theme::good_colour));
         CHECK_FALSE(has_hue(bad, accent()));
