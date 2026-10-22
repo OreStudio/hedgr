@@ -492,6 +492,15 @@ Check: look tests on a docked chart (pills, tones, no foot), and an allocation
 test showing a steady docked chart frame allocates nothing. A capture of a 2x2
 docked desk for the gallery.
 
+Delivered on `mini-plots-compact-chart`. A steady docked chart frame allocates
+nothing (it allocated 7 per chart before, the same as a floating one, which is
+unchanged at 7). With the 15 px UI font the compact header is 24 px against
+31 px for the full one, and the full chart's foot takes another 36 px. The
+compact row is as tall as the 22 px flags. The period caption in the header
+also opens the menu. Window padding stays as it is, because ImGui applies it
+in `Begin`, before the chart can know it is docked. The gallery's
+`docked-charts` capture shows four tiles.
+
 ### 4. Dock and pop out by click
 
 The "Dock" icon on a floating chart and the "Pop out" and close icons on a
