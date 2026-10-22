@@ -29,6 +29,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
+#include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "hedgr.ui/widget/tabs.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -121,15 +122,15 @@ void menu_screen(hedgr::ui::render::command_centre_ui_state& state,
         open_screen(state, id);
 }
 
-/** @brief The colour a tenant's lifecycle status is drawn in. */
-[[nodiscard]] ImU32 status_colour(std::string_view status) {
+/** @brief The tone a tenant's lifecycle status pill wears. */
+[[nodiscard]] theme::tone status_tone(std::string_view status) {
     if (status == "active")
-        return theme::status_colour(domain::session_status::authenticated);
+        return theme::tone::good;
     if (status == "bootstrapping")
-        return theme::readiness_colour(domain::readiness::bootstrapping);
+        return theme::tone::warning;
     if (status == "suspended")
-        return theme::failure_colour;
-    return ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        return theme::tone::bad;
+    return theme::tone::neutral;
 }
 
 /**
@@ -337,9 +338,7 @@ void draw_tenants(const domain::deployment_snapshot& snapshot) {
             ImGui::TableNextColumn();
             ImGui::TextUnformatted(row.name.c_str());
             ImGui::TableNextColumn();
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(
-                                   status_colour(row.status)),
-                "%s", row.status.c_str());
+            widget::value_pill(row.status, status_tone(row.status));
             ImGui::TableNextColumn();
             ImGui::TextDisabled("%s", row.type.c_str());
         }

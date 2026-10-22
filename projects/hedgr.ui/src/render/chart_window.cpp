@@ -27,18 +27,22 @@
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <ctime>
 #include <format>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -140,13 +144,53 @@ constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
  * to ask which is which: the magnitude answers, and the alternative is a label
  * reading "1.23456" beside one reading "0.00000".
  */
-[[nodiscard]] std::string format_price(double value) {
+/** @brief A number formatted into storage of its own, so a frame allocates nothing. */
+struct number_text final {
+    std::array<char, 32> buffer{};
+    std::size_t size = 0;
+
+    [[nodiscard]] std::string_view view() const { return {buffer.data(), size}; }
+    [[nodiscard]] const char* c_str() const { return buffer.data(); }
+};
+
+template<class... Args>
+[[nodiscard]] number_text format_number(std::format_string<Args...> pattern,
+    Args&&... args) {
+    number_text text;
+    const auto written = std::format_to_n(text.buffer.data(),
+        static_cast<std::ptrdiff_t>(text.buffer.size() - 1), pattern,
+        std::forward<Args>(args)...);
+    text.size = static_cast<std::size_t>(written.out - text.buffer.data());
+    return text;
+}
+
+[[nodiscard]] number_text format_price(double value) {
     const double magnitude = std::fabs(value);
     const int decimals = magnitude >= 1000.0 ? 2
         : magnitude >= 100.0 ? 3
         : magnitude >= 10.0 ? 4
         : 5;
-    return std::format("{:.{}f}", value, decimals);
+    return format_number("{:.{}f}", value, decimals);
+}
+
+/**
+ * @brief The verdict the change pill wears.
+ *
+ * The direction, unless the data is too old to have one: a stale move is no
+ * news, so it is neutral, and a delayed one wears the delay rather than the
+ * direction, as the price tag on the plot does.
+ */
+[[nodiscard]] theme::tone change_tone(domain::data_health health,
+    double change) {
+    if (health == domain::data_health::stale)
+        return theme::tone::neutral;
+    if (health == domain::data_health::delayed)
+        return theme::tone::warning;
+    if (change > 0.0)
+        return theme::tone::good;
+    if (change < 0.0)
+        return theme::tone::bad;
+    return theme::tone::neutral;
 }
 
 /** @brief A length of time in the fewest words the period combo uses. */
@@ -301,20 +345,22 @@ void render_chart(window_handle handle, const render_input& input,
      * many points are in view. Everything that is a setting lives on the foot,
      * so the plot gets the rest of the window.
      */
-    ImGui::TextUnformatted(chart->label.c_str());
+    ImGui::AlignTextToFramePadding();
+    widget::value_pill(chart->label);
     if (!no_points) {
         const double percent =
             first != 0.0 ? change / first * 100.0 : 0.0;
-        const ImVec4 tint = health_tint(health,
-            ImGui::ColorConvertU32ToFloat4(colour));
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         ImGui::PushFont(icon::numeric_font());
-        ImGui::TextColored(tint, "%s", format_price(last).c_str());
-        ImGui::SameLine();
-        ImGui::TextColored(tint, "%+.2f%%", percent);
+        ImGui::TextUnformatted(format_price(last).c_str());
         ImGui::PopFont();
+        ImGui::SameLine();
+        widget::value_pill(format_number("{:+.2f}%", percent).view(),
+            change_tone(health, change));
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::TextDisabled("%zu points", plotted);
+        widget::caption("Points");
+        ImGui::SameLine();
+        ImGui::Text("%zu", plotted);
         if (span_ns == 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 All points");

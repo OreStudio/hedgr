@@ -24,6 +24,7 @@
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
+#include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
@@ -112,11 +113,14 @@ void render_term_structure(window_handle handle, const render_input& input,
         .option_count = static_cast<int>(term_history_labels.size()),
         .selected = &history_index});
 
-    ImGui::TextUnformatted(terms->label.c_str());
+    ImGui::AlignTextToFramePadding();
+    widget::value_pill(terms->label);
     ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
     if (primary >= 0 && !curve->curves[static_cast<std::size_t>(primary)].nodes.empty()) {
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::TextDisabled("%zu terms",
+        widget::caption("Terms");
+        ImGui::SameLine();
+        ImGui::Text("%zu",
             curve->curves[static_cast<std::size_t>(primary)].nodes.size());
     }
     ImGui::SameLine();

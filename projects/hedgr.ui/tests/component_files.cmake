@@ -15,6 +15,7 @@ set(files
     "controls_tests.cpp"
     "crm_grid_tests.cpp"
     "time_text_tests.cpp"
+    "window_look_tests.cpp"
     "ema_tests.cpp"
     "flags_tests.cpp"
     "frame_cost_tests.cpp"
