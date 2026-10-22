@@ -509,15 +509,6 @@ void workspace::render(const render_input& input) {
                 || kind == hedgr::model::domain::window_kind::workspace
             ? ImGuiWindowFlags_MenuBar
             : ImGuiWindowFlags_None;
-        /*
-         * A chart alone in its dock node is a tile and its header names it, so
-         * the node's tab would only repeat the name above a smaller plot.
-         */
-        if (kind == hedgr::model::domain::window_kind::chart) {
-            ImGuiWindowClass tile;
-            tile.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_AutoHideTabBar;
-            ImGui::SetNextWindowClass(&tile);
-        }
         if (!ImGui::Begin(begin_label_.c_str(), closable ? &keep_open : nullptr,
                 window_flags)) {
             /*
@@ -553,22 +544,6 @@ void workspace::render(const render_input& input) {
             break;
         case tile_request::dock:
             next_move_ = dock_move{.window = handle, .into_desk = true};
-            break;
-        case tile_request::pop_out: {
-            /*
-             * Back out over the tile it leaves, at the size it last floated
-             * at, or at its opening size if it has floated nowhere this run.
-             */
-            const ImGuiViewport& viewport = *ImGui::GetWindowViewport();
-            const ImVec2 size = floating_size_for(state.floating_size,
-                default_size, viewport);
-            next_move_ = dock_move{.window = handle,
-                .pos = popped_position(ImGui::GetWindowPos(), size, viewport),
-                .size = size};
-            break;
-        }
-        case tile_request::close:
-            keep_open = false;
             break;
         }
 

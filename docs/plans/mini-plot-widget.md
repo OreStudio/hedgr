@@ -53,7 +53,7 @@ change is the last value against the first value in that span.
 
 Each lands on its own with the suite green.
 
-### 1. Remove the compact layout
+### 1. Remove the compact layout (done)
 
 A docked chart draws as a full chart. Delete the compact path and its tests, keep
 the Dock icon on floating charts. Check: the docked-chart tests now assert a full

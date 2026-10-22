@@ -95,7 +95,7 @@ TEST_CASE("two desk windows docked side by side are both drawn, docked",
     CHECK_FALSE(right->DrawList->VtxBuffer.empty());
 }
 
-TEST_CASE("a chart alone in its dock node hides the tab bar and others keep it",
+TEST_CASE("a chart alone in its dock node keeps its tab to drag it out by",
     "[docking][workspace]") {
     headless_imgui imgui;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -117,13 +117,12 @@ TEST_CASE("a chart alone in its dock node hides the tab bar and others keep it",
     }
 
     const ImGuiWindow* chart = desk_window("###left");
-    const ImGuiWindow* browser = desk_window("###right");
     REQUIRE(chart != nullptr);
-    REQUIRE(browser != nullptr);
     REQUIRE(chart->DockNode != nullptr);
-    REQUIRE(browser->DockNode != nullptr);
-    CHECK(chart->DockNode->IsHiddenTabBar());
-    CHECK_FALSE(browser->DockNode->IsHiddenTabBar());
+    CHECK_FALSE(chart->DockNode->IsHiddenTabBar());
+    REQUIRE(chart->DockNode->TabBar != nullptr);
+    CHECK(ImGui::TabBarFindTabByID(chart->DockNode->TabBar, chart->TabId)
+        != nullptr);
 }
 
 TEST_CASE("the lock prompt stays out of a dock", "[docking][workspace]") {
@@ -278,49 +277,47 @@ TEST_CASE("a second chart docked by its icon splits beside the first",
     /* Side by side and both shown, not two tabs of one node. */
     CHECK(a->DockNode != b->DockNode);
     CHECK(a->Pos.x < b->Pos.x);
-    CHECK(a->DockNode->IsHiddenTabBar());
-    CHECK(b->DockNode->IsHiddenTabBar());
+    CHECK_FALSE(a->DockNode->IsHiddenTabBar());
+    CHECK_FALSE(b->DockNode->IsHiddenTabBar());
 }
 
-TEST_CASE("a docked chart's Pop out icon floats it at the size it floated at",
+TEST_CASE("dragging a docked chart's tab out floats it",
     "[docking][workspace]") {
     dock_desk d{"c"};
-    const ImVec2 floating = desk_window("###c")->Size;
     REQUIRE(d.dock("###c"));
     REQUIRE(d.in_desk("###c"));
-    REQUIRE(desk_window("###c")->Size.x != floating.x);
-
-    REQUIRE(click_header_icon(d.workspace, d.input, "###c", "pop-out",
-        hedgr::ui::icon::move));
-    desk_frame(d.workspace, d.input);
 
     const ImGuiWindow* w = desk_window("###c");
-    REQUIRE(w != nullptr);
-    CHECK_FALSE(w->DockIsActive);
-    CHECK(w->DockId == 0);
-    CHECK(w->Size.x == floating.x);
-    CHECK(w->Size.y == floating.y);
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    CHECK(w->Pos.x >= viewport->WorkPos.x);
-    CHECK(w->Pos.y + w->Size.y <= viewport->WorkPos.y + viewport->WorkSize.y);
+    REQUIRE(w->DockNode->TabBar != nullptr);
+    const ImGuiTabItem* tab =
+        ImGui::TabBarFindTabByID(w->DockNode->TabBar, w->TabId);
+    REQUIRE(tab != nullptr);
+    const ImGuiTabBar* bar = w->DockNode->TabBar;
+    const ImVec2 grab(bar->BarRect.Min.x + tab->Offset + tab->Width * 0.5f,
+        (bar->BarRect.Min.y + bar->BarRect.Max.y) * 0.5f);
+
+    hover(d.workspace, d.input, grab);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    desk_frame(d.workspace, d.input);
+    for (float step = 1.0f; step <= 8.0f; step += 1.0f) {
+        hover(d.workspace, d.input, ImVec2(grab.x + 20.0f * step,
+            grab.y + 40.0f * step));
+    }
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    d.settle();
+
+    const ImGuiWindow* after = desk_window("###c");
+    REQUIRE(after != nullptr);
+    CHECK_FALSE(after->DockIsActive);
+    CHECK(after->DockId == 0);
 }
 
-TEST_CASE("a docked chart's close icon closes the window",
+TEST_CASE("a docked chart has no Dock icon to click",
     "[docking][workspace]") {
     dock_desk d{"c"};
     REQUIRE(d.dock("###c"));
-    static_cast<void>(d.desk.commands.drain());
-
-    REQUIRE(click_header_icon(d.workspace, d.input, "###c", "close",
-        hedgr::ui::icon::cancel));
-
-    std::vector<std::string> closed;
-    for (const auto& c : d.desk.commands.drain()) {
-        if (c.kind == model::command::command_kind::close_window)
-            closed.push_back(c.window_id);
-    }
-    REQUIRE(closed.size() == 1);
-    CHECK(closed[0] == "c");
+    CHECK_FALSE(click_header_icon(d.workspace, d.input, "###c", "dock",
+        hedgr::ui::icon::panel));
 }
 
 TEST_CASE("the desk's empty centre lets a click through to the background",

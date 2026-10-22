@@ -483,6 +483,12 @@ check is a runtime test of two charts, not four.
 
 ### 3. The compact chart
 
+> **Superseded.** The compact layout this step built was removed in
+> `mini-plot-widget.md` step 1. A docked chart draws as a full chart with
+> ImGui's own tab bar. The request was for a small card per series, which is
+> its own window kind there, not a chart drawn small. The text below records
+> what #76 delivered.
+
 `render_chart` branches on `ImGui::IsWindowDocked()`. The compact branch draws
 the one-row header, no foot, the right-click menu for period, style and EMA,
 and the focus outline. The workspace sets `AutoHideTabBar` through
@@ -502,6 +508,12 @@ in `Begin`, before the chart can know it is docked. The gallery's
 `docked-charts` capture shows four tiles.
 
 ### 4. Dock and pop out by click
+
+> **Partly superseded.** The Pop out and close icons on the compact header, the
+> right-click view menu and the focus outline went with the compact layout
+> (`mini-plot-widget.md` step 1). A docked chart is dragged out by its tab
+> and closed from it. The Dock icon on a floating chart, the dock space and the
+> placement rule below stay.
 
 The "Dock" icon on a floating chart and the "Pop out" and close icons on a
 compact one. Add `DockSpaceOverViewport` with the passthrough central node so

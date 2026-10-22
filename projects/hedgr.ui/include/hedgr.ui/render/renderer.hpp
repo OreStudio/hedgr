@@ -208,7 +208,7 @@ struct command_centre_ui_state final {
  * that docking and floating need. Where a window sits is ImGui's state, saved
  * in its own settings file, so none of these becomes a command.
  */
-enum class tile_request : std::uint8_t { none, dock, pop_out, close };
+enum class tile_request : std::uint8_t { none, dock };
 
 struct window_ui_state final {
     /** @brief The request the window's controls made this frame. */
