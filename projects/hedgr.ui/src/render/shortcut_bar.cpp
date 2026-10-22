@@ -325,6 +325,12 @@ bool hover_is_new_entry(std::string_view previous,
     return !hovered.empty() && hovered != previous;
 }
 
+float shortcut_bar_height(const render_input& input) {
+    if (input.shortcuts.size() == 0 || !shows_instances(input))
+        return 0.0f;
+    return entry_size + 2.0f * ImGui::GetStyle().WindowPadding.y;
+}
+
 void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result,
     shortcut_bar_state& state) {
     /*
@@ -333,7 +339,7 @@ void draw_shortcut_bar(const render_input& input, shortcut_bar_result& result,
      * opens. Drawing a bar of entries the interface cannot read would be a bar
      * of another session's shortcuts.
      */
-    if (input.shortcuts.size() == 0 || !shows_instances(input))
+    if (shortcut_bar_height(input) == 0.0f)
         return;
 
     /*

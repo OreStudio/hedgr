@@ -278,7 +278,7 @@ std::string identity_text(const identity_bar_state& state) {
 
 void draw_series_flags(const render_input& input,
     const hedgr::model::state::session_handle session,
-    std::string_view label) {
+    std::string_view label, float inset) {
     request_flags(input, session, label);
 
     const auto pair = hedgr::ui::widget::currencies_of(label);
@@ -297,7 +297,7 @@ void draw_series_flags(const render_input& input,
     const float gap = 3.0f;
     const float flags_width = flag_w * static_cast<float>(flags)
         + gap * static_cast<float>(flags - 1);
-    const float right = ImGui::GetWindowContentRegionMax().x;
+    const float right = ImGui::GetWindowContentRegionMax().x - inset;
     if (ImGui::GetCursorPosX() < right - flags_width)
         ImGui::SetCursorPosX(right - flags_width);
 

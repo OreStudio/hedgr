@@ -30,6 +30,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include <algorithm>
 #include <cfloat>
 #include <cstddef>
@@ -37,6 +38,7 @@
 #include <format>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 namespace {
@@ -75,6 +77,48 @@ void draw_background(const hedgr::ui::render::render_input& input) {
             viewport->Pos.y + viewport->Size.y),
         ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
         IM_COL32(97, 97, 97, 255));
+}
+
+/**
+ * @brief The node a window docked by its Dock button goes into.
+ *
+ * The desk's free centre while nothing is docked there, so the first window
+ * docked takes the room. After that, half of the tile focused last, split
+ * along its longer side, so docking charts one after another builds a grid
+ * rather than a stack of tabs.
+ *
+ * Called before the dock space is drawn, because the dock builder's splits are
+ * meant to land before the node they split is submitted.
+ */
+[[nodiscard]] ImGuiID dock_target(ImGuiID space) {
+    ImGuiDockNode* centre = ImGui::DockBuilderGetCentralNode(space);
+    if (centre == nullptr)
+        return space;
+    if (centre->Windows.empty())
+        return centre->ID;
+
+    const ImGuiDockNode* root = ImGui::DockBuilderGetNode(space);
+    ImGuiDockNode* last = ImGui::DockBuilderGetNode(root->LastFocusedNodeId);
+    const ImGuiDockNode* tile = last != nullptr && last->IsLeafNode() ? last
+                                                                       : centre;
+    ImGuiID half = 0;
+    static_cast<void>(ImGui::DockBuilderSplitNode(tile->ID,
+        tile->Size.x >= tile->Size.y ? ImGuiDir_Right : ImGuiDir_Down, 0.5f,
+        &half, nullptr));
+    return half;
+}
+
+/**
+ * @brief Where a popped-out window floats: over the tile it left, kept inside
+ * the work area.
+ */
+[[nodiscard]] ImVec2 popped_position(ImVec2 at, ImVec2 size,
+    const ImGuiViewport& viewport) {
+    const ImVec2 low = viewport.WorkPos;
+    const ImVec2 high(viewport.WorkPos.x + viewport.WorkSize.x - size.x,
+        viewport.WorkPos.y + viewport.WorkSize.y - size.y);
+    return ImVec2(std::clamp(at.x, low.x, std::max(low.x, high.x)),
+        std::clamp(at.y, low.y, std::max(low.y, high.y)));
 }
 
 /**
@@ -160,6 +204,7 @@ void workspace::render(const render_input& input) {
      * browser's, beside the tree.
      */
     draw_background(input);
+    draw_dock_space(input);
 
     /*
      * The runtime's latest failure, raised on the status bar before the walk
@@ -371,6 +416,16 @@ void workspace::render(const render_input& input) {
             : ImVec2(700.0f, 460.0f);
         ImGui::SetNextWindowSize(default_size, ImGuiCond_FirstUseEver);
 
+        if (move_ && move_->window == handle) {
+            if (move_->into_desk) {
+                ImGui::SetNextWindowDockID(move_->to);
+            } else {
+                ImGui::SetNextWindowDockID(0);
+                ImGui::SetNextWindowPos(move_->pos);
+                ImGui::SetNextWindowSize(move_->size);
+            }
+        }
+
         /*
          * Every window carries a close control, the root included. Closing is a
          * command rather than a local hide: the runtime owns the window table,
@@ -421,6 +476,49 @@ void workspace::render(const render_input& input) {
         hedgr::ui::theme::shade_window_background(
             hedgr::ui::theme::window_gradient);
 
+        const hedgr::model::state::key_parts<1> key{input.windows.id(handle)};
+        auto entry = ui_state_.find(key);
+        if (entry == ui_state_.end()) {
+            entry = ui_state_.try_emplace(
+                hedgr::model::state::composite_key<1>{key}).first;
+            /*
+             * A window that has not been seen before opens on the choices the
+             * last window left, while the windows already open keep their own.
+             */
+            entry->second.market_view = market_view_;
+        }
+        window_ui_state& state = entry->second;
+        if (!ImGui::IsWindowDocked())
+            state.floating_size = ImGui::GetWindowSize();
+        if (const auto draw = renderer_for(kind))
+            draw(handle, input, state, status_, lock_control_);
+
+        switch (std::exchange(state.tile, tile_request::none)) {
+        case tile_request::none:
+            break;
+        case tile_request::dock:
+            next_move_ = dock_move{.window = handle, .into_desk = true};
+            break;
+        case tile_request::pop_out: {
+            /*
+             * Back out over the tile it leaves, at the size it last floated
+             * at, or at its opening size if it has floated nowhere this run.
+             */
+            const ImGuiViewport& viewport = *ImGui::GetWindowViewport();
+            const ImVec2 wanted = state.floating_size.x > 0.0f
+                ? state.floating_size : default_size;
+            const ImVec2 size(std::min(wanted.x, viewport.WorkSize.x),
+                std::min(wanted.y, viewport.WorkSize.y));
+            next_move_ = dock_move{.window = handle,
+                .pos = popped_position(ImGui::GetWindowPos(), size, viewport),
+                .size = size};
+            break;
+        }
+        case tile_request::close:
+            keep_open = false;
+            break;
+        }
+
         if (!keep_open) {
             hedgr::model::command::command request;
             request.kind = hedgr::model::command::command_kind::close_window;
@@ -441,21 +539,6 @@ void workspace::render(const render_input& input) {
             closed.at_ns = input.now_ns;
             hedgr::model::signal::bus().raise(std::move(closed));
         }
-
-        const hedgr::model::state::key_parts<1> key{input.windows.id(handle)};
-        auto entry = ui_state_.find(key);
-        if (entry == ui_state_.end()) {
-            entry = ui_state_.try_emplace(
-                hedgr::model::state::composite_key<1>{key}).first;
-            /*
-             * A window that has not been seen before opens on the choices the
-             * last window left, while the windows already open keep their own.
-             */
-            entry->second.market_view = market_view_;
-        }
-        window_ui_state& state = entry->second;
-        if (const auto draw = renderer_for(kind))
-            draw(handle, input, state, status_, lock_control_);
 
         ImGui::End();
     }
@@ -497,6 +580,46 @@ void workspace::render(const render_input& input) {
      * the walk drew. See the note where it is opened.
      */
     draw_lock_prompt(input);
+
+    /* A move outlives one frame at most, so one whose window went is dropped. */
+    move_ = std::exchange(next_move_, std::nullopt);
+}
+
+void workspace::draw_dock_space(const render_input& input) {
+    if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable) == 0)
+        return;
+
+    /*
+     * ImGui's DockSpaceOverViewport, written out so the space can stop short
+     * of the shortcut bar. The bar is raised over every window, so a tile
+     * docked against the bottom edge would otherwise sit under it.
+     *
+     * The centre passes clicks through while nothing is docked there, so the
+     * desk behind it, and every window floating over it, are as reachable as
+     * they were before there was a dock space.
+     */
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,
+        std::max(0.0f, viewport->WorkSize.y - shortcut_bar_height(input))));
+    ImGui::SetNextWindowViewport(viewport->ID);
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
+        | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
+        | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking
+        | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus
+        | ImGuiWindowFlags_NoBackground;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("###hedgr-desk", nullptr, flags);
+    ImGui::PopStyleVar(3);
+
+    dock_space_ = ImGui::GetID("desk");
+    if (move_ && move_->into_desk)
+        move_->to = dock_target(dock_space_);
+    ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
+        ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::End();
 }
 
 bool workspace::shows_lock_prompt(const render_input& input) const noexcept {

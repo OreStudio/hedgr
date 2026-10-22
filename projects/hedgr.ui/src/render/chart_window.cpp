@@ -35,6 +35,7 @@
 #include "implot.h"
 #include <algorithm>
 #include <array>
+#include <cfloat>
 #include <cmath>
 #include <cstddef>
 #include <ctime>
@@ -392,6 +393,65 @@ bool draw_view_menu(market_view_state& view) {
     return changed;
 }
 
+/** @brief An icon at the right end of a chart's header, and what it asks. */
+struct header_icon final {
+    const char* id;
+    const char* glyph;
+    const char* tooltip;
+    tile_request request;
+};
+
+constexpr std::array floating_icons{
+    header_icon{"dock", icon::panel, "Dock into the desk", tile_request::dock},
+};
+
+constexpr std::array docked_icons{
+    header_icon{"pop-out", icon::move, "Pop out into a floating window",
+        tile_request::pop_out},
+    header_icon{"close", icon::cancel, "Close this chart",
+        tile_request::close},
+};
+
+/** @brief What the header's icons asked, and the width they keep. */
+struct header_icons_drawn final {
+    tile_request asked = tile_request::none;
+    float width = 0.0f;
+};
+
+/**
+ * @brief Draws @p icons at the right end of the header row, @p height tall,
+ * and clips the rest of the row short of them.
+ *
+ * The icons come first so a narrow tile loses the end of its header text and
+ * never a control. The caller draws the row and then pops the clip.
+ */
+[[nodiscard]] header_icons_drawn begin_header_row(
+    std::span<const header_icon> icons, float height) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float gap = style.ItemInnerSpacing.x;
+    const float width =
+        static_cast<float>(icons.size()) * (height + gap) - gap;
+    const float left = std::max(start.x,
+        start.x + ImGui::GetContentRegionAvail().x - width);
+
+    header_icons_drawn drawn{.width = width + gap};
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x,
+        std::max(0.0f, (height - ImGui::GetFontSize()) * 0.5f)));
+    ImGui::SetCursorScreenPos(ImVec2(left, start.y));
+    for (std::size_t i = 0; i < icons.size(); ++i) {
+        if (i != 0)
+            ImGui::SameLine(0.0f, gap);
+        if (widget::icon_button(icons[i].id, icons[i].glyph, icons[i].tooltip))
+            drawn.asked = icons[i].request;
+    }
+    ImGui::PopStyleVar();
+
+    ImGui::SetCursorScreenPos(start);
+    ImGui::PushClipRect(start, ImVec2(left - gap, FLT_MAX), true);
+    return drawn;
+}
+
 /** @brief Outlines the current window in the accent, the active tile's mark. */
 void draw_focus_outline() {
     if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
@@ -568,16 +628,24 @@ void render_chart(window_handle handle, const render_input& input,
     std::optional<widget::foot_state> foot;
     bool open_view_menu = false;
     if (layout == chart_layout::full) {
+        const auto icons = begin_header_row(floating_icons,
+            ImGui::GetFrameHeight());
+        state.tile = icons.asked;
         draw_full_header(summary);
         ImGui::SameLine();
-        draw_series_flags(input, *session, chart->label);
+        draw_series_flags(input, *session, chart->label, icons.width);
+        ImGui::PopClipRect();
     } else {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
             ImVec2(ImGui::GetStyle().ItemSpacing.x, compact_row_gap));
+        const auto icons = begin_header_row(docked_icons,
+            widget::value_pill_size(summary.label).y);
+        state.tile = icons.asked;
         open_view_menu = draw_compact_header(summary,
             state.market_view.chart_span);
         ImGui::SameLine();
-        draw_series_flags(input, *session, chart->label);
+        draw_series_flags(input, *session, chart->label, icons.width);
+        ImGui::PopClipRect();
         ImGui::PopStyleVar();
     }
 
