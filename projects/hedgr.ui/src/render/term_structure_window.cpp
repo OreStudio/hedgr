@@ -118,7 +118,7 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
     if (primary >= 0 && !curve->curves[static_cast<std::size_t>(primary)].nodes.empty()) {
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        widget::caption("Terms");
+        widget::caption("Terms", "Tenors on the newest curve.");
         ImGui::SameLine();
         ImGui::Text("%zu",
             curve->curves[static_cast<std::size_t>(primary)].nodes.size());

@@ -19,6 +19,7 @@
  */
 #include "allocation_counter.hpp"
 #include "headless_desk.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -42,8 +43,8 @@ using hedgr::testing::frame;
 using hedgr::testing::headless_imgui;
 using Catch::Approx;
 
-constexpr std::array all_tones{theme::tone::neutral, theme::tone::good,
-    theme::tone::bad, theme::tone::warning};
+constexpr std::array all_tones{theme::tone::neutral, theme::tone::quiet,
+    theme::tone::good, theme::tone::bad, theme::tone::warning};
 
 /** @brief The vertices @p draw adds to the current window's draw list. */
 template<class Draw>
@@ -83,6 +84,12 @@ bool is_solid(const ImDrawVert& v) {
     return v.uv.x == white.x && v.uv.y == white.y;
 }
 
+/** @brief How bright @p colour reads, in Rec. 709 weights. */
+float luminance(ImU32 colour) {
+    const ImVec4 c = ImGui::ColorConvertU32ToFloat4(colour);
+    return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+}
+
 ImU32 accent() {
     return ImGui::GetColorU32(ImGuiCol_CheckMark);
 }
@@ -92,6 +99,12 @@ float max_x(const std::vector<ImDrawVert>& vertices) {
     for (const auto& v : vertices)
         result = std::max(result, v.pos.x);
     return result;
+}
+
+ImVec2 centre_of_item() {
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    return ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
 }
 
 /** @brief A themed headless context, so the accent and the chip are real. */
@@ -151,6 +164,69 @@ TEST_CASE("a caption records the size it measures and draws inside it",
     });
 }
 
+TEST_CASE("a caption draws its help ring only when it has help",
+    "[cells][caption][help]") {
+    themed context;
+    frame([] {
+        const ImU32 ring = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        const auto plain = vertices_of([] { widget::caption("Points"); });
+        CHECK_FALSE(has_colour(plain, ring));
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const auto helped = vertices_of(
+            [] { widget::caption("Points", "Observations plotted."); });
+        CHECK(has_colour(helped, ring));
+        const float text_right = origin.x + widget::caption_size("Points").x;
+        for (const auto& v : helped) {
+            if (v.col == ring)
+                CHECK(v.pos.x > text_right);
+        }
+
+        const auto bare_cell = vertices_of(
+            [] { widget::labelled_value("Date", "15 Oct", 160.0f); });
+        CHECK_FALSE(has_colour(bare_cell, ring));
+        const auto helped_cell = vertices_of(
+            [] { widget::labelled_value("Date", "15 Oct", 160.0f, "Opened"); });
+        CHECK(has_colour(helped_cell, ring));
+    });
+}
+
+TEST_CASE("a hovered caption lights its help ring", "[cells][caption][help]") {
+    themed context;
+    const ImU32 resting = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const ImU32 lit = ImGui::GetColorU32(ImGuiCol_Text);
+    ImVec2 caption_centre;
+    ImVec2 cell_centre;
+    std::vector<ImDrawVert> caption;
+    std::vector<ImDrawVert> cell;
+    const auto draw = [&] {
+        frame([&] {
+            caption = vertices_of([] { widget::caption("Terms", "Tenors."); });
+            caption_centre = centre_of_item();
+            cell = vertices_of(
+                [] { widget::labelled_value("Date", "15 Oct", 160.0f, "Opened"); });
+            cell_centre = centre_of_item();
+        });
+    };
+    draw();
+    CHECK(has_colour(caption, resting));
+    CHECK_FALSE(has_colour(caption, lit));
+
+    ImGui::GetIO().AddMousePosEvent(caption_centre.x, caption_centre.y);
+    draw();
+    draw();
+    CHECK(has_colour(caption, lit));
+    CHECK_FALSE(has_colour(caption, resting));
+    CHECK(has_colour(cell, resting));
+
+    ImGui::GetIO().AddMousePosEvent(cell_centre.x, cell_centre.y);
+    draw();
+    draw();
+    CHECK(has_colour(cell, lit));
+    CHECK_FALSE(has_colour(cell, resting));
+    CHECK(has_colour(caption, resting));
+}
+
 TEST_CASE("the semantic tones take the state colours and never the accent",
     "[cells][tone]") {
     themed context;
@@ -185,6 +261,57 @@ TEST_CASE("the semantic tones take the state colours and never the accent",
                 CHECK(rgb(colours.text) != rgb(accent()));
             }
         }
+    });
+}
+
+/** @brief The height the glyphs of @p vertices in @p colour span together. */
+float glyph_extent(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
+    float top = FLT_MAX;
+    float bottom = -FLT_MAX;
+    for (const auto& v : vertices) {
+        if (is_solid(v) || v.col != colour)
+            continue;
+        top = std::min(top, v.pos.y);
+        bottom = std::max(bottom, v.pos.y);
+    }
+    return bottom > top ? bottom - top : 0.0f;
+}
+
+TEST_CASE("a headline value is taller than body text and holds its width",
+    "[cells][headline]") {
+    themed context;
+    frame([] {
+        const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+        const auto body =
+            vertices_of([] { ImGui::TextUnformatted("1.2345"); });
+        const auto headline =
+            vertices_of([] { widget::headline_value("1.2345"); });
+        CHECK(ImGui::GetItemRectSize().y > ImGui::GetTextLineHeight());
+        CHECK(glyph_extent(headline, text) > glyph_extent(body, text) + 2.0f);
+        for (const auto tone : all_tones) {
+            if (tone != theme::tone::neutral)
+                CHECK_FALSE(has_hue(headline, theme::pill_colours(tone).text));
+        }
+
+        /*
+         * The headless face is monospaced, so the test narrows its 1 to stand
+         * in for a proportional bold face.
+         */
+        ImFontBaked* const baked = hedgr::ui::icon::bold_font()->GetFontBaked(
+            ImGui::GetFontSize() * 1.35f);
+        REQUIRE(baked->FindGlyph('1') != nullptr);
+        const float narrow = baked->GetCharAdvance('0') * 0.5f;
+        baked->FindGlyph('1')->AdvanceX = narrow;
+        if (baked->IndexAdvanceX.Size > '1')
+            baked->IndexAdvanceX['1'] = narrow;
+        REQUIRE(baked->GetCharAdvance('1') < baked->GetCharAdvance('0'));
+
+        widget::headline_value("1.1111");
+        const float ones = ImGui::GetItemRectSize().x;
+        widget::headline_value("1.0000");
+        CHECK(ImGui::GetItemRectSize().x == Approx(ones));
+        widget::headline_value("1.00");
+        CHECK(ImGui::GetItemRectSize().x < ones);
     });
 }
 
@@ -224,6 +351,30 @@ TEST_CASE("a value pill is drawn in its tone's colours at its measured size",
             > widget::value_pill_size("8").x);
         CHECK(widget::value_pill_size("8-HOUR").y
             == Approx(widget::value_pill_size("8").y));
+    });
+}
+
+TEST_CASE("a quiet pill is dim text on a dimmer chip than a neutral one",
+    "[cells][pill][quiet]") {
+    themed context;
+    frame([] {
+        const auto bright = theme::pill_colours(theme::tone::neutral);
+        const auto quiet = theme::pill_colours(theme::tone::quiet);
+        CHECK(luminance(quiet.text) < luminance(bright.text) - 0.2f);
+        CHECK(luminance(quiet.fill) < luminance(bright.fill));
+        CHECK(quiet.text == ImGui::GetColorU32(theme::dim_text()));
+
+        const auto strong = vertices_of(
+            [] { widget::value_pill("STRONG", theme::tone::neutral); });
+        const auto alpha_pill = vertices_of(
+            [] { widget::value_pill("ALPHA", theme::tone::quiet); });
+        CHECK(has_colour(alpha_pill, quiet.text));
+        CHECK(has_colour(alpha_pill, quiet.fill));
+        CHECK_FALSE(has_colour(alpha_pill, bright.text));
+        CHECK(has_colour(strong, bright.text));
+        CHECK_FALSE(has_colour(strong, quiet.text));
+        CHECK(widget::value_pill_size("ALPHA").y
+            == Approx(ImGui::GetItemRectSize().y));
     });
 }
 
@@ -325,6 +476,52 @@ TEST_CASE("labelled cells of one width form aligned columns",
     });
 }
 
+TEST_CASE("a two-line cell sets a bold value over a dimmer line",
+    "[cells][labelled][two-line]") {
+    themed context;
+    frame([] {
+        constexpr float width = 160.0f;
+        const ImU32 bright = ImGui::GetColorU32(ImGuiCol_Text);
+        const ImU32 dim = ImGui::GetColorU32(theme::dim_text());
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const auto drawn = vertices_of([] {
+            widget::labelled_value2("Date", "15 Oct", "15:56", width,
+                "When it opened");
+        });
+        CHECK(ImGui::GetItemRectSize().x == Approx(width));
+        CHECK(ImGui::GetItemRectSize().y
+            == Approx(widget::labelled_value2_height()));
+        CHECK(widget::labelled_value2_height()
+            > widget::labelled_value_height());
+
+        const float caption_bottom = origin.y
+            + widget::caption_size("Date", "help").y;
+        float value_bottom = -FLT_MAX;
+        float sub_top = FLT_MAX;
+        std::size_t value_glyphs = 0;
+        std::size_t sub_glyphs = 0;
+        for (const auto& v : drawn) {
+            if (is_solid(v) || v.pos.y < caption_bottom)
+                continue;
+            if (v.col == bright) {
+                value_bottom = std::max(value_bottom, v.pos.y);
+                ++value_glyphs;
+            } else if (v.col == dim) {
+                sub_top = std::min(sub_top, v.pos.y);
+                ++sub_glyphs;
+            }
+        }
+        CHECK(value_glyphs == 4u * 5u);
+        CHECK(sub_glyphs == 4u * 5u);
+        CHECK(sub_top >= value_bottom - 1.0f);
+        CHECK(luminance(dim) < luminance(bright));
+        for (const auto& v : drawn) {
+            if (!is_solid(v) && alpha(v.col) != 0)
+                CHECK(v.pos.y <= origin.y + widget::labelled_value2_height());
+        }
+    });
+}
+
 TEST_CASE("a hero strip spans the width and wears its tone",
     "[cells][hero]") {
     themed context;
@@ -404,6 +601,76 @@ TEST_CASE("the chosen tab is underlined in the accent", "[cells][tabs]") {
     });
 }
 
+/** @brief The glyph quads @p vertices draw in @p colour. */
+std::size_t glyphs_in(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
+    const auto count = std::ranges::count_if(vertices,
+        [&](const ImDrawVert& v) { return !is_solid(v) && v.col == colour; });
+    return static_cast<std::size_t>(count) / 4u;
+}
+
+TEST_CASE("a tab count badge is an accent capsule holding its number",
+    "[cells][tabs][badge]") {
+    themed context;
+    struct drawn_tab final {
+        ImVec2 min;
+        ImVec2 max;
+        std::vector<ImDrawVert> badge;
+    };
+    drawn_tab tracked;
+    drawn_tab pairs;
+    float badge = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        frame([&] {
+            REQUIRE(ImGui::BeginTabBar("tabs"));
+            badge = widget::tab_badge_count_width(58);
+            widget::reserve_tab_badge("Tracked", false, badge);
+            const bool selected = ImGui::BeginTabItem("Tracked");
+            tracked.min = ImGui::GetItemRectMin();
+            tracked.max = ImGui::GetItemRectMax();
+            tracked.badge =
+                vertices_of([] { widget::tab_badge_count("Tracked", 58); });
+            if (selected)
+                ImGui::EndTabItem();
+
+            widget::reserve_tab_badge("Pairs", true,
+                widget::tab_badge_label_width("PRO"));
+            bool open = true;
+            if (ImGui::BeginTabItem("Pairs", &open))
+                ImGui::EndTabItem();
+            pairs.min = ImGui::GetItemRectMin();
+            pairs.max = ImGui::GetItemRectMax();
+            pairs.badge =
+                vertices_of([] { widget::tab_badge_label("Pairs", "PRO"); });
+            ImGui::EndTabBar();
+        });
+    }
+
+    CHECK(badge > widget::tab_badge_count_width(7));
+    CHECK(tracked.max.x - tracked.min.x
+        == Approx(ImGui::TabItemCalcSize("Tracked", false).x + badge));
+    const ImU32 number = ImGui::ColorConvertFloat4ToU32(theme::base_surface());
+    CHECK(has_colour(tracked.badge, accent()));
+    CHECK(glyphs_in(tracked.badge, number) == 2u);
+    const float label_end = tracked.min.x + ImGui::GetStyle().FramePadding.x
+        + ImGui::CalcTextSize("Tracked").x;
+    for (const auto& v : tracked.badge) {
+        CHECK(v.pos.x > label_end);
+        CHECK(v.pos.x <= tracked.max.x);
+        CHECK(v.pos.y >= tracked.min.y);
+        CHECK(v.pos.y <= tracked.max.y);
+    }
+
+    const ImU32 dim = ImGui::GetColorU32(theme::dim_text());
+    CHECK(glyphs_in(pairs.badge, dim) == 3u);
+    CHECK(has_colour(pairs.badge, ImGui::GetColorU32(ImGuiCol_TextDisabled)));
+    CHECK_FALSE(has_hue(pairs.badge, accent()));
+    CHECK_FALSE(has_hue(pairs.badge, theme::warning_colour));
+    CHECK(max_x(pairs.badge) <= pairs.max.x);
+    CHECK(pairs.max.x - pairs.min.x
+        == Approx(ImGui::TabItemCalcSize("Pairs", true).x
+            + widget::tab_badge_label_width("PRO")));
+}
+
 TEST_CASE("a steady frame of 200 cells allocates nothing", "[cells][frame]") {
     themed context;
     ImGui::GetIO().DisplaySize = ImVec2(1600.0f, 1400.0f);
@@ -418,6 +685,24 @@ TEST_CASE("a steady frame of 200 cells allocates nothing", "[cells][frame]") {
         ImGui::Begin("cells");
         widget::hero_strip("Current P/L", "+0.59%", theme::tone::good,
             "TARGETING TP2", "Profit since entry");
+        if (ImGui::BeginTabBar("tabs")) {
+            widget::reserve_tab_badge("Tracked", false,
+                widget::tab_badge_count_width(58));
+            const bool selected = ImGui::BeginTabItem("Tracked");
+            widget::tab_badge_count("Tracked", 58);
+            if (selected)
+                ImGui::EndTabItem();
+            widget::reserve_tab_badge("Pairs", false,
+                widget::tab_badge_label_width("PRO"));
+            if (ImGui::BeginTabItem("Pairs"))
+                ImGui::EndTabItem();
+            widget::tab_badge_label("Pairs", "PRO");
+            ImGui::EndTabBar();
+        }
+        widget::headline_value("1.27345");
+        widget::value_pill("ALPHA", theme::tone::quiet);
+        widget::labelled_value2("Date", "15 Oct 2026", "15:56:58", 180.0f,
+            "Opened");
         for (int i = 0; i < cells; ++i) {
             if (i % columns != 0)
                 ImGui::SameLine(0.0f, 0.0f);

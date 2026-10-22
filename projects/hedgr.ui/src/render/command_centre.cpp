@@ -37,6 +37,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -130,7 +131,7 @@ void menu_screen(hedgr::ui::render::command_centre_ui_state& state,
         return theme::tone::warning;
     if (status == "suspended")
         return theme::tone::bad;
-    return theme::tone::neutral;
+    return theme::tone::quiet;
 }
 
 /**
@@ -511,8 +512,23 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
 
             bool open = true;
             const std::string label = screen_label(screen);
-            if (ImGui::BeginTabItem(label.c_str(), pinned ? nullptr : &open,
-                    flags)) {
+            /*
+             * Only the roster has a count the deployment states: the overview
+             * is a page of facts, not a list.
+             */
+            const bool counted = screen == "tenants" && snapshot.is_read();
+            const int count = counted
+                ? static_cast<int>(std::min<std::uint64_t>(
+                      snapshot.tenant_total, std::numeric_limits<int>::max()))
+                : 0;
+            if (counted)
+                widget::reserve_tab_badge(label.c_str(), !pinned,
+                    widget::tab_badge_count_width(count));
+            const bool selected = ImGui::BeginTabItem(label.c_str(),
+                pinned ? nullptr : &open, flags);
+            if (counted)
+                widget::tab_badge_count(label.c_str(), count);
+            if (selected) {
                 widget::underline_selected_tab();
                 if (screen == "tenants")
                     draw_tenants(snapshot);

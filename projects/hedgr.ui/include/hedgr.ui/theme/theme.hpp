@@ -134,11 +134,14 @@ inline constexpr ImU32 warning_colour = IM_COL32(240, 193, 87, 255);
 /**
  * @brief The outcome a pill or a strip reports, which picks its colours.
  *
- * Neutral is a value with no verdict, such as a timeframe. The other three
- * are the state colours, never the accent: the accent marks a choice, and a
- * verdict drawn in it would read as something the reader picked.
+ * Neutral is a value with no verdict, such as a timeframe. Quiet is a value
+ * with no verdict that is also secondary, such as an empty count, and is drawn
+ * as dim text on a dimmer chip. The other three are the state colours, never
+ * the accent: the accent marks a choice, and a verdict drawn in it would read
+ * as something the reader picked. Quiet has no state version on purpose: a
+ * verdict is never secondary.
  */
-enum class tone : std::uint8_t { neutral, good, bad, warning };
+enum class tone : std::uint8_t { neutral, quiet, good, bad, warning };
 
 /** @brief The three colours a toned shape is drawn with. */
 struct tone_colours final {
@@ -151,7 +154,9 @@ struct tone_colours final {
  * @brief A pill's colours for @p value: a dark tinted fill, a thin border and
  * bright text in the tone's colour.
  *
- * Neutral takes the chip fill, the card border and the ordinary text.
+ * Neutral takes the chip fill, the card border and the ordinary text. Quiet
+ * takes a fill a step below the chip, the rule colour as its edge and the dim
+ * text, so it reads as present but not asking to be read.
  */
 [[nodiscard]] HEDGR_UI_EXPORT tone_colours pill_colours(tone value) noexcept;
 

@@ -56,9 +56,22 @@ namespace hedgr::ui::widget {
  * it sits in the middle of the line as text does. Lower case ASCII is drawn in
  * capitals; the caller's text is not copied.
  *
- * @param help Shown on hover over the caption, empty for no help glyph.
+ * @param help Shown on hover over the caption, empty for no help glyph. The
+ * glyph is a dim ring round a question mark, and both brighten while the
+ * caption is hovered, so the reader sees which label the tooltip explains.
  */
 HEDGR_UI_EXPORT void caption(std::string_view text, std::string_view help = {});
+
+/**
+ * @brief Draws a large bold value, such as a price, and advances past it.
+ *
+ * About a third larger than body text and in the bold face, or the regular
+ * face where no bold file is installed. Drawn in the ordinary text colour and
+ * never a state colour: a pill beside it carries the direction. Every digit
+ * takes the widest digit's advance, so a ticking value keeps its width. Centred
+ * on a line taller than itself, as a caption is.
+ */
+HEDGR_UI_EXPORT void headline_value(std::string_view text);
 
 /** @brief The corner radius of a value pill: a chip rather than a capsule. */
 inline constexpr float value_pill_rounding = 4.0f;
@@ -98,6 +111,22 @@ HEDGR_UI_EXPORT void labelled_value(std::string_view label,
 /** @brief Draws a caption over a value pill, in a cell of @p width. */
 HEDGR_UI_EXPORT void labelled_pill(std::string_view label,
     std::string_view value, theme::tone tone, float width,
+    std::string_view help = {});
+
+/** @brief The height of one two-line value cell. */
+[[nodiscard]] HEDGR_UI_EXPORT float labelled_value2_height();
+
+/**
+ * @brief Draws a caption over a bold value over a dim line, in a cell of
+ * @p width.
+ *
+ * The reference's DATE cell: the date in bold and its time beneath it, dim
+ * and in the regular face, because the time refines the date rather than
+ * standing beside it. Records one item of @p width by
+ * @c labelled_value2_height, which is taller than a one-line cell.
+ */
+HEDGR_UI_EXPORT void labelled_value2(std::string_view label,
+    std::string_view value, std::string_view sub, float width,
     std::string_view help = {});
 
 /** @brief The height of a hero strip. */
