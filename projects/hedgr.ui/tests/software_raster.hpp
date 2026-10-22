@@ -110,6 +110,12 @@ public:
         }
     }
 
+    /** @brief The painted colour at @p x, @p y, each channel in [0, 1]. */
+    [[nodiscard]] ImVec4 pixel(int x, int y) const {
+        const auto at = static_cast<std::size_t>(y * width_ + x) * 3;
+        return ImVec4(pixels_[at], pixels_[at + 1], pixels_[at + 2], 1.0f);
+    }
+
     /** @brief Writes the frame as a binary PPM. */
     bool write_ppm(const std::filesystem::path& path) const {
         std::ofstream file(path, std::ios::binary);

@@ -56,9 +56,12 @@ bool begin_card(const char* id, float width, float height, bool marked) {
         marked ? ImGui::ColorConvertU32ToFloat4(theme::edit_changed_colour)
                : theme::card_border());
 
+    const theme::background_mark parent = theme::mark_background();
     const bool open = ImGui::BeginChild(id, ImVec2(width, height),
         ImGuiChildFlags_Borders,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (open)
+        theme::shade_window_background(theme::card_gradient, parent);
 
     if (marked) {
         ImDrawList* const draw = ImGui::GetWindowDrawList();
@@ -81,10 +84,13 @@ bool begin_section_card(const char* id, float width) {
     ImGui::PushStyleColor(ImGuiCol_Border, theme::card_border());
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
         ImVec2(section_card_padding, section_card_padding));
+    const theme::background_mark parent = theme::mark_background();
     const bool open = ImGui::BeginChild(id, ImVec2(width, 0.0f),
         ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY
             | ImGuiChildFlags_AlwaysUseWindowPadding,
         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    if (open)
+        theme::shade_window_background(theme::card_gradient, parent);
     /*
      * The child has read its fill, outline and padding by now, and popping them
      * here keeps them off any child the card's body opens.

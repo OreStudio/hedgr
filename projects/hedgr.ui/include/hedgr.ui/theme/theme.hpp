@@ -163,6 +163,86 @@ struct tone_colours final {
  */
 [[nodiscard]] HEDGR_UI_EXPORT tone_colours band_colours(tone value) noexcept;
 
+/** @brief Two colours a surface fades between, @c from at its start. */
+struct gradient final {
+    ImU32 from = 0;
+    ImU32 to = 0;
+};
+
+/** @brief The direction a gradient runs: top to bottom, or left to right. */
+enum class axis : std::uint8_t { vertical, horizontal };
+
+/*
+ * The reference lights each panel from above: a card reads #13181E at its
+ * head, #0F141A through its middle and #0D1017 at its foot, on a flat #06090E
+ * page. Each end below is pushed a few levels past the sample so the fade
+ * reads on a monitor rather than only under a colour picker.
+ */
+inline constexpr ImU32 window_gradient_top = IM_COL32(0x13, 0x18, 0x1f, 255);
+inline constexpr ImU32 window_gradient_bottom = IM_COL32(0x0a, 0x0d, 0x12, 255);
+inline constexpr ImU32 card_gradient_top = IM_COL32(0x18, 0x1e, 0x26, 255);
+inline constexpr ImU32 card_gradient_bottom = IM_COL32(0x0c, 0x0f, 0x15, 255);
+inline constexpr gradient window_gradient{
+    .from = window_gradient_top, .to = window_gradient_bottom};
+inline constexpr gradient card_gradient{
+    .from = card_gradient_top, .to = card_gradient_bottom};
+
+/**
+ * @brief The alpha a strip's tone fill has at its left and at its right end.
+ *
+ * The CURRENT P/L strip glows green at its left and fades toward the card.
+ */
+inline constexpr unsigned int band_fade_strong_alpha = 0x26;
+inline constexpr unsigned int band_fade_faint_alpha = 0x05;
+
+/**
+ * @brief A strip's fill as a left to right fade of its tone.
+ *
+ * Neutral has no tone to fade, so both ends are its flat fill.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT gradient band_fade(tone value) noexcept;
+
+/**
+ * @brief Fills the rectangle @p min to @p max with @p colours along
+ * @p direction, its corners rounded by @p rounding like AddRectFilled's.
+ *
+ * The rounded rectangle is drawn first and its vertices are recoloured where
+ * they lie, so the corners and their antialiased fringe are ImGui's own.
+ */
+HEDGR_UI_EXPORT void fill_gradient(ImDrawList* draw, ImVec2 min, ImVec2 max,
+    gradient colours, axis direction, float rounding,
+    ImDrawFlags flags = ImDrawFlags_None);
+
+/**
+ * @brief Where the parent's draw list ended before a child was begun.
+ *
+ * ImGui draws a child's background into its parent's draw list when it can,
+ * to save a draw call, so the child's fill starts here rather than at the
+ * front of its own list.
+ */
+struct background_mark final {
+    ImDrawList* list = nullptr;
+    int start = 0;
+};
+
+/** @brief Marks the current window's draw list, to pass to a child's shading. */
+[[nodiscard]] HEDGR_UI_EXPORT background_mark mark_background();
+
+/**
+ * @brief Recolours the background ImGui drew for the current window as a
+ * top to bottom fade in @p colours.
+ *
+ * Call right after a Begin or a BeginChild that returned true, passing the
+ * mark taken just before a BeginChild. ImGui draws a window's background
+ * before its title bar, menu bar, scrollbars and outline, so the fill is the
+ * run of vertices in the window's background colour at the front of its own
+ * draw list, or at the mark when the child was drawn into its parent's. Only
+ * that run is touched, which leaves the decorations above it and every corner
+ * exactly as ImGui drew them.
+ */
+HEDGR_UI_EXPORT void shade_window_background(gradient colours,
+    background_mark parent = {});
+
 /** @brief The live data-health badge. */
 inline constexpr ImU32 health_live_colour = IM_COL32(106, 233, 149, 255);
 

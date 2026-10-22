@@ -20,7 +20,10 @@
 #include "hedgr.ui/theme/theme.hpp"
 
 #include "hedgr.ui/icon/icons.hpp"
+#include "imgui_internal.h"
 #include "implot.h"
+#include <algorithm>
+#include <span>
 
 namespace {
 
@@ -399,6 +402,98 @@ tone_colours band_colours(tone value) noexcept {
     /* The CURRENT P/L strip reads #131E24 on the same card. */
     return tone_colours{.fill = tint(base, 0x12),
         .border = tint(base, 0x40), .text = base};
+}
+
+gradient band_fade(tone value) noexcept {
+    const ImU32 base = tone_base(value);
+    if (base == 0) {
+        const ImU32 flat = band_colours(value).fill;
+        return gradient{.from = flat, .to = flat};
+    }
+    return gradient{.from = tint(base, band_fade_strong_alpha),
+        .to = tint(base, band_fade_faint_alpha)};
+}
+
+namespace {
+
+[[nodiscard]] float coordinate(const ImDrawVert& v, axis direction) noexcept {
+    return direction == axis::vertical ? v.pos.y : v.pos.x;
+}
+
+[[nodiscard]] unsigned int channel(ImU32 colour, unsigned int shift) noexcept {
+    return (colour >> shift) & 0xffu;
+}
+
+[[nodiscard]] unsigned int mix(unsigned int a, unsigned int b, float t) noexcept {
+    return static_cast<unsigned int>(static_cast<float>(a)
+        + (static_cast<float>(b) - static_cast<float>(a)) * t + 0.5f);
+}
+
+/*
+ * The vertex's own alpha scales the gradient's, because an antialiased fill
+ * fades its fringe to nothing and that fringe must stay transparent.
+ */
+void shade(std::span<ImDrawVert> vertices, float start, float end,
+    gradient colours, axis direction) noexcept {
+    const float length = end - start;
+    for (ImDrawVert& v : vertices) {
+        const float t = length > 0.0f
+            ? std::clamp((coordinate(v, direction) - start) / length, 0.0f, 1.0f)
+            : 0.0f;
+        const unsigned int alpha = mix(channel(colours.from, IM_COL32_A_SHIFT),
+            channel(colours.to, IM_COL32_A_SHIFT), t);
+        v.col = IM_COL32(
+            mix(channel(colours.from, IM_COL32_R_SHIFT),
+                channel(colours.to, IM_COL32_R_SHIFT), t),
+            mix(channel(colours.from, IM_COL32_G_SHIFT),
+                channel(colours.to, IM_COL32_G_SHIFT), t),
+            mix(channel(colours.from, IM_COL32_B_SHIFT),
+                channel(colours.to, IM_COL32_B_SHIFT), t),
+            alpha * channel(v.col, IM_COL32_A_SHIFT) / 255u);
+    }
+}
+
+}
+
+void fill_gradient(ImDrawList* draw, ImVec2 min, ImVec2 max,
+    gradient colours, axis direction, float rounding, ImDrawFlags flags) {
+    const int first = draw->VtxBuffer.Size;
+    draw->AddRectFilled(min, max, IM_COL32_WHITE, rounding, flags);
+    const std::span<ImDrawVert> added(draw->VtxBuffer.Data + first,
+        static_cast<std::size_t>(draw->VtxBuffer.Size - first));
+    if (direction == axis::vertical)
+        shade(added, min.y, max.y, colours, direction);
+    else
+        shade(added, min.x, max.x, colours, direction);
+}
+
+background_mark mark_background() {
+    ImDrawList* const list = ImGui::GetWindowDrawList();
+    return background_mark{.list = list, .start = list->VtxBuffer.Size};
+}
+
+void shade_window_background(gradient colours, background_mark parent) {
+    const ImGuiWindow* const window = ImGui::GetCurrentWindowRead();
+    const ImU32 background = ImGui::GetColorU32(
+        (window->Flags & ImGuiWindowFlags_ChildWindow) != 0
+            ? ImGuiCol_ChildBg : ImGuiCol_WindowBg);
+    ImDrawList* list = window->DrawList;
+    int start = 0;
+    if (list->VtxBuffer.Size == 0 && parent.list != nullptr) {
+        list = parent.list;
+        start = parent.start;
+    }
+    const std::span<ImDrawVert> after(list->VtxBuffer.Data + start,
+        static_cast<std::size_t>(list->VtxBuffer.Size - start));
+    const auto run = std::ranges::find_if(after, [&](const ImDrawVert& v) {
+        return (v.col & ~IM_COL32_A_MASK) != (background & ~IM_COL32_A_MASK);
+    });
+    const std::span<ImDrawVert> fill(after.begin(), run);
+    if (fill.empty())
+        return;
+    const auto [top, bottom] = std::ranges::minmax(fill, {},
+        [](const ImDrawVert& v) { return v.pos.y; });
+    shade(fill, top.pos.y, bottom.pos.y, colours, axis::vertical);
 }
 
 ImU32 status_colour(hedgr::model::domain::session_status value) noexcept {

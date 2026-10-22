@@ -20,6 +20,7 @@ set(files
     "flags_tests.cpp"
     "frame_cost_tests.cpp"
     "gallery_tests.cpp"
+    "gradient_tests.cpp"
     "market_health_tests.cpp"
     "market_view_tests.cpp"
     "render_tests.cpp"

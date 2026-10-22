@@ -329,7 +329,8 @@ void hero_strip(std::string_view label, std::string_view value,
         const ImVec2 corner(origin.x + width, origin.y + height);
         ImDrawList* const draw = ImGui::GetWindowDrawList();
         const theme::tone_colours colours = theme::band_colours(tone);
-        draw->AddRectFilled(origin, corner, colours.fill, hero_rounding);
+        theme::fill_gradient(draw, origin, corner, theme::band_fade(tone),
+            theme::axis::horizontal, hero_rounding);
         draw->AddRect(origin, corner, colours.border, hero_rounding, 0, 1.0f);
 
         const float padding = ImGui::GetFontSize() * hero_padding_x_ratio;
