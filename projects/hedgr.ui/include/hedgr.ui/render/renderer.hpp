@@ -37,6 +37,7 @@
 #include "hedgr.ui/render/term_ladder.hpp"
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
+#include "hedgr.ui/render/shared_crosshair.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/panel_defaults.hpp"
@@ -613,6 +614,14 @@ struct render_input final {
      * renderer may write it in place.
      */
     market_view_state& market_view;
+
+    /**
+     * @brief The time under the pointer in a docked chart, for the others.
+     *
+     * A reference for the same reason as @c market_view. A compact chart
+     * writes it while its plot is hovered and reads what the last frame wrote.
+     */
+    shared_crosshair& crosshair;
 
     /**
      * @brief The wall clock for judging how old an observation is.
