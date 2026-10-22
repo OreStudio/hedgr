@@ -288,8 +288,7 @@ void help_tooltip(std::string_view help) {
 /** @brief Lays out one cell and calls @p value with where its value goes. */
 template<class Value>
 void cell(std::string_view label, std::string_view help, float width,
-    Value&& value) {
-    const float height = labelled_value_height();
+    float height, Value&& value) {
     const ImVec2 origin = snapped_cursor();
     ImGui::Dummy(ImVec2(width, height));
     if (ImGui::IsItemVisible()) {
@@ -368,7 +367,7 @@ float labelled_value_height() {
 
 void labelled_value(std::string_view label, std::string_view value,
     float width, std::string_view help) {
-    cell(label, help, width,
+    cell(label, help, width, labelled_value_height(),
         [&](ImDrawList* draw, ImVec2 origin, const ImVec4& clip) {
             const face f = bold_at(pill_scale);
             log_text(origin, value);
@@ -381,9 +380,31 @@ void labelled_value(std::string_view label, std::string_view value,
 
 void labelled_pill(std::string_view label, std::string_view value,
     theme::tone tone, float width, std::string_view help) {
-    cell(label, help, width,
+    cell(label, help, width, labelled_value_height(),
         [&](ImDrawList* draw, ImVec2 origin, const ImVec4&) {
             draw_pill_at(draw, bold_at(pill_scale), origin, value, tone, width);
+        });
+}
+
+float labelled_value2_height() {
+    return caption_row_height(bold_at(caption_scale)) + cell_gap()
+        + 2.0f * std::ceil(bold_at(pill_scale).size);
+}
+
+void labelled_value2(std::string_view label, std::string_view value,
+    std::string_view sub, float width, std::string_view help) {
+    cell(label, help, width, labelled_value2_height(),
+        [&](ImDrawList* draw, ImVec2 origin, const ImVec4& clip) {
+            const face bold = bold_at(pill_scale);
+            log_text(origin, value);
+            draw->AddText(bold.font, bold.size, origin,
+                ImGui::GetColorU32(ImGuiCol_Text), value.data(),
+                value.data() + value.size(), 0.0f, &clip);
+            const ImVec2 below(origin.x, origin.y + std::ceil(bold.size));
+            log_text(below, sub);
+            draw->AddText(ImGui::GetFont(), bold.size, below,
+                ImGui::GetColorU32(theme::dim_text()), sub.data(),
+                sub.data() + sub.size(), 0.0f, &clip);
         });
 }
 

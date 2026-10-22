@@ -462,6 +462,52 @@ TEST_CASE("labelled cells of one width form aligned columns",
     });
 }
 
+TEST_CASE("a two-line cell sets a bold value over a dimmer line",
+    "[cells][labelled][two-line]") {
+    themed context;
+    frame([] {
+        constexpr float width = 160.0f;
+        const ImU32 bright = ImGui::GetColorU32(ImGuiCol_Text);
+        const ImU32 dim = ImGui::GetColorU32(theme::dim_text());
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const auto drawn = vertices_of([] {
+            widget::labelled_value2("Date", "15 Oct", "15:56", width,
+                "When it opened");
+        });
+        CHECK(ImGui::GetItemRectSize().x == Approx(width));
+        CHECK(ImGui::GetItemRectSize().y
+            == Approx(widget::labelled_value2_height()));
+        CHECK(widget::labelled_value2_height()
+            > widget::labelled_value_height());
+
+        const float caption_bottom = origin.y
+            + widget::caption_size("Date", "help").y;
+        float value_bottom = -FLT_MAX;
+        float sub_top = FLT_MAX;
+        std::size_t value_glyphs = 0;
+        std::size_t sub_glyphs = 0;
+        for (const auto& v : drawn) {
+            if (is_solid(v) || v.pos.y < caption_bottom)
+                continue;
+            if (v.col == bright) {
+                value_bottom = std::max(value_bottom, v.pos.y);
+                ++value_glyphs;
+            } else if (v.col == dim) {
+                sub_top = std::min(sub_top, v.pos.y);
+                ++sub_glyphs;
+            }
+        }
+        CHECK(value_glyphs == 4u * 5u);
+        CHECK(sub_glyphs == 4u * 5u);
+        CHECK(sub_top >= value_bottom - 1.0f);
+        CHECK(luminance(dim) < luminance(bright));
+        for (const auto& v : drawn) {
+            if (!is_solid(v) && alpha(v.col) != 0)
+                CHECK(v.pos.y <= origin.y + widget::labelled_value2_height());
+        }
+    });
+}
+
 TEST_CASE("a hero strip spans the width and wears its tone",
     "[cells][hero]") {
     themed context;
@@ -641,6 +687,8 @@ TEST_CASE("a steady frame of 200 cells allocates nothing", "[cells][frame]") {
         }
         widget::headline_value("1.27345");
         widget::value_pill("ALPHA", theme::tone::quiet);
+        widget::labelled_value2("Date", "15 Oct 2026", "15:56:58", 180.0f,
+            "Opened");
         for (int i = 0; i < cells; ++i) {
             if (i % columns != 0)
                 ImGui::SameLine(0.0f, 0.0f);

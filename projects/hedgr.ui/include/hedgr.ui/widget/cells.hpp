@@ -113,6 +113,22 @@ HEDGR_UI_EXPORT void labelled_pill(std::string_view label,
     std::string_view value, theme::tone tone, float width,
     std::string_view help = {});
 
+/** @brief The height of one two-line value cell. */
+[[nodiscard]] HEDGR_UI_EXPORT float labelled_value2_height();
+
+/**
+ * @brief Draws a caption over a bold value over a dim line, in a cell of
+ * @p width.
+ *
+ * The reference's DATE cell: the date in bold and its time beneath it, dim
+ * and in the regular face, because the time refines the date rather than
+ * standing beside it. Records one item of @p width by
+ * @c labelled_value2_height, which is taller than a one-line cell.
+ */
+HEDGR_UI_EXPORT void labelled_value2(std::string_view label,
+    std::string_view value, std::string_view sub, float width,
+    std::string_view help = {});
+
 /** @brief The height of a hero strip. */
 [[nodiscard]] HEDGR_UI_EXPORT float hero_strip_height();
 
