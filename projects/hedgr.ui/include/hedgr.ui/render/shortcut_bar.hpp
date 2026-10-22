@@ -65,6 +65,9 @@ struct shortcut_bar_state final {
 struct shortcut_bar_result final {
     /** @brief Whether a shortcut asked for the Instances window to come up. */
     bool focus_instances = false;
+
+    /** @brief Whether the control that floats every docked window was clicked. */
+    bool undock_all = false;
 };
 
 /**
@@ -77,7 +80,7 @@ struct shortcut_bar_result final {
  * clear.
  */
 [[nodiscard]] HEDGR_UI_EXPORT float shortcut_bar_height(
-    const render_input& input);
+    const render_input& input, bool desk_docked);
 
 /**
  * @brief Draws the shortcuts bar at the bottom of the viewport.
@@ -97,11 +100,13 @@ struct shortcut_bar_result final {
  * gets no strip of empty space across the bottom of their screen.
  *
  * @param input Everything the bar may read, including the entries themselves.
+ * @param desk_docked Whether any window is docked in the desk. The bar then
+ * draws even with no shortcuts, and ends with the control that undocks them.
  * @param result Filled with whatever the frame has to do after the draw.
  * @param state The bar's own memory of the last hovered entry.
  */
 HEDGR_UI_EXPORT void draw_shortcut_bar(const render_input& input,
-    shortcut_bar_result& result, shortcut_bar_state& state);
+    bool desk_docked, shortcut_bar_result& result, shortcut_bar_state& state);
 
 }
 
