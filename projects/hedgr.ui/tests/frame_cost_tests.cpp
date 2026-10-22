@@ -262,7 +262,7 @@ flag_draw draw_flags_for(desk& desk, std::string_view label) {
 
 }
 
-TEST_CASE("a currency outside the built-in artwork is drawn from its server image",
+TEST_CASE("a currency is drawn from its server image once it loads",
     "[frame][flags]") {
     headless_imgui imgui;
     desk desk;
@@ -281,7 +281,7 @@ TEST_CASE("a currency outside the built-in artwork is drawn from its server imag
     CHECK(after.cursor_moved > 0.0f);
 }
 
-TEST_CASE("a currency with no server image and no artwork draws nothing",
+TEST_CASE("a currency with no server image draws nothing and reserves no space",
     "[frame][flags]") {
     headless_imgui imgui;
     desk desk;
@@ -293,18 +293,6 @@ TEST_CASE("a currency with no server image and no artwork draws nothing",
     CHECK(drawn.texture_gets == 0);
     CHECK(drawn.vertices == 0);
     CHECK(drawn.cursor_moved == 0.0f);
-}
-
-TEST_CASE("a currency with artwork and no server image falls back to the artwork",
-    "[frame][flags]") {
-    headless_imgui imgui;
-    desk desk;
-    desk.currency_images.set("t", {{"USD", "img-us"}});
-
-    const auto drawn = draw_flags_for(desk, "IR BRL 1Y");
-
-    CHECK(drawn.texture_gets == 0);
-    CHECK(drawn.vertices > 0);
 }
 
 namespace {
@@ -832,7 +820,7 @@ TEST_CASE("an IR curve row asks for the image of a currency it has not loaded",
     CHECK(drawn.flag_draws == 0);
 }
 
-TEST_CASE("an IR curve row falls back to the built-in flag",
+TEST_CASE("an IR curve row with no server image shows no flag and keeps the text indent",
     "[frame][flags][browser]") {
     headless_imgui imgui;
     desk desk;
@@ -844,7 +832,7 @@ TEST_CASE("an IR curve row falls back to the built-in flag",
     CHECK(drawn.asked.empty());
     CHECK(drawn.flag_draws == 0);
     CHECK(desk.textures.gets == 0);
-    CHECK(drawn.text_x == bare.text_x + 14.0f);
+    CHECK(drawn.text_x == bare.text_x);
 }
 
 TEST_CASE("an IR curve row with no flag keeps the series row's text indent",

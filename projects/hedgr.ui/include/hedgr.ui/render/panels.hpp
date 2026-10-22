@@ -174,7 +174,7 @@ identity_text(const identity_bar_state& state);
  * @brief Asks the runtime for the flags a label names, once each.
  *
  * A flag is an assets image; the screen cannot block on one, so it asks and
- * draws the primitive until the answer lands.
+ * draws no flag until the answer lands.
  */
 HEDGR_UI_EXPORT void request_flags(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view label);
@@ -182,8 +182,7 @@ HEDGR_UI_EXPORT void request_flags(const render_input& input,
 /**
  * @brief Asks the runtime for one currency's flag, once.
  *
- * Any code the tenant's image map names is asked for, so a currency outside
- * the drawn fallbacks still gets the deployment's image.
+ * Any code the tenant's image map names is asked for.
  */
 HEDGR_UI_EXPORT void request_flag(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view currency);
@@ -194,24 +193,16 @@ image_texture(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view currency);
 
 /**
- * @brief The scale every market-data screen draws currency flags at.
- *
- * One value rather than a local constant per window, so an FX pair and an IR
- * curve show flags of the same size. The natural size is the series list's; a
- * screen's heading wants them twice that.
- */
-inline constexpr float series_flag_scale = 2.0f;
-
-/**
  * @brief Draws a label's currency flags at the right edge of the current line.
  *
  * Both market-data screens put their flags at the right of the heading rather
  * than in front of its name: the name is what the reader came for, and a flag
  * in front of it pushes the name along by an amount that changes with the
- * pair. Drawing them here is also what keeps the two screens on one scale.
+ * pair. Drawing them here is also what keeps the two screens on one size,
+ * the height of a value pill.
  *
  * The session names the tenant whose images are used. A currency with no
- * uploaded image falls back to the client's own flag primitives.
+ * loaded image shows no flag and takes no space.
  *
  * @param inset How far short of the right edge the flags end, for a heading
  * whose right end holds controls.

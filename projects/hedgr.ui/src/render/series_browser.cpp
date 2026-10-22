@@ -54,21 +54,12 @@ float draw_series_row(std::string_view label, float extra_indent,
     const ImVec2 rect_min = ImGui::GetItemRectMin();
     const ImVec2 rect_size = ImGui::GetItemRectSize();
     const auto draw = ImGui::GetWindowDrawList();
-    const auto pair = hedgr::ui::widget::currencies_of(label);
     float x = rect_min.x + 4.0f + extra_indent;
-    const float flag_y = rect_min.y + (rect_size.y - hedgr::ui::widget::flag_height) * 0.5f;
-    if (hedgr::ui::widget::flag_available(pair.base, base_texture)) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.base, 1.0f,
-            base_texture);
-        x += hedgr::ui::widget::flag_width + 2.0f;
-    }
-    if (hedgr::ui::widget::flag_available(pair.quote, quote_texture)) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, flag_y), pair.quote, 1.0f,
-            quote_texture);
-        x += hedgr::ui::widget::flag_width + 4.0f;
-    }
-    if (x == rect_min.x + 4.0f + extra_indent)
-        x += 4.0f;
+    const float flag_h = ImGui::GetTextLineHeight();
+    const float flag_y = rect_min.y + (rect_size.y - flag_h) * 0.5f;
+    const float flags_width = hedgr::ui::widget::draw_flag_pair(draw,
+        ImVec2(x, flag_y), flag_h, base_texture, quote_texture);
+    x += flags_width > 0.0f ? flags_width + 4.0f : 4.0f;
     const float text_y =
         rect_min.y + (rect_size.y - ImGui::GetTextLineHeight()) * 0.5f;
     draw->AddText(ImVec2(x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
