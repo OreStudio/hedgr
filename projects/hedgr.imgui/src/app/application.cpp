@@ -21,6 +21,7 @@
 
 #include "hedgr.imgui/app/capture_input.hpp"
 #include "hedgr.imgui/app/gl_texture.hpp"
+#include "hedgr.imgui/app/layout_file.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
@@ -430,14 +431,11 @@ GLFWwindow* application::initialise_graphics() {
     /*
      * ImGui writes a window's position back here when the process leaves, so
      * this path is where a layout lives and a capture that wants the same
-     * arrangement twice has to own it. Named through the environment because a
-     * capture runs from a directory it is given, and the file beside the binary
-     * is one session's arrangement rather than a fixture.
+     * arrangement twice has to own it through the environment.
      */
-    ini_path_ = "imgui.ini";
-    if (const char* ini = std::getenv("HEDGR_IMGUI_INI");
-        ini != nullptr && *ini != '\0')
-        ini_path_ = ini;
+    const char* ini = std::getenv("HEDGR_IMGUI_INI");
+    ini_path_ = layout_file_path(cfg_.database_path,
+        ini != nullptr ? ini : "").string();
     io.IniFilename = ini_path_.c_str();
 
     ui::theme::apply_theme();

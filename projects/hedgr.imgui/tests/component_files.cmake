@@ -8,11 +8,11 @@
 # version.
 #
 # The executable is glue: it opens a GL context, calls the runtime and hands the
-# frame to hedgr.ui. There is no honest unit test for that, because a test which
-# asserted the defaults of a config struct would pass with every function
-# stubbed out. It is verified by running it: build-target.sh, then
-# HEDGR_CAPTURE=<path> run.sh, and read the frame it writes.
+# frame to hedgr.ui, and that is verified by running it: build-target.sh, then
+# HEDGR_CAPTURE=<path> run.sh, and read the frame it writes. What is tested here
+# are the pure choices the glue makes, such as where the layout file lives.
 set(files
+    "layout_file_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
