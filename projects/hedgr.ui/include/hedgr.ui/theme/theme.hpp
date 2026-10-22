@@ -310,6 +310,17 @@ inline constexpr ImU32 rail_selection_bar = IM_COL32(91, 165, 255, 255);
 inline constexpr ImU32 rail_selection_border = IM_COL32(91, 165, 255, 150);
 
 /**
+ * @brief The alpha a currency flag image is drawn at, about 85 percent.
+ *
+ * A fully opaque flag out-shouts the dark card it sits on. A little
+ * translucency lets the card show through so the image sits with the theme.
+ */
+inline constexpr unsigned int flag_alpha = 217;
+
+/** @brief The gap between a base and a quote flag, close enough to read as one badge. */
+inline constexpr float flag_pair_gap = 2.0f;
+
+/**
  * @brief The colour of a session status.
  *
  * Disconnected grey, connecting amber, authenticated green, failed red.

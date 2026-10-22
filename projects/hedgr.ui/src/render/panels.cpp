@@ -23,6 +23,7 @@
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "imgui.h"
@@ -284,35 +285,18 @@ void draw_series_flags(const render_input& input,
     const auto pair = hedgr::ui::widget::currencies_of(label);
     const auto base_texture = image_texture(input, session, pair.base);
     const auto quote_texture = image_texture(input, session, pair.quote);
-    const bool has_base =
-        hedgr::ui::widget::flag_available(pair.base, base_texture);
-    const bool has_quote =
-        hedgr::ui::widget::flag_available(pair.quote, quote_texture);
-    const float flag_w = hedgr::ui::widget::flag_width * series_flag_scale;
-    const float flag_h = hedgr::ui::widget::flag_height * series_flag_scale;
-    const auto flags = static_cast<int>(has_base) + static_cast<int>(has_quote);
-    if (flags == 0)
+    const float flag_h = hedgr::ui::widget::value_pill_size(label).y;
+    const float flags_width =
+        hedgr::ui::widget::flag_pair_width(flag_h, base_texture, quote_texture);
+    if (flags_width == 0.0f)
         return;
 
-    const float gap = 3.0f;
-    const float flags_width = flag_w * static_cast<float>(flags)
-        + gap * static_cast<float>(flags - 1);
     const float right = ImGui::GetWindowContentRegionMax().x - inset;
     if (ImGui::GetCursorPosX() < right - flags_width)
         ImGui::SetCursorPosX(right - flags_width);
 
-    auto* draw = ImGui::GetWindowDrawList();
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    float x = origin.x;
-    if (has_base) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.base,
-            series_flag_scale, base_texture);
-        x += flag_w + gap;
-    }
-    if (has_quote) {
-        hedgr::ui::widget::draw_flag(draw, ImVec2(x, origin.y), pair.quote,
-            series_flag_scale, quote_texture);
-    }
+    hedgr::ui::widget::draw_flag_pair(ImGui::GetWindowDrawList(),
+        ImGui::GetCursorScreenPos(), flag_h, base_texture, quote_texture);
     ImGui::Dummy(ImVec2(flags_width, flag_h));
 }
 

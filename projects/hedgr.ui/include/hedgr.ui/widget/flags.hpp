@@ -27,29 +27,20 @@
 
 namespace hedgr::ui::widget {
 
-/** @brief The width of a flag at its natural height. */
-inline constexpr float flag_width = 16.0f;
+/** @brief A flag's width over its height, the 16 by 11 of the server's images. */
+inline constexpr float flag_aspect = 16.0f / 11.0f;
 
-/** @brief The height of a flag, one row of text. */
-inline constexpr float flag_height = 11.0f;
-
-/**
- * @brief Whether this build knows a currency's flag.
- *
- * Only the built-in artwork; a currency the deployment adds after this build
- * may still have a server image.
- */
-[[nodiscard]] HEDGR_UI_EXPORT bool has_flag(std::string_view currency);
+/** @brief The width of a flag @p height tall. */
+[[nodiscard]] HEDGR_UI_EXPORT float flag_width_for(float height) noexcept;
 
 /**
- * @brief Whether a currency can be drawn at all.
+ * @brief The width of the flags that have a texture, zero when neither does.
  *
- * The server's image wins when it sent one; the built-in artwork covers a
- * currency it did not. A currency with neither is left undrawn rather than
- * shown as a blank grey box.
+ * A currency with no loaded server image takes no space, and one flag takes
+ * no gap.
  */
-[[nodiscard]] HEDGR_UI_EXPORT bool
-flag_available(std::string_view currency, ImTextureID texture);
+[[nodiscard]] HEDGR_UI_EXPORT float flag_pair_width(
+    float height, ImTextureID base, ImTextureID quote) noexcept;
 
 /** @brief The currencies a series label names, base and quote. */
 struct currency_pair final {
@@ -63,24 +54,23 @@ struct currency_pair final {
  * An FX label is "FX GBP/USD" and an interest-rate label is "IR GBP 1D", so
  * the pair comes from the word after the asset class. A word that is not an
  * ISO-shaped code (three capital letters) yields an empty code. Whether the
- * code has a flag is for flag_available, since the server may serve an image
- * for a currency this build has no artwork for.
+ * server has an image for it is for the caller to look up.
  */
 [[nodiscard]] HEDGR_UI_EXPORT currency_pair
 currencies_of(std::string_view label);
 
 /**
- * @brief Draws one currency's flag at @p top_left, sixteen by eleven pixels by default.
+ * @brief Draws the server's flag images for a base and a quote, side by side.
  *
- * The flags are drawn rather than decoded, because a flag needs a few bars and
- * a canton and nothing more, and a sprite sheet would put a decoder, an upload
- * and an asset licence on the path that draws a list. The artwork is simplified
- * to what identifies the currency, and @p scale lets a larger surface draw the
- * same artwork bigger. The series list uses the natural size; the chart header
- * asks for twice it.
+ * Every flag comes from the server, so a texture of zero means that image is
+ * not loaded and nothing is drawn or reserved for it. The images are rounded
+ * like a value pill, tinted a little translucent and edged in the card border,
+ * and sit a couple of pixels apart so the two read as one badge.
+ *
+ * @return The width drawn, as flag_pair_width reports it.
  */
-HEDGR_UI_EXPORT void draw_flag(ImDrawList* draw, ImVec2 top_left,
-    std::string_view currency, float scale = 1.0f, ImTextureID texture = 0);
+HEDGR_UI_EXPORT float draw_flag_pair(ImDrawList* draw, ImVec2 top_left,
+    float height, ImTextureID base, ImTextureID quote);
 
 }
 
