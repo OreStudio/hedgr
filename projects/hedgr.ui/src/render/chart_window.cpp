@@ -40,6 +40,7 @@
 #include <ctime>
 #include <format>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -137,6 +138,9 @@ namespace {
 
 constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 
+/** @brief The gap under a compact chart's header row, tighter than a full one's. */
+constexpr float compact_row_gap = 2.0f;
+
 /**
  * @brief A price, with the decimals its magnitude needs.
  *
@@ -219,6 +223,190 @@ void save_chart_view(window_handle handle, const render_input& input,
     state.chart_view_sent_for = handle;
 }
 
+/**
+ * @brief Saves the chart's view after one of its choices changed.
+ *
+ * Only the choice that changed updates the remembered default. Copying the
+ * whole window state would take another window's untouched choices with it
+ * and make the last click win every field.
+ */
+void chart_view_changed(window_handle handle, const render_input& input,
+    window_ui_state& state, const market_view_state& before) {
+    if (state.market_view.chart_span != before.chart_span)
+        input.market_view.chart_span = state.market_view.chart_span;
+    if (state.market_view.chart_style != before.chart_style)
+        input.market_view.chart_style = state.market_view.chart_style;
+    if (state.market_view.chart_ema != before.chart_ema)
+        input.market_view.chart_ema = state.market_view.chart_ema;
+    save_chart_view(handle, input, state);
+}
+
+/** @brief How a chart lays itself out, which follows from where it sits. */
+enum class chart_layout { full, compact };
+
+/** @brief What the header states about the series, derived once a frame. */
+struct chart_summary final {
+    std::string_view label;
+    double first = 0.0;
+    double last = 0.0;
+    domain::data_health health = domain::data_health::unavailable;
+    std::size_t plotted = 0;
+    std::int64_t span_ns = 0;
+    hedgr::model::state::series_history history;
+    bool no_points = true;
+    /** @brief The time the plotted points cover, when short of the span. */
+    std::optional<std::int64_t> short_shown_ns;
+
+    [[nodiscard]] double change() const { return last - first; }
+    [[nodiscard]] double percent() const {
+        return first != 0.0 ? change() / first * 100.0 : 0.0;
+    }
+};
+
+[[nodiscard]] const char* short_history_reason(
+    const hedgr::model::state::series_history& history) {
+    return history.truncated
+        ? "The read stopped at its bound, so older observations were not read"
+        : "The server holds no older observations for this series";
+}
+
+/**
+ * @brief The full header: the series, what it is worth, and how many points
+ * are in view, in one row with a large price.
+ */
+void draw_full_header(const chart_summary& s) {
+    ImGui::AlignTextToFramePadding();
+    widget::value_pill(s.label);
+    if (!s.no_points) {
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        widget::headline_value(format_price(s.last).view());
+        ImGui::SameLine();
+        widget::value_pill(format_number("{:+.2f}%", s.percent()).view(),
+            change_tone(s.health, s.change()));
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        widget::caption("Points",
+            "Observations plotted in the chosen period.");
+        ImGui::SameLine();
+        ImGui::Text("%zu", s.plotted);
+        if (s.span_ns == 0) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("\u00b7 All points");
+            ImGui::SetItemTooltip("%s",
+                "The period is All, so every point in the series is plotted");
+        }
+    }
+    if (s.history.reading) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("Reading older history...");
+    } else if (s.short_shown_ns) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("\u00b7 shows %s of %s",
+            duration_text(*s.short_shown_ns).c_str(),
+            duration_text(s.span_ns).c_str());
+        ImGui::SetItemTooltip("%s", short_history_reason(s.history));
+    }
+}
+
+/** @brief The compact header's tooltip: what the full header spells out. */
+void draw_compact_tooltip(const chart_summary& s) {
+    if (!ImGui::BeginTooltip())
+        return;
+    const auto word = domain::data_health_word(s.health);
+    ImGui::Text("%.*s", static_cast<int>(word.size()), word.data());
+    if (!s.no_points)
+        ImGui::Text("%zu points in view%s", s.plotted,
+            s.span_ns == 0 ? ", every point in the series" : "");
+    if (s.history.reading) {
+        ImGui::TextDisabled("Reading older history...");
+    } else if (s.short_shown_ns) {
+        ImGui::TextDisabled("Shows %s of %s. %s",
+            duration_text(*s.short_shown_ns).c_str(),
+            duration_text(s.span_ns).c_str(), short_history_reason(s.history));
+    }
+    ImGui::TextDisabled("%s", "Right click the plot for period, style and EMA");
+    ImGui::EndTooltip();
+}
+
+/**
+ * @brief The compact header: the series, its period, and what it is worth, in
+ * one tight row with the price at body size.
+ *
+ * @return Whether the period was clicked, which opens the view menu.
+ */
+[[nodiscard]] bool draw_compact_header(const chart_summary& s,
+    int span_index) {
+    ImGui::BeginGroup();
+    widget::value_pill(s.label);
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s",
+        chart_span_labels[static_cast<std::size_t>(span_index)]);
+    const bool period_clicked = ImGui::IsItemClicked();
+    if (!s.no_points) {
+        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+        const auto price = format_price(s.last);
+        ImGui::PushFont(icon::numeric_font());
+        ImGui::TextUnformatted(price.view().data(),
+            price.view().data() + price.view().size());
+        ImGui::PopFont();
+        ImGui::SameLine();
+        widget::value_pill(format_number("{:+.2f}%", s.percent()).view(),
+            change_tone(s.health, s.change()));
+    }
+    ImGui::EndGroup();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+        draw_compact_tooltip(s);
+    return period_clicked;
+}
+
+/** @brief One section of the view menu. @return Whether the choice changed. */
+bool choose(const char* heading, std::span<const char* const> labels,
+    int& selected) {
+    ImGui::SeparatorText(heading);
+    bool changed = false;
+    for (std::size_t i = 0; i < labels.size(); ++i) {
+        const int index = static_cast<int>(i);
+        if (ImGui::MenuItem(labels[i], nullptr, selected == index)
+            && selected != index) {
+            selected = index;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/**
+ * @brief The compact chart's period, style and EMA, as a popup.
+ *
+ * The same choices the full chart's foot offers, on the same scratch, so a
+ * tile undocked into a full chart shows what was chosen on the tile.
+ *
+ * @return Whether a choice changed.
+ */
+bool draw_view_menu(market_view_state& view) {
+    if (!ImGui::BeginPopup("chart-view"))
+        return false;
+    bool changed = choose("Period", chart_span_labels, view.chart_span);
+    changed |= choose("Style", chart_style_labels, view.chart_style);
+    changed |= choose("Overlay", chart_ema_labels, view.chart_ema);
+    ImGui::EndPopup();
+    return changed;
+}
+
+/** @brief Outlines the current window in the accent, the active tile's mark. */
+void draw_focus_outline() {
+    if (!ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows))
+        return;
+    const ImVec2 min = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    const ImVec2 max(min.x + size.x, min.y + size.y);
+    auto* draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(min, max, false);
+    draw->AddRect(ImVec2(min.x + 0.5f, min.y + 0.5f),
+        ImVec2(max.x - 0.5f, max.y - 0.5f), theme::rail_selection_border, 0.0f,
+        0, 1.0f);
+    draw->PopClipRect();
+}
+
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -238,14 +426,24 @@ void render_chart(window_handle handle, const render_input& input,
     using hedgr::model::domain::chart_state;
 
     ImGui::PushID("chart");
-    widget::foot_state foot;
-    foot.identity = identity_text(identity_of(input, handle));
+    /*
+     * The foot's identity is a few strings, so it is built only where a foot
+     * is drawn. A compact chart draws none and allocates nothing on a steady
+     * frame.
+     */
+    const auto make_foot = [&] {
+        widget::foot_state foot;
+        foot.identity = identity_text(identity_of(input, handle));
+        return foot;
+    };
+    const auto layout = ImGui::IsWindowDocked() ? chart_layout::compact
+                                                : chart_layout::full;
 
     const auto& shape = input.windows.state(handle);
     const auto* chart = std::get_if<chart_state>(&shape);
     if (chart == nullptr) {
         ImGui::TextWrapped("%s", "This window is not a chart.");
-        widget::draw_status_foot(status, input.now_ns, foot);
+        widget::draw_status_foot(status, input.now_ns, make_foot());
         ImGui::PopID();
         return;
     }
@@ -261,6 +459,7 @@ void render_chart(window_handle handle, const render_input& input,
 
     const auto session = signed_in_session(input, handle);
     if (!session) {
+        auto foot = make_foot();
         draw_signed_out(input, status, foot);
         ImGui::PopID();
         return;
@@ -322,8 +521,6 @@ void render_chart(window_handle handle, const render_input& input,
     const ImU32 colour = change < 0.0 ? theme::failure_colour : up_colour;
     const ImVec4 line_colour = ImGui::ColorConvertU32ToFloat4(colour);
 
-    set_health_foot(foot, health, as_of_ns, input.wall_now_ns, reading);
-
     /*
      * The runtime decides whether the series already holds the span. The chart
      * only says which span it plots, once per change, and once more when a read
@@ -346,71 +543,43 @@ void render_chart(window_handle handle, const render_input& input,
             state.history_asked_ns = span_ns;
         }
     }
-    foot.controls.push_back(widget::foot_combo{
-        .id = "period",
-        .tooltip = "The span the chart plots",
-        .options = chart_span_labels.data(),
-        .option_count = static_cast<int>(chart_span_labels.size()),
-        .selected = &state.market_view.chart_span});
-    foot.controls.push_back(widget::foot_combo{
-        .id = "style",
-        .tooltip = "Draw candles or a line",
-        .options = chart_style_labels.data(),
-        .option_count = static_cast<int>(chart_style_labels.size()),
-        .selected = &state.market_view.chart_style});
-    foot.controls.push_back(widget::foot_combo{
-        .id = "ema",
-        .tooltip = "Overlay the exponential moving average of the window",
-        .options = chart_ema_labels.data(),
-        .option_count = static_cast<int>(chart_ema_labels.size()),
-        .selected = &state.market_view.chart_ema});
-
-    /*
-     * One row of chrome above the plot: the series, what it is worth, and how
-     * many points are in view. Everything that is a setting lives on the foot,
-     * so the plot gets the rest of the window.
-     */
-    ImGui::AlignTextToFramePadding();
-    widget::value_pill(chart->label);
-    if (!no_points) {
-        const double percent =
-            first != 0.0 ? change / first * 100.0 : 0.0;
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        widget::headline_value(format_price(last).view());
-        ImGui::SameLine();
-        widget::value_pill(format_number("{:+.2f}%", percent).view(),
-            change_tone(health, change));
-        ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        widget::caption("Points",
-            "Observations plotted in the chosen period.");
-        ImGui::SameLine();
-        ImGui::Text("%zu", plotted);
-        if (span_ns == 0) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("\u00b7 All points");
-            ImGui::SetItemTooltip("%s",
-                "The period is All, so every point in the series is plotted");
-        }
-    }
-    if (history.reading) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("Reading older history...");
-    } else if (!no_points && span_ns > 0 && history.floor_ns != 0) {
+    chart_summary summary{.label = chart->label,
+        .first = first,
+        .last = last,
+        .health = health,
+        .plotted = plotted,
+        .span_ns = span_ns,
+        .history = history,
+        .no_points = no_points};
+    if (!history.reading && !no_points && span_ns > 0
+        && history.floor_ns != 0) {
         const auto shown_ns = plotted > 1
             ? points.at_ns[points.size - 1] - points.at_ns[start] : 0;
         if (shown_ns + domain::market_level_ns(
-                domain::market_level_for_span(span_ns)) < span_ns) {
-            ImGui::SameLine();
-            ImGui::TextDisabled("\u00b7 shows %s of %s",
-                duration_text(shown_ns).c_str(),
-                duration_text(span_ns).c_str());
-            ImGui::SetItemTooltip("%s", history.truncated
-                ? "The read stopped at its bound, so older observations were not read"
-                : "The server holds no older observations for this series");
-        }
+                domain::market_level_for_span(span_ns)) < span_ns)
+            summary.short_shown_ns = shown_ns;
     }
-    ImGui::SameLine();
-    draw_series_flags(input, *session, chart->label);
+
+    /*
+     * One row of chrome above the plot. A full chart keeps its settings on the
+     * foot; a compact one has no foot, so its settings are a right click away
+     * and the plot gets the rest of the tile.
+     */
+    std::optional<widget::foot_state> foot;
+    bool open_view_menu = false;
+    if (layout == chart_layout::full) {
+        draw_full_header(summary);
+        ImGui::SameLine();
+        draw_series_flags(input, *session, chart->label);
+    } else {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+            ImVec2(ImGui::GetStyle().ItemSpacing.x, compact_row_gap));
+        open_view_menu = draw_compact_header(summary,
+            state.market_view.chart_span);
+        ImGui::SameLine();
+        draw_series_flags(input, *session, chart->label);
+        ImGui::PopStyleVar();
+    }
 
     if (row && !series.failure(*row).empty()) {
         const auto failure = series.failure(*row);
@@ -419,10 +588,33 @@ void render_chart(window_handle handle, const render_input& input,
             "%.*s", static_cast<int>(failure.size()), failure.data());
     }
 
-    const float foot_height = widget::status_foot_height(status, foot);
+    float foot_height = 0.0f;
+    if (layout == chart_layout::full) {
+        foot = make_foot();
+        set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
+        foot->controls.push_back(widget::foot_combo{
+            .id = "period",
+            .tooltip = "The span the chart plots",
+            .options = chart_span_labels.data(),
+            .option_count = static_cast<int>(chart_span_labels.size()),
+            .selected = &state.market_view.chart_span});
+        foot->controls.push_back(widget::foot_combo{
+            .id = "style",
+            .tooltip = "Draw candles or a line",
+            .options = chart_style_labels.data(),
+            .option_count = static_cast<int>(chart_style_labels.size()),
+            .selected = &state.market_view.chart_style});
+        foot->controls.push_back(widget::foot_combo{
+            .id = "ema",
+            .tooltip = "Overlay the exponential moving average of the window",
+            .options = chart_ema_labels.data(),
+            .option_count = static_cast<int>(chart_ema_labels.size()),
+            .selected = &state.market_view.chart_ema});
+        foot_height = widget::status_foot_height(status, *foot)
+            + ImGui::GetStyle().ItemSpacing.y;
+    }
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float plot_height = std::max(
-        available.y - foot_height - ImGui::GetStyle().ItemSpacing.y, 80.0f);
+    const float plot_height = std::max(available.y - foot_height, 80.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##plot-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
@@ -605,24 +797,25 @@ void render_chart(window_handle handle, const render_input& input,
             ImPlot::PopStyleColor();
             ImPlot::PopStyleVar(2);
         }
+        if (layout == chart_layout::compact
+            && ImGui::IsWindowHovered(
+                ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)
+            && ImGui::IsMouseReleased(ImGuiMouseButton_Right))
+            open_view_menu = true;
     }
     ImGui::EndChild();
     ImGui::PopStyleVar();
 
     const auto before = state.market_view;
-    if (widget::draw_status_foot(status, input.now_ns, foot)) {
-        /*
-         * Only the choice that changed updates the remembered default. Copying
-         * the whole window state would take another window's untouched choices
-         * with it and make the last click win every field.
-         */
-        if (state.market_view.chart_span != before.chart_span)
-            input.market_view.chart_span = state.market_view.chart_span;
-        if (state.market_view.chart_style != before.chart_style)
-            input.market_view.chart_style = state.market_view.chart_style;
-        if (state.market_view.chart_ema != before.chart_ema)
-            input.market_view.chart_ema = state.market_view.chart_ema;
-        save_chart_view(handle, input, state);
+    if (layout == chart_layout::full) {
+        if (widget::draw_status_foot(status, input.now_ns, *foot))
+            chart_view_changed(handle, input, state, before);
+    } else {
+        if (open_view_menu)
+            ImGui::OpenPopup("chart-view");
+        if (draw_view_menu(state.market_view))
+            chart_view_changed(handle, input, state, before);
+        draw_focus_outline();
     }
     ImGui::PopID();
 }

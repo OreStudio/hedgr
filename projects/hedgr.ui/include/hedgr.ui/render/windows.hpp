@@ -152,7 +152,16 @@ HEDGR_UI_EXPORT void render_series_browser(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
-/** @brief One market series as a candle or line plot, drawn from the series table's columns. */
+/**
+ * @brief One market series as a candle or line plot, drawn from the series
+ * table's columns.
+ *
+ * A floating chart is drawn full: a header with the points in view and a foot
+ * holding the period, style and EMA. A chart docked into another window is a
+ * tile and is drawn compact: one header row, no foot, and the same choices on
+ * a right click over the plot. Docked or not is read from ImGui each frame,
+ * so the operator chooses the layout by docking.
+ */
 HEDGR_UI_EXPORT void render_chart(
     hedgr::model::state::window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
