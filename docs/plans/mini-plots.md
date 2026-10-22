@@ -510,6 +510,34 @@ there is a desk space to dock into.
 Check: a headless test that a pop-out request leaves the window floating on the
 next frame and a dock request leaves it docked.
 
+Delivered in #77. What differed from the plan:
+
+- The Dock icon sits at the right end of the floating chart's header, not in
+  the foot. Pop out and close sit at the right end of the compact header. The
+  icons are drawn first and the header text is clipped short of them, so a
+  narrow tile loses text before it loses a control.
+- The rule for where Dock puts a chart. While the desk's free centre is empty,
+  the chart fills it. After that, it takes half of the tile focused last,
+  split along that tile's longer side. Docking four charts one after another
+  gives a grid, not four tabs. The split uses `DockBuilderSplitNode` from
+  `imgui_internal.h`, the one use of the dock builder outside tests.
+- The dock space is ImGui's `DockSpaceOverViewport` written out in
+  `workspace::draw_dock_space`, because the stock call fills the whole work
+  area. The shortcut bar is raised over every window, so the space stops at
+  the bar's resting height and a tile docked at the bottom edge is never under
+  it. The bar still grows over the desk while the pointer is on it. There is
+  no viewport-wide status bar to avoid: each window draws its own.
+- The icons reuse the existing sheet, so no glyph was added. Dock is `panel`
+  (Column Triple), pop out is `move` (Arrow Upload) and close is `cancel`
+  (Dismiss). Each has a tooltip that names the action.
+- The requests are interface scratch (`window_ui_state::tile`), not commands.
+  Where a window sits is ImGui's state in `imgui.ini` (D4), so nothing reaches
+  the runtime. Close still goes through `close_window`.
+- `SetNextWindowDockID(0)` undocks a window (verified by the pop-out test).
+  A popped-out window floats over the tile it left, at the size it last
+  floated at, or at its opening size when it has not floated this run, kept
+  inside the work area.
+
 ### 5. Shared crosshair
 
 The double-buffered cursor time in the workspace and the line and tag in
@@ -623,7 +651,7 @@ series, linked pan and zoom, and a Hedgr-owned tiling container.
   XWayland (step 6).
 - That ImPlot 1.0 behaves the same inside docked windows. Its source has no
   docking code, which is evidence but not a run.
-- That `SetNextWindowDockID(0)` undocks a window.
+- That `SetNextWindowDockID(0)` undocks a window. Verified in step 4.
 - How `imgui.ini` behaves when the store and the ini disagree about which
   windows exist.
 - How the compact header reads at the smallest tile sizes, which needs eyes on

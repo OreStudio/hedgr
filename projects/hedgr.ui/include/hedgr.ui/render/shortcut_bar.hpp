@@ -68,6 +68,18 @@ struct shortcut_bar_result final {
 };
 
 /**
+ * @brief How much of the bottom of the viewport the bar covers at rest, or
+ * zero on a frame that draws no bar.
+ *
+ * The desk's dock space ends above it, so a docked window is never drawn
+ * under the bar. The bar grows over the desk while the pointer is on it,
+ * which is a moment rather than a place, so only the resting height is kept
+ * clear.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT float shortcut_bar_height(
+    const render_input& input);
+
+/**
  * @brief Draws the shortcuts bar at the bottom of the viewport.
  *
  * The bar is a dock rather than a strip inside a window. Every window in this

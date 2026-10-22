@@ -212,9 +212,13 @@ inline constexpr float series_flag_scale = 2.0f;
  *
  * The session names the tenant whose images are used. A currency with no
  * uploaded image falls back to the client's own flag primitives.
+ *
+ * @param inset How far short of the right edge the flags end, for a heading
+ * whose right end holds controls.
  */
 HEDGR_UI_EXPORT void draw_series_flags(const render_input& input,
-    const hedgr::model::state::session_handle session, std::string_view label);
+    const hedgr::model::state::session_handle session, std::string_view label,
+    float inset = 0.0f);
 
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;

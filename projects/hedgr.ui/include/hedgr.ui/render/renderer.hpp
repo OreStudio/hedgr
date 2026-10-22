@@ -201,7 +201,22 @@ struct command_centre_ui_state final {
     bool session_loss_reported = false;
 };
 
+/**
+ * @brief What a window's own controls asked of its place on the desk.
+ *
+ * Set by a renderer and acted on by the workspace, which owns the Begin call
+ * that docking and floating need. Where a window sits is ImGui's state, saved
+ * in its own settings file, so none of these becomes a command.
+ */
+enum class tile_request : std::uint8_t { none, dock, pop_out, close };
+
 struct window_ui_state final {
+    /** @brief The request the window's controls made this frame. */
+    tile_request tile = tile_request::none;
+
+    /** @brief The window's size when it last floated, zero until it has. */
+    ImVec2 floating_size{};
+
     /** @brief Filter text, as typed. */
     std::array<char, 128> filter{};
 

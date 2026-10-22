@@ -27,6 +27,7 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace hedgr::ui::render {
@@ -101,7 +102,29 @@ public:
     /** @brief Writes the remembered choices to @p path. */
     void save_market_view(const std::filesystem::path& path) const;
 
+    /** @brief The desk's dock space, zero until a frame with docking on. */
+    [[nodiscard]] ImGuiID dock_space() const noexcept { return dock_space_; }
+
 private:
+    /**
+     * @brief A window to dock into the desk or float out of it.
+     *
+     * Asked for in one frame and done before the window's Begin in the next,
+     * because a window's dock can only be set before it is begun.
+     */
+    struct dock_move final {
+        hedgr::model::state::window_handle window;
+        /** @brief Into the desk's dock space, or out to @c pos and @c size. */
+        bool into_desk = false;
+        /** @brief The node it docks into, chosen before the dock space draws. */
+        ImGuiID to = 0;
+        ImVec2 pos{};
+        ImVec2 size{};
+    };
+
+    /** @brief Draws the dock space that fills the desk above the shortcut bar. */
+    void draw_dock_space(const render_input& input);
+
     /**
      * @brief Draws the notice that says the store could not be opened.
      *
@@ -161,6 +184,12 @@ private:
 
     /** @brief The choices the market-data screens share across windows. */
     market_view_state market_view_;
+
+    ImGuiID dock_space_ = 0;
+
+    /** @brief The move asked for this frame, and the one to do this frame. */
+    std::optional<dock_move> next_move_;
+    std::optional<dock_move> move_;
 
     /*
      * The master password prompt's own scratch state.
