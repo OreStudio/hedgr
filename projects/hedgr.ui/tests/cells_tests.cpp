@@ -257,6 +257,44 @@ TEST_CASE("the semantic tones take the state colours and never the accent",
     });
 }
 
+/** @brief The height the glyphs of @p vertices in @p colour span together. */
+float glyph_extent(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
+    float top = FLT_MAX;
+    float bottom = -FLT_MAX;
+    for (const auto& v : vertices) {
+        if (is_solid(v) || v.col != colour)
+            continue;
+        top = std::min(top, v.pos.y);
+        bottom = std::max(bottom, v.pos.y);
+    }
+    return bottom > top ? bottom - top : 0.0f;
+}
+
+TEST_CASE("a headline value is taller than body text and holds its width",
+    "[cells][headline]") {
+    themed context;
+    frame([] {
+        const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+        const auto body =
+            vertices_of([] { ImGui::TextUnformatted("1.2345"); });
+        const auto headline =
+            vertices_of([] { widget::headline_value("1.2345"); });
+        CHECK(ImGui::GetItemRectSize().y > ImGui::GetTextLineHeight());
+        CHECK(glyph_extent(headline, text) > glyph_extent(body, text) + 2.0f);
+        for (const auto tone : all_tones) {
+            if (tone != theme::tone::neutral)
+                CHECK_FALSE(has_hue(headline, theme::pill_colours(tone).text));
+        }
+
+        widget::headline_value("1.1111");
+        const float ones = ImGui::GetItemRectSize().x;
+        widget::headline_value("1.0000");
+        CHECK(ImGui::GetItemRectSize().x == Approx(ones));
+        widget::headline_value("1.00");
+        CHECK(ImGui::GetItemRectSize().x < ones);
+    });
+}
+
 TEST_CASE("a value pill is drawn in its tone's colours at its measured size",
     "[cells][pill]") {
     themed context;

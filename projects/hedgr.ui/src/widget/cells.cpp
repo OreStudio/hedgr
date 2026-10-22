@@ -46,6 +46,7 @@ constexpr float pill_scale = 0.85f;
 constexpr float pill_padding_x_ratio = 0.6f;
 constexpr float pill_padding_y_ratio = 0.3f;
 constexpr float cell_gap_ratio = 0.35f;
+constexpr float headline_scale = 1.35f;
 constexpr float hero_scale = 1.5f;
 constexpr float hero_padding_x_ratio = 0.9f;
 constexpr float hero_padding_y_ratio = 0.55f;
@@ -168,6 +169,48 @@ void draw_caption_at(ImDrawList* draw, const face& f, ImVec2 origin,
         lit ? ring : colour, '?', &clip);
 }
 
+/**
+ * @brief The advance every digit of a headline takes: the widest digit's.
+ *
+ * The bold face sets its digits in proportion, so a price set in it would
+ * change width as it ticks and push the pill beside it back and forth. Giving
+ * every digit one advance keeps the row still, as a tabular face would.
+ */
+[[nodiscard]] float digit_advance(ImFontBaked* baked) {
+    float widest = 0.0f;
+    for (ImWchar digit = '0'; digit <= '9'; ++digit)
+        widest = std::max(widest, baked->GetCharAdvance(digit));
+    return widest;
+}
+
+[[nodiscard]] bool is_digit(ImWchar code) {
+    return code >= '0' && code <= '9';
+}
+
+/** @brief Calls @p visit with each code point of @p text and its advance. */
+template<class Visit>
+void for_each_headline_glyph(const face& f, std::string_view text,
+    Visit&& visit) {
+    ImFontBaked* const baked = f.font->GetFontBaked(f.size);
+    const float digit = digit_advance(baked);
+    const char* cursor = text.data();
+    const char* const end = cursor + text.size();
+    while (cursor < end) {
+        unsigned int code = 0;
+        cursor += ImTextCharFromUtf8(&code, cursor, end);
+        const auto glyph = static_cast<ImWchar>(code);
+        visit(glyph, baked->GetCharAdvance(glyph),
+            is_digit(glyph) ? digit : baked->GetCharAdvance(glyph));
+    }
+}
+
+[[nodiscard]] float headline_width(const face& f, std::string_view text) {
+    float width = 0.0f;
+    for_each_headline_glyph(f, text,
+        [&](ImWchar, float, float advance) { width += advance; });
+    return width;
+}
+
 [[nodiscard]] float pill_padding_x(const face& f) {
     return f.size * pill_padding_x_ratio;
 }
@@ -283,6 +326,27 @@ void caption(std::string_view text, std::string_view help) {
                 origin->y + size.y));
     }
     help_tooltip(help);
+}
+
+void headline_value(std::string_view text) {
+    const face f = bold_at(headline_scale);
+    const ImVec2 size(headline_width(f, text), std::ceil(f.size));
+    const auto origin = place_inline(size);
+    if (!origin)
+        return;
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+    const ImU32 colour = ImGui::GetColorU32(ImGuiCol_Text);
+    const ImVec4 clip(origin->x, origin->y, origin->x + size.x,
+        origin->y + size.y);
+    log_text(*origin, text);
+    float x = origin->x;
+    for_each_headline_glyph(f, text,
+        [&](ImWchar code, float own, float advance) {
+            f.font->RenderChar(draw, f.size,
+                ImVec2(ImFloor(x + (advance - own) * 0.5f), origin->y), colour,
+                code, &clip);
+            x += advance;
+        });
 }
 
 ImVec2 value_pill_size(std::string_view text) {

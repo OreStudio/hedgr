@@ -351,9 +351,7 @@ void render_chart(window_handle handle, const render_input& input,
         const double percent =
             first != 0.0 ? change / first * 100.0 : 0.0;
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        ImGui::PushFont(icon::numeric_font());
-        ImGui::TextUnformatted(format_price(last).c_str());
-        ImGui::PopFont();
+        widget::headline_value(format_price(last).view());
         ImGui::SameLine();
         widget::value_pill(format_number("{:+.2f}%", percent).view(),
             change_tone(health, change));

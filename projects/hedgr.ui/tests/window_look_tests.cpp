@@ -39,6 +39,7 @@
 #include <functional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -355,6 +356,56 @@ TEST_CASE("a chart names its series in a neutral pill", "[look][chart]") {
     CHECK(solid_width(vertices, fill)
         >= widget::value_pill_size("FX GBP/USD").x - 1.5f);
     CHECK_FALSE(has_state_tone(vertices));
+}
+
+/** @brief The top of the chart's plot area, below its one header row. */
+float plot_top() {
+    for (const ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) {
+        if (std::string_view(w->Name).find("##plot-area") != std::string_view::npos)
+            return w->Pos.y;
+    }
+    FAIL("no plot area");
+    return 0.0f;
+}
+
+TEST_CASE("a chart heads its plot with one row and a large price",
+    "[look][chart]") {
+    chart_fixture chart{0.0001};
+    const auto vertices = settled([&] { chart.draw(newest_at_ns); },
+        frame_vertices);
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    const float header_top = frame->DC.CursorStartPos.y;
+    const float header = plot_top() - header_top;
+    CHECK(header == Approx(ImGui::GetFrameHeight()
+        + ImGui::GetStyle().ItemSpacing.y));
+
+    const ImVec2 white = ImGui::GetDrawListSharedData()->TexUvWhitePixel;
+    const ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+    const auto extent = [&](const std::vector<ImDrawVert>& drawn, float top,
+                            float bottom) {
+        float low = FLT_MAX;
+        float high = -FLT_MAX;
+        for (const auto& v : drawn) {
+            if (v.col != text || (v.uv.x == white.x && v.uv.y == white.y)
+                || v.pos.y < top || v.pos.y > bottom)
+                continue;
+            low = std::min(low, v.pos.y);
+            high = std::max(high, v.pos.y);
+        }
+        return high > low ? high - low : 0.0f;
+    };
+    const float price = extent(vertices, header_top, plot_top());
+
+    float line_top = 0.0f;
+    float line_bottom = 0.0f;
+    hedgr::testing::frame([&] {
+        ImGui::TextUnformatted("1.2345 FX 120");
+        line_top = ImGui::GetItemRectMin().y;
+        line_bottom = ImGui::GetItemRectMax().y;
+    });
+    const auto body = frame_vertices();
+    CHECK(price > extent(body, line_top, line_bottom) + 2.0f);
 }
 
 TEST_CASE("a term structure names its curve in a pill and wears no state",

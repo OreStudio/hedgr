@@ -62,6 +62,17 @@ namespace hedgr::ui::widget {
  */
 HEDGR_UI_EXPORT void caption(std::string_view text, std::string_view help = {});
 
+/**
+ * @brief Draws a large bold value, such as a price, and advances past it.
+ *
+ * About a third larger than body text and in the bold face, or the regular
+ * face where no bold file is installed. Drawn in the ordinary text colour and
+ * never a state colour: a pill beside it carries the direction. Every digit
+ * takes the widest digit's advance, so a ticking value keeps its width. Centred
+ * on a line taller than itself, as a caption is.
+ */
+HEDGR_UI_EXPORT void headline_value(std::string_view text);
+
 /** @brief The corner radius of a value pill: a chip rather than a capsule. */
 inline constexpr float value_pill_rounding = 4.0f;
 
