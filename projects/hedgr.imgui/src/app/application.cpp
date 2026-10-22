@@ -43,6 +43,15 @@
 #include <implot.h>
 #include <stb_image.h>
 
+/*
+ * Every build tree compiles against one shared vcpkg install, so a tree
+ * configured against an ImGui without the docking branch would build and then
+ * drop the dock layout from imgui.ini. It fails here instead.
+ */
+#ifndef IMGUI_HAS_DOCK
+#error "Hedgr needs ImGui's docking branch: the imgui port's docking-experimental feature."
+#endif
+
 #include <boost/log/trivial.hpp>
 #include <chrono>
 #include <cstdint>
@@ -428,6 +437,7 @@ GLFWwindow* application::initialise_graphics() {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     /*
      * ImGui writes a window's position back here when the process leaves, so
      * this path is where a layout lives and a capture that wants the same
