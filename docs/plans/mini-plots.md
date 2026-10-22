@@ -15,8 +15,11 @@ charts.
 
 Line references are to `main` at `e030995`. A claim marked "inferred" was read
 off the code or a header and not observed running. A claim marked "verified"
-was checked against a source file named beside it. Nothing here was built or
-run.
+was checked against a source file named beside it. Step 1 has since been built
+and its suite run; nothing here was run with a display.
+
+The user decided D1 to D10 on 2026-10-22 (see "Decisions"). All went as
+recommended except D9: tearing a window out into its own OS window is in.
 
 ## Why
 
@@ -143,7 +146,9 @@ windows exist and what they show, and ImGui's own file says where they are.
   (verified, `:3924-3937`).
 - The GLFW backend disables multi-viewports under Wayland since 2025-04-26
   (verified, `backends/imgui_impl_glfw.cpp:50` at that tag). Hedgr builds GLFW
-  with Wayland (`vcpkg.json`, `glfw3` feature `wayland`).
+  with Wayland (`vcpkg.json`, `glfw3` feature `wayland`) and asks GLFW for
+  Wayland whenever `WAYLAND_DISPLAY` is set (`application.cpp:319-323`). See
+  "Multiple OS windows" for what that means for D9.
 
 ## What a small plot is
 
@@ -364,6 +369,57 @@ accent token. The nearest is the selection blue, `rail_selection_border`
 accent. No new widget is needed for the first slice (inferred from the widget
 list).
 
+### Multiple OS windows (viewports)
+
+D9 is in. A docked tile or a floating window can be dragged outside the main
+window and becomes its own OS window. ImGui calls this multi-viewports
+(`ImGuiConfigFlags_ViewportsEnable`). What the source at `v1.92.9b-docking`
+says about this machine, a GNOME 50 Wayland session:
+
+- The GLFW backend sets `ImGuiBackendFlags_PlatformHasViewports` only when
+  `glfwGetPlatform()` is not Wayland (verified, `imgui_impl_glfw.cpp:740-749`).
+  The reason is upstream issue #8587: Wayland gives a client no global window
+  position, and viewports place windows by position.
+- When the flag is asked for and the backend lacks support, `NewFrame` clears
+  it and carries on (verified, `imgui.cpp:11789-11809`, called unconditionally
+  from `NewFrame` at `:5792`). So asking for viewports on Wayland is harmless,
+  and every window stays inside the main one.
+- No other backend in that tag does better. The SDL3 backend grants viewports
+  only for the `windows`, `cocoa`, `x11`, `DIVE` and `VMAN` video drivers, not
+  `wayland` (verified, `imgui_impl_sdl3.cpp:584-596`). Switching backend would
+  buy nothing.
+- Secondary windows share the main window's GL context, so Hedgr's textures
+  (background, icons, currency images) draw in them unchanged (verified,
+  `imgui_impl_glfw.cpp:1393-1394`). Each secondary window sets swap interval 0,
+  so only the main window paces the frame (verified, `:1422-1423`). The window
+  identity hints set before the main window persist in GLFW and apply to the
+  secondary windows too (inferred, GLFW keeps hints until reset).
+- The frame loop must call `UpdatePlatformWindows` and
+  `RenderPlatformWindowsDefault` after rendering and restore the main context.
+  `UpdatePlatformWindows` returns at once when the flag is off (verified,
+  `imgui.cpp:17689-17696`).
+
+The options:
+
+1. **X11 through XWayland**, `glfwInitHint(GLFW_PLATFORM, GLFW_PLATFORM_X11)`.
+   Viewports work. The costs are the general costs of an X11 client on a
+   Wayland desktop: GNOME upscales X11 windows under fractional or HiDPI
+   scaling, which blurs them, unless mutter's `xwayland-native-scaling` is on.
+   This machine has one 1920x1080 output, no `monitors.xml` and no mutter
+   experimental features, so it runs at scale 1 and the blur does not apply
+   (inferred from `/sys/class/drm` and `gsettings`). On X11 the backend uses the
+   content scale and reports a framebuffer scale of 1 (verified,
+   `imgui_impl_glfw.cpp:1184-1188`).
+2. **Native Wayland, viewports off.** Today's behaviour. Docking works inside
+   the main window. No tear-out.
+3. **A backend with Wayland viewports.** None exists at this tag (see above).
+
+Chosen. Step 1 asks for viewports everywhere and adds the frame-loop calls.
+`HEDGR_PLATFORM=x11` makes GLFW use X11, which turns tear-out on. The default
+stays native Wayland until a person has run the X11 path once (step 6), because
+nobody has yet watched a torn-out window on this desktop. The log names the
+platform and whether windows can be torn out, on every launch.
+
 ### Headless tests
 
 The headless desk sets `io.IniFilename = nullptr`
@@ -387,18 +443,27 @@ launch directory is a layout the operator loses.
 Check: a unit test of the path choice, and one launch from `$HOME` and one from
 the repo that open the same arrangement.
 
+Delivered in #72, with the `vcpkg.json` version fix.
+
 ### 1. The docking build
 
 Add `docking-experimental` to the `imgui` features in `vcpkg.json`. Reinstall
 `imgui` and `implot` into the shared installed tree. Set
 `ImGuiConfigFlags_DockingEnable` beside the nav flags (`application.cpp:428`).
 Add `ImGuiWindowFlags_NoDocking` to the startup notice and the lock prompt.
-Do not enable viewports.
+Ask for `ImGuiConfigFlags_ViewportsEnable`, add the platform-window calls to the
+frame loop, and add the `HEDGR_PLATFORM=x11` switch (see "Multiple OS
+windows"). On the default Wayland platform this changes nothing visible.
 
 Check: build and full `ctest` green. A `static_assert` that `IMGUI_HAS_DOCK` is
 defined, so a tree built against the wrong install fails at compile time. A
 headless test that docks two windows with the dock builder and draws both. A
 manual drag of one chart onto another.
+
+Delivered in #73, stacked on #72. The release tree built with no warnings and
+`ctest` passed 6 of 6. ImPlot and ImCoolBar needed no change. The check is an
+`#error`, since only the preprocessor can test whether a macro is defined. The
+manual drag is still to do.
 
 ### 2. Each chart keeps its own period and style
 
@@ -439,7 +504,31 @@ Check: a headless test that feeds a mouse position over one plot and asserts the
 other draws its line at that time on the next frame. A frame-cost check that an
 idle desk is unchanged.
 
-## Decisions for the user
+### 6. Tear-out windows by default
+
+Run `HEDGR_PLATFORM=x11` by hand: tear a chart out, dock it back, restart and
+see it return, minimise the main window. Then fix what the run shows. The known
+candidates are all inferred. Torn-out windows keep the theme's rounded corners and
+show the clear colour behind them (ImGui's examples set `WindowRounding` to 0
+and an opaque window background when viewports are on); the minimised wait
+(`application.cpp:723-728`) stops drawing torn-out windows while the main one
+is iconified; window positions in `imgui.ini` are desktop coordinates on X11
+and main-window coordinates on Wayland, so switching platform moves windows.
+Then make X11 the default when `DISPLAY` is set and keep
+`HEDGR_PLATFORM=wayland` as the way back, or keep Wayland the default if the
+run says XWayland costs more than it gives. Captures stay on whichever platform
+they run on today.
+
+Check: the manual run above, and a capture on the default platform unchanged.
+
+## Decisions
+
+Decided on 2026-10-22: D1 ImGui docking, D2 plain drag, D3 docked means small,
+D4 layout in `imgui.ini` beside the store, D5 every desk window except the
+startup notice, the lock prompt and the shortcut bar, D6 a shared crosshair
+across docked charts in one session, D7 per-chart period and style with
+`market-view.ini` as the seed for new charts, D8 not in the first slice, D9 in
+(changed from the recommendation), D10 later. The list below is kept as asked.
 
 - **D1. How docking is built.** ImGui's docking (recommended): drag a window
   onto another to split or tab, works for every window kind, small build
@@ -470,14 +559,16 @@ idle desk is unchanged.
   first slice (recommended). It needs the chart id rule
   (`window_service.cpp:156-165`) to change, which also changes what "open this
   series again" does.
-- **D9. Tearing a tile out into its own OS window** (multi-viewports). Out
-  (recommended). ImGui's GLFW backend turns it off under Wayland.
+- **D9. Tearing a tile out into its own OS window** (multi-viewports). The
+  plan recommended out. **Decided in.** ImGui's GLFW backend turns it off under
+  Wayland, so it works through XWayland, behind `HEDGR_PLATFORM=x11` until
+  step 6.
 - **D10. Linked pan and zoom across tiles.** Later (recommended). Charts cannot
   pan or zoom today.
 
 ## Out of scope
 
-Multi-viewports, drawing tools, indicators beyond the EMA, volume bars,
+Native Wayland multi-viewports (no backend supports them), drawing tools, indicators beyond the EMA, volume bars,
 compare overlays, saved named layouts or layout presets, two tiles of one
 series, linked pan and zoom, and a Hedgr-owned tiling container.
 
@@ -488,6 +579,10 @@ series, linked pan and zoom, and a Hedgr-owned tiling container.
   `ImGuiIO` for all of them at once, so every tree needs a full rebuild, and a
   branch without step 1 then compiles against a docking header. The
   `static_assert` in step 1 makes the mismatch loud in one direction only.
+  Observed in step 1: vcpkg installs headers with the tarball's file times, so
+  ninja does not see them change and an incremental build links stale objects
+  (`undefined reference to ImGui::GetForegroundDrawList()`). Run
+  `ninja -t clean` in each tree after the reinstall.
 - **"Experimental".** The feature is named experimental in vcpkg. The docking
   branch is tagged at each release and is what most ImGui applications ship on
   (inferred from the tag scheme, not measured).
@@ -499,12 +594,18 @@ series, linked pan and zoom, and a Hedgr-owned tiling container.
 - **Minimum size.** The 360x220 floor may not apply to docked windows
   (inferred), so a tile can be squeezed until the header no longer fits. Step
   3 should clip the header rather than wrap it.
+- **Viewports untested with a display.** Step 1 wires them and the source says
+  Wayland ignores the request, but no torn-out window has been seen. Step 6
+  owns that run.
 - **Focus and capture.** `SetNextWindowFocus` on a docked tab selects the tab
   (inferred). The capture raise at `workspace.cpp:312-317` should still work.
 
 ## What cannot be verified without building
 
-- That the project builds and the suite passes on the docking install.
+- That the project builds and the suite passes on the docking install. Done
+  in step 1.
+- What a torn-out window looks like and how it behaves on GNOME through
+  XWayland (step 6).
 - That ImPlot 1.0 behaves the same inside docked windows. Its source has no
   docking code, which is evidence but not a run.
 - That `SetNextWindowDockID(0)` undocks a window.
@@ -513,8 +614,7 @@ series, linked pan and zoom, and a Hedgr-owned tiling container.
 - How the compact header reads at the smallest tile sizes, which needs eyes on
   a capture.
 
-## A defect noticed, not fixed
+## A defect noticed
 
-`vcpkg.json:5` declares `"version-semver": "0.0.1"` while `CMakeLists.txt`
-declares the project version 0.2.0. Versions move one minor per release, so the
-manifest should read 0.2.0. Left for its own change.
+`vcpkg.json:5` declared `"version-semver": "0.0.1"` while `CMakeLists.txt`
+declares the project version 0.2.0. Fixed in #72.
