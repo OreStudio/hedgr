@@ -48,7 +48,7 @@ namespace {
  * carries it and neutral at zero, so an empty bucket claims no state.
  */
 void count_pill(std::string_view verdict, std::size_t count,
-    theme::tone tone) {
+    theme::tone tone, const char* help) {
     std::array<char, 32> text{};
     const auto written = std::format_to_n(text.data(),
         static_cast<std::ptrdiff_t>(text.size()), "{} {}", count, verdict);
@@ -56,6 +56,7 @@ void count_pill(std::string_view verdict, std::size_t count,
         std::string_view(text.data(),
             static_cast<std::size_t>(written.out - text.data())),
         count > 0 ? tone : theme::tone::neutral);
+    ImGui::SetItemTooltip("%s", help);
 }
 
 }
@@ -131,7 +132,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     };
 
     ImGui::AlignTextToFramePadding();
-    widget::caption("CRM");
+    widget::caption("CRM",
+        "The currency rate matrix shown. The pills count its pairs by how "
+        "fresh their rates are.");
     ImGui::SameLine();
     widget::value_pill(state.crm_name);
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
@@ -168,12 +171,15 @@ void render_crm_matrix(window_handle handle, const render_input& input,
          */
         const auto health = model::domain::assess_verdicts(counts);
         set_health_foot(foot, health, as_of_ns, input.wall_now_ns, reading);
-        count_pill("fresh", counts.fresh, theme::tone::good);
+        count_pill("fresh", counts.fresh, theme::tone::good,
+            "Pairs whose rate is current.");
         ImGui::SameLine();
-        count_pill("stale", counts.stale, theme::tone::warning);
+        count_pill("stale", counts.stale, theme::tone::warning,
+            "Pairs whose rate is older than it should be.");
         ImGui::SameLine();
         count_pill("unavailable",
-            counts.disconnected + counts.unavailable, theme::tone::neutral);
+            counts.disconnected + counts.unavailable, theme::tone::neutral,
+            "Pairs with no rate, or whose source cannot be reached.");
         if (snapshot->latency_ns > 0) {
             ImGui::SameLine();
             ImGui::TextDisabled("\u00b7 %.0f ms",

@@ -56,7 +56,9 @@ namespace hedgr::ui::widget {
  * it sits in the middle of the line as text does. Lower case ASCII is drawn in
  * capitals; the caller's text is not copied.
  *
- * @param help Shown on hover over the caption, empty for no help glyph.
+ * @param help Shown on hover over the caption, empty for no help glyph. The
+ * glyph is a dim ring round a question mark, and both brighten while the
+ * caption is hovered, so the reader sees which label the tooltip explains.
  */
 HEDGR_UI_EXPORT void caption(std::string_view text, std::string_view help = {});
 

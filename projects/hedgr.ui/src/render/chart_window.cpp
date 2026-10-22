@@ -358,7 +358,8 @@ void render_chart(window_handle handle, const render_input& input,
         widget::value_pill(format_number("{:+.2f}%", percent).view(),
             change_tone(health, change));
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        widget::caption("Points");
+        widget::caption("Points",
+            "Observations plotted in the chosen period.");
         ImGui::SameLine();
         ImGui::Text("%zu", plotted);
         if (span_ns == 0) {

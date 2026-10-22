@@ -94,6 +94,12 @@ float max_x(const std::vector<ImDrawVert>& vertices) {
     return result;
 }
 
+ImVec2 centre_of_item() {
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    return ImVec2((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
+}
+
 /** @brief A themed headless context, so the accent and the chip are real. */
 struct themed final {
     headless_imgui imgui;
@@ -149,6 +155,69 @@ TEST_CASE("a caption records the size it measures and draws inside it",
         CHECK(max_x(vertices) <= origin.x + width + 1.0f);
         CHECK(max_x(vertices) >= origin.x + width - step);
     });
+}
+
+TEST_CASE("a caption draws its help ring only when it has help",
+    "[cells][caption][help]") {
+    themed context;
+    frame([] {
+        const ImU32 ring = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        const auto plain = vertices_of([] { widget::caption("Points"); });
+        CHECK_FALSE(has_colour(plain, ring));
+
+        const ImVec2 origin = ImGui::GetCursorScreenPos();
+        const auto helped = vertices_of(
+            [] { widget::caption("Points", "Observations plotted."); });
+        CHECK(has_colour(helped, ring));
+        const float text_right = origin.x + widget::caption_size("Points").x;
+        for (const auto& v : helped) {
+            if (v.col == ring)
+                CHECK(v.pos.x > text_right);
+        }
+
+        const auto bare_cell = vertices_of(
+            [] { widget::labelled_value("Date", "15 Oct", 160.0f); });
+        CHECK_FALSE(has_colour(bare_cell, ring));
+        const auto helped_cell = vertices_of(
+            [] { widget::labelled_value("Date", "15 Oct", 160.0f, "Opened"); });
+        CHECK(has_colour(helped_cell, ring));
+    });
+}
+
+TEST_CASE("a hovered caption lights its help ring", "[cells][caption][help]") {
+    themed context;
+    const ImU32 resting = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const ImU32 lit = ImGui::GetColorU32(ImGuiCol_Text);
+    ImVec2 caption_centre;
+    ImVec2 cell_centre;
+    std::vector<ImDrawVert> caption;
+    std::vector<ImDrawVert> cell;
+    const auto draw = [&] {
+        frame([&] {
+            caption = vertices_of([] { widget::caption("Terms", "Tenors."); });
+            caption_centre = centre_of_item();
+            cell = vertices_of(
+                [] { widget::labelled_value("Date", "15 Oct", 160.0f, "Opened"); });
+            cell_centre = centre_of_item();
+        });
+    };
+    draw();
+    CHECK(has_colour(caption, resting));
+    CHECK_FALSE(has_colour(caption, lit));
+
+    ImGui::GetIO().AddMousePosEvent(caption_centre.x, caption_centre.y);
+    draw();
+    draw();
+    CHECK(has_colour(caption, lit));
+    CHECK_FALSE(has_colour(caption, resting));
+    CHECK(has_colour(cell, resting));
+
+    ImGui::GetIO().AddMousePosEvent(cell_centre.x, cell_centre.y);
+    draw();
+    draw();
+    CHECK(has_colour(cell, lit));
+    CHECK_FALSE(has_colour(cell, resting));
+    CHECK(has_colour(caption, resting));
 }
 
 TEST_CASE("the semantic tones take the state colours and never the accent",

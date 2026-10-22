@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 
 namespace hedgr::ui::widget {
@@ -58,6 +59,9 @@ constexpr float hero_rounding = 6.0f;
 [[nodiscard]] float cell_gap() {
     return std::round(ImGui::GetFontSize() * cell_gap_ratio);
 }
+
+/** @brief Whether a caption carries a help glyph, and whether it is lit. */
+enum class marker : std::uint8_t { none, resting, hovered };
 
 /** @brief A font at a size, which is all a draw list needs to place text. */
 struct face final {
@@ -133,7 +137,7 @@ void for_each_capital(std::string_view text, Visit&& visit) {
 
 /** @brief Draws a caption whose row of @p row_height starts at @p origin. */
 void draw_caption_at(ImDrawList* draw, const face& f, ImVec2 origin,
-    std::string_view text, bool help, float row_height, const ImVec4& clip) {
+    std::string_view text, marker help, float row_height, const ImVec4& clip) {
     ImFontBaked* const baked = f.font->GetFontBaked(f.size);
     const ImU32 colour = ImGui::GetColorU32(theme::dim_text());
     const float top = ImFloor(origin.y + (row_height - f.size) * 0.5f);
@@ -147,19 +151,21 @@ void draw_caption_at(ImDrawList* draw, const face& f, ImVec2 origin,
         x += baked->GetCharAdvance(code) + step;
     });
 
-    if (!help)
+    if (help == marker::none)
         return;
     const float diameter = help_diameter(f);
     const ImVec2 centre(
         origin.x + tracked_width(f, text) + f.size * help_gap_ratio
             + diameter * 0.5f,
         origin.y + row_height * 0.5f);
-    const ImU32 quiet = ImGui::GetColorU32(ImGuiCol_TextDisabled);
-    draw->AddCircle(centre, diameter * 0.5f - 0.5f, quiet, 0, 1.0f);
+    const bool lit = help == marker::hovered;
+    const ImU32 ring = lit ? ImGui::GetColorU32(ImGuiCol_Text)
+                           : ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    draw->AddCircle(centre, diameter * 0.5f - 0.5f, ring, 0, 1.0f);
     const float mark = baked->GetCharAdvance('?');
     f.font->RenderChar(draw, f.size,
         ImVec2(ImFloor(centre.x - mark * 0.5f), ImFloor(centre.y - f.size * 0.5f)),
-        colour, '?', &clip);
+        lit ? ring : colour, '?', &clip);
 }
 
 [[nodiscard]] float pill_padding_x(const face& f) {
@@ -223,6 +229,13 @@ void draw_pill_at(ImDrawList* draw, const face& f, ImVec2 origin,
     return origin;
 }
 
+/** @brief The help glyph of the item just added, lit while it is hovered. */
+[[nodiscard]] marker help_marker(std::string_view help) {
+    if (help.empty())
+        return marker::none;
+    return ImGui::IsItemHovered() ? marker::hovered : marker::resting;
+}
+
 void help_tooltip(std::string_view help) {
     if (!help.empty())
         ImGui::SetItemTooltip("%.*s", static_cast<int>(help.size()),
@@ -234,20 +247,19 @@ template<class Value>
 void cell(std::string_view label, std::string_view help, float width,
     Value&& value) {
     const float height = labelled_value_height();
-    const ImVec2 size(width, height);
-    if (ImGui::IsRectVisible(size)) {
-        const ImVec2 origin = snapped_cursor();
+    const ImVec2 origin = snapped_cursor();
+    ImGui::Dummy(ImVec2(width, height));
+    if (ImGui::IsItemVisible()) {
         const face caption_face = bold_at(caption_scale);
         const float row = caption_row_height(caption_face);
         const ImVec4 clip(origin.x, origin.y, origin.x + width,
             origin.y + height);
         ImDrawList* const draw = ImGui::GetWindowDrawList();
-        draw_caption_at(draw, caption_face, origin, label, !help.empty(), row,
-            clip);
+        draw_caption_at(draw, caption_face, origin, label, help_marker(help),
+            row, clip);
         value(draw, ImVec2(origin.x,
             origin.y + row + cell_gap()), clip);
     }
-    ImGui::Dummy(size);
     help_tooltip(help);
 }
 
@@ -266,7 +278,7 @@ void caption(std::string_view text, std::string_view help) {
     const ImVec2 size = measure_caption(f, text, !help.empty());
     if (const auto origin = place_inline(size)) {
         draw_caption_at(ImGui::GetWindowDrawList(), f, *origin, text,
-            !help.empty(), size.y,
+            help_marker(help), size.y,
             ImVec4(origin->x, origin->y, origin->x + size.x,
                 origin->y + size.y));
     }
@@ -323,9 +335,9 @@ void hero_strip(std::string_view label, std::string_view value,
     theme::tone tone, std::string_view pill, std::string_view help) {
     const float width = ImGui::GetContentRegionAvail().x;
     const float height = hero_strip_height();
-    const ImVec2 size(width, height);
-    if (ImGui::IsRectVisible(size)) {
-        const ImVec2 origin = snapped_cursor();
+    const ImVec2 origin = snapped_cursor();
+    ImGui::Dummy(ImVec2(width, height));
+    if (ImGui::IsItemVisible()) {
         const ImVec2 corner(origin.x + width, origin.y + height);
         ImDrawList* const draw = ImGui::GetWindowDrawList();
         const theme::tone_colours colours = theme::band_colours(tone);
@@ -339,7 +351,7 @@ void hero_strip(std::string_view label, std::string_view value,
         const float row = caption_row_height(caption_face);
         draw_caption_at(draw, caption_face,
             ImVec2(origin.x + padding, origin.y + (height - row) * 0.5f), label,
-            !help.empty(), row, clip);
+            help_marker(help), row, clip);
 
         float right = corner.x - padding;
         if (!pill.empty()) {
@@ -363,7 +375,6 @@ void hero_strip(std::string_view label, std::string_view value,
             colours.text, value.data(), value.data() + value.size(), 0.0f,
             &clip);
     }
-    ImGui::Dummy(size);
     help_tooltip(help);
 }
 
