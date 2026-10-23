@@ -1063,7 +1063,7 @@ TEST_CASE("an open menu with every kind of row costs a steady frame no allocatio
         static_cast<void>(widget::menu_label("File", true));
         ImGui::End();
         {
-            const widget::menu_popup popup("menu");
+            const widget::menu_popup popup("menu", 0.0f, 60.0f);
             if (popup) {
                 widget::menu_heading("Windows");
                 static_cast<void>(widget::menu_item_row({.label = "Open"}));

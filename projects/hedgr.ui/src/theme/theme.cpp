@@ -420,7 +420,8 @@ ImVec4 chart_tag_colour() noexcept {
 }
 
 ImVec4 menu_surface() noexcept {
-    return menu_fill;
+    return ImVec4(menu_fill.x, menu_fill.y, menu_fill.z,
+        menu_fill.w * menu_popup_alpha);
 }
 
 ImVec4 menu_bar_edge() noexcept {

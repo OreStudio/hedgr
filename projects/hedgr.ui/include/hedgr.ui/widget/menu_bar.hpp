@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/widget/menu.hpp"
+#include "imgui.h"
 
 namespace hedgr::ui::widget {
 
@@ -90,7 +91,9 @@ void menu_bar_label(menu_bar_state& state, int entry, const char* text,
     Rows&& rows, float height = 0.0f) {
     const bool pressed = menu_label(text, state.open == entry, height);
     if (menu_bar_entry(state, entry, text, pressed)) {
-        const menu_popup popup(text);
+        const ImVec2 min = ImGui::GetItemRectMin();
+        const ImVec2 max = ImGui::GetItemRectMax();
+        const menu_popup popup(text, 0.0f, (min.x + max.x) * 0.5f);
         if (popup)
             rows();
     }
