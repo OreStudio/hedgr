@@ -33,23 +33,31 @@ namespace hedgr::ui::render {
 /**
  * @name The launch intro's timeline
  *
- * One slow pulse, like a neon sign switching on and off. The geometry never
- * changes, only the light: the logo and the word start as a dim white, the
- * rest level, brighten smoothly to their peak, dim smoothly back to the rest
- * level by the rest point, and from there the whole intro fades out over the
- * main window until the total. The
- * peak is where the intro's sound is loudest: assets/sounds/intro_swell.wav is
- * measured by tools/measure_intro_peak.py: the centre of its loudest 50 ms window
- * is 3.023 s, and the two move together.
+ * Two slow pulses, like a neon sign flaring twice. The geometry never changes,
+ * only the light: the logo and the word start as a dim white, the rest level,
+ * brighten smoothly to a peak, dim smoothly back to the rest level, brighten
+ * to the same peak again and dim back to rest by the rest point, and from
+ * there the whole intro fades out over the main window until the total. The
+ * pulses touch the rest level once between them, so they read as two flashes.
+ * Pulse k peaks at intro_peak_ns + k * intro_pulse_period_ns. The peaks are
+ * where the intro's sound is loudest: assets/sounds/intro_swell.wav is
+ * measured by tools/measure_intro_peak.py, which gives the centre of the
+ * loudest 50 ms window of each swell, 3.023 s and 6.223 s, and the two move
+ * together.
  *
  * @c intro_max_step is the most the brightness may change between two samples
- * 10 ms apart. Smoothstep's steepest slope is 1.5 over the longer ramp, which
- * is a step of about 0.005 on the falling ramp, so this holds a pulse that cannot jump or flicker.
+ * 10 ms apart. Smoothstep's steepest slope is 1.5 over the ramp, which is a
+ * step of about 0.006 over 1.6 s, so this holds a pulse that cannot jump or
+ * flicker.
  * @{
  */
 inline constexpr std::int64_t intro_peak_ns = 3'023'000'000;
-inline constexpr std::int64_t intro_rest_ns = 5'200'000'000;
-inline constexpr std::int64_t intro_total_ns = 6'000'000'000;
+inline constexpr int intro_pulse_count = 2;
+inline constexpr std::int64_t intro_pulse_period_ns = 3'200'000'000;
+inline constexpr std::int64_t intro_rise_ns = 1'600'000'000;
+inline constexpr std::int64_t intro_fall_ns = 1'600'000'000;
+inline constexpr std::int64_t intro_rest_ns = 7'823'000'000;
+inline constexpr std::int64_t intro_total_ns = 8'623'000'000;
 inline constexpr float intro_max_step = 0.01f;
 /**
  * @brief The calibration between the sound and the picture, in milliseconds.
@@ -125,24 +133,32 @@ struct intro_timing final {
     bool skipped = false;
 
     /**
-     * @brief How bright the logo and word are: the rest level at rest, 1 at the peak.
+     * @brief How bright the logo and word are: the rest level at rest, 1 at a peak.
      *
-     * Smoothstep from @c intro_rest_brightness up to 1 at the peak and
-     * smoothstep back down to the rest level at the rest point, so the slope is
-     * zero at the start, the peak and the rest point: one eased swell with a
-     * single maximum. Before the start and after the rest point it is the rest
-     * level.
+     * Each pulse is a smoothstep from the rest level up to 1 over
+     * @c intro_rise_ns and a smoothstep back down over @c intro_fall_ns, so the
+     * slope is zero at the start, the peak and the end of every pulse: no
+     * jump, one maximum each. Pulses are @c intro_pulse_period_ns apart and
+     * the brightness is the highest of them, so it is the rest level between
+     * them only if a fall and the next rise add up to the period. Before the
+     * first pulse and after the rest point it is the rest level.
      */
     [[nodiscard]] static constexpr float brightness(
         std::int64_t elapsed_ns) noexcept {
         constexpr float rest = theme::intro_rest_brightness;
-        if (elapsed_ns <= 0 || elapsed_ns >= intro_rest_ns)
-            return rest;
-        const float x = elapsed_ns <= intro_peak_ns
-            ? static_cast<float>(elapsed_ns) / static_cast<float>(intro_peak_ns)
-            : static_cast<float>(intro_rest_ns - elapsed_ns)
-                / static_cast<float>(intro_rest_ns - intro_peak_ns);
-        return rest + (1.0f - rest) * (x * x * (3.0f - 2.0f * x));
+        float bump = 0.0f;
+        for (int k = 0; k < intro_pulse_count; ++k) {
+            const std::int64_t from_peak
+                = elapsed_ns - intro_peak_ns - k * intro_pulse_period_ns;
+            const std::int64_t span = from_peak <= 0 ? intro_rise_ns : intro_fall_ns;
+            const std::int64_t left = span - (from_peak <= 0 ? -from_peak : from_peak);
+            if (left <= 0)
+                continue;
+            const float x = static_cast<float>(left) / static_cast<float>(span);
+            const float pulse = x * x * (3.0f - 2.0f * x);
+            bump = pulse > bump ? pulse : bump;
+        }
+        return rest + (1.0f - rest) * bump;
     }
 
     /**

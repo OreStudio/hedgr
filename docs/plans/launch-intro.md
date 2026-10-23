@@ -4,32 +4,40 @@ The intro replaces the splash. It plays once, at launch, over the main window.
 
 ## Timeline
 
-The intro is one slow pulse of light, like a neon sign that rests dim, flares
-and settles back. Nothing moves or grows: only the light changes. All times are
-from the first frame the intro is drawn. The constants live in
-`hedgr.ui/render/intro.hpp`; the look constants live in
+The intro is two slow pulses of light, like a neon sign that rests dim, flares,
+settles back to dim, flares again and settles. Nothing moves or grows: only the
+light changes. All times are from the first frame the intro is drawn. The
+constants live in `hedgr.ui/render/intro.hpp`; the look constants live in
 `hedgr.ui/theme/theme.hpp`.
 
-The sign starts and ends at a resting level, `intro_rest_brightness` (0.32 of
-full): a dim, soft, slightly cool grey-white, not black and not blue.
+The sign starts, ends and dips between the pulses at a resting level,
+`intro_rest_brightness` (0.32 of full): a dim, soft, slightly cool grey-white,
+not black and not blue.
 
 | Time | Brightness | Veil |
 | --- | --- | --- |
 | 0.0 s | 0.32 (rest) | opaque |
-| 3.023 s (`intro_peak_ns`) | 1 (brightest) | opaque |
-| 5.2 s (`intro_rest_ns`) | 0.32 (rest again) | opaque |
-| 6.0 s (`intro_total_ns`) | 0.32 | 0, the main window is fully shown |
+| 1.423 s (`intro_peak_ns - intro_rise_ns`) | 0.32, the first pulse ignites | opaque |
+| 3.023 s (`intro_peak_ns`) | 1 (first peak) | opaque |
+| 4.623 s | 0.32, the valley: the pulses touch rest | opaque |
+| 6.223 s (`intro_peak_ns + intro_pulse_period_ns`) | 1 (second peak, same height) | opaque |
+| 7.823 s (`intro_rest_ns`) | 0.32 (rest again) | opaque |
+| 8.623 s (`intro_total_ns`) | 0.32 | 0, the main window is fully shown |
 
-Brightness is a smoothstep from the rest level up to the peak and a smoothstep
-back down to the rest level at the rest point: the slope is zero at the start,
-the peak and the rest point, so there is no jump, no flicker and one maximum.
-The steepest step between samples 10 ms apart is about 0.005 (on the falling
-ramp), and `intro_max_step` (0.01) bounds it in a test. The veil is opaque until
-the rest point and then fades linearly, so the whole screen dissolves into the
-main window over the last 0.8 s. `intro_timing` holds `brightness`, `lift` (how
-far above rest, 0 to 1), `halo_gain`, `veil_alpha` and `finished` as pure
-functions of elapsed time, and a `skipped` flag. Any key or click skips, so the
-length costs nobody anything.
+Each pulse is a smoothstep from the rest level up to the peak over
+`intro_rise_ns` (1.6 s) and a smoothstep back down over `intro_fall_ns` (1.6 s).
+The period (`intro_pulse_period_ns`, 3.2 s) is the fall plus the rise, so the
+valley is one instant at exactly the rest level and the two read as separate
+flashes. `intro_pulse_count` (2) pulses are laid down by `brightness`, which
+takes the highest of them at any time, so it supports any count. The slope is
+zero at the start, each peak and the end of each pulse, so there is no jump or
+flicker. The steepest step between samples 10 ms apart is about 0.006, and
+`intro_max_step` (0.01) bounds it in a test. The veil is opaque until the rest
+point and then fades linearly, so the whole screen dissolves into the main
+window over the last 0.8 s. `intro_timing` holds `brightness`, `lift` (how far
+above rest, 0 to 1), `halo_gain`, `veil_alpha` and `finished` as pure functions
+of elapsed time, and a `skipped` flag. Any key or click skips, so the length
+(about 8.6 s) costs nobody anything.
 
 ## What is drawn
 
@@ -93,18 +101,26 @@ vignette.
 
 ## Sound
 
-`assets/sounds/intro_swell.wav`, mono 44.1 kHz 16-bit, 6.0 s, raised as the
+`assets/sounds/intro_swell.wav`, mono 44.1 kHz 16-bit, 8.623 s, raised as the
 signal `application.intro` on the first intro frame. It is the engine swell
-the operator chose: Kenney's `spaceEngineLow_000` faded in over 2.8 s and out
-over the next 2.6 s, with `lowFrequency_explosion_000` (both Sci-Fi Sounds,
-CC0) delayed to 2.8 s as the impact, loudness-normalised and faded out over the
-last 1.2 s. `tools/make_intro_sound.sh` is the ffmpeg recipe; it matches the
-committed file in shape (correlation 0.99) and level, not byte for byte, since
-loudnorm's output depends on the ffmpeg build. `tools/measure_intro_peak.py`
-finds the centre of the loudest 50 ms window, 3.023 s, which fixes
-`intro_peak_ns`. The visual timeline moved to the sound: the rest point (5.2 s)
-and the total (6.0 s) stay where the audio fades out, so the rise is 3.023 s and
-the fall 2.177 s.
+the operator chose, played twice. One swell is Kenney's `spaceEngineLow_000`
+faded in over 2.8 s and out over the next 2.6 s, with
+`lowFrequency_explosion_000` (both Sci-Fi Sounds, CC0) delayed to 2.8 s as the
+impact, padded to 6 s with a 1.2 s fade out. The second copy is the same
+samples at the same level, delayed by the pulse period (3.2 s) over the first
+one's tail, then the sum is faded out over the last 1.2 s, ending with the veil,
+and loudness-normalised. `tools/make_intro_sound.sh` is the ffmpeg recipe; it
+matches the shape and level of the committed file, not byte for byte, since
+loudnorm's output depends on the ffmpeg build.
+
+`tools/measure_intro_peak.py` reports the loudest 50 ms window in each pulse's
+search window: 3.023 s (-16.9 dBFS) and 6.223 s (-16.3 dBFS), exactly one period
+apart. These fix `intro_peak_ns` and `intro_pulse_period_ns`. The second is
+0.6 dB louder only because the first swell's tail adds to it; the copies
+themselves are the same level. The visual rest point (7.823 s) and total
+(8.623 s) follow from the second peak plus the fall and the veil, where the
+audio has faded to silence. The first pulse's lead-in at rest is 1.423 s, set by
+where the first swell's impact lands rather than chosen.
 
 ## Keeping the sound and the picture together
 
@@ -135,8 +151,8 @@ a sound that has to line up with a picture.
 `HEDGR_INTRO_AUDIO_OFFSET_MS` overrides it for one run, within 5000 ms either
 way. Positive means the sound is heard later than the picture shows it, and the
 picture starts that much later; negative brings the picture forward. If the
-sound still seems late, raise it in steps of 100 and watch the pulse's peak
-against the impact. The log shows where time goes. A run prints, at info:
+sound still seems late, raise it in steps of 100 and watch each pulse's peak
+against its impact. The log shows where time goes. A run prints, at info:
 
     Intro audio: preloaded <path>/intro_swell.wav in X ms
     Intro warm-up: textures built in X ms
