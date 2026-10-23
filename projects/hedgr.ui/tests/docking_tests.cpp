@@ -641,6 +641,88 @@ TEST_CASE("a docked window draws no fill of its own", "[docking][workspace][look
     CHECK(a->DockIsActive);
 }
 
+namespace {
+
+/** @brief The solid body vertices of @p node's card, below the tabs that end on its strip's foot. */
+std::vector<ImDrawVert> card_body(const ImGuiDockNode& node) {
+    const float top = node.TabBar->BarRect.Max.y;
+    std::vector<ImDrawVert> body;
+    for (const ImDrawVert& v : node.HostWindow->DrawList->VtxBuffer)
+        if (v.pos.y > top + 0.25f && v.pos.x >= node.Pos.x - 0.01f
+            && v.pos.x <= node.Pos.x + node.Size.x + 0.01f
+            && v.pos.y <= node.Pos.y + node.Size.y + 0.01f
+            && (v.col >> IM_COL32_A_SHIFT) == 255u)
+            body.push_back(v);
+    return body;
+}
+
+/** @brief Whether @p c is within one eight-bit step per channel of @p want. */
+bool near_colour(ImU32 c, ImU32 want, unsigned int slack) {
+    for (int shift : {IM_COL32_R_SHIFT, IM_COL32_G_SHIFT, IM_COL32_B_SHIFT}) {
+        const int a = static_cast<int>((c >> shift) & 0xffu);
+        const int b = static_cast<int>((want >> shift) & 0xffu);
+        if (std::abs(a - b) > static_cast<int>(slack))
+            return false;
+    }
+    return true;
+}
+
+}
+
+TEST_CASE("a docked card's body runs the window gradient over its own rect",
+    "[docking][workspace][look]") {
+    docked_pair p;
+    for (const char* window : {"###a", "###b"}) {
+        const auto body = card_body(p.node(window));
+        REQUIRE_FALSE(body.empty());
+        const auto [high, low] = std::ranges::minmax(body, {},
+            [](const ImDrawVert& v) { return v.pos.y; });
+        /* The solid vertices sit half a pixel inside the card's edges. */
+        CHECK(near_colour(high.col, theme::window_gradient_top, 2));
+        CHECK(near_colour(low.col, theme::window_gradient_bottom, 2));
+        CHECK_FALSE(near_colour(high.col, low.col, 2));
+    }
+}
+
+TEST_CASE("a docked card keeps its rounded corners under the gradient",
+    "[docking][workspace][look]") {
+    docked_pair p;
+    const ImGuiDockNode& left = p.node("###a");
+    const float foot = left.Pos.y + left.Size.y;
+    const float inner = left.Pos.x + left.Size.x;
+    for (const ImDrawVert& v : card_body(left)) {
+        /* A square fan would put a vertex on the corner itself. */
+        CHECK(std::hypot(v.pos.x - inner, v.pos.y - foot) > 1.5f);
+        CHECK(std::hypot(v.pos.x - left.Pos.x, v.pos.y - foot) > 1.5f);
+    }
+}
+
+TEST_CASE("two cards stacked in the desk each have their own gradient",
+    "[docking][workspace][look]") {
+    dock_desk d{"a", "b"};
+    theme::apply_theme();
+    const ImGuiID space = d.workspace.dock_space();
+    ImGuiID lower = 0;
+    const ImGuiID upper = ImGui::DockBuilderSplitNode(space, ImGuiDir_Up, 0.5f,
+        nullptr, &lower);
+    ImGui::DockBuilderDockWindow("###a", upper);
+    ImGui::DockBuilderDockWindow("###b", lower);
+    ImGui::DockBuilderFinish(space);
+    d.settle();
+    d.settle();
+    const ImGuiDockNode& a = *desk_window("###a")->DockNode;
+    const ImGuiDockNode& b = *desk_window("###b")->DockNode;
+    REQUIRE(a.Pos.y < b.Pos.y);
+    for (const ImGuiDockNode* node : {&a, &b}) {
+        const auto body = card_body(*node);
+        REQUIRE_FALSE(body.empty());
+        const auto [high, low] = std::ranges::minmax(body, {},
+            [](const ImDrawVert& v) { return v.pos.y; });
+        CHECK(near_colour(high.col, theme::window_gradient_top, 2));
+        CHECK(near_colour(low.col, theme::window_gradient_bottom, 2));
+    }
+}
+
 TEST_CASE("a floating window keeps its own rounded fill and no gap",
     "[docking][workspace][look]") {
     dock_desk d{"c"};

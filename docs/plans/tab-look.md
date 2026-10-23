@@ -72,8 +72,12 @@ What the desk does instead:
   A splitter still shows under the pointer, in the resize grip colours.
 - `paint_dock_cards` then paints each docked leaf node of the desk's space into
   its host window's background channel: the strip (`tab_bar`) rounded at the top,
-  the body (`WindowBg`) rounded at the bottom, or at all four corners when the
-  node shows no strip. The radius is `theme::dock_rounding`, the tab's 6 px, so
+  the body rounded at the bottom, or at all four corners when the
+  node shows no strip. The body is filled by `fill_gradient` with
+  `theme::window_gradient`, the colours a floating window's fill gets, over the
+  body's own rect (below the strip), so each card has its own top and foot and
+  the rounded corners stay ImGui's rounded path. It adds no steady-frame
+  allocation beyond the fill's vertices. The radius is `theme::dock_rounding`, the tab's 6 px, so
   the first tab's corner sits in the strip's.
 - A window docked in the desk is begun with a zero background alpha and a clear
   `ScrollbarBg` (read from last frame's dock state), so its own square fill and
@@ -81,8 +85,8 @@ What the desk does instead:
 - A window docked in a floating node, and every floating window, is unchanged.
 
 Not verified in a window: how the gap and the 6 px corners read on a monitor, the
-splitter highlight, and a drag over the desk. The body is the flat `WindowBg`, as
-before, not the gradient floating windows get.
+splitter highlight, and a drag over the desk. How the gradient reads on a card
+next to a floating window is likewise unchecked.
 
 ## Where it differs
 
