@@ -239,6 +239,19 @@ HEDGR_UI_EXPORT void request_accounts_window(const render_input& input,
     std::string_view instance_id);
 
 /**
+ * @brief Asks for the window of @p kind that shows one series of @p session.
+ *
+ * Chart and mini plot ids are derived from the series, so a second request for
+ * a series already open focuses its window and makes no other. The series
+ * browser, a chart's header and a mini plot card all open windows through this,
+ * so there is one description of what opening a series means.
+ */
+HEDGR_UI_EXPORT void request_series_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    hedgr::model::domain::window_kind kind, std::string_view series_id,
+    std::string_view label);
+
+/**
  * @brief Asks for the Instances window.
  *
  * The window is found or made by the runtime, which owns the window table. The
