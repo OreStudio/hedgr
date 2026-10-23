@@ -2,7 +2,7 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Step 1 is done; the rest is
+the ImCoolBar shortcut bar over several small PRs. Steps 1 and 2 are done; the rest is
 plan.
 
 ## The reference
@@ -76,27 +76,45 @@ Each step is one PR, with tests, and leaves the app working.
      (decision 2). Closing a submenu when the pointer moves to another row is
      step 2's to build and check in a real window. The popup is wired to
      nothing yet; the hidden `component gallery` test draws one for a look.
-2. **The top bar and the system menu.** A main menu bar window drawn from
-   `workspace` before the dock space, fixed height, our own window (decision 1).
-   The ORE swirl logo button at the left (`assets/branding/ore-logo-white.svg`,
-   rasterised through `image::rasterize_svg`, the black variant for a light
-   theme) opens the system menu with Instances as its first row, then Lock
-   store, Undock all and About, and upper-case top-level labels follow. The
-   dock space and `floating_size_for` already read `WorkPos`, so the bar must
-   be a viewport work area inset, not a window over the desk. The bar stays
-   empty of other menus in this PR.
-3. **The toolbar.** A second fixed-height strip under the menu bar, styled like
-   the reference's schematic toolbar: a rounded capsule with a purple outline
-   holding a row of flat icon buttons, a small grip handle at its left, and the
-   selected tool filled purple (`chart_tag_colour`). Each button is a real
-   ImGui item with a tooltip, built from the icon tile in `chart_window.cpp`
-   (`tile_icon`) and the pill drawing in `widget/segmented.hpp`, so nav and
-   hover work as elsewhere. In Hedgr it holds the actions that today have no
-   quick home: open chart, open mini plot, CRM, accounts, undock all, and later
-   a tool mode (pointer, pan, measure) for the chart if one is wanted. Opening
-   actions are momentary (no selected fill); only a real mode stays filled.
-   The toolbar takes its height from the same one place as the menu bar, so
-   the work area is inset once. It draws nothing while the store is locked.
+2. [x] **The top bar and the system menu.** A fixed-height menu bar window
+   (`render/menu_bar.cpp`), our own window (decision 1), drawn by `workspace`
+   before the dock space. The ORE swirl logo button at the left
+   (`assets/branding/ore-logo-white.svg`, rasterised through
+   `image::rasterize_svg` at the button's pixel size) opens the system menu with
+   Instances as its first row, then a separator and Lock store, Unlock store or
+   Create store by the lock state. Top-level labels are one
+   `widget::menu_bar_label` call each in later steps.
+   - Notes. The bar goes through ImGui's `BeginViewportSideBar`, which is the one
+     place the top is inset: the viewport's `WorkPos` and `WorkSize` shrink by
+     `theme::menu_bar_height` a frame after the bar first draws, so the dock
+     space, `floating_size_for`, the card grid and Undock all read the inset
+     without knowing about it. The cool bar still shrinks the dock space at the
+     bottom until step 8. Click opens, and while a popup is open the pointer on
+     another entry moves it there (`widget::menu_after_entry` is the pure rule,
+     `menu_bar_entry` applies it to ImGui). A click on an open entry closes it
+     because ImGui closes the popup at the press, which the rule accounts for.
+     While the store is locked the menu has only the way in; there is no Quit
+     row because the app has no quit path of its own (the OS window close is
+     the only one), and no About or Undock all row yet (Undock all stays on the
+     cool bar until step 8). The logo's SVG is read once from `branding/` beside
+     the library (the cmake copy rule ships it with the splash) and reaches the
+     GL cache through a new `image_texture_source::svg`. The black variant is
+     unused, as the theme is dark only. Not checked in a real window.
+3. **The toolbar.** A floating capsule over the desk, not a fixed strip,
+   styled like the reference's schematic toolbar: a rounded capsule with a purple
+   outline holding a row of flat icon buttons, a small grip handle at its left
+   that drags it, and the selected tool filled purple (`chart_tag_colour`). It
+   is a window of its own that is never dockable, is clamped inside the work
+   area (below the menu bar, since the work area is already inset) so it can
+   never cover the menu bar or leave the desk, and remembers its position in the
+   ini or the store. Each button is a real ImGui item with a tooltip, built from
+   the icon tile in `chart_window.cpp` (`tile_icon`) and the pill drawing in
+   `widget/segmented.hpp`, so nav and hover work as elsewhere. In Hedgr it holds
+   the actions that today have no quick home: open chart, open mini plot, CRM,
+   accounts, undock all, and later a tool mode (pointer, pan, measure) for the
+   chart if one is wanted. Opening actions are momentary (no selected fill); only
+   a real mode stays filled. Because it floats it takes no height from the
+   work-area inset. It draws nothing while the store is locked.
 4. **The Instances panel.** An Instances menu opens a large panel: a filter box
    and a tile grid of instances with their photos from the image cache. A click
    opens or raises the Instances window on that instance. The catalogue
@@ -113,8 +131,8 @@ Each step is one PR, with tests, and leaves the app working.
 7. **The status bar.** One viewport-wide bottom strip in the reference's look,
    carrying the message ladder from `status_bar.hpp` and the connection state
    once PR 94 lands. The dock space already subtracts a bar height; this swaps
-   the shortcut bar's height for the status bar's and, with the toolbar, keeps
-   one inset for top and bottom.
+   the shortcut bar's height for the status bar's, as a bottom side bar like the
+   top bar, so the work area is inset by the bars alone.
 8. **Retire the cool bar.** Delete `shortcut_bar.cpp`, `shortcut_bar_result`,
    `shortcut_bar_height` and `shortcut_bar_tests.cpp`, move Undock all to the
    system menu and Windows menu, and drop the ImCoolBar dependency. The pinned
@@ -130,7 +148,7 @@ size. The button opens the system menu, not the Instances window.
 
 ## Decisions
 
-Decided by the user: 1, 4, 5 and 9. The rest are recommendations to confirm.
+Decided by the user: 1, 4, 5, 9 and 10. The rest are recommendations to confirm.
 
 1. **Menu bar built on ImGui's main menu bar or on our own window.** Decided:
    our own fixed-height window, reusing `theme.hpp`, `widget/`, `cells.hpp`,
@@ -159,13 +177,13 @@ Decided by the user: 1, 4, 5 and 9. The rest are recommendations to confirm.
 9. **Order of the Windows list and the status bar.** Decided: the Windows list
    (step 6) before the status bar (step 7), because it replaces what the cool
    bar did for raising windows.
-10. **Toolbar contents and behaviour.** New. Recommend open chart, open mini
-    plot, CRM, accounts and undock all as momentary buttons, and no mode
-    buttons until the chart has modes to choose between. Open question: whether
-    the toolbar floats over the desk as a draggable capsule (the grip handle
-    suggests it) or is docked in a fixed strip under the menu bar. The plan
-    assumes the fixed strip, since one work-area inset is simpler than a
-    movable window that must not cover the tab bars.
+10. **Toolbar contents and behaviour.** Decided: it floats over the desk as a
+    draggable capsule (the grip handle is its drag), not a fixed strip. It must
+    not be dockable, stays inside the work area, remembers its position in the
+    ini or the store, and must not cover the menu bar. Contents are a
+    recommendation: open chart, open mini plot, CRM, accounts and undock all as
+    momentary buttons, and no mode buttons until the chart has modes to choose
+    between.
 
 ## Risks
 

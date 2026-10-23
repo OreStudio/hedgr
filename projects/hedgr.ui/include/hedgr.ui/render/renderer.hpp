@@ -423,6 +423,24 @@ struct image_texture_source {
     [[nodiscard]] virtual ImTextureID get(std::string_view tenant_id,
         std::string_view image_id, std::string_view mime_type,
         const std::vector<std::uint8_t>& data) = 0;
+
+    /**
+     * @brief The texture of an SVG document drawn at @p width by @p height
+     * pixels, uploading it if needed.
+     *
+     * For artwork the application ships rather than a tenant's images, so the
+     * document is named by @p image_id alone. Each size is its own texture,
+     * and the texture is marked used by this frame. A source with no graphics
+     * context, or a document that does not parse, answers 0.
+     */
+    [[nodiscard]] virtual ImTextureID svg(std::string_view image_id,
+        std::string_view document, int width, int height) {
+        static_cast<void>(image_id);
+        static_cast<void>(document);
+        static_cast<void>(width);
+        static_cast<void>(height);
+        return 0;
+    }
 };
 
 /**

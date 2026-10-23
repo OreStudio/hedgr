@@ -24,6 +24,7 @@ set(files
     "gradient_tests.cpp"
     "market_health_tests.cpp"
     "market_view_tests.cpp"
+    "menu_bar_tests.cpp"
     "menu_look_tests.cpp"
     "mini_plot_open_tests.cpp"
     "mini_plot_tests.cpp"

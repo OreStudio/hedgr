@@ -53,6 +53,21 @@ struct counting_textures final : render::image_texture_source {
         ++gets;
         return static_cast<ImTextureID>(1);
     }
+
+    /** @brief What the last SVG was asked for, so a test can read the size. */
+    std::size_t svg_gets = 0;
+    int svg_width = 0;
+    int svg_height = 0;
+    std::string svg_id;
+
+    ImTextureID svg(std::string_view image_id, std::string_view, int width,
+        int height) override {
+        ++svg_gets;
+        svg_id = image_id;
+        svg_width = width;
+        svg_height = height;
+        return static_cast<ImTextureID>(7);
+    }
 };
 
 /** @brief One ImGui and ImPlot context for the life of a test. */

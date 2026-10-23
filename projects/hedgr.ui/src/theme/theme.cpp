@@ -161,6 +161,7 @@ const ImVec4 tab_dimmed_active = colour(0x181a28ff); // derived
  */
 const ImVec4 menu_fill = colour(0x0b0e14ff); // derived
 const ImVec4 menu_edge = colour(0x262a36ff); // derived
+const ImVec4 menu_bar_fill = colour(0x10131bff); // derived
 constexpr float menu_hover_alpha = 0.55f; // derived
 const ImVec4 menu_active = colour(0x8d6cf0ff); // derived
 
@@ -407,6 +408,10 @@ ImVec4 chart_tag_colour() noexcept {
 
 ImVec4 menu_surface() noexcept {
     return menu_fill;
+}
+
+ImVec4 menu_bar_surface() noexcept {
+    return menu_bar_fill;
 }
 
 ImVec4 menu_border() noexcept {
