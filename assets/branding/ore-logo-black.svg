@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="35 35 824 824" width="256" height="256" role="img" aria-label="ORE Studio">
+  <title>ORE Studio</title>
+  <defs>
+    <path id="half" d="M112,690 A412,412 0 0 1 655,92 C700,140 712,200 705,250 C695,330 665,380 628,410 A183,183 0 0 0 268,395 C180,420 120,540 112,690 Z"/>
+  </defs>
+  <g fill="#000">
+    <use href="#half"/>
+    <use href="#half" transform="rotate(180 447 447)"/>
+  </g>
+</svg>
