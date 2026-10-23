@@ -522,6 +522,24 @@ void workspace::render(const render_input& input) {
          * because the window reads these when it is begun.
          */
         if (card) {
+            /*
+             * Cards dock like any window, and a node of them is a grid. Its tab
+             * bar is hidden (the set flag also stops the corner triangle from
+             * showing it again), so every card stays on screen with the whole
+             * node as its tile. For the same reason a card never tabs over
+             * another window and nothing tabs over it: a drop always splits,
+             * and over the empty desk centre it splits at the edge rather than
+             * filling the desk. The tile then takes the card's own size, which
+             * ImGui reads from the dragged window. The class is unclassed, so
+             * a card still docks beside a chart, and a chart's node keeps its
+             * tabs.
+             */
+            ImGuiWindowClass tile;
+            tile.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_HiddenTabBar
+                | ImGuiDockNodeFlags_NoDockingOverMe
+                | ImGuiDockNodeFlags_NoDockingOverOther
+                | ImGuiDockNodeFlags_NoDockingOverEmpty;
+            ImGui::SetNextWindowClass(&tile);
             window_flags |= ImGuiWindowFlags_NoBackground
                 | ImGuiWindowFlags_NoScrollbar
                 | ImGuiWindowFlags_NoScrollWithMouse;
@@ -562,6 +580,19 @@ void workspace::render(const render_input& input) {
             state.floating_size = ImGui::GetWindowSize();
         if (const auto draw = renderer_for(kind))
             draw(handle, input, state, status_, lock_control_);
+
+        /*
+         * A docked card has no tab bar and so no close button, and a click on
+         * it opens the chart, so the way to close it is its context menu. A
+         * floating card keeps its title bar's own control.
+         */
+        if (card && ImGui::IsWindowDocked()
+            && ImGui::BeginPopupContextWindow("##card-menu",
+                ImGuiPopupFlags_MouseButtonRight)) {
+            if (ImGui::MenuItem("Close"))
+                keep_open = false;
+            ImGui::EndPopup();
+        }
 
         switch (std::exchange(state.tile, tile_request::none)) {
         case tile_request::none:
