@@ -24,6 +24,7 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
+#include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -917,4 +918,124 @@ TEST_CASE("a steady mini plot card frame allocates nothing", "[frame][mini_plot]
     CHECK(static_cast<std::size_t>(many_vertices) >= 60 * 95 * 6);
     CHECK(few == 0);
     CHECK(many == 0);
+}
+
+namespace {
+
+/** @brief Allocations of one steady frame of @p draw, after warming up. */
+template<class Draw>
+std::size_t steady_allocations(Draw draw) {
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const auto before = hedgr::testing::allocations();
+    draw();
+    return hedgr::testing::allocations() - before;
+}
+
+constexpr model::domain::session_status states[] = {
+    model::domain::session_status::disconnected,
+    model::domain::session_status::failed,
+    model::domain::session_status::connecting,
+};
+
+}
+
+TEST_CASE("a plot state costs a steady frame no allocation, each of its states",
+    "[frame][plot_state]") {
+    headless_imgui imgui;
+    using hedgr::ui::widget::plot_state;
+    for (const auto state : {plot_state::disconnected, plot_state::failed,
+             plot_state::reading}) {
+        const auto allocations = steady_allocations([&] {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
+            ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoDecoration);
+            hedgr::ui::widget::draw_plot_state(state, ImVec2(0.0f, 0.0f),
+                ImVec2(600.0f, 400.0f), 44.0f, true, "certificate rejected");
+            ImGui::End();
+            ImGui::Render();
+        });
+        CHECK(allocations == 0);
+    }
+}
+
+TEST_CASE("a steady mini plot card frame allocates nothing in each connection state",
+    "[frame][mini_plot][plot_state]") {
+    for (const auto status : states) {
+        headless_imgui imgui;
+        desk desk;
+        desk.sessions.set_status(desk.session, status);
+        const auto handle = desk.open(model::domain::window_kind::mini_plot,
+            model::domain::mini_plot_state{.label = "FX GBP/USD",
+                .series_id = "s"});
+        const auto series = desk.market.intern("i", "a", "s");
+        desk.windows.set_series(handle, std::span{&series, 1});
+        render::window_ui_state state;
+        hedgr::ui::widget::status_bar bar;
+        render::lock_control lock;
+        auto input = desk.input();
+        const auto allocations = steady_allocations([&] {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(220.0f, 150.0f));
+            ImGui::Begin("card");
+            render::render_mini_plot(handle, input, state, bar, lock);
+            ImGui::End();
+            ImGui::Render();
+        });
+        INFO("session status " << static_cast<int>(status));
+        CHECK(allocations == 0);
+    }
+}
+
+TEST_CASE("a chart in each connection state allocates no more than a chart with data",
+    "[frame][chart][plot_state]") {
+    const auto with_data = allocations_with_charts(1);
+    for (const auto status : states) {
+        headless_imgui imgui;
+        desk desk;
+        desk.sessions.set_status(desk.session, status);
+        const auto handle = desk.open(model::domain::window_kind::chart,
+            model::domain::chart_state{.label = "FX GBP/USD",
+                .series_id = "s"});
+        const auto series = desk.market.intern("i", "a", "s");
+        desk.windows.set_series(handle, std::span{&series, 1});
+        render::window_ui_state state;
+        hedgr::ui::widget::status_bar bar;
+        render::lock_control lock;
+        auto input = desk.input();
+        const auto allocations = steady_allocations([&] {
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(900.0f, 500.0f));
+            ImGui::Begin("chart");
+            render::render_chart(handle, input, state, bar, lock);
+            ImGui::End();
+            ImGui::Render();
+        });
+        INFO("session status " << static_cast<int>(status));
+        CHECK(allocations <= with_data);
+    }
+
+    /* The same for a connected chart that is still reading its series. */
+    headless_imgui imgui;
+    desk desk;
+    const auto handle = desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
+    const auto series = desk.market.intern("i", "a", "s");
+    desk.windows.set_series(handle, std::span{&series, 1});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar bar;
+    render::lock_control lock;
+    auto input = desk.input();
+    CHECK(steady_allocations([&] {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(900.0f, 500.0f));
+        ImGui::Begin("chart");
+        render::render_chart(handle, input, state, bar, lock);
+        ImGui::End();
+        ImGui::Render();
+    }) <= with_data);
 }

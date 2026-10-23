@@ -366,6 +366,38 @@ inline constexpr float plot_label_padding_y = 8.0f;
 /** @brief How many labels the bottom axis shows. */
 inline constexpr int plot_x_label_count = 4;
 
+/**
+ * @brief The greys of the glyph a plot draws when it has no connection.
+ *
+ * A session that was never opened is the dimmer of the two, since nothing went
+ * wrong; one that failed is a step brighter so it draws the eye without a
+ * colour that shouts.
+ */
+inline constexpr ImU32 plot_disconnected_colour = IM_COL32(88, 92, 104, 255);
+inline constexpr ImU32 plot_failed_colour = IM_COL32(140, 144, 156, 255);
+
+/** @brief The colour of the arc a plot spins while it waits. */
+inline constexpr ImU32 plot_spinner_colour = IM_COL32(150, 140, 180, 255);
+
+/** @brief The weight of the spinner's arc, in pixels. */
+inline constexpr float plot_spinner_weight = 2.5f;
+
+/** @brief Seconds one turn of the spinner takes. */
+inline constexpr float plot_spinner_turn_s = 0.9f;
+
+/** @brief How much of a circle the spinner's arc covers, three quarters. */
+inline constexpr float plot_spinner_arc = 4.712389f;
+
+/** @brief The segments the spinner's arc is cut into. */
+inline constexpr int plot_spinner_segments = 24;
+
+/** @brief The size of a plot's state glyph on a chart, and on a card. */
+inline constexpr float plot_state_glyph_size = 44.0f;
+inline constexpr float plot_state_card_glyph_size = 28.0f;
+
+/** @brief The share of a plot's width a state caption may wrap within. */
+inline constexpr float plot_state_caption_share = 0.8f;
+
 /** @brief The corner radius of a mini plot card. */
 inline constexpr float mini_plot_rounding = 8.0f;
 
