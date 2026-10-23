@@ -365,14 +365,59 @@ inline constexpr float flag_height_fraction = 0.75f;
 /** @brief The corner radius of a tab's top corners, the tab reference's folder. */
 inline constexpr float tab_rounding = 6.0f;
 
+/**
+ * @brief The room round a dock tab's label, left and right and above and below,
+ * and the gap between two tabs. Measured off the reference's strip: a 28 pixel
+ * tab, four pixels between tabs. The desk pushes them around its dock space,
+ * so no other frame changes.
+ */
+inline constexpr float tab_padding_x = 8.0f;
+inline constexpr float tab_padding_y = 6.5f;
+inline constexpr float tab_spacing = 4.0f;
+
+/** @brief The strip behind the dock tabs, which the desk pushes over the title fill. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_bar_colour() noexcept;
+
+/** @brief The colour of a dock tab's label and close x, chosen tab or idle. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_label_colour() noexcept;
+
 /** @brief The fill of a tab that is neither chosen nor hovered. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_idle_colour() noexcept;
 
-/** @brief The fill of a tab under the pointer, tinted toward the chart purple. */
+/** @brief The fill of a tab under the pointer, a step lighter than the chosen one. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_hover_colour() noexcept;
 
-/** @brief The fill of the chosen tab, a step lighter than an idle one. */
+/** @brief The fill of the chosen tab, the reference's violet. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_active_colour() noexcept;
+
+/*
+ * The lighter end of each tab fill, about twelve points of lightness above the
+ * sampled colour at the same hue and saturation. The sampled colour stays the
+ * foot of the tab, so a tab still reads as the reference's fill; the lift
+ * matches the bar's own fade from a lit head.
+ */
+inline constexpr ImU32 tab_idle_top = IM_COL32(0x46, 0x49, 0x5b, 255);
+inline constexpr ImU32 tab_hover_top = IM_COL32(0xa4, 0x96, 0xb8, 255);
+inline constexpr ImU32 tab_active_top = IM_COL32(0x92, 0x81, 0xa9, 255);
+
+/**
+ * @brief Fades the tab fills drawn into @p draw from vertex @p first on, within
+ * the rectangle @p min to @p max, from their lighter top to their sampled foot.
+ *
+ * ImGui paints a tab with one flat colour, so the vertices of the rounded
+ * shape are recoloured by their height where they lie and the corners and
+ * their antialiased fringe stay ImGui's own. Only a vertex that has the idle,
+ * hovered or chosen fill is touched.
+ */
+HEDGR_UI_EXPORT void shade_tab(ImDrawList* draw, int first, ImVec2 min,
+    ImVec2 max);
+
+/**
+ * @brief Fades every visible dock node's tabs, after the dock space is
+ * submitted. A node's strip is drawn in its host window, the desk's for the
+ * docked ones and its own for a floating node.
+ */
+HEDGR_UI_EXPORT void shade_dock_tabs();
 
 /** @brief The fill of the last price chip, the reference's chip purple. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
@@ -488,6 +533,12 @@ inline constexpr float menu_bar_margin = 6.0f;
  * above and below, counted once. The dock space starts this far down.
  */
 inline constexpr float menu_bar_extent = menu_bar_height + 2.0f * menu_bar_margin;
+
+/**
+ * @brief The gap between the bar's plate and the popup an entry opens, so the
+ * menu floats just clear of the bar instead of touching it.
+ */
+inline constexpr float menu_popup_gap = 4.0f;
 
 /** @brief The room between the logo button's edge and the swirl drawn in it. */
 inline constexpr float menu_bar_logo_padding = 9.0f;

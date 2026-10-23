@@ -803,11 +803,28 @@ void workspace::draw_dock_space(const render_input& input) {
      * The dock nodes' tab bars are submitted inside this call and take the
      * font in force, which is how their labels get the reference's monospace
      * without a hook per tab. Windows docked here draw their bodies later, in
-     * their own Begin, so their text keeps the base face.
+     * their own Begin, so their text keeps the base face. The tab strip's
+     * padding, spacing, label colour and backing are pushed the same way, so
+     * the reference's 28 pixel tabs do not reshape any other frame.
      */
     ImGui::PushFont(icon::mono_font());
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        ImVec2(hedgr::ui::theme::tab_padding_x,
+            hedgr::ui::theme::tab_padding_y));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing,
+        ImVec2(hedgr::ui::theme::tab_spacing,
+            ImGui::GetStyle().ItemInnerSpacing.y));
+    ImGui::PushStyleColor(ImGuiCol_Text, hedgr::ui::theme::tab_label_colour());
+    ImGui::PushStyleColor(ImGuiCol_TitleBg,
+        hedgr::ui::theme::tab_bar_colour());
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive,
+        hedgr::ui::theme::tab_bar_colour());
     ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
         ImGuiDockNodeFlags_PassthruCentralNode);
+    /* ImGui paints each tab flat; the fade is laid over its vertices here. */
+    hedgr::ui::theme::shade_dock_tabs();
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar(2);
     ImGui::PopFont();
     ImGui::End();
 }

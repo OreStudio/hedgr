@@ -23,6 +23,7 @@
 #include "imgui_internal.h"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <span>
 
@@ -142,17 +143,18 @@ const ImVec4 chart_line = colour(0x8068d6ff); // Price line, x 40 to 430 y 80 to
 const ImVec4 chart_tag = colour(0x7c59e9ff); // Price chip, x 470 y 272
 
 /*
- * The tab strip of the tab reference (docs/samples/572312177-...png). Its tabs
- * are folders: a dim idle tab, an active one a step lighter with a violet cast,
- * and a hover that tints toward the violet. The values are read by eye off the
- * flat fills of its ImPlot Demo, Dear ImGui Demo and Statistics tabs and are
- * not sampled, so each is marked derived.
+ * The tab strip of the tab reference (docs/samples/572312177-...png), sampled
+ * from its Statistics, Viewport and Signal Analyzer tabs (all three the same
+ * fill, so a focused strip is not told from the others), its Dear ImGui Demo
+ * idle tab, the strip behind them and the labels. The hover is not in the
+ * reference, which shows no hovered tab, so it is a step lighter than the
+ * chosen fill and derived.
  */
-const ImVec4 tab_idle = colour(0x10131aff); // derived
-const ImVec4 tab_hover = colour(0x2a2548ff); // derived
-const ImVec4 tab_active = colour(0x211e3aff); // derived
-const ImVec4 tab_dimmed = colour(0x0b0e14ff); // derived
-const ImVec4 tab_dimmed_active = colour(0x181a28ff); // derived
+const ImVec4 tab_idle = colour(0x2b2d38ff); // Dear ImGui Demo tab, x 160 to 320 y 200
+const ImVec4 tab_hover = colour(0x84719fff); // derived
+const ImVec4 tab_active = colour(0x73608dff); // Statistics tab, x 12 to 140 y 60
+const ImVec4 tab_bar = colour(0x191923ff); // strip behind the tabs, x 300 y 60
+const ImVec4 tab_label = colour(0xcacde0ff); // label glyphs of every tab, chosen or idle
 
 /*
  * The menu panel of the tab reference: a flat fill under the card, an outline,
@@ -240,9 +242,9 @@ void apply_theme() {
     style.PopupRounding = hedgr::ui::theme::menu_rounding;
     style.GrabRounding = 3.0f;
     style.TabRounding = hedgr::ui::theme::tab_rounding;
-    style.TabBorderSize = 1.0f;
+    style.TabBorderSize = 0.0f;
     style.TabBarBorderSize = 1.0f;
-    style.TabBarOverlineSize = 2.0f;
+    style.TabBarOverlineSize = 0.0f;
     style.ScrollbarRounding = 6.0f;
     style.WindowBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
@@ -297,18 +299,20 @@ void apply_theme() {
     colors[ImGuiCol_ResizeGripHovered] = accent_hover;
     colors[ImGuiCol_ResizeGripActive] = accent_active;
     /*
-     * A folder tab: rounded top, a dim idle fill, a lighter violet-cast active
-     * fill with a violet overline, a violet-tinted hover, and a dimmer pair
-     * for a tab bar whose window has lost focus. The bar's own rule takes the
-     * selected tab's colour in ImGui, which is what joins the two.
+     * A folder tab: rounded top, square bottom, no outline and no overline. The
+     * rule under the strip takes the chosen tab's colour in ImGui, which is
+     * the reference's violet line. The reference draws a strip that has lost
+     * focus the same as a focused one, so the dimmed pair is the plain pair.
+     * The overline colour stays the chart purple for the widget tabs, which
+     * draw their own underline from it.
      */
     colors[ImGuiCol_Tab] = tab_idle;
     colors[ImGuiCol_TabHovered] = tab_hover;
     colors[ImGuiCol_TabSelected] = tab_active;
     colors[ImGuiCol_TabSelectedOverline] = chart_line;
-    colors[ImGuiCol_TabDimmed] = tab_dimmed;
-    colors[ImGuiCol_TabDimmedSelected] = tab_dimmed_active;
-    colors[ImGuiCol_TabDimmedSelectedOverline] = border;
+    colors[ImGuiCol_TabDimmed] = tab_idle;
+    colors[ImGuiCol_TabDimmedSelected] = tab_active;
+    colors[ImGuiCol_TabDimmedSelectedOverline] = chart_line;
     /*
      * The menu bar is a strip of its own above the tabs, in the title bar's
      * surface, so the two navigation levels read as two levels rather than as
@@ -400,6 +404,14 @@ ImVec4 tab_hover_colour() noexcept {
 
 ImVec4 tab_active_colour() noexcept {
     return tab_active;
+}
+
+ImVec4 tab_bar_colour() noexcept {
+    return tab_bar;
+}
+
+ImVec4 tab_label_colour() noexcept {
+    return tab_label;
 }
 
 ImVec4 chart_tag_colour() noexcept {
@@ -620,6 +632,70 @@ void fill_stops(ImDrawList* draw, ImVec2 min, ImVec2 max,
                     << IM_COL32_A_SHIFT);
         }
         draw->PopClipRect();
+    }
+}
+
+namespace {
+
+struct tab_fade final {
+    ImU32 bottom;
+    ImU32 top;
+};
+
+}
+
+void shade_tab(ImDrawList* draw, int first, ImVec2 min, ImVec2 max) {
+    const std::array<tab_fade, 3> fades{{
+        {ImGui::ColorConvertFloat4ToU32(tab_idle), tab_idle_top},
+        {ImGui::ColorConvertFloat4ToU32(tab_hover), tab_hover_top},
+        {ImGui::ColorConvertFloat4ToU32(tab_active), tab_active_top}}};
+    /*
+     * An antialiased fill keeps its solid vertices half a pixel inside its
+     * shape, so the fade runs between those, which puts the lighter stop on
+     * the top edge and the sampled fill on the bottom one.
+     */
+    constexpr float inset = 0.5f;
+    const float height = max.y - min.y - 2.0f * inset;
+    if (height <= 0.0f)
+        return;
+    /* The fringe of an antialiased fill reaches a pixel past its shape. */
+    constexpr float fringe = 1.0f;
+    for (int i = first; i < draw->VtxBuffer.Size; ++i) {
+        ImDrawVert& v = draw->VtxBuffer[i];
+        if (v.pos.x < min.x - fringe || v.pos.x > max.x + fringe
+            || v.pos.y < min.y - fringe || v.pos.y > max.y + fringe)
+            continue;
+        for (const tab_fade& fade : fades) {
+            if ((v.col & ~IM_COL32_A_MASK) != (fade.bottom & ~IM_COL32_A_MASK))
+                continue;
+            const float t = std::clamp((v.pos.y - min.y - inset) / height, 0.0f, 1.0f);
+            const auto lerp = [&](unsigned int shift) {
+                return mix(channel(fade.top, shift),
+                    channel(fade.bottom, shift), t);
+            };
+            v.col = IM_COL32(lerp(IM_COL32_R_SHIFT), lerp(IM_COL32_G_SHIFT),
+                lerp(IM_COL32_B_SHIFT), channel(v.col, IM_COL32_A_SHIFT));
+            break;
+        }
+    }
+}
+
+void shade_dock_tabs() {
+    const ImGuiContext& g = *ImGui::GetCurrentContext();
+    for (const ImGuiStoragePair& pair : g.DockContext.Nodes.Data) {
+        const auto* node = static_cast<const ImGuiDockNode*>(pair.val_p);
+        if (node == nullptr || node->TabBar == nullptr
+            || node->HostWindow == nullptr || !node->IsVisible)
+            continue;
+        const ImGuiTabBar& bar = *node->TabBar;
+        const float foot = bar.BarRect.Max.y - g.Style.TabBarBorderSize;
+        for (const ImGuiTabItem& tab : bar.Tabs) {
+            const float left = bar.BarRect.Min.x
+                + std::trunc(tab.Offset - bar.ScrollingAnim);
+            shade_tab(node->HostWindow->DrawList, 0,
+                ImVec2(left, bar.BarRect.Min.y),
+                ImVec2(left + tab.Width, foot));
+        }
     }
 }
 
