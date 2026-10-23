@@ -21,6 +21,7 @@
 #include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.ui/image/svg_raster.hpp"
+#include <format>
 #include <stb_image.h>
 
 namespace hedgr::imgui::app {
@@ -70,15 +71,30 @@ bool image_texture_cache::ensure(std::string_view tenant_id,
         return false;
     }
 
-    auto& by_recency = entries_.get<1>();
-    by_recency.push_front(entry{.key = key,
+    insert(key, tenant_id, image_id, texture, bytes);
+    return true;
+}
+
+void image_texture_cache::insert(std::string key, std::string_view tenant_id,
+    std::string_view image_id, unsigned int texture, std::size_t bytes) {
+    entries_.get<1>().push_front(entry{.key = std::move(key),
         .tenant_id = std::string{tenant_id},
         .image_id = std::string{image_id},
         .texture = texture,
         .bytes = bytes,
         .used_frame = 0});
     bytes_ += bytes;
-    return true;
+}
+
+ImTextureID image_texture_cache::touch(
+    container::nth_index<0>::type::iterator found) {
+    auto& by_recency = entries_.get<1>();
+    const auto position = entries_.project<1>(found);
+    by_recency.relocate(by_recency.begin(), position);
+    by_recency.modify(position, [this](entry& value) {
+        value.used_frame = frame_;
+    });
+    return static_cast<ImTextureID>(found->texture);
 }
 
 ImTextureID image_texture_cache::get(std::string_view tenant_id,
@@ -93,13 +109,32 @@ ImTextureID image_texture_cache::get(std::string_view tenant_id,
         model::state::make_tenant_key(tenant_id, image_id));
     if (found == by_key.end())
         return 0;
-    auto& by_recency = entries_.get<1>();
-    const auto position = entries_.project<1>(found);
-    by_recency.relocate(by_recency.begin(), position);
-    by_recency.modify(position, [this](entry& value) {
-        value.used_frame = frame_;
-    });
-    return static_cast<ImTextureID>(found->texture);
+    return touch(found);
+}
+
+ImTextureID image_texture_cache::svg(std::string_view image_id,
+    std::string_view document, int width, int height) {
+    const auto key = model::state::make_tenant_key(
+        "", std::format("{}@{}x{}", image_id, width, height));
+    auto& by_key = entries_.get<0>();
+    if (const auto found = by_key.find(key); found != by_key.end())
+        return touch(found);
+    if (failed_.contains(key))
+        return 0;
+
+    const auto raster = ui::image::rasterize_svg(document, width, height);
+    if (!raster) {
+        failed_.insert(key);
+        return 0;
+    }
+    const unsigned int texture = upload_rgba(raster->pixels.data(),
+        raster->width, raster->height);
+    if (texture == 0) {
+        failed_.insert(key);
+        return 0;
+    }
+    insert(key, "", image_id, texture, raster->pixels.size());
+    return touch(by_key.find(key));
 }
 
 void image_texture_cache::begin_frame() {

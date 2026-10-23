@@ -411,6 +411,21 @@ inline constexpr float menu_label_spacing_share = 0.08f;
 inline constexpr float menu_label_padding_x = 10.0f;
 
 /**
+ * @brief The top bar's fill: flat and dark, with a hairline of @c menu_border
+ * along its bottom edge.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_bar_surface() noexcept;
+
+/** @brief The height of the top bar, which is also the side of the logo button. */
+inline constexpr float menu_bar_height = 40.0f;
+
+/** @brief The room between the logo button's edge and the swirl drawn in it. */
+inline constexpr float menu_bar_logo_padding = 9.0f;
+
+/** @brief The room between the logo button's edge and its hover plate. */
+inline constexpr float menu_bar_plate_inset = 4.0f;
+
+/**
  * @brief The faint dashed rules across a plot, in a purple grey at a low
  * alpha, so a rule is a guide and never a line of data.
  */

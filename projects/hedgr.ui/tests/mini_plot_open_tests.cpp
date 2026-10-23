@@ -52,6 +52,12 @@ struct open_desk final {
 
     open_desk() : input(desk.input()) {
         ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        /*
+         * The top bar insets the work area a frame after it first draws, and
+         * the tests place cards from WorkPos before start(), so the inset is
+         * established first, on an empty desk.
+         */
+        settle();
     }
 
     void place(const std::string& id, float width, float height) {

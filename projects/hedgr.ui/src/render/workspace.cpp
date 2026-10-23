@@ -284,6 +284,24 @@ void workspace::render(const render_input& input) {
      * browser's, beside the tree.
      */
     draw_background(input);
+
+    /*
+     * The top bar goes before the dock space and is what insets the work area
+     * at the top, so the dock space below reads WorkPos and needs no knowledge
+     * of it. Its answer joins the lock control's, which is read after the walk.
+     */
+    if (!logo_loaded_) {
+        logo_loaded_ = true;
+        if (const auto path = logo_svg_path(); !path.empty())
+            logo_svg_ = read_text_file(path);
+    }
+    menu_bar_result top_bar;
+    draw_menu_bar(input, logo_svg_, menu_bar_, top_bar);
+    if (top_bar.focus_instances)
+        focus_instances_ = true;
+    lock_control_.close_requested |= top_bar.lock_requested;
+    lock_control_.open_requested |= top_bar.unlock_requested;
+
     draw_dock_space(input);
 
     /*

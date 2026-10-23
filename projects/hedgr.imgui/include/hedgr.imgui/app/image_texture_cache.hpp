@@ -57,6 +57,9 @@ public:
         std::string_view image_id, std::string_view mime_type,
         const std::vector<std::uint8_t>& data) override;
 
+    [[nodiscard]] ImTextureID svg(std::string_view image_id,
+        std::string_view document, int width, int height) override;
+
     /** @brief Starts a frame; textures used after this are pinned. */
     void begin_frame();
 
@@ -90,6 +93,13 @@ private:
     bool ensure(std::string_view tenant_id, std::string_view image_id,
         std::string_view mime_type,
         const std::vector<std::uint8_t>& data);
+
+    /** @brief Stores an uploaded texture under @p key, most recent first. */
+    void insert(std::string key, std::string_view tenant_id,
+        std::string_view image_id, unsigned int texture, std::size_t bytes);
+
+    /** @brief Marks @p found used by this frame and returns its texture. */
+    ImTextureID touch(container::nth_index<0>::type::iterator found);
 
     container entries_;
     std::size_t bytes_ = 0;

@@ -22,9 +22,11 @@
 
 #include "hedgr.model/state/composite_key.hpp"
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
+#include "hedgr.ui/widget/menu_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
 #include <filesystem>
@@ -42,8 +44,9 @@ namespace hedgr::ui::render {
  * through the command queue, so the workspace can be destroyed and rebuilt
  * without losing anything a person would miss.
  *
- * There is no menu bar. Actions are icon buttons with tooltips, because a
- * pull-down menu hides what can be done behind a click that does not name it.
+ * The top bar holds the logo and the system menu behind it. Actions stay icon
+ * buttons with tooltips, because a pull-down menu hides what can be done
+ * behind a click that does not name it.
  */
 class HEDGR_UI_EXPORT workspace final {
 public:
@@ -341,6 +344,20 @@ private:
      * needs the previous frame's answer to know there was one.
      */
     shortcut_bar_state shortcut_bar_;
+
+    /** @brief Which top-level menu of the top bar is open. */
+    hedgr::ui::widget::menu_bar_state menu_bar_;
+
+    /**
+     * @brief The logo's SVG document, read from disk on the first frame.
+     *
+     * Kept as text so the texture source can be asked for it every frame, as
+     * that is how a texture is marked used, without a read of the file.
+     */
+    std::string logo_svg_;
+
+    /** @brief Whether the logo file has been looked for, found or not. */
+    bool logo_loaded_ = false;
 
     /*
      * There is deliberately no "I have submitted a password" flag here. The

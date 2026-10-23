@@ -20,12 +20,14 @@
 #include "allocation_counter.hpp"
 #include "headless_desk.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
+#include "hedgr.ui/widget/menu_bar.hpp"
 #include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
@@ -1081,4 +1083,31 @@ TEST_CASE("an open menu with every kind of row costs a steady frame no allocatio
     });
     CHECK(rows_drawn);
     CHECK(allocations == 0);
+}
+
+TEST_CASE("the top bar costs a steady frame no allocation, closed and with its menu open",
+    "[frame][menu_bar]") {
+    headless_imgui imgui;
+    hedgr::ui::theme::apply_theme();
+    desk desk;
+    auto input = desk.input();
+    hedgr::ui::widget::menu_bar_state state;
+    const std::string svg = "<svg xmlns='http://www.w3.org/2000/svg'/>";
+    const auto draw = [&] {
+        hedgr::ui::render::menu_bar_result result;
+        ImGui::NewFrame();
+        hedgr::ui::render::draw_menu_bar(input, svg, state, result);
+        ImGui::Render();
+    };
+    CHECK(steady_allocations(draw) == 0);
+
+    ImGui::GetIO().AddMousePosEvent(20.0f, 20.0f);
+    draw();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    draw();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    draw();
+    CHECK(state.open == 0);
+    CHECK(steady_allocations(draw) == 0);
+    CHECK(state.open == 0);
 }
