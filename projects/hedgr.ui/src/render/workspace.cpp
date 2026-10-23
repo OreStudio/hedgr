@@ -421,7 +421,10 @@ void workspace::render(const render_input& input) {
         begin_label_ += "###";
         begin_label_ += input.windows.id(handle);
 
-        ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f),
+        ImGui::SetNextWindowSizeConstraints(
+            kind == hedgr::model::domain::window_kind::mini_plot
+                ? ImVec2(64.0f, 64.0f)
+                : ImVec2(360.0f, 220.0f),
             ImVec2(FLT_MAX, FLT_MAX));
 
         /*
@@ -437,6 +440,8 @@ void workspace::render(const render_input& input) {
             ? ImVec2(1180.0f, 820.0f)
             : kind == hedgr::model::domain::window_kind::command_centre
             ? ImVec2(1120.0f, 760.0f)
+            : kind == hedgr::model::domain::window_kind::mini_plot
+            ? ImVec2(240.0f, 180.0f)
             : kind == hedgr::model::domain::window_kind::chart
             ? ImVec2(1000.0f, 620.0f)
             : kind == hedgr::model::domain::window_kind::crm_matrix
@@ -504,13 +509,31 @@ void workspace::render(const render_input& input) {
          * because this loop owns the Begin call and a renderer only fills the
          * body.
          */
-        const ImGuiWindowFlags window_flags =
+        const bool card = kind == hedgr::model::domain::window_kind::mini_plot;
+        ImGuiWindowFlags window_flags =
             kind == hedgr::model::domain::window_kind::command_centre
                 || kind == hedgr::model::domain::window_kind::workspace
             ? ImGuiWindowFlags_MenuBar
             : ImGuiWindowFlags_None;
-        if (!ImGui::Begin(begin_label_.c_str(), closable ? &keep_open : nullptr,
-                window_flags)) {
+        /*
+         * A card is its own tile, so its window has no padding, border or
+         * background to show round it. The title bar or the dock tab stays: it
+         * is how a card is moved, closed and docked. Pushed only around Begin
+         * because the window reads these when it is begun.
+         */
+        if (card) {
+            window_flags |= ImGuiWindowFlags_NoBackground
+                | ImGuiWindowFlags_NoScrollbar
+                | ImGuiWindowFlags_NoScrollWithMouse;
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        }
+        const bool begun = ImGui::Begin(begin_label_.c_str(),
+            closable ? &keep_open : nullptr, window_flags);
+        if (card)
+            ImGui::PopStyleVar(3);
+        if (!begun) {
             /*
              * Collapsed or fully clipped: ImGui still wants its End, and
              * nothing inside the window is submitted. This is the content
@@ -519,8 +542,9 @@ void workspace::render(const render_input& input) {
             ImGui::End();
             continue;
         }
-        hedgr::ui::theme::shade_window_background(
-            hedgr::ui::theme::window_gradient);
+        if (!card)
+            hedgr::ui::theme::shade_window_background(
+                hedgr::ui::theme::window_gradient);
 
         const hedgr::model::state::key_parts<1> key{input.windows.id(handle)};
         auto entry = ui_state_.find(key);
