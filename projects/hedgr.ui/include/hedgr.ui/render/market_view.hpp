@@ -65,17 +65,11 @@ inline constexpr std::array<const char*, chart_spans.size()> chart_span_labels
           return labels;
       }();
 
-/**
- * @brief The spans a chart header draws as segments, as indices into
- * @c chart_spans. The rest are in the header's dropdown.
- */
-inline constexpr std::array<int, 4> chart_span_shown{0, 2, 3, 4};
-
-/** @brief The chart styles the style combo offers. */
+/** @brief The chart styles the header's style control offers. */
 inline constexpr std::array<const char*, 2> chart_style_labels{
     "Candles", "Line"};
 
-/** @brief The EMA choices the overlay combo offers. */
+/** @brief The EMA choices the header's overlay control offers. */
 inline constexpr std::array<const char*, 2> chart_ema_labels{
     "EMA off", "EMA 20"};
 

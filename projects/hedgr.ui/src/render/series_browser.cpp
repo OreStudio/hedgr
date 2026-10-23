@@ -90,7 +90,7 @@ bool mini_plot_button() {
 void request_series_window(const render_input& input,
     const hedgr::model::state::session_handle session,
     const domain::window_kind kind, std::string_view series_id,
-    std::string_view label) {
+    std::string_view label, std::optional<std::int64_t> span_ns) {
     command request;
     request.kind = command_kind::open_window;
     request.instance_id = std::string{input.sessions.instance_id(session)};
@@ -98,6 +98,7 @@ void request_series_window(const render_input& input,
     request.new_window_kind = kind;
     request.series_id = std::string{series_id};
     request.series_label = std::string{label};
+    request.series_span_ns = span_ns;
     input.commands.push(std::move(request));
 }
 
@@ -540,7 +541,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::PushID(row->id.c_str());
                 if (mini_plot_button()) {
                     request_series_window(input, *session,
-                        domain::window_kind::mini_plot, row->id, row->label);
+                        domain::window_kind::mini_plot, row->id, row->label,
+                        chart_span_ns(input.market_view.chart_span));
                 }
                 ImGui::PopID();
             }

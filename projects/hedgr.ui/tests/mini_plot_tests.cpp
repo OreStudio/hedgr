@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -48,23 +49,29 @@ namespace theme = hedgr::ui::theme;
 
 constexpr std::int64_t now_ns = 1'760'000'000'000'000'000;
 constexpr std::int64_t step_ns = 600'000'000'000;
+constexpr std::int64_t card_span_ns = 24LL * 3600 * 1'000'000'000;
 
 /** @brief A card whose series holds @p count points ending now, shaped by @p value. */
 template<class Value>
 model::state::window_handle card_with(hedgr::testing::desk& desk,
-    std::size_t count, Value value, std::string id = "s") {
+    std::size_t count, Value value, std::string id = "s",
+    bool also_fine = false) {
     const auto handle = desk.open(model::domain::window_kind::mini_plot,
-        model::domain::mini_plot_state{.label = "FX GBP/USD", .series_id = id},
+        model::domain::mini_plot_state{.label = "FX GBP/USD", .series_id = id,
+            .span_ns = card_span_ns},
         "card-" + id);
     const auto series = desk.market.intern("i", "a", id);
     desk.windows.set_series(handle, std::span{&series, 1});
-    for (std::size_t k = 0; k < count; ++k)
-        desk.market.append(series, model::domain::market_level_for_span(
-                                       render::mini_plot_span_ns),
-            {.at_ns = now_ns
-                    - static_cast<std::int64_t>(count - 1 - k) * step_ns,
-                .value = value(k)},
-            1);
+    for (std::size_t k = 0; k < count; ++k) {
+        const model::state::series_point point{.at_ns = now_ns
+                - static_cast<std::int64_t>(count - 1 - k) * step_ns,
+            .value = value(k)};
+        desk.market.append(series,
+            model::domain::market_level_for_span(card_span_ns), point, 1);
+        if (also_fine)
+            desk.market.append(series, model::domain::market_level::fine,
+                point, 1);
+    }
     return handle;
 }
 
@@ -84,14 +91,14 @@ struct card_draw final {
 
 /** @brief Draws the card in a window of @p size and counts what it drew. */
 card_draw draw_card(hedgr::testing::desk& desk,
-    model::state::window_handle handle, theme::tone tone, ImVec2 size) {
+    model::state::window_handle handle, theme::tone tone, ImVec2 size,
+    ImU32 colour = ImGui::ColorConvertFloat4ToU32(theme::chart_line_colour())) {
     hedgr::ui::widget::status_bar status;
     render::lock_control lock;
     render::window_ui_state state;
     auto input = desk.input();
     input.wall_now_ns = now_ns;
     card_draw result;
-    const ImU32 colour = theme::pill_colours(tone).text;
     for (int pass = 0; pass < 2; ++pass) {
         result = {};
         ImGui::NewFrame();
@@ -185,40 +192,104 @@ TEST_CASE("a mini plot card for a series not held says so",
     CHECK(text.find("Series not held") != std::string::npos);
 }
 
-TEST_CASE("a rising series draws its line and fill in the good tone",
+TEST_CASE("a card's line and fill are the chart's colour whatever the series did",
     "[mini_plot]") {
+    hedgr::testing::headless_imgui imgui;
+    theme::apply_theme();
+    hedgr::testing::desk desk;
+    const auto rising = card_with(desk, 60,
+        [](std::size_t k) { return 1.20 + static_cast<double>(k) * 0.001; },
+        "up");
+    const auto falling = card_with(desk, 60,
+        [](std::size_t k) { return 1.30 - static_cast<double>(k) * 0.001; },
+        "down");
+
+    for (const auto& [handle, tone] :
+        {std::pair{rising, theme::tone::good},
+            std::pair{falling, theme::tone::bad}}) {
+        const auto drawn = draw_card(desk, handle, tone, ImVec2(260.0f, 170.0f));
+        CHECK(drawn.line_vertices > 0);
+        CHECK(drawn.fill_vertices > 0);
+        const auto verdict = draw_card(desk, handle, tone,
+            ImVec2(260.0f, 170.0f), theme::pill_colours(tone).text);
+        CHECK(verdict.line_vertices == 0);
+        /* The pill still carries the verdict, and only the pill. */
+        CHECK(drawn.pill_top < FLT_MAX);
+        const auto other = tone == theme::tone::good ? theme::tone::bad
+                                                     : theme::tone::good;
+        CHECK(draw_card(desk, handle, other, ImVec2(260.0f, 170.0f)).pill_top
+            == FLT_MAX);
+    }
+}
+
+namespace {
+
+constexpr std::int64_t minute_ns = 60'000'000'000;
+
+/** @brief A chart window plotting the series @p card holds, on span @p span_ns. */
+model::state::window_handle chart_beside(hedgr::testing::desk& desk,
+    model::state::window_handle card, std::int64_t span_ns,
+    std::string id = "chart") {
+    const auto chart = desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s",
+            .view = model::domain::chart_view{.span_ns = span_ns}},
+        id);
+    desk.windows.set_series(chart, desk.windows.series(card));
+    return chart;
+}
+
+}
+
+TEST_CASE("a card with no chart open shows the span it was opened with",
+    "[mini_plot][span]") {
     hedgr::testing::headless_imgui imgui;
     theme::apply_theme();
     hedgr::testing::desk desk;
     const auto handle = card_with(desk, 60,
         [](std::size_t k) { return 1.20 + static_cast<double>(k) * 0.001; });
 
-    const auto good = draw_card(desk, handle, theme::tone::good,
-        ImVec2(260.0f, 170.0f));
-    const auto bad = draw_card(desk, handle, theme::tone::bad,
-        ImVec2(260.0f, 170.0f));
-    INFO("good line " << good.line_vertices << " fill " << good.fill_vertices);
-    CHECK(good.line_vertices > 0);
-    CHECK(good.fill_vertices > 0);
-    CHECK(bad.line_vertices == 0);
-    CHECK(bad.fill_vertices == 0);
+    CHECK(render::mini_plot_span(desk.input(), handle) == card_span_ns);
+    const auto text = drawn_text(desk, handle);
+    CHECK(text.find("1d") != std::string::npos);
+    CHECK(text.find("24H") == std::string::npos);
 }
 
-TEST_CASE("a falling series draws its line and fill in the bad tone",
-    "[mini_plot]") {
+TEST_CASE("a card follows the span of the open chart of its series",
+    "[mini_plot][span]") {
     hedgr::testing::headless_imgui imgui;
     theme::apply_theme();
     hedgr::testing::desk desk;
     const auto handle = card_with(desk, 60,
-        [](std::size_t k) { return 1.30 - static_cast<double>(k) * 0.001; });
+        [](std::size_t k) { return 1.20 + static_cast<double>(k) * 0.001; },
+        "s", true);
+    const auto chart = chart_beside(desk, handle, 15 * minute_ns);
 
-    const auto bad = draw_card(desk, handle, theme::tone::bad,
-        ImVec2(260.0f, 170.0f));
-    const auto good = draw_card(desk, handle, theme::tone::good,
-        ImVec2(260.0f, 170.0f));
-    CHECK(bad.line_vertices > 0);
-    CHECK(bad.fill_vertices > 0);
-    CHECK(good.line_vertices == 0);
+    CHECK(render::mini_plot_span(desk.input(), handle) == 15 * minute_ns);
+    const auto text = drawn_text(desk, handle);
+    CHECK(text.find("15m") != std::string::npos);
+    CHECK(text.find("1d") == std::string::npos);
+
+    /* The chart changes period and the card changes with it. */
+    std::get<model::domain::chart_state>(desk.windows.state(chart)).view->span_ns
+        = 60 * minute_ns;
+    CHECK(render::mini_plot_span(desk.input(), handle) == 60 * minute_ns);
+    CHECK(drawn_text(desk, handle).find("1h") != std::string::npos);
+}
+
+TEST_CASE("a closed chart, or a chart of another series, does not move a card",
+    "[mini_plot][span]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+    const auto handle = card_with(desk, 60,
+        [](std::size_t k) { return 1.20 + static_cast<double>(k) * 0.001; });
+
+    const auto closed = chart_beside(desk, handle, 15 * minute_ns, "closed");
+    desk.windows.set_open(closed, false);
+    const auto other = chart_beside(desk, handle, 60 * minute_ns, "other");
+    const auto elsewhere = desk.market.intern("i", "a", "elsewhere");
+    desk.windows.set_series(other, std::span{&elsewhere, 1});
+
+    CHECK(render::mini_plot_span(desk.input(), handle) == card_span_ns);
 }
 
 TEST_CASE("a card with no points yet or no held series draws no line",
@@ -332,7 +403,7 @@ TEST_CASE("the sparkline reduces any series to the point budget and the unit box
     CHECK(render::make_sparkline(points, 5).size == theme::mini_plot_point_budget);
     points.size = 10;
     CHECK(render::make_sparkline(points, 0).size == 10);
-    CHECK(render::mini_plot_first(points, render::mini_plot_span_ns) == 0);
+    CHECK(render::mini_plot_first(points, card_span_ns) == 0);
     points.size = 1000;
     const auto first = render::mini_plot_first(points, 100 * step_ns);
     CHECK(first == 899);

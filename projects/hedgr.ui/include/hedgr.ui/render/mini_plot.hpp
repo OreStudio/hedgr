@@ -21,7 +21,9 @@
 #define HEDGR_UI_RENDER_MINI_PLOT_HPP
 
 #include "hedgr.model/state/series_ring.hpp"
+#include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include <array>
@@ -30,11 +32,15 @@
 
 namespace hedgr::ui::render {
 
-/** @brief The span a card shows, fixed for now. */
-inline constexpr std::int64_t mini_plot_span_ns = 24LL * 3600 * 1'000'000'000;
-
-/** @brief The card's period label, in step with @c mini_plot_span_ns. */
-inline constexpr const char* mini_plot_span_label = "24H";
+/**
+ * @brief The span a card shows.
+ *
+ * It follows the open chart of the same series and session, which is how a
+ * reader sees the card and the chart agree. With no such chart it is the span
+ * the card was opened with.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::int64_t mini_plot_span(
+    const render_input& input, hedgr::model::state::window_handle card);
 
 /**
  * @brief The line of a card, reduced to a fixed number of points.

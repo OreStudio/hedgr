@@ -292,11 +292,12 @@ constexpr std::array floating_icons{mini_plot_icon,
     header_icon{"dock", icon::panel, "Dock into the desk", header_ask::dock},
 };
 
-/** @brief What the header's controls asked, and the width they keep. */
+/** @brief What the header's controls asked, and the room they keep. */
 struct header_icons_drawn final {
     header_ask asked = header_ask::none;
-    bool period_changed = false;
-    float width = 0.0f;
+    bool view_changed = false;
+    /** @brief How far short of the row's right end the flags end. */
+    float flags_inset = 0.0f;
 };
 
 /**
@@ -326,41 +327,50 @@ struct header_icons_drawn final {
 }
 
 /**
- * @brief Draws the period selector and then @p icons at the right end of the
- * header row, @p height tall, and clips the rest of the row short of them.
+ * @brief Draws the header's controls at the right end of the row, @p height
+ * tall, and clips the rest of the row short of them.
  *
- * The controls come first so a narrow tile loses the end of its header text
- * and never a control. The caller draws the row and then pops the clip.
+ * From the right: the @p icons, the room for the flags, then the @p strips in
+ * order, so a narrow tile loses the end of its header text and never a control.
+ * The caller draws the row and then pops the clip.
  */
 [[nodiscard]] header_icons_drawn begin_header_row(
-    std::span<const header_icon> icons, const widget::segmented_control& period,
+    std::span<const header_icon> icons,
+    std::span<const widget::segmented_control> strips, float flags_width,
     float height) {
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImVec2 start = ImGui::GetCursorScreenPos();
     const float gap = style.ItemInnerSpacing.x;
+    const float group_gap = style.ItemSpacing.x;
     const float side = widget::segmented_height();
     const float icons_width = icons.empty()
         ? 0.0f
         : static_cast<float>(icons.size()) * (side + gap) - gap;
-    const float period_width = widget::segmented_width(period);
     const float right = start.x + ImGui::GetContentRegionAvail().x;
     const float icons_left = std::max(start.x, right - icons_width);
-    const float period_left = std::max(start.x, icons_left
-        - (icons.empty() ? 0.0f : gap) - period_width);
     const float top = start.y + std::max(0.0f, std::floor((height - side) * 0.5f));
 
-    header_icons_drawn drawn{.width = right - period_left + gap};
+    header_icons_drawn drawn;
+    drawn.flags_inset = icons.empty() ? 0.0f : icons_width + group_gap;
     for (std::size_t i = 0; i < icons.size(); ++i) {
         const ImVec2 origin(icons_left + static_cast<float>(i) * (side + gap),
             top);
         if (tile_icon(icons[i], origin, side))
             drawn.asked = icons[i].request;
     }
-    drawn.period_changed = widget::draw_segmented(period,
-        ImVec2(period_left, top));
+
+    float left = icons_left - (icons.empty() ? 0.0f : group_gap);
+    if (flags_width > 0.0f)
+        left -= flags_width + group_gap;
+    for (std::size_t i = strips.size(); i-- > 0;) {
+        left = std::max(start.x, left - widget::segmented_width(strips[i]));
+        if (widget::draw_segmented(strips[i], ImVec2(left, top)))
+            drawn.view_changed = true;
+        left -= group_gap;
+    }
 
     ImGui::SetCursorScreenPos(start);
-    ImGui::PushClipRect(start, ImVec2(period_left - gap, FLT_MAX), true);
+    ImGui::PushClipRect(start, ImVec2(left + group_gap - gap, FLT_MAX), true);
     return drawn;
 }
 
@@ -471,7 +481,7 @@ void render_chart(window_handle handle, const render_input& input,
     const bool no_points = points.size == 0;
     const double first = no_points ? 0.0 : points.value[start];
     const double last = no_points ? 0.0 : points.value[points.size - 1];
-    const ImVec4 line_colour = theme::accent_colour();
+    const ImVec4 line_colour = theme::chart_line_colour();
 
     /*
      * The runtime decides whether the series already holds the span. The chart
@@ -519,27 +529,45 @@ void render_chart(window_handle handle, const render_input& input,
      */
     const bool docked = ImGui::IsWindowDocked();
     const market_view_state view_before = state.market_view;
-    const widget::segmented_control period{.id = "period",
-        .tooltip = "The span the chart plots",
-        .options = chart_span_labels.data(),
-        .option_count = static_cast<int>(chart_span_labels.size()),
-        .shown = chart_span_shown,
-        .selected = &state.market_view.chart_span};
+    const std::array strips{
+        widget::segmented_control{.id = "period",
+            .tooltip = "The span the chart plots",
+            .options = chart_span_labels.data(),
+            .option_count = static_cast<int>(chart_span_labels.size()),
+            .selected = &state.market_view.chart_span},
+        widget::segmented_control{.id = "style",
+            .tooltip = "Draw candles or a line",
+            .options = chart_style_labels.data(),
+            .option_count = static_cast<int>(chart_style_labels.size()),
+            .selected = &state.market_view.chart_style},
+        widget::segmented_control{.id = "ema",
+            .tooltip = "Overlay the exponential moving average of the window",
+            .options = chart_ema_labels.data(),
+            .option_count = static_cast<int>(chart_ema_labels.size()),
+            .selected = &state.market_view.chart_ema}};
+    const float flags_width = series_flags_width(input, *session, chart->label);
     const auto icons = begin_header_row(
         docked ? std::span<const header_icon>{docked_icons}
                : std::span<const header_icon>{floating_icons},
-        period, ImGui::GetFrameHeight());
+        strips, flags_width, ImGui::GetFrameHeight());
     state.tile = icons.asked == header_ask::dock ? tile_request::dock
                                                  : tile_request::none;
     if (icons.asked == header_ask::mini_plot) {
         request_series_window(input, *session, domain::window_kind::mini_plot,
-            chart->series_id, chart->label);
+            chart->series_id, chart->label,
+            chart_span_ns(state.market_view.chart_span));
     }
     draw_full_header(summary);
     ImGui::SameLine();
-    draw_series_flags(input, *session, chart->label, icons.width);
     ImGui::PopClipRect();
-    if (icons.period_changed)
+    /*
+     * The flags sit at a fixed place short of the icons, not after the text,
+     * so a long header never pushes them over a control.
+     */
+    ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x
+        - icons.flags_inset - flags_width);
+    draw_series_flags(input, *session, chart->label, icons.flags_inset);
+    if (icons.view_changed)
         chart_view_changed(handle, input, state, view_before);
 
     if (row && !series.failure(*row).empty()) {
@@ -554,18 +582,6 @@ void render_chart(window_handle handle, const render_input& input,
     {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
-        foot->controls.push_back(widget::foot_combo{
-            .id = "style",
-            .tooltip = "Draw candles or a line",
-            .options = chart_style_labels.data(),
-            .option_count = static_cast<int>(chart_style_labels.size()),
-            .selected = &state.market_view.chart_style});
-        foot->controls.push_back(widget::foot_combo{
-            .id = "ema",
-            .tooltip = "Overlay the exponential moving average of the window",
-            .options = chart_ema_labels.data(),
-            .option_count = static_cast<int>(chart_ema_labels.size()),
-            .selected = &state.market_view.chart_ema});
         foot_height = widget::status_foot_height(status, *foot)
             + ImGui::GetStyle().ItemSpacing.y;
     }
@@ -677,7 +693,7 @@ void render_chart(window_handle handle, const render_input& input,
                     static_cast<int>(places.size()));
                 ImPlot::SetupFinish();
 
-                const ImVec4 tag_colour = health_tint(health, line_colour);
+                const ImVec4 tag_colour = health_tint(health, theme::chart_tag_colour());
 
                 /*
                  * The grid is the horizontal rules at the Y ticks, dashed and

@@ -30,6 +30,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/export.hpp"
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -200,6 +201,9 @@ struct command final {
 
     /** @brief Human label of that series, for the window's title. */
     std::string series_label;
+
+    /** @brief The span a mini plot opens on, for open_window; zero is all. */
+    std::optional<std::int64_t> series_span_ns;
 
     /** @brief Image identifier, for load_image. */
     std::string image_id;

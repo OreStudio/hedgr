@@ -517,9 +517,10 @@ void workspace::render(const render_input& input) {
             : ImGuiWindowFlags_None;
         /*
          * A card is its own tile, so its window has no padding, border or
-         * background to show round it. The title bar or the dock tab stays: it
-         * is how a card is moved, closed and docked. Pushed only around Begin
-         * because the window reads these when it is begun.
+         * background to show round it, and no title bar either. The body is the
+         * handle: a drag on it moves the card and docks it, and the context menu
+         * closes it. Pushed only around Begin because the window reads these
+         * when it is begun.
          */
         if (card) {
             /*
@@ -540,7 +541,8 @@ void workspace::render(const render_input& input) {
                 | ImGuiDockNodeFlags_NoDockingOverOther
                 | ImGuiDockNodeFlags_NoDockingOverEmpty;
             ImGui::SetNextWindowClass(&tile);
-            window_flags |= ImGuiWindowFlags_NoBackground
+            window_flags |= ImGuiWindowFlags_NoTitleBar
+                | ImGuiWindowFlags_NoBackground
                 | ImGuiWindowFlags_NoScrollbar
                 | ImGuiWindowFlags_NoScrollWithMouse;
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
@@ -582,11 +584,11 @@ void workspace::render(const render_input& input) {
             draw(handle, input, state, status_, lock_control_);
 
         /*
-         * A docked card has no tab bar and so no close button, and a click on
-         * it opens the chart, so the way to close it is its context menu. A
-         * floating card keeps its title bar's own control.
+         * A card has no title bar and no tab, so no close button, and a click
+         * on it opens the chart, so the way to close it is its context menu,
+         * floating or docked.
          */
-        if (card && ImGui::IsWindowDocked()
+        if (card
             && ImGui::BeginPopupContextWindow("##card-menu",
                 ImGuiPopupFlags_MouseButtonRight)) {
             if (ImGui::MenuItem("Close"))

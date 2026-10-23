@@ -873,7 +873,7 @@ std::size_t allocations_with_cards(std::size_t count, int& vertices_out) {
                 1));
         const auto window = desk.open(model::domain::window_kind::mini_plot,
             model::domain::mini_plot_state{.label = "FX GBP/USD",
-                .series_id = id},
+                .series_id = id, .span_ns = 24LL * 3600 * 1'000'000'000},
             std::format("card-{}", i));
         desk.windows.set_series(window, std::span{&series, 1});
         windows.push_back(window);

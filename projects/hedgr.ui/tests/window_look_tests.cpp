@@ -550,18 +550,29 @@ TEST_CASE("a right click on a chart's plot opens no menu, docked or floating",
 
 namespace {
 
-/** @brief The id of the header's period segment @p option, as ImGui hashes it. */
-ImGuiID period_segment_id(int option) {
+/** @brief The id of option @p option of the header control @p control. */
+ImGuiID segment_id(const char* control, const char* const* labels, int option) {
     const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
     REQUIRE(frame != nullptr);
     ImGuiID id = ImHashStr("chart", 0, frame->ID);
-    id = ImHashStr("period", 0, id);
+    id = ImHashStr(control, 0, id);
     id = ImHashData(&option, sizeof(option), id);
-    return ImHashStr(render::chart_span_labels[static_cast<std::size_t>(option)],
-        0, id);
+    return ImHashStr(labels[option], 0, id);
 }
 
-/** @brief The id of the header's dropdown button. */
+ImGuiID period_segment_id(int option) {
+    return segment_id("period", render::chart_span_labels.data(), option);
+}
+
+ImGuiID style_segment_id(int option) {
+    return segment_id("style", render::chart_style_labels.data(), option);
+}
+
+ImGuiID ema_segment_id(int option) {
+    return segment_id("ema", render::chart_ema_labels.data(), option);
+}
+
+/** @brief The id of the dropdown button the period control used to end in. */
 ImGuiID period_more_id() {
     const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
     REQUIRE(frame != nullptr);
@@ -588,6 +599,19 @@ float header_x_of(chart_fixture& chart, ImGuiID wanted) {
     }
     FAIL("no header item under the pointer");
     return 0.0f;
+}
+
+/** @brief The x of item @p wanted in the header row, or a negative if none. */
+float header_x_if_any(chart_fixture& chart, ImGuiID wanted) {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    const float y = frame->DC.CursorStartPos.y + ImGui::GetFrameHeight() * 0.5f;
+    for (float x = 990.0f; x > 0.0f; x -= 3.0f) {
+        hover(chart, ImVec2(x, y));
+        if (ImGui::GetCurrentContext()->HoveredId == wanted)
+            return x;
+    }
+    return -1.0f;
 }
 
 float header_y() {
@@ -619,36 +643,71 @@ TEST_CASE("a period chosen in the header changes the span and is saved",
     CHECK(saved[0].chart_view.span_ns == 60'000'000'000);
 }
 
-TEST_CASE("the header's dropdown lists the periods it has no segment for",
+TEST_CASE("the header strip shows every period and has no dropdown",
     "[look][chart][period]") {
     chart_fixture chart{0.0001};
     settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
-    static_cast<void>(chart.desk.commands.drain());
 
-    const float x = header_x_of(chart, period_more_id());
+    float previous = -1.0f;
+    for (std::size_t option = 0; option < render::chart_spans.size(); ++option) {
+        const float x = header_x_if_any(chart,
+            period_segment_id(static_cast<int>(option)));
+        INFO(render::chart_spans[option].label);
+        CHECK(x > previous);
+        previous = x;
+    }
+    CHECK(header_x_if_any(chart, period_more_id()) < 0.0f);
+}
+
+TEST_CASE("the period strip's last segment is All and it picks the whole series",
+    "[look][chart][period]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+
+    const int all = static_cast<int>(render::chart_spans.size()) - 1;
+    const float x = header_x_of(chart, period_segment_id(all));
     click(chart, ImVec2(x, header_y()), ImGuiMouseButton_Left);
-    const ImGuiWindow* list = open_popup();
-    REQUIRE(list != nullptr);
-    chart.draw(newest_at_ns);
+    CHECK(chart.state.market_view.chart_span == all);
+    CHECK(render::chart_span_ns(all) == 0);
+}
 
-    /* The first row is 5m, the one period with no segment besides All. */
-    const ImVec2 first(list->Pos.x + list->Size.x * 0.5f,
-        list->Pos.y + ImGui::GetStyle().WindowPadding.y
-            + ImGui::GetTextLineHeight() * 0.5f);
-    click(chart, first, ImGuiMouseButton_Left);
-    CHECK(chart.state.market_view.chart_span == 1);
+TEST_CASE("the plot type and EMA controls are in the header, after the strip",
+    "[look][chart][period]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    const float all = header_x_if_any(chart,
+        period_segment_id(static_cast<int>(render::chart_spans.size()) - 1));
+    REQUIRE(all > 0.0f);
+
+    const float candles = header_x_if_any(chart, style_segment_id(0));
+    const float line = header_x_if_any(chart, style_segment_id(1));
+    const float off = header_x_if_any(chart, ema_segment_id(0));
+    const float on = header_x_if_any(chart, ema_segment_id(1));
+    CHECK(candles > all);
+    CHECK(line > candles);
+    CHECK(off > line);
+    CHECK(on > off);
+
+    /* Choosing in the header changes the chart and is saved as its view. */
+    static_cast<void>(chart.desk.commands.drain());
+    click(chart, ImVec2(on, header_y()), ImGuiMouseButton_Left);
+    click(chart, ImVec2(candles, header_y()), ImGuiMouseButton_Left);
+    CHECK(chart.state.market_view.chart_ema == 1);
+    CHECK(chart.state.market_view.chart_style == 0);
     std::vector<model::command::command> saved;
     for (auto& c : chart.desk.commands.drain()) {
         if (c.kind == model::command::command_kind::configure_chart)
             saved.push_back(std::move(c));
     }
-    REQUIRE(saved.size() == 1);
-    CHECK(saved[0].chart_view.span_ns == 300'000'000'000);
+    REQUIRE_FALSE(saved.empty());
+    CHECK(saved.back().chart_view.ema);
+    CHECK(saved.back().chart_view.style
+        == model::domain::chart_style::candles);
 }
 
-TEST_CASE("a chart's foot has no period combo", "[look][chart][period]") {
+TEST_CASE("a chart's foot holds the identity and status and no controls",
+    "[look][chart][period]") {
     chart_fixture chart{0.0001};
-    chart.state.market_view.chart_span = render::chart_span_index(900'000'000'000);
     std::string text;
     hedgr::testing::frame([&] {
         ImGui::LogToBuffer();
@@ -660,8 +719,8 @@ TEST_CASE("a chart's foot has no period combo", "[look][chart][period]") {
         text = ImGui::GetCurrentContext()->LogBuffer.c_str();
         ImGui::LogFinish();
     });
-    CHECK(text.find("Line") != std::string::npos);
-    CHECK(text.find("EMA off") != std::string::npos);
+    CHECK(text.find("Line") == std::string::npos);
+    CHECK(text.find("EMA") == std::string::npos);
     CHECK(text.find("15m") == std::string::npos);
 }
 
@@ -679,6 +738,17 @@ std::vector<ImDrawVert> plot_vertices_of(ImU32 colour) {
     return found;
 }
 
+}
+
+TEST_CASE("a chart's line and fill are the chart purple, not the accent blue",
+    "[look][chart][plot]") {
+    chart_fixture chart{0.0001};
+    chart.state.market_view.chart_style = 1;
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    CHECK_FALSE(plot_vertices_of(ImGui::ColorConvertFloat4ToU32(
+        theme::chart_line_colour())).empty());
+    CHECK(plot_vertices_of(ImGui::ColorConvertFloat4ToU32(
+        theme::accent_colour())).empty());
 }
 
 TEST_CASE("a chart's plot draws no border and no frame",

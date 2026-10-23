@@ -77,7 +77,8 @@ using support::store_failure;
 default_state_for(domain::window_kind kind, std::string_view last_error,
     std::string_view instance_id, std::string_view account_id,
     std::string_view series_id = {},
-    std::string_view series_label = {}) {
+    std::string_view series_label = {},
+    std::optional<std::int64_t> span_ns = std::nullopt) {
     switch (kind) {
     case domain::window_kind::chart: {
         domain::chart_state chart;
@@ -91,6 +92,8 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         card.label = series_label.empty() ? "Series"
                                           : std::string{series_label};
         card.series_id = std::string{series_id};
+        if (span_ns)
+            card.span_ns = *span_ns;
         return card;
     }
     case domain::window_kind::series_browser:
@@ -367,7 +370,8 @@ open_outcome window_service::open(const command::command& cmd) {
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))
         last_error = sessions_.last_error(*session);
     spec.state = default_state_for(cmd.new_window_kind, last_error,
-        cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label);
+        cmd.instance_id, cmd.account_id, cmd.series_id, cmd.series_label,
+        cmd.series_span_ns);
     if (cmd.new_window_kind == domain::window_kind::crm_matrix) {
         auto& crm = std::get<domain::crm_matrix_state>(spec.state);
         crm.crm_name = cmd.crm_name;
