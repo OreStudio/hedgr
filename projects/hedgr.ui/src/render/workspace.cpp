@@ -821,6 +821,8 @@ void workspace::draw_dock_space(const render_input& input) {
         hedgr::ui::theme::tab_bar_colour());
     ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
         ImGuiDockNodeFlags_PassthruCentralNode);
+    /* ImGui paints each tab flat; the fade is laid over its vertices here. */
+    hedgr::ui::theme::shade_dock_tabs();
     ImGui::PopStyleColor(3);
     ImGui::PopStyleVar(2);
     ImGui::PopFont();

@@ -390,6 +390,35 @@ inline constexpr float tab_spacing = 4.0f;
 /** @brief The fill of the chosen tab, the reference's violet. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_active_colour() noexcept;
 
+/*
+ * The lighter end of each tab fill, about twelve points of lightness above the
+ * sampled colour at the same hue and saturation. The sampled colour stays the
+ * foot of the tab, so a tab still reads as the reference's fill; the lift
+ * matches the bar's own fade from a lit head.
+ */
+inline constexpr ImU32 tab_idle_top = IM_COL32(0x46, 0x49, 0x5b, 255);
+inline constexpr ImU32 tab_hover_top = IM_COL32(0xa4, 0x96, 0xb8, 255);
+inline constexpr ImU32 tab_active_top = IM_COL32(0x92, 0x81, 0xa9, 255);
+
+/**
+ * @brief Fades the tab fills drawn into @p draw from vertex @p first on, within
+ * the rectangle @p min to @p max, from their lighter top to their sampled foot.
+ *
+ * ImGui paints a tab with one flat colour, so the vertices of the rounded
+ * shape are recoloured by their height where they lie and the corners and
+ * their antialiased fringe stay ImGui's own. Only a vertex that has the idle,
+ * hovered or chosen fill is touched.
+ */
+HEDGR_UI_EXPORT void shade_tab(ImDrawList* draw, int first, ImVec2 min,
+    ImVec2 max);
+
+/**
+ * @brief Fades every visible dock node's tabs, after the dock space is
+ * submitted. A node's strip is drawn in its host window, the desk's for the
+ * docked ones and its own for a floating node.
+ */
+HEDGR_UI_EXPORT void shade_dock_tabs();
+
 /** @brief The fill of the last price chip, the reference's chip purple. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
 

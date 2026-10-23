@@ -23,6 +23,7 @@
 #include "imgui_internal.h"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <span>
 
@@ -631,6 +632,70 @@ void fill_stops(ImDrawList* draw, ImVec2 min, ImVec2 max,
                     << IM_COL32_A_SHIFT);
         }
         draw->PopClipRect();
+    }
+}
+
+namespace {
+
+struct tab_fade final {
+    ImU32 bottom;
+    ImU32 top;
+};
+
+}
+
+void shade_tab(ImDrawList* draw, int first, ImVec2 min, ImVec2 max) {
+    const std::array<tab_fade, 3> fades{{
+        {ImGui::ColorConvertFloat4ToU32(tab_idle), tab_idle_top},
+        {ImGui::ColorConvertFloat4ToU32(tab_hover), tab_hover_top},
+        {ImGui::ColorConvertFloat4ToU32(tab_active), tab_active_top}}};
+    /*
+     * An antialiased fill keeps its solid vertices half a pixel inside its
+     * shape, so the fade runs between those, which puts the lighter stop on
+     * the top edge and the sampled fill on the bottom one.
+     */
+    constexpr float inset = 0.5f;
+    const float height = max.y - min.y - 2.0f * inset;
+    if (height <= 0.0f)
+        return;
+    /* The fringe of an antialiased fill reaches a pixel past its shape. */
+    constexpr float fringe = 1.0f;
+    for (int i = first; i < draw->VtxBuffer.Size; ++i) {
+        ImDrawVert& v = draw->VtxBuffer[i];
+        if (v.pos.x < min.x - fringe || v.pos.x > max.x + fringe
+            || v.pos.y < min.y - fringe || v.pos.y > max.y + fringe)
+            continue;
+        for (const tab_fade& fade : fades) {
+            if ((v.col & ~IM_COL32_A_MASK) != (fade.bottom & ~IM_COL32_A_MASK))
+                continue;
+            const float t = std::clamp((v.pos.y - min.y - inset) / height, 0.0f, 1.0f);
+            const auto lerp = [&](unsigned int shift) {
+                return mix(channel(fade.top, shift),
+                    channel(fade.bottom, shift), t);
+            };
+            v.col = IM_COL32(lerp(IM_COL32_R_SHIFT), lerp(IM_COL32_G_SHIFT),
+                lerp(IM_COL32_B_SHIFT), channel(v.col, IM_COL32_A_SHIFT));
+            break;
+        }
+    }
+}
+
+void shade_dock_tabs() {
+    const ImGuiContext& g = *ImGui::GetCurrentContext();
+    for (const ImGuiStoragePair& pair : g.DockContext.Nodes.Data) {
+        const auto* node = static_cast<const ImGuiDockNode*>(pair.val_p);
+        if (node == nullptr || node->TabBar == nullptr
+            || node->HostWindow == nullptr || !node->IsVisible)
+            continue;
+        const ImGuiTabBar& bar = *node->TabBar;
+        const float foot = bar.BarRect.Max.y - g.Style.TabBarBorderSize;
+        for (const ImGuiTabItem& tab : bar.Tabs) {
+            const float left = bar.BarRect.Min.x
+                + std::trunc(tab.Offset - bar.ScrollingAnim);
+            shade_tab(node->HostWindow->DrawList, 0,
+                ImVec2(left, bar.BarRect.Min.y),
+                ImVec2(left + tab.Width, foot));
+        }
     }
 }
 

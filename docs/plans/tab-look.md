@@ -33,6 +33,26 @@ Every number below was read off the screenshot pixel by pixel.
   monospace, so the tab drew the missing-glyph box or nothing. The loader now
   adds the icon glyphs to the monospace too.
 
+## The fade
+
+ImGui paints a tab with one flat colour. Each tab fill fades vertically, from a
+lighter head to the sampled colour at its foot, like the bar. The sampled
+colours (`#73608D` chosen, `#2B2D38` idle, and the derived `#84719F` hover) are
+the bottom stop, so a tab still reads as the reference's fill. The head is a
+derived constant, about twelve points of lightness above each (`tab_active_top`
+`#9281A9`, `tab_idle_top` `#46495B`, `tab_hover_top` `#A496B8`), all in
+`theme.hpp`. The 1 px rule and the close x are unchanged.
+
+Dock tabs are drawn by `TabItemBackground` into the dock node's host window,
+which for a dock space is a child window of the desk, and for a floating node
+its own. `shade_dock_tabs` runs after the dock space is submitted, walks every
+visible dock node's tab bar, and calls `shade_tab` per tab rectangle. That
+recolours the vertices that have one of the three fills by their height. The
+shapes are not replaced, so the rounded top corners and the antialiased fringe
+are ImGui's. The fade runs between the solid vertices, which sit half a pixel
+inside the shape, so the head stop lands on the top edge and the sampled fill
+on the bottom edge. It adds no vertices and allocates nothing.
+
 ## Where it differs
 
 - The hover fill `#84719F` is derived: the reference shows no hovered tab. It is
