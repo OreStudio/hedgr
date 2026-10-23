@@ -214,10 +214,10 @@ TEST_CASE("a series browser row's Mini plot icon opens a card for that row",
     open_desk d;
     d.desk.market.apply_catalogue("i", "a",
         {model::domain::market_series_row{.id = "s-0", .label = "FX GBP/USD",
-             .asset_class = "FX", .producer_kind = "SYNTHETIC"},
+             .asset_class = "FX", .provider_code = "ore"},
             model::domain::market_series_row{.id = "s-1",
                 .label = "FX EUR/USD", .asset_class = "FX",
-                .producer_kind = "SYNTHETIC"}});
+                .provider_code = "ore"}});
     static_cast<void>(d.desk.open(window_kind::series_browser,
         model::domain::series_browser_state{}, "b"));
     d.place("b", 900.0f, 500.0f);
