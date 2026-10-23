@@ -503,12 +503,73 @@ TEST_CASE("a failed first read marks the series row as failed and ends the read"
     auto failed = answer_of(event::event_kind::series_points);
     failed.series_id = "s-1";
     failed.observed_at_ns = 2;
-    failed.message = "the observation answer could not be decoded";
+    failed.message = "the tick answer could not be decoded";
     REQUIRE(f.reads.apply(failed));
 
-    CHECK(f.series.failure(row) == "the observation answer could not be decoded");
+    CHECK(f.series.failure(row) == "the tick answer could not be decoded");
     CHECK(f.series.columns(row, domain::market_level::fine).size == 0);
     CHECK(f.reads.pending().empty());
+}
+
+/** @brief A first load answer of @p count ticks @p gap_ns apart from @p first_ns. */
+[[nodiscard]] event::event first_load_answer(int count, std::int64_t gap_ns,
+    std::int64_t first_ns = base) {
+    auto fact = answer_of(event::event_kind::series_points);
+    fact.series_id = "s-1";
+    fact.observed_at_ns = 2;
+    for (int i = 0; i < count; ++i)
+        fact.points.push_back({.at_ns = first_ns + i * gap_ns, .value = 1.0 + i});
+    return fact;
+}
+
+TEST_CASE("a first load of 200 ticks a second apart seeds 200 fine buckets",
+    "[reads][backfill]") {
+    fixture f;
+    f.open();
+    const auto row = f.series.intern(instance_id, account_id, "s-1");
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+
+    REQUIRE(f.reads.apply(first_load_answer(200, second)));
+
+    const auto fine = f.series.columns(row, domain::market_level::fine);
+    CHECK(fine.size == 200);
+    CHECK(fine.at_ns[0] == base);
+    CHECK(fine.at_ns[199] == base + 199 * second);
+    CHECK(f.series.failure(row).empty());
+}
+
+TEST_CASE("a live bucket that landed during the read survives it once",
+    "[reads][backfill]") {
+    fixture f;
+    f.open();
+    const auto row = f.series.intern(instance_id, account_id, "s-1");
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+    const auto fine = domain::market_level::fine;
+
+    /* The subscription is live first, so ticks close while the read is out. */
+    const auto overlap = base + 10 * second;
+    const auto after = base + 400 * second;
+    REQUIRE(f.series.append(row, fine,
+        {.at_ns = overlap, .value = 99.0, .open = 99.0, .high = 99.0,
+            .low = 99.0}, 1) == state::append_result::applied);
+    REQUIRE(f.series.append(row, fine,
+        {.at_ns = after, .value = 98.0, .open = 98.0, .high = 98.0,
+            .low = 98.0}, 1) == state::append_result::applied);
+
+    REQUIRE(f.reads.apply(first_load_answer(300, second)));
+
+    const auto held = f.series.columns(row, fine);
+    CHECK(held.size == 301);
+    std::size_t at_overlap = 0;
+    for (std::size_t i = 0; i < held.size; ++i) {
+        if (held.at_ns[i] == overlap) {
+            ++at_overlap;
+            CHECK(held.value[i] == 99.0);
+        }
+    }
+    CHECK(at_overlap == 1);
+    CHECK(held.at_ns[held.size - 1] == after);
+    CHECK(held.value[held.size - 1] == 98.0);
 }
 
 namespace {
@@ -518,7 +579,6 @@ namespace worker = hedgr::runtime::worker;
 [[nodiscard]] worker::market_job points_job() {
     worker::market_job job;
     job.series_id = "s-1";
-    job.limit = 2000;
     return job;
 }
 
@@ -536,6 +596,11 @@ namespace worker = hedgr::runtime::worker;
     fact.message = std::move(message);
     for (int i = 0; i < points; ++i)
         fact.points.push_back({.at_ns = base + i * second, .value = 1.0});
+    fact.tick_from_ns = 5;
+    fact.tick_to_ns = 9;
+    fact.tick_coordinate = "oresmd://fx/EURUSD";
+    fact.tick_coordinates = 1;
+    fact.ticks_read = static_cast<std::size_t>(points);
     return fact;
 }
 
@@ -546,14 +611,18 @@ namespace worker = hedgr::runtime::worker;
 
 }
 
-TEST_CASE("a first read logs its series, request and count at info",
+TEST_CASE("a first load logs its series, span, count and coordinate at info",
     "[reads][log]") {
-    const auto report = worker::report_market_read(points_job(), read_fact(45));
+    auto fact = read_fact(45);
+    fact.tick_to_ns = 0;
+    const auto report = worker::report_market_read(points_job(), fact);
 
     CHECK_FALSE(report.warn);
     CHECK(names(report, "'s-1'"));
-    CHECK(names(report, "limit=2000 offset=0"));
-    CHECK(names(report, "45 points"));
+    CHECK(names(report, "first load"));
+    CHECK(names(report, "from_ns=5 to_ns=now"));
+    CHECK(names(report, "45 ticks of 'oresmd://fx/EURUSD'"));
+    CHECK(names(report, "span read in full"));
 }
 
 TEST_CASE("a history read logs its series, range and count at info",
@@ -563,24 +632,39 @@ TEST_CASE("a history read logs its series, range and count at info",
     CHECK_FALSE(report.warn);
     CHECK(names(report, "'s-1'"));
     CHECK(names(report, "from_ns=5 to_ns=9"));
-    CHECK(names(report, "7 observations"));
+    CHECK(names(report, "7 ticks"));
+}
+
+TEST_CASE("a read at the ceiling or shortened says so, and several coordinates "
+          "name the one plotted",
+    "[reads][log]") {
+    auto fact = read_fact(7);
+    fact.history_truncated = true;
+    fact.tick_coordinates = 3;
+    const auto report = worker::report_market_read(history_job(), fact);
+
+    CHECK_FALSE(report.warn);
+    CHECK(names(report, "at the ceiling or a retry shortened the span"));
+    CHECK(names(report, "plotted the first of 3 coordinates"));
+    CHECK(names(report, "'oresmd://fx/EURUSD'"));
 }
 
 TEST_CASE("a failed read warns with the series, the request and the reason",
     "[reads][log]") {
     const auto points = worker::report_market_read(points_job(),
-        read_fact(0, "the deployment refused the observations"));
+        read_fact(0, "the span holds more ticks than one reply carries "
+                     "(range_too_large)"));
     CHECK(points.warn);
     CHECK(names(points, "'s-1'"));
-    CHECK(names(points, "limit=2000 offset=0"));
-    CHECK(names(points, "the deployment refused the observations"));
+    CHECK(names(points, "first load"));
+    CHECK(names(points, "range_too_large"));
 
     const auto history = worker::report_market_read(history_job(),
-        read_fact(0, "the observation answer could not be decoded"));
+        read_fact(0, "the tick answer could not be decoded"));
     CHECK(history.warn);
     CHECK(names(history, "'s-1'"));
     CHECK(names(history, "from_ns=5 to_ns=9"));
-    CHECK(names(history, "the observation answer could not be decoded"));
+    CHECK(names(history, "the tick answer could not be decoded"));
 }
 
 TEST_CASE("an empty answer warns that the deployment returned nothing",
@@ -590,6 +674,6 @@ TEST_CASE("an empty answer warns that the deployment returned nothing",
         INFO(report.text);
         CHECK(report.warn);
         CHECK(names(report, "'s-1'"));
-        CHECK(names(report, "no observations"));
+        CHECK(names(report, "no ticks"));
     }
 }

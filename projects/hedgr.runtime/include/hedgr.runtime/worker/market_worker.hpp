@@ -32,7 +32,7 @@
 namespace hedgr::runtime::worker {
 
 /**
- * @brief One market read: the series catalogue, or one series' points.
+ * @brief One market read: the series catalogue, or one series' ticks.
  *
  * The read runs on its own connection, presenting the session's token, so a
  * slow marketdata service costs its own screen its own request rather than
@@ -57,15 +57,13 @@ struct market_job final {
     /** @brief The series to read, for a points read. */
     std::string series_id;
 
-    /** @brief The most points to ask for. */
-    std::uint32_t limit = 600;
-
     /**
-     * @brief Whether this reads a time range of the series by pages.
+     * @brief Whether this reads a time range of the series, not its first load.
      *
-     * A history read asks for the range from @c history_from_ns to
-     * @c history_to_ns in pages of the model's page size, up to its page bound,
-     * and answers with @c series_history. @c limit is not used.
+     * A history read asks for the ticks from @c history_from_ns to
+     * @c history_to_ns in one call, retrying once on a shorter span when the
+     * deployment refuses it as too large, and answers with @c series_history.
+     * The first load, which answers with @c series_points, sizes its own span.
      */
     bool history = false;
 

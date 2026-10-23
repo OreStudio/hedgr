@@ -84,7 +84,7 @@ struct series_info final {
 /**
  * @brief What a row knows of the deeper reads made for its chart spans.
  *
- * The first backfill reads the newest observations only. A longer span asks for
+ * The first load reads a short span of ticks only. A longer span asks for
  * more, one read at a time, and this is the record that stops the same ask
  * being made again.
  */

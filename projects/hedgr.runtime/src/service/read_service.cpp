@@ -480,13 +480,13 @@ void read_service::start_market_backfill(std::string_view instance_id,
     job.principal = std::move(read->principal);
     job.catalogue = false;
     job.series_id = std::string{series_id};
-    job.limit = 2000;
 
     pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Seeding live history for series '" << series_id << "' on '"
-        << instance_id << "' / '" << account_id << "': first read asks for "
-        << "the newest " << job.limit << " observations (offset 0)";
+        << instance_id << "' / '" << account_id << "': first load reads the "
+        << "ticks of a span widened until it holds "
+        << domain::market_first_load_min_points << " points";
     worker::spawn_market_read(pool_, std::move(job), events_);
 }
 
@@ -540,8 +540,8 @@ void read_service::load_history(const model::command::command& cmd) {
         << "Reading history for series '" << cmd.series_id << "': span_ns="
         << cmd.history_span_ns << " level=" << static_cast<int>(plan->level)
         << " held_oldest_at_ns=" << plan->to_ns
-        << " from_ns=" << plan->from_ns << " max_observations="
-        << domain::market_history_page * domain::market_history_max_pages;
+        << " from_ns=" << plan->from_ns << " max_ticks="
+        << domain::market_tick_ceiling;
     worker::spawn_market_read(pool_, std::move(job), events_);
 }
 
@@ -677,7 +677,7 @@ bool read_service::apply(const model::event::event& ev) {
         market_.seed(*held, ev.points, ev.observed_at_ns);
         market_.finish_history(*held, ev.history_from_ns, ev.history_truncated);
         const char* outcome = ev.history_truncated
-            ? "stopped at the read bound, older observations were not read"
+            ? "the reply was at the ceiling or a retry shortened the span, older ticks were not read"
             : ev.points.empty()
                 || ev.points.front().at_ns > ev.history_from_ns
                 ? "the server holds nothing older"

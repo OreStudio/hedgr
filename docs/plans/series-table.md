@@ -1150,49 +1150,84 @@ What remains is the work that needed the key and the stamp this plan built.
 
 ## History depth
 
-The first backfill of a watched series reads its newest 2,000 observations and
-seeds all three levels from them. For a dense series that is 33 minutes of one
-second data, so a one hour or longer period plotted a ring that did not reach
-back as far as the period said. A longer period now reads older observations
-when the level it plots from does not hold the span.
+Since OreStudio commit `c5ca60e3f6` a live tick is written to the tick table
+and not to the observation table, so a read of observations returns a handful of
+points for a series that is ticking. Hedgr reads ticks with
+`marketdata.v1.ops.get_series_ticks` (PR 3681, merge `a2eab09336`), for the first
+load and for deeper history alike. The observation read is gone, with its page
+planner (`observation_page`) and the page constants.
 
-**What the deployment supports.** `list_by_series_id_market_observations_request`
-carries `offset`, `limit`, an `order` and a `filter` with
-`observation_datetime_from` and `observation_datetime_to`, inclusive instants as
-text (`market_observation_protocol.hpp:220-237`, the filter at `:67-75`). The
-service applies the filter, the order (observation time newest first when none
-is named, the row id as the tie-break) and the page in one SQL statement
-(`market_observation_repository.cpp:297-321`, `stated_order.hpp`). A time range
-and an offset are therefore both real, and an offset names the same row on every
-page while the range is fixed. The response carries `total`, which Hedgr does
-not need. No server cap on `limit` was found, and the NATS payload limit of the
-deployment was not checked, so a page stays at the 2,000 the backfill already
-proves.
+**What the call is.** `get_series_ticks_request` carries `series_id`,
+`from_instant` (inclusive), an optional `to_instant` (exclusive, null means the
+service clock) and a list of coordinate URIs (empty means all, at most 1,000)
+(`operations_protocol.hpp`). It has no count and no page. The reply carries the
+coordinates once each, `first_instant`, and per tick a gap in microseconds from
+the previous tick (the first is 0), a coordinate index and a value, in time and
+then coordinate order. Hedgr rebuilds each time as `first_instant` plus the
+running sum of the gaps (`series_read_from_ticks`). A span that holds more than
+25,000 ticks (`series_tick_reader::max_ticks`) is refused as `range_too_large`,
+never cut. A session with no party gets `party_required`, an inverted span
+`range_inverted`, a long coordinate list `filter_too_large`. A span with no end
+whose start is after the service clock is an empty reply.
 
-**The decision.** The chart sends `load_history` with its span when the span
-changes, and once more when a history read that was in flight ends cleanly. The
-runtime, in `read_service::load_history`, asks `plan_history_read` whether the
-span's level (`market_level_for_span`) holds a bucket at or before
-`newest - span`, capped at what the ring keeps. If not, and no earlier read
-already asked back that far (`series_history::floor_ns`), one worker reads the
-range from that instant to the level's oldest held bucket, in pages of 2,000,
-at most 20 pages. The answer is seeded through `series_table::seed`, so a held
-bucket wins by bucket id, and it records the floor.
+**Failures.** Every refusal is a `session_error` with its own `session_errc`
+(`range_too_large`, `party_required`, `range_inverted`, `filter_too_large`, and
+`read_refused` for any other outcome code). The message carries the outcome code
+and the service's sentence, so a chart's failure line and the #95 read log both
+name it.
 
-- One read per series at a time, by `request_id::history`. A change made while
-  one is in flight is dropped, and the chart sends it again when that read ends.
-- Bounded by the ring capacities (the span is clamped to them), by 20 pages of
-  2,000 observations per read, and by the floor, which allows at most one read
-  per distinct depth.
-- A read that returns less than asked ends the asking. The floor is set to the
-  instant that was asked for, so "the server holds nothing older" is not asked
-  again. A read that hit the page bound is also not repeated, and the chart says
-  the older observations were not read.
-- A failed read leaves the floor alone, shows the row's failure, and is retried
-  by the next explicit period change.
+**Which coordinate is plotted.** A reply may carry several coordinates. The
+points are those of the first coordinate the reply names, which is the
+coordinate of its earliest tick, and a reply with several logs at info which one
+is plotted. The deployment has no typed `mid` or `price` coordinate to prefer, so
+the rule is positional until it has one. The rule is the one place to change when
+a series carries a bid and an ask.
 
-**Known limits.** A series denser than 40,000 observations in the span shows its
-newest 40,000 and says so. The oldest held bucket can be partial, because the
-backfill cut it mid bucket and the held bucket wins the merge, so its open, high
-and low describe only part of it. Both are the price of reading by time over a
-protocol with no server-side aggregation.
+**The first load.** `start_market_backfill` has no chart span to read, because
+the series is watched before any window asks. It reads what the fine level keeps,
+two hours up to now, and widens to two days and then thirty days (the spans the
+medium and coarse levels keep, `market_first_load_spans`) while the reply holds
+fewer than 200 points (`market_first_load_min_points`), so a series that ticks
+slowly still gives a chart something to draw. A `range_too_large` refusal is
+retried on the newer half of the span, up to three times for the first load, and
+what arrives is kept. A read that was shortened is not widened, since a wider span
+cannot hold fewer ticks. A failure after a read that arrived keeps that read.
+The term structure ladder (`market_series_tail`) starts at a minute and wants 20
+points, so its 30 second refresh stays small.
+
+**Deeper history.** The chart sends `load_history` with its span as before and
+`plan_history_read`, the floor and the one-read-at-a-time rule are unchanged. The
+worker reads the planned span in one call and retries once on its newer half when
+the service refuses it. `truncated` now means that the reply was at the ceiling
+or a retry shortened the span, and the oldest ticks of the span are the ones
+missing. The floor still records the instant that was asked for, so a read that
+was shortened is not repeated.
+
+**Merge with live.** The tick subscription of a session starts when it signs in,
+and a series is watched and backfilled only after the catalogue has arrived, so
+the live stream runs before the first read. Buckets that close during the read
+are appended to the rings, and the answer is seeded through `series_table::seed`,
+which merges by bucket id with the held bucket winning. A tick that landed during
+the read and the same second in the reply are one bucket, once, and the held
+value is the one kept. Ticks of the same series that fall in one second collapse
+to one bucket, so the reply and the stream agree on bucket boundaries because both
+use the same level interval. `read_service_tests.cpp` holds the case.
+
+### Open points
+
+- **The provider clash stays.** `market_tick` carries neither a provider nor a
+  series id, only the quote URI, so two providers of one URI in one party cannot
+  be told apart on the live stream, and the history call answers by series id
+  while the live ticks are routed by URI. To ask OreStudio: add the series id to
+  the live subject or to `market_tick`. Until then a chart of such a series would
+  merge the history of one provider with the live ticks of both.
+- **No synthetic marker.** A tick has no flag for one the service made up, and
+  none was added to the call. Hedgr cannot tell a produced tick from an observed
+  one.
+- **Not tested against a server.** The call was checked against the headers in
+  the OreStudio tree and by tests over a fake fetch. It has not been called over
+  authenticated NATS.
+- **The first read of a dense series.** A series with more than 25,000 ticks in
+  its newest quarter hour (about 28 a second) is still refused after three
+  retries, and its first load fails with `range_too_large` in the row's failure
+  line. The deeper history read, which retries once, fails sooner.

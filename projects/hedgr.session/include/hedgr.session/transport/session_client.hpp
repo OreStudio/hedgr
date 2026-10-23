@@ -25,6 +25,7 @@
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -207,17 +208,36 @@ struct market_point final {
     std::string term;
 };
 
-/** @brief One series' observations, oldest first. */
+/** @brief One series' ticks as one read returned them, oldest first. */
 struct market_series_read final {
-    /** @brief The points, in time order. */
+    /** @brief The points of the coordinate plotted, in time order. */
     std::vector<market_point> points;
 
     /**
-     * @brief Whether a history read stopped at its bound with more to read.
+     * @brief Whether the read may be missing older ticks.
      *
-     * Always false for a newest-N read, which has no notion of "the rest".
+     * True when a retry shortened the span or the reply held as many ticks as
+     * the deployment's ceiling allows.
      */
     bool truncated = false;
+
+    /** @brief Whether a retry shortened the span after a refusal as too large. */
+    bool shortened = false;
+
+    /** @brief The coordinate the points are of, or empty when there are none. */
+    std::string coordinate;
+
+    /** @brief How many coordinates the reply carried. */
+    std::size_t coordinates = 0;
+
+    /** @brief How many ticks the reply carried, of every coordinate. */
+    std::size_t ticks = 0;
+
+    /** @brief The start of the span the reply answers, epoch nanoseconds. */
+    std::int64_t from_ns = 0;
+
+    /** @brief The end of that span, or zero when it ran to the service clock. */
+    std::int64_t to_ns = 0;
 };
 
 /**
@@ -452,38 +472,66 @@ public:
     market_series(std::uint32_t limit = 500) const;
 
     /**
-     * @brief Reads one series' most recent observations, oldest first.
+     * @brief Reads the ticks of one span of one series, in one call.
      *
-     * The read asks for the newest @p limit points and reverses them, because a
-     * plot runs left to right in time and the deployment orders newest first.
+     * Calls the history call with the span half open: a tick at @p from_ns is
+     * in and one at @p to_ns is out. A zero @p to_ns states no end, which the
+     * deployment reads as its own clock. The reply may carry several
+     * coordinates; the points are those of the first, and the others are
+     * logged at info. A refusal is a failure whose message names the outcome
+     * code, with a distinct @c session_errc for a span that is too large, has
+     * no party, is inverted or names too many coordinates.
      *
      * @pre the session is authenticated.
      * @param series_id the series' key.
-     * @param limit the most points to ask for.
-     * @return the points, or why they could not be read.
+     * @return the points oldest first, or why they could not be read.
      */
     [[nodiscard]] result<market_series_read>
-    market_series_points(std::string_view series_id,
-        std::uint32_t limit = 600) const;
+    market_series_ticks(std::string_view series_id, std::int64_t from_ns,
+        std::int64_t to_ns) const;
 
     /**
-     * @brief One series' observations from @p from_ns up to @p to_ns, the
-     * newest first up to a bound.
+     * @brief Reads the first load of a series: its newest ticks for a chart.
      *
-     * Pages the deployment's by-series read with a time range, in pages of
-     * @p page observations and at most @p max_pages of them. When the bound is
-     * hit with the last page still full the read is marked truncated and the
-     * oldest observations of the range are the ones missing.
+     * Widens the span from two hours until the reply holds enough points, see
+     * @c read_first_load. The series' live ticks arrive on the subscription, so
+     * the caller merges the two by time.
+     *
+     * @pre the session is authenticated.
+     * @param series_id the series' key.
+     * @return the points oldest first, or why they could not be read.
+     */
+    [[nodiscard]] result<market_series_read>
+    market_series_points(std::string_view series_id) const;
+
+    /**
+     * @brief Reads at least @p count of a series' newest ticks, if it has them.
+     *
+     * Starts at a minute and widens, see @c read_newest_ticks, so a read that
+     * repeats on a cadence stays small. The read may hold more than @p count.
+     *
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<market_series_read>
+    market_series_tail(std::string_view series_id, std::size_t count) const;
+
+    /**
+     * @brief One series' ticks from @p from_ns up to @p to_ns.
+     *
+     * Reads the span, and once on a span halved from the old end when the
+     * deployment refuses it as too large. The read is marked truncated when the
+     * span was shortened or the reply was at the ceiling, and then the oldest
+     * ticks of the span are the ones missing.
      *
      * @pre the session is authenticated.
      * @param series_id the series' key.
      * @param from_ns the earliest instant wanted, epoch nanoseconds.
-     * @param to_ns the latest instant wanted, epoch nanoseconds.
+     * @param to_ns the end of the span, exclusive, epoch nanoseconds.
      * @return the points oldest first, or why they could not be read.
      */
     [[nodiscard]] result<market_series_read>
     market_series_history(std::string_view series_id, std::int64_t from_ns,
-        std::int64_t to_ns, std::uint32_t page, std::uint32_t max_pages) const;
+        std::int64_t to_ns) const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

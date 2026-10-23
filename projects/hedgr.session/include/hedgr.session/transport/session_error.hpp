@@ -58,6 +58,16 @@ enum class session_errc : std::uint8_t {
     closed = 7,
     /** @brief The instance ended the login session, so the token is dead. */
     session_expired = 8,
+    /** @brief The tick span holds more ticks than one reply carries. */
+    range_too_large = 9,
+    /** @brief The session has no party, so it can read no ticks. */
+    party_required = 10,
+    /** @brief The tick span ends before it starts. */
+    range_inverted = 11,
+    /** @brief The tick read names more coordinates than the service allows. */
+    filter_too_large = 12,
+    /** @brief The deployment refused the tick read for another reason. */
+    read_refused = 13,
 };
 
 /**

@@ -36,7 +36,6 @@
 #include "ores.iam.api/messaging/password_policy_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
-#include "ores.marketdata.api/messaging/market_observation_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
@@ -48,7 +47,8 @@
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "hedgr.session/market/series_label.hpp"
 #include "hedgr.session/market/series_summary.hpp"
-#include "hedgr.session/transport/observation_page.hpp"
+#include "hedgr.model/domain/market.hpp"
+#include "hedgr.session/transport/tick_span.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
 #include <boost/lexical_cast.hpp>
@@ -1303,15 +1303,15 @@ session_client::market_series(std::uint32_t limit) const {
 }
 
 result<market_series_read>
-session_client::market_series_points(std::string_view series_id,
-    std::uint32_t limit) const {
+session_client::market_series_ticks(std::string_view series_id,
+    std::int64_t from_ns, std::int64_t to_ns) const {
     if (!is_connected()) {
         return fail(session_errc::closed,
-            "an observation read needs an open connection to the instance");
+            "a tick read needs an open connection to the instance");
     }
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,
-            "an observation read needs a signed-in session");
+            "a tick read needs a signed-in session");
     }
 
     boost::uuids::uuid id{};
@@ -1322,124 +1322,99 @@ session_client::market_series_points(std::string_view series_id,
             std::format("'{}' is not a series key", series_id));
     }
 
-    using ores::marketdata::messaging::list_by_series_id_market_observations_request;
-    using ores::marketdata::messaging::list_by_series_id_market_observations_response;
+    using ores::marketdata::messaging::get_series_ticks_request;
+    using ores::marketdata::messaging::get_series_ticks_response;
+
+    const auto instant = [](std::int64_t ns) {
+        return std::chrono::system_clock::time_point{
+            std::chrono::duration_cast<std::chrono::system_clock::duration>(
+                std::chrono::nanoseconds(ns))};
+    };
+    get_series_ticks_request request;
+    request.series_id = id;
+    request.from_instant = instant(from_ns);
+    if (to_ns != 0)
+        request.to_instant = instant(to_ns);
 
     try {
-        const auto page = ores::nats::service::authenticated_request_and_decode<
-            list_by_series_id_market_observations_response>(client(),
-            list_by_series_id_market_observations_request::nats_subject,
-            newest_observations_request(id, limit), options_.request_timeout);
-        if (!page) {
+        const auto reply = ores::nats::service::authenticated_request_and_decode<
+            get_series_ticks_response>(client(),
+            get_series_ticks_request::nats_subject, request,
+            options_.request_timeout);
+        if (!reply) {
             BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "The observation answer for series '" << series_id
-                << "' could not be decoded (limit " << limit << ", offset 0)";
+                << "The tick answer for series '" << series_id
+                << "' could not be decoded (from_ns " << from_ns << ", to_ns "
+                << to_ns << ")";
             return fail(session_errc::protocol_error,
-                "the observation answer could not be decoded");
+                "the tick answer could not be decoded");
         }
-        if (page->result.outcome != ores::utility::domain::outcome::ok) {
+        auto read = series_read_from_ticks(*reply);
+        if (!read) {
             BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "The deployment refused the observations of series '"
-                << series_id << "' (limit " << limit << ", offset 0): "
-                << page->result.message;
-            return fail(session_errc::protocol_error,
-                page->result.message.empty()
-                    ? std::string("the deployment refused the observations")
-                    : page->result.message);
+                << "The tick read of series '" << series_id << "' (from_ns "
+                << from_ns << ", to_ns " << to_ns << ") failed: "
+                << read.error().message;
+            return read;
         }
-
-        auto read = series_read_from(page->market_observations);
-
+        if (read->coordinates > 1) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Series '" << series_id << "' has " << read->coordinates
+                << " coordinates; plotting the first, '" << read->coordinate
+                << "'";
+        }
         BOOST_LOG_SEV(lg(), ores::logging::debug)
-            << "Read " << read.points.size() << " points for series '"
-            << series_id << "'";
+            << "Read " << read->ticks << " ticks, " << read->points.size()
+            << " of '" << read->coordinate << "', for series '" << series_id
+            << "'";
         return read;
     } catch (const std::exception& e) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "The observation read for series '" << series_id
+            << "The tick read for series '" << series_id
             << "' failed: " << e.what();
         return transport_failure(e);
     } catch (...) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "The observation read for series '" << series_id
+            << "The tick read for series '" << series_id
             << "' failed for an unnamed reason";
         return transport_failure();
     }
 }
 
+namespace {
+
+[[nodiscard]] std::int64_t clock_now_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+}
+
+result<market_series_read>
+session_client::market_series_points(std::string_view series_id) const {
+    const tick_fetch fetch = [this, series_id](const tick_span& span) {
+        return market_series_ticks(series_id, span.from_ns, span.to_ns);
+    };
+    return read_first_load(fetch, clock_now_ns());
+}
+
+result<market_series_read>
+session_client::market_series_tail(std::string_view series_id,
+    std::size_t count) const {
+    const tick_fetch fetch = [this, series_id](const tick_span& span) {
+        return market_series_ticks(series_id, span.from_ns, span.to_ns);
+    };
+    return read_newest_ticks(fetch, clock_now_ns(),
+        hedgr::model::domain::market_tail_spans, count);
+}
+
 result<market_series_read>
 session_client::market_series_history(std::string_view series_id,
-    std::int64_t from_ns, std::int64_t to_ns, std::uint32_t page,
-    std::uint32_t max_pages) const {
-    if (!is_connected()) {
-        return fail(session_errc::closed,
-            "an observation read needs an open connection to the instance");
-    }
-    if (!is_authenticated()) {
-        return fail(session_errc::not_authenticated,
-            "an observation read needs a signed-in session");
-    }
-
-    boost::uuids::uuid id{};
-    try {
-        id = boost::lexical_cast<boost::uuids::uuid>(series_id);
-    } catch (const std::exception&) {
-        return fail(session_errc::protocol_error,
-            std::format("'{}' is not a series key", series_id));
-    }
-
-    using ores::marketdata::messaging::list_by_series_id_market_observations_request;
-    using ores::marketdata::messaging::list_by_series_id_market_observations_response;
-
-    const observation_fetch fetch = [this, series_id](
-        const list_by_series_id_market_observations_request& request)
-        -> result<std::vector<ores::marketdata::domain::market_observation>> {
-        const auto answer = ores::nats::service::authenticated_request_and_decode<
-            list_by_series_id_market_observations_response>(client(),
-            list_by_series_id_market_observations_request::nats_subject,
-            request, options_.request_timeout);
-        if (!answer) {
-            BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "The observation answer for series '" << series_id
-                << "' could not be decoded (offset " << request.offset
-                << ", limit " << request.limit << ")";
-            return fail(session_errc::protocol_error,
-                "the observation answer could not be decoded");
-        }
-        if (answer->result.outcome != ores::utility::domain::outcome::ok) {
-            BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "The deployment refused the observations of series '"
-                << series_id << "' (offset " << request.offset << ", limit "
-                << request.limit << "): " << answer->result.message;
-            return fail(session_errc::protocol_error,
-                answer->result.message.empty()
-                    ? std::string("the deployment refused the observations")
-                    : answer->result.message);
-        }
-        return answer->market_observations;
+    std::int64_t from_ns, std::int64_t to_ns) const {
+    const tick_fetch fetch = [this, series_id](const tick_span& span) {
+        return market_series_ticks(series_id, span.from_ns, span.to_ns);
     };
-
-    try {
-        auto read = read_history_pages(fetch, id, from_ns, to_ns, page,
-            max_pages);
-        if (read) {
-            BOOST_LOG_SEV(lg(), ores::logging::debug)
-                << "Read " << read->points.size()
-                << " history points for series '" << series_id << "'"
-                << (read->truncated ? " (truncated)" : "");
-        }
-        return read;
-    } catch (const std::exception& e) {
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "The history read for series '" << series_id
-            << "' failed: " << e.what();
-        return transport_failure(e);
-    } catch (...) {
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "The history read for series '" << series_id
-            << "' failed for an unnamed reason";
-        return transport_failure();
-    }
+    return read_tick_span(fetch, tick_span{from_ns, to_ns}, to_ns, 1);
 }
 
 std::string session_client::subject(std::string_view suffix) const {

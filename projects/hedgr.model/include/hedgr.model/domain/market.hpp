@@ -21,6 +21,7 @@
 #define HEDGR_MODEL_DOMAIN_MARKET_HPP
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -155,17 +156,43 @@ market_level_for_span(std::int64_t span_ns) noexcept {
     return market_level::coarse;
 }
 
-/** @brief Observations one history page asks for. */
-inline constexpr std::size_t market_history_page = 2000;
+/**
+ * @brief The most ticks one reply of the history call carries.
+ *
+ * The service refuses a span that holds more, so a read sized to a span
+ * retries once on a shorter one rather than paging.
+ */
+inline constexpr std::size_t market_tick_ceiling = 25'000;
 
 /**
- * @brief The most pages one history read fetches.
+ * @brief How many ticks a first load tries to bring back.
  *
- * Bounds a read of a dense series: 20 pages is 40,000 observations, a few
- * megabytes in flight, and each page stays the size the first backfill already
- * proves the deployment answers.
+ * A series that ticks slower than the first span covers would give a chart a
+ * few points, so the first load widens its span until it holds this many or
+ * runs out of spans.
  */
-inline constexpr std::size_t market_history_max_pages = 20;
+inline constexpr std::size_t market_first_load_min_points = 200;
+
+/**
+ * @brief The spans a first load tries, narrowest first.
+ *
+ * Each is what one level keeps: two hours at the fine level, two days at the
+ * medium and thirty days at the coarse one.
+ */
+inline constexpr std::array<std::int64_t, 3> market_first_load_spans{
+    static_cast<std::int64_t>(market_fine_capacity) * market_fine_ns,
+    static_cast<std::int64_t>(market_medium_capacity) * market_medium_ns,
+    static_cast<std::int64_t>(market_coarse_capacity) * market_coarse_ns};
+
+/**
+ * @brief The spans a read of a series' few newest ticks tries, narrowest first.
+ *
+ * A term structure keeps twenty points per pillar and refreshes on a cadence,
+ * so it starts at a minute rather than at what a chart needs.
+ */
+inline constexpr std::array<std::int64_t, 4> market_tail_spans{
+    market_medium_ns, market_coarse_ns, 24 * market_coarse_ns,
+    static_cast<std::int64_t>(market_coarse_capacity) * market_coarse_ns};
 
 /** @brief What a deeper read of a series would ask the deployment for. */
 struct history_plan final {
