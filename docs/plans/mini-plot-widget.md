@@ -105,12 +105,26 @@ docked, and a docked one keeps ImGui's tab. A floating card also opens at
 the rows leave little room. The tests read the
 draw list vertices (line and fill by colour and the white pixel uv), not text.
 
-### 4. Make one, open one
+### 4. Make one, open one (done)
 
 A "Mini plot" action on a full chart's header and in the series browser opens a
 card for that series. Clicking a card focuses or opens the full chart for it.
 Check: a click test for each action, and that one series gives one card unless
 asked twice (D4).
+
+What differed. All three opens go through one `request_series_window`, which
+the browser's chart open now uses too. A chart's header gets one flat icon,
+Apps (`icon::dashboard`), left of Dock, and a docked chart keeps it though it
+has no Dock. A browser row gets a narrow fourth column holding the same icon,
+flat and dim, over a row selectable that now allows overlap. A card's tile is
+one invisible button, so a press on it never moves the window. A click is a
+release on the tile with no drag past ImGui's threshold, which leaves the
+floating title and the docked tab as the only handles for moving it. One card
+per series and focus on a second ask are the runtime's, by the window id from
+step 2. The UI tests check the command each click pushes, and that two clicks
+push the same one. The runtime half is `market_feed_tests` (watchers stay at
+one on a second open), which could not build here for the `producer_kind`
+break in the OreStudio tree.
 
 ### 5. A grid from docking
 

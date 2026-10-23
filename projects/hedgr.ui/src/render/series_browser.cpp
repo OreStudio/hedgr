@@ -68,23 +68,38 @@ float draw_series_row(std::string_view label, float extra_indent,
         label.data() + label.size()).x;
 }
 
-void open_chart(const render_input& input,
-    const hedgr::model::state::session_handle session,
-    const domain::market_series_row& row) {
-    command request;
-    request.kind = command_kind::open_window;
-    request.instance_id = std::string{input.sessions.instance_id(session)};
-    request.account_id = std::string{input.sessions.account_id(session)};
-    request.new_window_kind = domain::window_kind::chart;
-    request.series_id = row.id;
-    request.series_label = row.label;
-    input.commands.push(std::move(request));
-}
-
 }
 
 namespace hedgr::ui::render {
 
+namespace {
+
+/** @brief The row's flat icon that opens its mini plot, true when pressed. */
+bool mini_plot_button() {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text,
+        ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    const bool pressed = ImGui::SmallButton(icon::dashboard);
+    ImGui::PopStyleColor(2);
+    ImGui::SetItemTooltip("%s", "Open a mini plot for this series");
+    return pressed;
+}
+
+}
+
+void request_series_window(const render_input& input,
+    const hedgr::model::state::session_handle session,
+    const domain::window_kind kind, std::string_view series_id,
+    std::string_view label) {
+    command request;
+    request.kind = command_kind::open_window;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.new_window_kind = kind;
+    request.series_id = std::string{series_id};
+    request.series_label = std::string{label};
+    input.commands.push(std::move(request));
+}
 
 void open_curve(const render_input& input,
     hedgr::model::state::session_handle session,
@@ -451,7 +466,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 if (ImGui::Selectable("##combo-row", chosen)) {
                     state.market_selected_series_id = row->id;
                     state.market_selected_series_label = row->label;
-                    open_chart(input, *session, *row);
+                    request_series_window(input, *session, domain::window_kind::chart,
+                        row->id, row->label);
                 }
                 request_flags(input, *session, row->label);
                 const auto pair = hedgr::ui::widget::currencies_of(row->label);
@@ -476,12 +492,15 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             - widget::status_foot_height(status)
             - ImGui::GetFrameHeightWithSpacing(),
         120.0f);
-    if (ImGui::BeginTable("##series", 3, flags, ImVec2(0.0f, height))) {
+    if (ImGui::BeginTable("##series", 4, flags, ImVec2(0.0f, height))) {
         ImGui::TableSetupColumn("Series", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthFixed,
             80.0f);
         ImGui::TableSetupColumn("Provider", ImGuiTableColumnFlags_WidthFixed,
             110.0f);
+        ImGui::TableSetupColumn("##mini", ImGuiTableColumnFlags_WidthFixed
+                | ImGuiTableColumnFlags_NoHeaderLabel,
+            ImGui::GetFrameHeight());
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
 
@@ -497,7 +516,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::PushID(row->id.c_str());
                 ImGui::Selectable("##row", false,
                     ImGuiSelectableFlags_SpanAllColumns
-                        | ImGuiSelectableFlags_AllowDoubleClick);
+                        | ImGuiSelectableFlags_AllowDoubleClick
+                        | ImGuiSelectableFlags_AllowOverlap);
                 const auto pair = hedgr::ui::widget::currencies_of(row->label);
                 draw_series_row(row->label, 0.0f,
                     image_texture(input, *session, pair.base),
@@ -506,7 +526,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     state.market_selected_series_id = row->id;
                     state.market_selected_series_label = row->label;
-                    open_chart(input, *session, *row);
+                    request_series_window(input, *session, domain::window_kind::chart,
+                        row->id, row->label);
                 }
                 ImGui::SetItemTooltip("%s", row->uri.c_str());
 
@@ -515,6 +536,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TextDisabled("%s", row->asset_class.c_str());
                 ImGui::TableNextColumn();
                 ImGui::TextDisabled("%s", row->provider_code.c_str());
+                ImGui::TableNextColumn();
+                ImGui::PushID(row->id.c_str());
+                if (mini_plot_button()) {
+                    request_series_window(input, *session,
+                        domain::window_kind::mini_plot, row->id, row->label);
+                }
+                ImGui::PopID();
             }
         }
         ImGui::EndTable();

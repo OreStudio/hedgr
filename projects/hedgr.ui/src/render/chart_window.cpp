@@ -41,6 +41,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <ctime>
 #include <format>
 #include <optional>
@@ -271,21 +272,29 @@ void draw_full_header(const chart_summary& s) {
     }
 }
 
+/** @brief What a header icon asks for. */
+enum class header_ask : std::uint8_t { none, dock, mini_plot };
+
 /** @brief An icon at the right end of a chart's header, and what it asks. */
 struct header_icon final {
     const char* id;
     const char* glyph;
     const char* tooltip;
-    tile_request request;
+    header_ask request;
 };
 
-constexpr std::array floating_icons{
-    header_icon{"dock", icon::panel, "Dock into the desk", tile_request::dock},
+constexpr header_icon mini_plot_icon{"mini", icon::dashboard,
+    "Open a mini plot for this series", header_ask::mini_plot};
+
+constexpr std::array docked_icons{mini_plot_icon};
+
+constexpr std::array floating_icons{mini_plot_icon,
+    header_icon{"dock", icon::panel, "Dock into the desk", header_ask::dock},
 };
 
 /** @brief What the header's controls asked, and the width they keep. */
 struct header_icons_drawn final {
-    tile_request asked = tile_request::none;
+    header_ask asked = header_ask::none;
     bool period_changed = false;
     float width = 0.0f;
 };
@@ -517,10 +526,15 @@ void render_chart(window_handle handle, const render_input& input,
         .shown = chart_span_shown,
         .selected = &state.market_view.chart_span};
     const auto icons = begin_header_row(
-        docked ? std::span<const header_icon>{}
+        docked ? std::span<const header_icon>{docked_icons}
                : std::span<const header_icon>{floating_icons},
         period, ImGui::GetFrameHeight());
-    state.tile = icons.asked;
+    state.tile = icons.asked == header_ask::dock ? tile_request::dock
+                                                 : tile_request::none;
+    if (icons.asked == header_ask::mini_plot) {
+        request_series_window(input, *session, domain::window_kind::mini_plot,
+            chart->series_id, chart->label);
+    }
     draw_full_header(summary);
     ImGui::SameLine();
     draw_series_flags(input, *session, chart->label, icons.width);

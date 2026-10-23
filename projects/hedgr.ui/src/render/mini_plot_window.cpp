@@ -311,7 +311,14 @@ void render_mini_plot(window_handle handle, const render_input& input,
     ImGui::PopClipRect();
     window->DC.CursorMaxPos = extent;
     ImGui::SetCursorScreenPos(origin);
-    ImGui::Dummy(size);
+    const bool released = ImGui::InvisibleButton("##card", size);
+    if (ImGui::IsItemHovered())
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    const ImVec2 dragged = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+    if (released && session && dragged.x == 0.0f && dragged.y == 0.0f) {
+        request_series_window(input, *session, domain::window_kind::chart,
+            card->series_id, card->label);
+    }
 }
 
 }
