@@ -369,6 +369,17 @@ inline constexpr int plot_x_label_count = 4;
 /** @brief The corner radius of a mini plot card. */
 inline constexpr float mini_plot_rounding = 8.0f;
 
+/**
+ * @brief The fixed size of a card, and the gap the snap grid leaves between
+ * cells. A cell is the card plus the gap, so cards that snap never touch.
+ */
+inline constexpr float mini_plot_width = 240.0f;
+inline constexpr float mini_plot_height = 180.0f;
+inline constexpr float mini_plot_grid_gap = 4.0f;
+
+/** @brief The side of the close control in a card's top-right corner. */
+inline constexpr float mini_plot_close_side = 20.0f;
+
 /** @brief A card's padding as a share of its shorter side, and the bounds. */
 inline constexpr float mini_plot_padding_share = 0.07f;
 inline constexpr float mini_plot_padding_min = 6.0f;

@@ -1,7 +1,8 @@
 # Mini plot widget
 
-A mini plot is a small card for one series, a window of its own that docks beside
-other cards into a grid. It is not a chart in a small size.
+A mini plot is a small card for one series, a window of its own that floats at a
+fixed size and snaps to a grid beside other cards. It is not a chart in a small
+size.
 
 The reference is `docs/samples/9864e339b564bd6ab45c2f4c10b1633585b4a76e-686x370.png`,
 a grid of cards. Each card shows the pair with its currency flags, the last
@@ -20,8 +21,8 @@ in a few hundred pixels, so a desk can hold twenty of them beside one big chart.
 
 - A chart is always a full chart: header, plot, foot. It floats or docks as one,
   with ImGui's own tab bar and drag to undock.
-- Docking, the dock space, X11 tear-out (#74, #79) and Undock all (#81) are
-  generic and serve cards as they serve charts.
+- Docking, the dock space, X11 tear-out (#74, #79) and Undock all (#81) serve
+  charts. Cards do not dock (step 5).
 - Per-chart period, style and EMA (#75) stay.
 - Flags come from the server only (#82).
 
@@ -98,10 +99,9 @@ them. A card too short for the stacked foot puts the period and the pill on
 one row. A card's window has
 no padding, border or background of its own (`workspace.cpp` sets that for
 `mini_plot` only), so the tile is the whole content region, floating or docked.
-A floating card keeps its title bar, which is how it is moved, closed and
-docked, and a docked one keeps ImGui's tab. A floating card also opens at
-240x180 and may shrink to 64x64, where charts open at 1000x620 and stop at
-360x220. The line always ends above the foot row, rising behind the price when
+A floating card keeps its title bar, which is how it is moved and closed,
+and opens at 240x180 (step 5 fixes that size), where charts open at 1000x620
+and stop at 360x220. The line always ends above the foot row, rising behind the price when
 the rows leave little room. The tests read the
 draw list vertices (line and fill by colour and the white pixel uv), not text.
 
@@ -126,36 +126,36 @@ push the same one. The runtime half is `market_feed_tests` (watchers stay at
 one on a second open), which could not build here for the `producer_kind`
 break in the OreStudio tree.
 
-### 5. A grid from docking (done)
+### 5. A grid from snapping (done, replaces docking)
 
-Cards dock by dragging like any window. A node of cards hides its tab bar and
-gets a small default size so a first dock lands as a tile. Check: five cards
-docked into a split tree draw without overlap and keep their positions after a
-restart through `imgui.ini`. A "Tidy" action that lays cards out in a grid is
-not in this plan (D5).
+Cards never dock. They float at one fixed size (240x180) and snap to a grid.
+Check: a card dragged onto a dock target stays floating, its size survives a
+resize attempt, a drop lands on the grid, and a restored ini that docked a card
+brings it back floating. Frame cost on a steady frame stays at zero allocations.
 
-What differed. A card's window class sets the node flags HiddenTabBar,
-NoDockingOverMe, NoDockingOverOther and NoDockingOverEmpty. Set by the window
-class, the hidden bar cannot be shown again from its corner triangle. The three
-no-docking flags mean a drop on a card, or a card dropped on anything, splits
-instead of tabbing, and a card dropped on the empty desk centre is refused, so
-it must go to an edge or beside a tile. The class is unclassed, so cards still
-dock beside charts and a chart's node keeps its tabs. The tile size is ImGui's:
-a split takes the size of the dragged window, so a card (240x180) lands as a
-card-sized tile, not half. With no tab, a docked card is undocked by dragging
-its corner triangle and closed from a right-click menu (Close); a floating one
-keeps its title bar. There is no Dock icon on a card, so `dock_target` is
-unchanged. The tests dock five cards by the dock builder and check disjoint
-rects and a restart through the ini text, and drag a card onto another's middle
-and onto the empty centre. The edge drop's tile size is not tested, only read
-from ImGui's source.
+What differed. The first version of this step docked cards and hid their tab
+bar, which failed in a live run: dock nodes share one rectangle, so every split
+shrinks the tiles it touches and docking cannot hold a fixed size. A card is
+now `NoDocking` and `NoResize`, which also undocks a card whose saved settings
+say docked, and its size is set every frame from `theme::mini_plot_width` and
+`mini_plot_height`. The grid anchors at the main viewport's work position with a
+pitch of the card plus `mini_plot_grid_gap` (4px). When a drag of a card ends it
+moves to the cell nearest where it was dropped, or the nearest free cell when
+another card holds that one. A card with no saved position opens in the first
+free cell, scanning left to right then top to bottom. `cell_for`, `snap_cell`,
+`snap_position` and `first_free_cell` are pure and take the occupied cells, so
+the rule is tested without ImGui. The workspace reads the other cards' cells
+from their windows, or their saved settings before they are first drawn, only
+when a card opens or a drag ends. Because the tab and the title bar are gone, a
+card closes from a small X in its top-right corner, drawn while the pointer is
+over the card, or from the right-click menu. The X is a button, so a press on it
+neither drags the card nor counts as a click that opens the chart.
 
 ### Follow-up: header strip and tile (done)
 
 Three changes from a live run. The card has no title bar
-(`ImGuiWindowFlags_NoTitleBar`): its body is the handle, so a drag on it moves a
-floating card and docks it, and the right-click Close is the way to close a
-card, floating or docked. The tile is no longer an invisible button, because
+(`ImGuiWindowFlags_NoTitleBar`): its body is the handle, so a drag on it moves the
+card (it no longer docks it, step 5), and the right-click Close closes it. The tile is no longer an invisible button, because
 that button took the press the window needed to move; a click is a release over
 the window that never passed ImGui's drag threshold. The card draws its line and
 fill in the chart's colour (`chart_line_colour`) and only the change pill keeps
@@ -179,6 +179,10 @@ its line is what the series already holds for that span.
   volume, no venue. Recommended.
 - **D4. One card per series.** Making a second for the same series focuses the
   first. Recommended. The alternative lets you make several.
-- **D5. No auto-tidy.** Recommended for now. Docking is the grid.
+- **D5. No auto-tidy.** Recommended for now. The snap grid keeps cards tidy as
+  they are dropped, and there is no action that rearranges them.
+- **D7. Cards snap, they do not dock.** Dock nodes share space, so docking
+  cannot hold a fixed size. A card floats at 240x180 and snaps to a grid. The
+  alternative was a custom grid container window, which reimplements docking.
 - **D6. Click opens the full chart.** Recommended. Double click and a menu are
   the alternatives.

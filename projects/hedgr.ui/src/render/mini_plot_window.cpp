@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/health.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
@@ -35,6 +36,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <variant>
 
@@ -125,6 +127,72 @@ void dim_line(ImVec2 at, const char* text) {
     ImGui::PopStyleColor();
 }
 
+}
+
+namespace {
+
+[[nodiscard]] bool is_taken(std::span<const card_cell> occupied,
+    card_cell cell) noexcept {
+    return std::ranges::find(occupied, cell) != occupied.end();
+}
+
+}
+
+card_cell cell_for(const card_grid& grid, ImVec2 position) noexcept {
+    const auto nearest = [](float offset, float pitch, int count) {
+        const int index = static_cast<int>(std::lround(offset / pitch));
+        return std::clamp(index, 0, std::max(count, 1) - 1);
+    };
+    return card_cell{
+        nearest(position.x - grid.origin.x, grid.pitch.x, grid.columns),
+        nearest(position.y - grid.origin.y, grid.pitch.y, grid.rows)};
+}
+
+ImVec2 cell_position(const card_grid& grid, card_cell cell) noexcept {
+    return ImVec2(grid.origin.x + static_cast<float>(cell.column) * grid.pitch.x,
+        grid.origin.y + static_cast<float>(cell.row) * grid.pitch.y);
+}
+
+card_cell snap_cell(const card_grid& grid, ImVec2 position,
+    std::span<const card_cell> occupied) noexcept {
+    const card_cell own = cell_for(grid, position);
+    if (!is_taken(occupied, own))
+        return own;
+    card_cell best = own;
+    float best_distance = 0.0f;
+    bool found = false;
+    for (int row = 0; row < grid.rows; ++row) {
+        for (int column = 0; column < grid.columns; ++column) {
+            const card_cell cell{column, row};
+            if (is_taken(occupied, cell))
+                continue;
+            const ImVec2 at = cell_position(grid, cell);
+            const float dx = at.x - position.x;
+            const float dy = at.y - position.y;
+            const float distance = dx * dx + dy * dy;
+            if (!found || distance < best_distance) {
+                best = cell;
+                best_distance = distance;
+                found = true;
+            }
+        }
+    }
+    return best;
+}
+
+ImVec2 snap_position(const card_grid& grid, ImVec2 position,
+    std::span<const card_cell> occupied) noexcept {
+    return cell_position(grid, snap_cell(grid, position, occupied));
+}
+
+card_cell first_free_cell(const card_grid& grid,
+    std::span<const card_cell> occupied) noexcept {
+    const int columns = std::max(grid.columns, 1);
+    for (int index = 0;; ++index) {
+        const card_cell cell{index % columns, index / columns};
+        if (!is_taken(occupied, cell))
+            return cell;
+    }
 }
 
 std::int64_t mini_plot_span(const render_input& input, window_handle card) {
@@ -246,7 +314,6 @@ void draw_sparkline(ImDrawList* draw, const sparkline& line, ImVec2 min,
 void render_mini_plot(window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock) {
-    static_cast<void>(state);
     static_cast<void>(status);
     static_cast<void>(lock);
 
@@ -344,17 +411,48 @@ void render_mini_plot(window_handle handle, const render_input& input,
     }
 
     ImGui::PopClipRect();
+
+    /*
+     * The close control shows only while the pointer is over the card. It is
+     * a button, so a press on it never reaches the window to move it, and a
+     * release on it is not a click on the tile. The release frame still has
+     * the button active, so hover is read through that block, or the button
+     * would vanish before it could report its click.
+     */
+    const bool hovered = ImGui::IsWindowHovered(
+        ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    const float side = theme::mini_plot_close_side;
+    const ImVec2 close_min(corner.x - side - theme::mini_plot_grid_gap,
+        origin.y + theme::mini_plot_grid_gap);
+    bool over_close = false;
+    if (hovered) {
+        ImGui::SetCursorScreenPos(close_min);
+        if (ImGui::InvisibleButton("##close", ImVec2(side, side)))
+            state.tile = tile_request::close;
+        over_close = ImGui::IsItemHovered();
+        ImGui::SetItemTooltip("Close");
+        const ImVec2 close_max(close_min.x + side, close_min.y + side);
+        if (over_close)
+            draw->AddRectFilled(close_min, close_max,
+                ImGui::GetColorU32(ImGuiCol_ButtonHovered),
+                ImGui::GetStyle().FrameRounding);
+        const ImVec2 glyph = ImGui::CalcTextSize(icon::cancel);
+        draw->AddText(ImVec2(close_min.x + std::floor((side - glyph.x) * 0.5f),
+                           close_min.y + std::floor((side - glyph.y) * 0.5f)),
+            ImGui::GetColorU32(over_close ? ImGuiCol_Text : ImGuiCol_TextDisabled),
+            icon::cancel);
+    }
     window->DC.CursorMaxPos = extent;
     /*
      * The tile is not a button: a card has no title bar, so a press on its body
-     * has to reach ImGui as a press on the window, which moves a floating card
-     * and drags a docked one out. A click is then a release over the window
-     * that never travelled past the drag threshold.
+     * has to reach ImGui as a press on the window, which moves the card. A
+     * click is then a release over the window that never travelled past the
+     * drag threshold.
      */
-    const bool hovered = ImGui::IsWindowHovered();
     if (hovered)
-        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    const bool clicked = hovered
+        ImGui::SetMouseCursor(over_close ? ImGuiMouseCursor_Arrow
+                                         : ImGuiMouseCursor_Hand);
+    const bool clicked = hovered && !over_close
         && ImGui::IsMouseReleased(ImGuiMouseButton_Left)
         && !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left);
     if (clicked && session) {
