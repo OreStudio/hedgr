@@ -30,6 +30,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
+#include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.ui/widget/segmented.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -374,6 +375,35 @@ struct header_icons_drawn final {
     return drawn;
 }
 
+/**
+ * @brief The body and foot of a chart whose session is not open.
+ *
+ * The plot area says so with the shared glyph and caption, where the other data
+ * windows use a sentence, because a chart is the window an operator watches
+ * for liveness and a glyph reads at a glance.
+ */
+void draw_connection_state(const render_input& input,
+    widget::status_bar& status, widget::foot_state& foot,
+    widget::plot_state state, std::string_view reason) {
+    set_health_foot(foot, domain::data_health::unavailable, 0, 0, false);
+    const float foot_height = widget::status_foot_height(status, foot)
+        + ImGui::GetStyle().ItemSpacing.y;
+    const ImVec2 available = ImGui::GetContentRegionAvail();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    if (ImGui::BeginChild("##plot-area",
+            ImVec2(available.x, std::max(available.y - foot_height, 80.0f)),
+            ImGuiChildFlags_None)) {
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 room = ImGui::GetContentRegionAvail();
+        widget::draw_plot_state(state, at,
+            ImVec2(at.x + room.x, at.y + room.y), theme::plot_state_glyph_size,
+            true, state == widget::plot_state::failed ? reason
+                                                      : std::string_view{});
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    widget::draw_status_foot(status, input.now_ns, foot);
+}
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -424,7 +454,16 @@ void render_chart(window_handle handle, const render_input& input,
     const auto session = signed_in_session(input, handle);
     if (!session) {
         auto foot = make_foot();
-        draw_signed_out(input, status, foot);
+        const auto bound = input.windows.session_of(handle);
+        const auto state_now = bound
+            ? widget::plot_state_for(input.sessions.status(*bound), false)
+            : widget::plot_state::none;
+        if (state_now == widget::plot_state::none) {
+            draw_signed_out(input, status, foot);
+        } else {
+            draw_connection_state(input, status, foot, state_now,
+                input.sessions.last_error(*bound));
+        }
         ImGui::PopID();
         return;
     }
@@ -593,7 +632,11 @@ void render_chart(window_handle handle, const render_input& input,
     if (ImGui::BeginChild("##plot-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
         if (reading) {
-            ImGui::TextDisabled("Reading the series...");
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 room = ImGui::GetContentRegionAvail();
+            widget::draw_plot_state(widget::plot_state::reading, at,
+                ImVec2(at.x + room.x, at.y + room.y),
+                theme::plot_state_glyph_size, true);
         } else if (no_points) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {

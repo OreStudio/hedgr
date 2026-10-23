@@ -314,7 +314,6 @@ TEST_CASE("a card with no points yet or no held series draws no line",
         }
     }
     CHECK(drawn_text(desk, unheld).find("Series not held") != std::string::npos);
-    CHECK(drawn_text(desk, empty).find("Reading the series") != std::string::npos);
 }
 
 TEST_CASE("a card scales from tiny to large and keeps its line inside its tile",

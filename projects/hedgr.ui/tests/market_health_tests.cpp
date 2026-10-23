@@ -101,12 +101,14 @@ TEST_CASE("a chart on a one-day period is live while its feed ticks",
     CHECK(says(text, render::as_of_text(now - second)));
 }
 
-TEST_CASE("every data window says the same thing when its session is lost",
+/*
+ * A chart is the exception: it says so in its plot area, with a glyph, and
+ * plot_state_tests.cpp covers it.
+ */
+TEST_CASE("every other data window says the same thing when its session is lost",
     "[health][session]") {
     const std::vector<std::pair<window_kind, model::domain::window_state>>
         windows{
-            {window_kind::chart,
-                model::domain::chart_state{.label = "FX", .series_id = "s"}},
             {window_kind::term_structure,
                 model::domain::term_structure_state{.label = "IR",
                     .curve_key = "c"}},
