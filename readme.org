@@ -122,6 +122,24 @@ which matters because the windows float over one another, and
 =build/scripts/capture.sh= writes a layout of its own so that two runs' frames
 are comparable.
 
+* Logging
+
+Logging is off until =--log-enabled= is given, and then
+it goes to the console and to a file. The file is =hedgr.imgui.log= in a =log=
+directory beside the store (=.cache/hedgr/log= in a source build, otherwise
+=$XDG_DATA_HOME/hedgr/log= or =~/.local/share/hedgr/log=), so the desktop entry
+and a terminal write the same file. =--log-filename=, =--log-directory= and
+=--log-level= override the parts, and the line "Logging to ..." at the start of
+a run names the file. ORE Studio's logging writes a file only when given a name,
+which is why a bare =--log-enabled= once left no file; Hedgr now supplies the
+default. The file grows without a limit, so it is worth deleting between
+sessions.
+
+A chart's history reads log at info with the series, the request (=limit= and
+=offset=, or the time range) and the count. A failed read, an answer that could
+not be decoded or was refused, and an empty answer log at warning with the
+reason. Search the log for =Market points= and =Market history=.
+
 * Adding a window kind
 
 Three places, and the compiler checks two of them:

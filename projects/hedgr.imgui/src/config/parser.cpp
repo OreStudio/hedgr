@@ -27,6 +27,7 @@
 #include <string_view>
 #include <boost/program_options.hpp>
 #include <boost/throw_exception.hpp>
+#include "hedgr.imgui/app/log_file.hpp"
 #include "hedgr.imgui/config/parser_exception.hpp"
 #include "ores.logging/logging_configuration.hpp"
 #include "ores.nats/config/nats_configuration.hpp"
@@ -214,6 +215,21 @@ parse_arguments(const std::vector<std::string>& arguments, std::ostream& info) {
 
     r.connection = read_connection_configuration(vm);
     r.database_path = default_database_path();
+
+    /*
+     * Switching logging on is a request for a file, so the name and the
+     * directory it leaves out are chosen here. The directory is made now
+     * because the logger is built straight from these options.
+     */
+    if (r.logging) {
+        auto target = hedgr::imgui::app::resolve_log_target(
+            {r.logging->filename, r.logging->output_directory},
+            r.database_path);
+        std::error_code ignored;
+        std::filesystem::create_directories(target.directory, ignored);
+        r.logging->filename = std::move(target.filename);
+        r.logging->output_directory = std::move(target.directory);
+    }
     r.master_password = read_master_password();
     return r;
 }

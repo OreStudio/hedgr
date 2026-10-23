@@ -26,6 +26,7 @@
 #include "hedgr.ui/widget/status_foot.hpp"
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace hedgr::ui::render {
 
@@ -70,6 +71,21 @@ inline void set_health_foot(hedgr::ui::widget::foot_state& foot,
     foot.age = as_of_ns > 0 && wall_now_ns > 0
         ? tick_age_text(wall_now_ns - as_of_ns) : std::string{};
     foot.updating = reading;
+}
+
+/**
+ * @brief Says in the foot that the series' history could not be read.
+ *
+ * A read that failed leaves the chart showing only what arrived live, which the
+ * foot's health word would otherwise report as a healthy feed. The reason stays
+ * in the failure line above the plot, so the foot carries the short note only.
+ */
+inline void set_history_unavailable_foot(
+    hedgr::ui::widget::foot_state& foot, std::string_view failure) {
+    if (failure.empty())
+        return;
+    foot.word = "history unavailable";
+    foot.colour = theme::failure_colour;
 }
 
 }

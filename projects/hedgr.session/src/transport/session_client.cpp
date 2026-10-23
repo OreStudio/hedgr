@@ -1331,10 +1331,17 @@ session_client::market_series_points(std::string_view series_id,
             list_by_series_id_market_observations_request::nats_subject,
             newest_observations_request(id, limit), options_.request_timeout);
         if (!page) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The observation answer for series '" << series_id
+                << "' could not be decoded (limit " << limit << ", offset 0)";
             return fail(session_errc::protocol_error,
                 "the observation answer could not be decoded");
         }
         if (page->result.outcome != ores::utility::domain::outcome::ok) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The deployment refused the observations of series '"
+                << series_id << "' (limit " << limit << ", offset 0): "
+                << page->result.message;
             return fail(session_errc::protocol_error,
                 page->result.message.empty()
                     ? std::string("the deployment refused the observations")
@@ -1384,7 +1391,7 @@ session_client::market_series_history(std::string_view series_id,
     using ores::marketdata::messaging::list_by_series_id_market_observations_request;
     using ores::marketdata::messaging::list_by_series_id_market_observations_response;
 
-    const observation_fetch fetch = [this](
+    const observation_fetch fetch = [this, series_id](
         const list_by_series_id_market_observations_request& request)
         -> result<std::vector<ores::marketdata::domain::market_observation>> {
         const auto answer = ores::nats::service::authenticated_request_and_decode<
@@ -1392,10 +1399,18 @@ session_client::market_series_history(std::string_view series_id,
             list_by_series_id_market_observations_request::nats_subject,
             request, options_.request_timeout);
         if (!answer) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The observation answer for series '" << series_id
+                << "' could not be decoded (offset " << request.offset
+                << ", limit " << request.limit << ")";
             return fail(session_errc::protocol_error,
                 "the observation answer could not be decoded");
         }
         if (answer->result.outcome != ores::utility::domain::outcome::ok) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The deployment refused the observations of series '"
+                << series_id << "' (offset " << request.offset << ", limit "
+                << request.limit << "): " << answer->result.message;
             return fail(session_errc::protocol_error,
                 answer->result.message.empty()
                     ? std::string("the deployment refused the observations")
