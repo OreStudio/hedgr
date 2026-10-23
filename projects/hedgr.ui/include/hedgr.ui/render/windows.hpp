@@ -32,9 +32,9 @@ namespace hedgr::ui::render {
  * browser widget that the Accounts window is built from as well. Everything it
  * can do is an icon with a tooltip, because there is no menu bar anywhere.
  *
- * It carries a close control like every other window. The shortcut bar's entry
- * for it is what opens it again, and that entry is only drawn while the store
- * is open, so the close control is offered only then as well.
+ * It carries a close control like every other window. The FILE menu's Instances
+ * row is what opens it again, and that row is only drawn while the store is
+ * open, so the close control is offered only then as well.
  */
 HEDGR_UI_EXPORT void render_instances_window(
     hedgr::model::state::window_handle handle, const render_input& input,

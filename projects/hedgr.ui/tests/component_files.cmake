@@ -30,7 +30,6 @@ set(files
     "mini_plot_tests.cpp"
     "plot_state_tests.cpp"
     "render_tests.cpp"
-    "shortcut_bar_tests.cpp"
     "sound_tests.cpp"
     "splash_tests.cpp"
     "status_bar_tests.cpp"

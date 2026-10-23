@@ -519,12 +519,12 @@ struct render_input final {
     const hedgr::model::state::window_table& windows;
 
     /**
-     * @brief What the operator has put on the shortcuts bar.
+     * @brief What the operator has pinned as shortcuts.
      *
-     * Read for the bar and for the control that adds to it, both of which ask
-     * the same question of the same table. It is the store's own order rather
-     * than one the interface imposes, so the entries are drawn in the order the
-     * table returns them.
+     * Read for the TOOLS menu's Accounts list and for the control that adds to
+     * it, both of which ask the same question of the same table. It is the
+     * store's own order rather than one the interface imposes, so the entries
+     * are listed in the order the table returns them.
      */
     const hedgr::model::state::shortcut_table& shortcuts;
 

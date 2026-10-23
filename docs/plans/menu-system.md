@@ -2,8 +2,8 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Steps 1 to 3 are done; the rest is
-plan.
+the ImCoolBar shortcut bar over several small PRs. Steps 1 to 3 and 9 are done; the
+rest is plan.
 
 ## The reference
 
@@ -20,16 +20,11 @@ plan.
 
 ## What exists
 
-- **Shortcut bar.** `render/shortcut_bar.cpp` draws an ImCoolBar window anchored
-  to the bottom centre of the viewport. It holds one tile per catalogue
-  shortcut (`input.shortcuts`, a `domain::shortcut` with a window kind and
-  target id) and, while anything is docked, an Undock all tile. Its resting
-  height is `shortcut_bar_height`; `workspace::draw_dock_space` shrinks the dock
-  space by that height. The tile click goes through `activate_entry`, which
-  handles two kinds only: Instances (`request_instances_window` plus
-  `shortcut_bar_result::focus_instances`) and accounts
-  (`request_accounts_window`). Any other kind is an inert click. Hover raises a tick signal. The bar is raised over every window
-  by `raise_bar_to_front` and draws nothing while the store is locked.
+- **Shortcut bar (retired).** `render/shortcut_bar.cpp` drew an ImCoolBar window
+  at the bottom centre, one tile per catalogue shortcut plus Undock all, and the
+  dock space stopped short of it. Step 9 deleted it, with the vendored ImCoolBar.
+  The catalogue (`input.shortcuts`) stays: the TOOLS menu's Accounts submenu
+  lists it. The tile photos and the hover tick went with the bar.
 - **Mini plots actions.** There are none on the bar in this checkout. The mini
   plot is opened from a chart or from the series browser. The Windows menu below
   is where "tidy mini plots" and "close all mini plots" would live if wanted.
@@ -86,8 +81,7 @@ Each step is one PR, with tests, and leaves the app working.
      place the top is inset: the viewport's `WorkPos` and `WorkSize` shrink by
      `theme::menu_bar_height` a frame after the bar first draws, so the dock
      space, `floating_size_for`, the card grid and Undock all read the inset
-     without knowing about it. The cool bar still shrinks the dock space at the
-     bottom until step 9. Click opens, and while a popup is open the pointer on
+     without knowing about it. Click opens, and while a popup is open the pointer on
      another entry moves it there (`widget::menu_after_entry` is the pure rule,
      `menu_bar_entry` applies it to ImGui). A click on an open entry closes it
      because ImGui closes the popup at the press, which the rule accounts for.
@@ -106,8 +100,8 @@ Each step is one PR, with tests, and leaves the app working.
      menu.
    - VIEW: Undock all, a disabled row until something is docked. The Windows
      submenu is step 7's.
-   - TOOLS: Series browser, Accounts and, for a system administration session,
-     Command centre. They act on the first signed-in session and are disabled
+   - TOOLS: Series browser, Accounts (a submenu, see step 9) and, for a system
+     administration session, Command centre. They act on the first signed-in session and are disabled
      when there is none. The CRM matrix has no row: it needs a party and a
      matrix name, which only the series browser's picker can supply.
    - HELP: About, a small window with the mark, the version from the CMake
@@ -117,8 +111,7 @@ Each step is one PR, with tests, and leaves the app working.
    - Quit sets `menu_bar_result::quit_requested`; `workspace::exit_requested`
      carries it to the frame loop, which sets its existing `exit_requested_`.
    - Notes. The labels are as tall as the bar, so their popups open flush under
-     its edge (`menu_label` takes a height). The cool bar keeps its Instances and
-     Undock all entries until step 9. Not checked in a real window. The label
+     its edge (`menu_label` takes a height). Not checked in a real window. The label
      face was the proportional sans at first; it is now the bundled monospace
      (decisions 6 and 11).
 4. **The toolbar.** A floating capsule over the desk, not a fixed strip,
@@ -151,13 +144,27 @@ Each step is one PR, with tests, and leaves the app working.
    here. It comes before the status bar (decision 9).
 8. **The status bar.** One viewport-wide bottom strip in the reference's look,
    carrying the message ladder from `status_bar.hpp` and the connection state
-   once PR 94 lands. The dock space already subtracts a bar height; this swaps
-   the shortcut bar's height for the status bar's, as a bottom side bar like the
-   top bar, so the work area is inset by the bars alone.
-9. **Retire the cool bar.** Delete `shortcut_bar.cpp`, `shortcut_bar_result`,
-   `shortcut_bar_height` and `shortcut_bar_tests.cpp`, move Undock all to the
-   VIEW and Windows menus, and drop the ImCoolBar dependency. The pinned
-   shortcut row from step 5 already holds the catalogue shortcuts.
+   once PR 94 lands. It is a bottom side bar like the top bar, so the work
+   area is inset by the bars alone (the dock space already fills the work area).
+9. [x] **Retire the cool bar.** Brought forward. Deleted `shortcut_bar.cpp`,
+   `shortcut_bar_result`, `shortcut_bar_height`, `shortcut_bar_tests.cpp` and the
+   vendored ImCoolBar (nothing else used it). The dock space now spans the whole
+   work area, so the only inset is the top bar's. Undock all already lived in
+   VIEW. The `focus_instances` request stays: FILE > Instances uses it.
+   - The one thing reachable only through the bar was the per-instance accounts
+     tile. TOOLS > Accounts is now a submenu row (chevron) whose panel opens
+     beside it, on click or hover. It lists the signed-in session's instance
+     first, then one row per catalogue shortcut of kind accounts, each instance
+     once, labelled with the instance name. A pick calls
+     `request_accounts_window` and raises `shortcut.activated` (so the sound pack
+     still plays, ADR 0008), then closes the menu. This folds the old single
+     Accounts row in: its session instance is the first entry. The row is
+     disabled when there is neither a session nor a shortcut.
+   - Stop-gap. The submenu is text only and lasts until step 5 (the Instances
+     panel, with the photo tiles and the pinned row) and step 6 (the Accounts
+     panel) replace it. The `shortcut.hovered` signal has no raiser now; its name
+     and sound mapping stay for step 5's tiles.
+   - Not checked in a real window.
 
 ## The logo
 
@@ -187,7 +194,7 @@ Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to conf
    the top; the user then chose the reference's layout, with traditional menus
    (FILE, VIEW, TOOLS, HELP) and Instances under FILE.
 5. **Shortcuts.** Decided: the catalogue shortcuts become a pinned row at the
-   top of the Instances panel. The ImCoolBar tile bar is retired in step 9.
+   top of the Instances panel. The ImCoolBar tile bar is retired (step 9), and TOOLS > Accounts lists the shortcuts until then.
 6. **Label font.** Decided (user feedback): the menu chrome is set in the
    reference's monospace, JetBrains Mono (SIL OFL 1.1), bundled under
    `assets/fonts` with `JetBrainsMono-OFL.txt`. It covers the bar's labels,
@@ -251,8 +258,8 @@ Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to conf
   Keep panels inside the main viewport (`ImGuiWindowFlags_NoViewport` is not
   per popup; use `SetNextWindowViewport` with the main viewport) and check on
   the target window manager, which cannot be done here.
-- **The store lock.** The cool bar draws nothing while the store is locked.
-  The menus and the toolbar must do the same, or show only Lock and Quit, since the catalogue
+- **The store lock.** The cool bar drew nothing while the store was locked.
+  The menus, which hide everything but FILE, and the toolbar must do the same, or show only Lock and Quit, since the catalogue
   is behind the master password.
 - **The mode pill group** in the reference (SCHEMATIC and its icons) has no
   equivalent here and is not in scope; the toolbar step is the nearest thing.
