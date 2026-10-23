@@ -31,6 +31,8 @@ namespace domain = hedgr::model::domain;
 using hedgr::ui::render::build_crm_grid;
 using hedgr::ui::render::crm_delta_is_zero;
 using hedgr::ui::render::crm_grid;
+using hedgr::ui::render::crm_pair_cards;
+using hedgr::ui::render::crm_series_for_pair;
 
 domain::crm_cell cell(std::string base, std::string quote, double rate,
     std::string status = "fresh") {
@@ -55,6 +57,17 @@ std::string rate_at(const crm_grid& grid, std::string_view pair) {
         if (entry.pair == pair)
             return entry.rate;
     return "missing";
+}
+
+domain::market_series_row fx_series(std::string id, std::string base,
+    std::string quote, std::string party = "p1") {
+    domain::market_series_row row;
+    row.id = std::move(id);
+    row.label = "FX " + base + "/" + quote;
+    row.asset_class = "FX";
+    row.party_id = std::move(party);
+    row.uri = "oresmd:///fx/" + base + "?ccy=" + quote;
+    return row;
 }
 
 const domain::crm_convention usd_jpy{.pair_code = "USD/JPY",
@@ -102,4 +115,39 @@ TEST_CASE("a CRM delta that rounds to zero is neutral", "[crm]") {
     CHECK(crm_delta_is_zero(0.0049));
     CHECK(crm_delta_is_zero(-0.0049));
     CHECK_FALSE(crm_delta_is_zero(0.005));
+}
+
+TEST_CASE("a CRM pair finds the FX series of its own party", "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("a", "EUR", "USD", "other"),
+        fx_series("b", "EUR", "USD")};
+    const auto* row = crm_series_for_pair(series, "p1", "EUR", "USD");
+    REQUIRE(row != nullptr);
+    CHECK(row->id == "b");
+    CHECK(crm_series_for_pair(series, "p1", "USD", "EUR") == nullptr);
+}
+
+TEST_CASE("CRM mini plots open one card per pair, skipping pairs with none",
+    "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("eurusd", "EUR", "USD"),
+        fx_series("usdeur", "USD", "EUR"),
+        fx_series("gbpusd", "GBP", "USD")};
+    std::size_t unmatched = 99;
+    const auto cards = crm_pair_cards(series, "p1",
+        {"EUR", "GBP", "USD"}, unmatched);
+    REQUIRE(cards.size() == 3);
+    CHECK(cards[0].id == "eurusd");
+    CHECK(cards[1].id == "usdeur");
+    CHECK(cards[2].id == "gbpusd");
+    CHECK(unmatched == 1);
+}
+
+TEST_CASE("CRM mini plots count a pair once however many series it has",
+    "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("a", "EUR", "USD"), fx_series("a", "EUR", "USD")};
+    std::size_t unmatched = 0;
+    CHECK(crm_pair_cards(series, "p1", {"EUR", "USD"}, unmatched).size() == 1);
+    CHECK(unmatched == 0);
 }

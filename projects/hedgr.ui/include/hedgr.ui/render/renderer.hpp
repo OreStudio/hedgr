@@ -250,6 +250,12 @@ struct window_ui_state final {
     /** @brief The matrix as last derived from the CRM batch. */
     crm_grid crm_view;
 
+    /** @brief Cards "Mini plots" would open, held while it asks to confirm. */
+    std::vector<crm_card> crm_pending_cards;
+
+    /** @brief Pairs of the matrix that had no series when it was pressed. */
+    std::size_t crm_unmatched_pairs = 0;
+
     /** @brief Whether the CRM picker popup is open. */
     bool crm_picker_open = false;
 
