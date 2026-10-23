@@ -459,6 +459,15 @@ HEDGR_UI_EXPORT void paint_dock_cards(ImGuiID dock_space);
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_surface() noexcept;
 
+/**
+ * @brief How much of the scene behind a menu panel is hidden by it, from 0 to 1.
+ *
+ * @c menu_surface carries this alpha: the panel is a very dark tint over the
+ * desk, so the scene shows faintly, as in the reference. Text and the outline
+ * stay opaque.
+ */
+inline constexpr float menu_popup_alpha = 0.80f;
+
 /** @brief The one pixel outline of a menu panel. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_border() noexcept;
 
@@ -564,6 +573,17 @@ inline constexpr float menu_bar_extent = menu_bar_height + 2.0f * menu_bar_margi
  * menu floats just clear of the bar instead of touching it.
  */
 inline constexpr float menu_popup_gap = 4.0f;
+
+/**
+ * @brief The caret on a top-level menu's top edge, pointing up at its label.
+ *
+ * It is one pixel taller than the gap so its tip lands a pixel under the plate's
+ * bottom edge, over the plate's hairline, as the reference's caret meets its
+ * button. Its centre keeps @c menu_caret_margin clear of the panel's corners.
+ */
+inline constexpr float menu_caret_width = 12.0f;
+inline constexpr float menu_caret_height = menu_popup_gap + 1.0f;
+inline constexpr float menu_caret_margin = menu_rounding;
 
 /** @brief The room between the logo button's edge and the swirl drawn in it. */
 inline constexpr float menu_bar_logo_padding = 9.0f;

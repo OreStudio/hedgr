@@ -26,6 +26,7 @@
 #include <array>
 #include <catch2/catch_all.hpp>
 #include <cmath>
+#include <optional>
 #include <vector>
 
 namespace {
@@ -47,6 +48,8 @@ struct menu_panel final {
     std::array<bool, row_count> pressed{};
     ImRect panel;
     std::vector<ImDrawVert> verts;
+    std::vector<ImDrawVert> foreground;
+    std::optional<float> caret_x;
     const char* heading = "files";
     bool with_separator = false;
     bool opened = false;
@@ -63,7 +66,7 @@ struct menu_panel final {
         }
         ImGui::SetNextWindowPos(ImVec2(100.0f, 100.0f));
         {
-            const widget::menu_popup popup("menu");
+            const widget::menu_popup popup("menu", 0.0f, caret_x);
             if (popup) {
                 widget::menu_heading(heading);
                 const std::array<widget::menu_row, row_count> rows{{
@@ -87,6 +90,9 @@ struct menu_panel final {
                 panel = ImRect(at, ImVec2(at.x + size.x, at.y + size.y));
             }
         }
+        const auto& front = ImGui::GetForegroundDrawList(
+            ImGui::GetMainViewport())->VtxBuffer;
+        foreground.assign(front.begin(), front.end());
         ImGui::Render();
     }
 
@@ -311,4 +317,119 @@ TEST_CASE("the arrow keys reach every enabled row and skip the disabled one",
         << menu.pressed[3] << menu.pressed[4]);
     CHECK(menu.pressed[more]);
     CHECK_FALSE(menu.pressed[locked]);
+}
+
+namespace {
+
+/** @brief The foreground vertices of colour @p col, which is where the caret is. */
+std::vector<ImDrawVert> caret_verts(const menu_panel& menu, ImU32 col) {
+    std::vector<ImDrawVert> found;
+    for (const ImDrawVert& v : menu.foreground) {
+        if (v.col == col)
+            found.push_back(v);
+    }
+    return found;
+}
+
+float lowest_y(const std::vector<ImDrawVert>& verts) {
+    float y = 1.0e9f;
+    for (const ImDrawVert& v : verts)
+        y = std::min(y, v.pos.y);
+    return y;
+}
+
+}
+
+TEST_CASE("a menu panel is translucent by the theme's alpha", "[look][menu][glass]") {
+    menu_panel menu;
+    menu.settle();
+    const ImVec4 surface = theme::menu_surface();
+    CHECK(theme::menu_popup_alpha < 1.0f);
+    CHECK(surface.w == Catch::Approx(theme::menu_popup_alpha));
+    const ImU32 fill = u32(surface);
+    REQUIRE(menu.has(menu.panel, fill));
+    CHECK((fill >> IM_COL32_A_SHIFT) == static_cast<ImU32>(
+              theme::menu_popup_alpha * 255.0f + 0.5f));
+    /* The outline stays more opaque than the fill. */
+    CHECK(theme::menu_border().w > surface.w);
+}
+
+TEST_CASE("a caret points up from the panel's top edge at the label's centre",
+    "[look][menu][glass]") {
+    menu_panel menu;
+    menu.caret_x = 150.0f;
+    menu.settle();
+    const auto fill = caret_verts(menu, u32(theme::menu_surface()));
+    REQUIRE(fill.size() == 3);
+    const float apex_y = lowest_y(fill);
+    /* The fill is anti-aliased, which pulls its solid vertices in by half a pixel. */
+    CHECK(apex_y == Catch::Approx(menu.panel.Min.y - theme::menu_caret_height)
+                        .margin(1.0f));
+    float base_left = 1.0e9f;
+    float base_right = -1.0e9f;
+    for (const ImDrawVert& v : fill) {
+        if (v.pos.y == apex_y) {
+            CHECK(v.pos.x == Catch::Approx(150.0f));
+        } else {
+            CHECK(v.pos.y >= menu.panel.Min.y);
+            CHECK(v.pos.y <= menu.panel.Min.y + 1.0f);
+            base_left = std::min(base_left, v.pos.x);
+            base_right = std::max(base_right, v.pos.x);
+        }
+    }
+    CHECK(base_right - base_left == Catch::Approx(theme::menu_caret_width).margin(3.0f));
+    CHECK((base_left + base_right) * 0.5f == Catch::Approx(150.0f).margin(0.5f));
+}
+
+TEST_CASE("a caret has the panel's fill and an outline on its slanted sides only",
+    "[look][menu][glass]") {
+    menu_panel menu;
+    menu.caret_x = 150.0f;
+    menu.settle();
+    const auto edge = caret_verts(menu, u32(theme::menu_border()));
+    REQUIRE_FALSE(edge.empty());
+    const float apex_y = lowest_y(edge);
+    float lowest_edge = -1.0e9f;
+    for (const ImDrawVert& v : edge)
+        lowest_edge = std::max(lowest_edge, v.pos.y);
+    /* Nothing is stroked along the base: the stroke ends at the base corners. */
+    CHECK(lowest_edge <= menu.panel.Min.y + 2.5f);
+    int along_base = 0;
+    for (const ImDrawVert& v : edge) {
+        if (std::abs(v.pos.x - 150.0f) < theme::menu_caret_width * 0.25f
+            && v.pos.y > menu.panel.Min.y - 1.0f)
+            ++along_base;
+    }
+    CHECK(along_base == 0);
+    CHECK(apex_y < menu.panel.Min.y - 1.0f);
+    CHECK(caret_verts(menu, u32(theme::menu_surface())).size() == 3);
+}
+
+TEST_CASE("a caret near the panel's ends is kept clear of the corners",
+    "[look][menu][glass]") {
+    const float reach = theme::menu_caret_margin + theme::menu_caret_width * 0.5f;
+    for (const float label : {-500.0f, 100.0f, 1.0e6f}) {
+        menu_panel menu;
+        menu.caret_x = label;
+        menu.settle();
+        const auto fill = caret_verts(menu, u32(theme::menu_surface()));
+        REQUIRE(fill.size() == 3);
+        const float apex_y = lowest_y(fill);
+        float apex_x = 0.0f;
+        for (const ImDrawVert& v : fill) {
+            if (v.pos.y == apex_y)
+                apex_x = v.pos.x;
+        }
+        CHECK(apex_x >= menu.panel.Min.x + reach - 0.01f);
+        CHECK(apex_x <= menu.panel.Max.x - reach + 0.01f);
+        CHECK(apex_x == Catch::Approx(
+                  std::clamp(label, menu.panel.Min.x + reach,
+                      menu.panel.Max.x - reach)));
+    }
+}
+
+TEST_CASE("a popup given no label has no caret", "[look][menu][glass]") {
+    menu_panel menu;
+    menu.settle();
+    CHECK(menu.foreground.empty());
 }

@@ -21,6 +21,7 @@
 #define HEDGR_UI_WIDGET_MENU_HPP
 
 #include "hedgr.ui/export.hpp"
+#include <optional>
 
 namespace hedgr::ui::widget {
 
@@ -36,10 +37,17 @@ namespace hedgr::ui::widget {
  * and draw the rows only when it converts to true. The popup is opened with
  * ImGui::OpenPopup under the same @p id, as for BeginPopup. A @p width of zero
  * means as wide as the widest row, at least the theme's minimum.
+ *
+ * With a @p caret_x, the screen x of the label that opened the popup, a small
+ * caret is drawn on the panel's top edge pointing up at that x (clamped inside
+ * the corners), so the panel reads as hanging off its label. The caret is drawn
+ * on the foreground list of the popup's viewport, as it lies outside the window;
+ * a popup that is its own OS window gets none.
  */
 class HEDGR_UI_EXPORT menu_popup final {
 public:
-    explicit menu_popup(const char* id, float width = 0.0f);
+    explicit menu_popup(const char* id, float width = 0.0f,
+        std::optional<float> caret_x = std::nullopt);
     ~menu_popup();
     menu_popup(const menu_popup&) = delete;
     menu_popup& operator=(const menu_popup&) = delete;
@@ -51,7 +59,15 @@ public:
 
 private:
     bool open_;
+    std::optional<float> caret_x_;
 };
+
+/**
+ * @brief The x a caret is centred at: @p label_x, kept clear of a panel's rounded
+ * corners, or the panel's middle when it is too narrow to fit one.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT float menu_caret_centre(float panel_min_x,
+    float panel_max_x, float label_x) noexcept;
 
 /** @brief What one menu row says. Every field after the label is optional. */
 struct menu_row final {

@@ -241,6 +241,31 @@ Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to conf
       read as JetBrains Mono (tall x-height, squared curves, wide even
       advance), judged by eye from the picture; no other family was compared.
     - Not checked in a real window.
+12. **Glass panels and the caret.** Decided from the reference's render-mode
+    menu (`267987113-...png`), after the user asked for "a bit of transparency
+    and an arrow pointing to the menu bar".
+    - Fill. `theme::menu_surface()` carries `theme::menu_popup_alpha` (0.80),
+      so the scene shows faintly through every menu panel, the TOOLS > Accounts
+      child panel included. Text and the outline stay opaque.
+    - Caret. A 12 by 5 px triangle (`menu_caret_width`, `menu_caret_height`)
+      on the panel's top edge, pointing up, centred on the label that opened the
+      popup (`menu_bar_label` passes the label's centre to `menu_popup`). The
+      gap under the plate is 4 px, so the caret is one pixel taller: its tip
+      lands 1 px under the plate's bottom edge, over the hairline, as the
+      reference's caret meets its button. Its centre is clamped
+      `menu_caret_margin` (the panel's corner radius) plus half its width clear
+      of the panel's ends, so a popup shifted to stay on screen still gets a
+      caret on the straight part of its edge. The fill is the panel's, the
+      outline is stroked on the two slanted sides only, and the base sits one
+      border width inside the panel so the fill hides the panel's outline there.
+    - Where it is drawn. The tip is outside the popup window, which clips its
+      own draw list, so the caret goes on the foreground list of the popup's
+      viewport. A popup on another viewport (its own OS window on X11) gets no
+      caret, because it would lie outside that window.
+    - Left out. The Accounts child panel has no caret: it opens beside a row, and
+      a left-pointing caret was optional. The About window is an ordinary window
+      with the window look, not a menu panel, and is unchanged.
+    - Not checked in a real window, nor the other-viewport case.
 
 ## Risks
 

@@ -84,9 +84,49 @@ void draw_chevron(ImDrawList* draw, ImVec2 centre, ImU32 colour) {
     return ImGui::ColorConvertFloat4ToU32(colour);
 }
 
+/**
+ * @brief Draws the caret on the current popup window's top edge, pointing up at
+ * @p label_x.
+ *
+ * The tip is above the window, so it goes on the viewport's foreground list, not
+ * the window's clipped one. The base sits one border width inside the panel so
+ * its fill covers the outline across the base; the outline is stroked on the two
+ * slanted sides only, and runs on into the panel's top edge.
+ */
+void draw_caret(float label_x) {
+    const ImVec2 at = ImGui::GetWindowPos();
+    const ImVec2 size = ImGui::GetWindowSize();
+    const float half = theme::menu_caret_width * 0.5f;
+    const float centre = menu_caret_centre(at.x, at.x + size.x, label_x);
+    const float base = at.y + ImGui::GetStyle().PopupBorderSize;
+    const ImVec2 left(centre - half, base);
+    const ImVec2 tip(centre, at.y - theme::menu_caret_height);
+    const ImVec2 right(centre + half, base);
+    ImDrawList* const draw = ImGui::GetForegroundDrawList(
+        ImGui::GetWindowViewport());
+    draw->AddTriangleFilled(left, tip, right, u32(theme::menu_surface()));
+    draw->PathLineTo(left);
+    draw->PathLineTo(tip);
+    draw->PathLineTo(right);
+    draw->PathStroke(u32(theme::menu_border()), ImDrawFlags_None,
+        ImGui::GetStyle().PopupBorderSize);
 }
 
-menu_popup::menu_popup(const char* id, float width) {
+}
+
+float menu_caret_centre(float panel_min_x, float panel_max_x,
+    float label_x) noexcept {
+    const float reach = theme::menu_caret_margin + theme::menu_caret_width * 0.5f;
+    const float low = panel_min_x + reach;
+    const float high = panel_max_x - reach;
+    if (low > high)
+        return (panel_min_x + panel_max_x) * 0.5f;
+    return std::clamp(label_x, low, high);
+}
+
+menu_popup::menu_popup(const char* id, float width,
+    std::optional<float> caret_x)
+    : caret_x_(caret_x) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
         ImVec2(theme::menu_padding, theme::menu_padding));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
@@ -111,6 +151,8 @@ menu_popup::menu_popup(const char* id, float width) {
 menu_popup::~menu_popup() {
     if (open_) {
         ImGui::PopFont();
+        if (caret_x_ && ImGui::GetWindowViewport() == ImGui::GetMainViewport())
+            draw_caret(*caret_x_);
         ImGui::EndPopup();
     }
     ImGui::PopStyleColor(style_colours_pushed);

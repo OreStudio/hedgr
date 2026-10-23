@@ -426,6 +426,33 @@ TEST_CASE("a menu opens a small gap below the bar's plate", "[menu_bar]") {
     }
 }
 
+TEST_CASE("an open top-level menu's caret points at its label's centre",
+    "[menu_bar][glass]") {
+    for (const char* name : {"File", "Tools"}) {
+        bar_harness h;
+        h.open_menu(name);
+        REQUIRE(GImGui->OpenPopupStack.Size > 0);
+        const ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
+        const auto label = h.label(name);
+        REQUIRE(label.has_value());
+        const auto& front = ImGui::GetForegroundDrawList(
+            ImGui::GetMainViewport())->VtxBuffer;
+        const ImU32 fill = ImGui::ColorConvertFloat4ToU32(theme::menu_surface());
+        float apex_x = -1.0f;
+        float apex_y = 1.0e9f;
+        for (const ImDrawVert& v : front) {
+            if (v.col == fill && v.pos.y < apex_y) {
+                apex_y = v.pos.y;
+                apex_x = v.pos.x;
+            }
+        }
+        const float plate_bottom = popup->Pos.y - theme::menu_popup_gap;
+        /* The label centre was found by a 2 pixel sweep, so allow that much. */
+        CHECK(apex_x == Catch::Approx(label->x).margin(2.0f));
+        CHECK(apex_y == Catch::Approx(plate_bottom + 1.0f).margin(1.5f));
+    }
+}
+
 TEST_CASE("clicking a label opens its menu and clicking it again closes it",
     "[menu_bar]") {
     bar_harness h;
