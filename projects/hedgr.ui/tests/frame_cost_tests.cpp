@@ -1085,7 +1085,7 @@ TEST_CASE("an open menu with every kind of row costs a steady frame no allocatio
     CHECK(allocations == 0);
 }
 
-TEST_CASE("the top bar costs a steady frame no allocation, closed and with its menu open",
+TEST_CASE("the top bar costs a steady frame no allocation, closed and with each menu open",
     "[frame][menu_bar]") {
     headless_imgui imgui;
     hedgr::ui::theme::apply_theme();
@@ -1096,18 +1096,44 @@ TEST_CASE("the top bar costs a steady frame no allocation, closed and with its m
     const auto draw = [&] {
         hedgr::ui::render::menu_bar_result result;
         ImGui::NewFrame();
-        hedgr::ui::render::draw_menu_bar(input, svg, state, result);
+        hedgr::ui::render::draw_menu_bar(input, svg, true, state, result);
         ImGui::Render();
     };
     CHECK(steady_allocations(draw) == 0);
 
-    ImGui::GetIO().AddMousePosEvent(20.0f, 20.0f);
+    /* Sweep the pointer along the bar, to learn where each label is. */
+    const ImGuiWindow* bar = ImGui::FindWindowByName("###hedgr-menu-bar");
+    REQUIRE(bar != nullptr);
+    const char* const names[] = {"File", "View", "Tools", "Help"};
+    float at[4] = {};
+    for (float x = 2.0f; x < 600.0f; x += 2.0f) {
+        ImGui::GetIO().AddMousePosEvent(x, 20.0f);
+        draw();
+        for (int i = 0; i < 4; ++i) {
+            if (GImGui->HoveredId == ImHashStr("##label", 0,
+                    ImHashStr(names[i], 0, bar->ID)))
+                at[i] = x;
+        }
+    }
+    for (int entry = 0; entry < 4; ++entry) {
+        REQUIRE(at[entry] > 0.0f);
+        ImGui::GetIO().AddMousePosEvent(at[entry], 20.0f);
+        draw();
+        if (entry == 0) {
+            ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+            draw();
+            ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        }
+        draw();
+        draw();
+        CHECK(state.open == entry);
+        CHECK(GImGui->OpenPopupStack.Size == 1);
+        CHECK(steady_allocations(draw) == 0);
+    }
+
+    state.open = hedgr::ui::widget::menu_bar_state::none;
+    state.about_open = true;
     draw();
-    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
     draw();
-    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
-    draw();
-    CHECK(state.open == 0);
     CHECK(steady_allocations(draw) == 0);
-    CHECK(state.open == 0);
 }

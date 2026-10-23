@@ -26,7 +26,8 @@ if(NOT files)
 endif()
 
 add_library(${lib_target_name} ${files})
-target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY)
+target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY
+    HEDGR_VERSION="${PROJECT_VERSION}")
 # Vendored upstream code is kept byte-for-byte apart from its patch, so it is
 # not held to the project's warning set.
 set_source_files_properties(../third_party/imcoolbar/ImCoolBar.cpp

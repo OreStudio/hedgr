@@ -296,11 +296,14 @@ void workspace::render(const render_input& input) {
             logo_svg_ = read_text_file(path);
     }
     menu_bar_result top_bar;
-    draw_menu_bar(input, logo_svg_, menu_bar_, top_bar);
+    draw_menu_bar(input, logo_svg_, desk_docked_, menu_bar_, top_bar);
     if (top_bar.focus_instances)
         focus_instances_ = true;
     lock_control_.close_requested |= top_bar.lock_requested;
     lock_control_.open_requested |= top_bar.unlock_requested;
+    if (top_bar.undock_all)
+        next_move_ = dock_move{.all = true};
+    exit_requested_ |= top_bar.quit_requested;
 
     draw_dock_space(input);
 

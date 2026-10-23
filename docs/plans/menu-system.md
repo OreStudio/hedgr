@@ -2,12 +2,12 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Steps 1 and 2 are done; the rest is
+the ImCoolBar shortcut bar over several small PRs. Steps 1 to 3 are done; the rest is
 plan.
 
 ## The reference
 
-- A top bar. A round logo button at the far left, then upper-case monospace
+- A top bar. A small plain logo at the far left (a brand mark, not a menu), then upper-case monospace
   labels (FILE, VIEW, HELP, TOOLS, DEBUG), then a pill group of mode buttons.
 - A popup is a flat dark rounded panel with plain rows. The hovered or selected
   row is a purple rounded bar across the panel. A row with a submenu ends in a
@@ -78,29 +78,49 @@ Each step is one PR, with tests, and leaves the app working.
      nothing yet; the hidden `component gallery` test draws one for a look.
 2. [x] **The top bar and the system menu.** A fixed-height menu bar window
    (`render/menu_bar.cpp`), our own window (decision 1), drawn by `workspace`
-   before the dock space. The ORE swirl logo button at the left
+   before the dock space. The ORE swirl at the left
    (`assets/branding/ore-logo-white.svg`, rasterised through
-   `image::rasterize_svg` at the button's pixel size) opens the system menu with
-   Instances as its first row, then a separator and Lock store, Unlock store or
-   Create store by the lock state. Top-level labels are one
-   `widget::menu_bar_label` call each in later steps.
+   `image::rasterize_svg` at the mark's pixel size). This step first made the
+   logo open a system menu; step 3 replaced that.
    - Notes. The bar goes through ImGui's `BeginViewportSideBar`, which is the one
      place the top is inset: the viewport's `WorkPos` and `WorkSize` shrink by
      `theme::menu_bar_height` a frame after the bar first draws, so the dock
      space, `floating_size_for`, the card grid and Undock all read the inset
      without knowing about it. The cool bar still shrinks the dock space at the
-     bottom until step 8. Click opens, and while a popup is open the pointer on
+     bottom until step 9. Click opens, and while a popup is open the pointer on
      another entry moves it there (`widget::menu_after_entry` is the pure rule,
      `menu_bar_entry` applies it to ImGui). A click on an open entry closes it
      because ImGui closes the popup at the press, which the rule accounts for.
-     While the store is locked the menu has only the way in; there is no Quit
-     row because the app has no quit path of its own (the OS window close is
-     the only one), and no About or Undock all row yet (Undock all stays on the
-     cool bar until step 8). The logo's SVG is read once from `branding/` beside
-     the library (the cmake copy rule ships it with the splash) and reaches the
-     GL cache through a new `image_texture_source::svg`. The black variant is
-     unused, as the theme is dark only. Not checked in a real window.
-3. **The toolbar.** A floating capsule over the desk, not a fixed strip,
+     The logo's SVG is read once from `branding/` beside the library (the cmake
+     copy rule ships it with the splash) and reaches the GL cache through
+     `image_texture_source::svg`. The black variant is unused, as the theme is
+     dark only. Not checked in a real window.
+3. [x] **Traditional menus.** Decision change (user feedback on the reference):
+   the logo is a plain brand mark, not a menu, and the top-level menus lead
+   instead, as in the reference. The logo keeps an "ORE Studio" hover tooltip.
+   The bar is shaded with a gradient (decision 11) and holds, right of the
+   logo, FILE, VIEW, TOOLS and HELP, each one `widget::menu_bar_label` call.
+   - FILE: Instances, a separator, Lock store, Unlock store or Create store by
+     the lock state, a separator, Quit. Instances moves here from the system
+     menu.
+   - VIEW: Undock all, a disabled row until something is docked. The Windows
+     submenu is step 7's.
+   - TOOLS: Series browser, Accounts and, for a system administration session,
+     Command centre. They act on the first signed-in session and are disabled
+     when there is none. The CRM matrix has no row: it needs a party and a
+     matrix name, which only the series browser's picker can supply.
+   - HELP: About, a small window with the mark, the version from the CMake
+     project version (`HEDGR_VERSION`, `render::version_text`) and the licence
+     line.
+   - While the store is shut only FILE is drawn (the way in and Quit).
+   - Quit sets `menu_bar_result::quit_requested`; `workspace::exit_requested`
+     carries it to the frame loop, which sets its existing `exit_requested_`.
+   - Notes. The labels are as tall as the bar, so their popups open flush under
+     its edge (`menu_label` takes a height). The cool bar keeps its Instances and
+     Undock all entries until step 9. Not checked in a real window. The label
+     face is the proportional sans, as decision 6; the reference's monospace
+     is still to do.
+4. **The toolbar.** A floating capsule over the desk, not a fixed strip,
    styled like the reference's schematic toolbar: a rounded capsule with a purple
    outline holding a row of flat icon buttons, a small grip handle at its left
    that drags it, and the selected tool filled purple (`chart_tag_colour`). It
@@ -115,28 +135,28 @@ Each step is one PR, with tests, and leaves the app working.
    chart if one is wanted. Opening actions are momentary (no selected fill); only
    a real mode stays filled. Because it floats it takes no height from the
    work-area inset. It draws nothing while the store is locked.
-4. **The Instances panel.** An Instances menu opens a large panel: a filter box
+5. **The Instances panel.** An Instances menu opens a large panel: a filter box
    and a tile grid of instances with their photos from the image cache. A click
    opens or raises the Instances window on that instance. The catalogue
    shortcuts become a pinned row at the top of the panel (decision 5). Reuses
    the `entry_tooltip` text for hover.
-5. **Accounts.** An Accounts menu opens a panel with tenant headings and the
+6. **Accounts.** An Accounts menu opens a panel with tenant headings and the
    accounts under each, from `tenant_row` and the accounts table. A click opens
    the accounts window for that instance and account.
-6. **The Windows list.** A Windows menu lists open windows from `input.windows`
+7. **The Windows list.** A Windows menu lists open windows from `input.windows`
    grouped by `window_kind`. Click raises (reusing the `focus_instances`
    mechanism, which is a request read before the walk), the x closes through the
    close command, as the window's own close control does. Mini plot actions go
    here. It comes before the status bar (decision 9).
-7. **The status bar.** One viewport-wide bottom strip in the reference's look,
+8. **The status bar.** One viewport-wide bottom strip in the reference's look,
    carrying the message ladder from `status_bar.hpp` and the connection state
    once PR 94 lands. The dock space already subtracts a bar height; this swaps
    the shortcut bar's height for the status bar's, as a bottom side bar like the
    top bar, so the work area is inset by the bars alone.
-8. **Retire the cool bar.** Delete `shortcut_bar.cpp`, `shortcut_bar_result`,
+9. **Retire the cool bar.** Delete `shortcut_bar.cpp`, `shortcut_bar_result`,
    `shortcut_bar_height` and `shortcut_bar_tests.cpp`, move Undock all to the
-   system menu and Windows menu, and drop the ImCoolBar dependency. The pinned
-   shortcut row from step 4 already holds the catalogue shortcuts.
+   VIEW and Windows menus, and drop the ImCoolBar dependency. The pinned
+   shortcut row from step 5 already holds the catalogue shortcuts.
 
 ## The logo
 
@@ -144,11 +164,11 @@ Decided: the swirl only, as `assets/branding/ore-logo-white.svg`, with
 `ore-logo-black.svg` beside it. They are vectors, so the earlier plan to crop a
 PNG with a script is dropped: rasterise at the button's size through
 `image::rasterize_svg` (lunasvg is already linked) and upload one texture per
-size. The button opens the system menu, not the Instances window.
+size. It is a plain mark with no popup; the system menu is gone.
 
 ## Decisions
 
-Decided by the user: 1, 4, 5, 9 and 10. The rest are recommendations to confirm.
+Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to confirm.
 
 1. **Menu bar built on ImGui's main menu bar or on our own window.** Decided:
    our own fixed-height window, reusing `theme.hpp`, `widget/`, `cells.hpp`,
@@ -161,11 +181,12 @@ Decided by the user: 1, 4, 5, 9 and 10. The rest are recommendations to confirm.
    large panels are `BeginPopup` with a fixed size.
 3. **Opens on click or on hover.** Recommend click to open, then hover to move
    between top-level labels, as the reference does.
-4. **Logo button action.** Decided: the ORE swirl opens the system menu, whose
-   first row is Instances. A click that jumps straight to the Instances dialog
-   hides the rest of the menu.
+4. **Logo button action.** Decided, and revised: the ORE swirl is a plain brand
+   mark that opens nothing. It first opened a system menu with Instances at
+   the top; the user then chose the reference's layout, with traditional menus
+   (FILE, VIEW, TOOLS, HELP) and Instances under FILE.
 5. **Shortcuts.** Decided: the catalogue shortcuts become a pinned row at the
-   top of the Instances panel. The ImCoolBar tile bar is retired in step 8.
+   top of the Instances panel. The ImCoolBar tile bar is retired in step 9.
 6. **Label font.** Recommend the proportional sans first, with upper case and
    letter spacing (done in step 1), and a bundled monospace later, as the tab
    look does.
@@ -175,7 +196,7 @@ Decided by the user: 1, 4, 5, 9 and 10. The rest are recommendations to confirm.
 8. **Where the status bar sits relative to window foots.** Recommend keeping
    the window foots; they carry per-window identity the strip cannot.
 9. **Order of the Windows list and the status bar.** Decided: the Windows list
-   (step 6) before the status bar (step 7), because it replaces what the cool
+   (step 7) before the status bar (step 8), because it replaces what the cool
    bar did for raising windows.
 10. **Toolbar contents and behaviour.** Decided: it floats over the desk as a
     draggable capsule (the grip handle is its drag), not a fixed strip. It must
@@ -184,6 +205,10 @@ Decided by the user: 1, 4, 5, 9 and 10. The rest are recommendations to confirm.
     recommendation: open chart, open mini plot, CRM, accounts and undock all as
     momentary buttons, and no mode buttons until the chart has modes to choose
     between.
+11. **The bar's look.** Decided: a gradient, in the reference's dark navy violet.
+    It is two `theme::fill_gradient` fills over the window's own fill, one across
+    (lighter at the left) and one down (a black wash growing toward the
+    hairline), with the colours in `theme.hpp`.
 
 ## Risks
 

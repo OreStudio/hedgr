@@ -411,10 +411,25 @@ inline constexpr float menu_label_spacing_share = 0.08f;
 inline constexpr float menu_label_padding_x = 10.0f;
 
 /**
- * @brief The top bar's fill: flat and dark, with a hairline of @c menu_border
- * along its bottom edge.
+ * @brief The window fill under the top bar's gradient, and the colour it
+ * shows if the gradient is not drawn. A hairline of @c menu_border runs along
+ * the bar's bottom edge.
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_bar_surface() noexcept;
+
+/*
+ * The bar's tint is a navy violet that is lighter at the left, where the
+ * reference's logo sits, and deeper to the right, with a black wash that
+ * thickens toward the hairline.
+ */
+inline constexpr ImU32 menu_bar_gradient_left = IM_COL32(0x1d, 0x1a, 0x3a, 255);
+inline constexpr ImU32 menu_bar_gradient_right = IM_COL32(0x10, 0x12, 0x20, 255);
+inline constexpr ImU32 menu_bar_shade_top = IM_COL32(0, 0, 0, 0);
+inline constexpr ImU32 menu_bar_shade_bottom = IM_COL32(0, 0, 0, 0x58);
+inline constexpr gradient menu_bar_across{
+    .from = menu_bar_gradient_left, .to = menu_bar_gradient_right};
+inline constexpr gradient menu_bar_down{
+    .from = menu_bar_shade_top, .to = menu_bar_shade_bottom};
 
 /** @brief The height of the top bar, which is also the side of the logo button. */
 inline constexpr float menu_bar_height = 40.0f;

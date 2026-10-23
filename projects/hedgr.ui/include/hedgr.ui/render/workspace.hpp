@@ -91,6 +91,15 @@ public:
     void render(const render_input& input);
 
     /**
+     * @brief Whether the operator chose Quit, for the frame loop to leave on.
+     *
+     * Sticky once set, because the loop reads it after the frame that set it.
+     */
+    [[nodiscard]] bool exit_requested() const noexcept {
+        return exit_requested_;
+    }
+
+    /**
      * @brief The market-data choices every such window reads and writes.
      *
      * The frame owns them because they outlive the window that made them. The
@@ -209,6 +218,9 @@ private:
 
     /** @brief Whether any window was docked in the desk at the last frame's end. */
     bool desk_docked_ = false;
+
+    /** @brief Set by the top bar's Quit row. */
+    bool exit_requested_ = false;
 
     /** @brief The move asked for this frame, and the one to do this frame. */
     std::optional<dock_move> next_move_;
