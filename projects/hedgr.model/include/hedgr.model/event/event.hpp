@@ -201,8 +201,22 @@ struct event final {
     /** @brief How far back a history read asked, epoch ns, for series_history. */
     std::int64_t history_from_ns = 0;
 
-    /** @brief Whether the read stopped at its bound, for series_history. */
+    /**
+     * @brief Whether the reply was at the ceiling or a retry shortened the
+     * span, for series_points and series_history.
+     */
     bool history_truncated = false;
+
+    /** @brief The span the tick read answered, epoch ns, zero end for now. */
+    std::int64_t tick_from_ns = 0;
+    std::int64_t tick_to_ns = 0;
+
+    /** @brief The coordinate plotted, and how many the reply carried. */
+    std::string tick_coordinate;
+    std::size_t tick_coordinates = 0;
+
+    /** @brief How many ticks the reply carried, of every coordinate. */
+    std::size_t ticks_read = 0;
 
     /** @brief When the read finished, on the monotonic clock, for market events. */
     std::int64_t observed_at_ns = 0;

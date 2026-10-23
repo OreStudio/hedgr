@@ -102,26 +102,18 @@ boost::asio::awaitable<void> run_market(market_job job,
         } else {
             fact.message = describe(read.error());
         }
-    } else if (job.history) {
-        if (const auto read = client.market_series_history(job.series_id,
-                job.history_from_ns, job.history_to_ns,
-                static_cast<std::uint32_t>(domain::market_history_page),
-                static_cast<std::uint32_t>(domain::market_history_max_pages));
-            read) {
-            fact.history_truncated = read->truncated;
-            fact.points.reserve(read->points.size());
-            for (const auto& point : read->points) {
-                fact.points.push_back(domain::market_point{
-                    .at_ns = point.at_ns,
-                    .value = point.value});
-            }
-        } else {
-            fact.message = describe(read.error());
-        }
     } else {
-        if (const auto read = client.market_series_points(job.series_id,
-                job.limit);
-            read) {
+        const auto read = job.history
+            ? client.market_series_history(job.series_id, job.history_from_ns,
+                  job.history_to_ns)
+            : client.market_series_points(job.series_id);
+        if (read) {
+            fact.history_truncated = read->truncated;
+            fact.tick_from_ns = read->from_ns;
+            fact.tick_to_ns = read->to_ns;
+            fact.tick_coordinate = read->coordinate;
+            fact.tick_coordinates = read->coordinates;
+            fact.ticks_read = read->ticks;
             fact.points.reserve(read->points.size());
             for (const auto& point : read->points) {
                 fact.points.push_back(domain::market_point{
@@ -169,43 +161,41 @@ market_read_report report_market_read(const market_job& job,
             instance, fact.series.size())};
     }
 
-    if (job.history) {
-        const auto request = std::format("from_ns={} to_ns={}",
-            job.history_from_ns, job.history_to_ns);
-        if (!fact.message.empty()) {
-            return {true, std::format("Market history read for series '{}' "
-                                      "on '{}' failed ({}): {}",
-                job.series_id, instance, request, fact.message)};
-        }
-        if (fact.points.empty()) {
-            return {true, std::format("Market history for series '{}' on '{}' "
-                                      "is empty ({}): the deployment "
-                                      "returned no observations",
-                job.series_id, instance, request)};
-        }
-        return {false, std::format("Market history for series '{}' on '{}': "
-                                   "{} observations {}{}{}",
-            job.series_id, instance, fact.points.size(), request,
-            fact.history_truncated ? " (stopped at the page bound)"
-                                   : " (range read in full)",
-            bounds())};
+    const auto kind = job.history ? "history" : "first load";
+    const auto request = job.history
+        ? std::format("from_ns={} to_ns={}", job.history_from_ns,
+              job.history_to_ns)
+        : std::format("first load, span widened until {} points",
+              domain::market_first_load_min_points);
+    if (!fact.message.empty()) {
+        return {true, std::format("Market {} tick read for series '{}' on "
+                                  "'{}' failed ({}): {}",
+            kind, job.series_id, instance, request, fact.message)};
     }
 
-    const auto request = std::format("limit={} offset=0", job.limit);
-    if (!fact.message.empty()) {
-        return {true, std::format("Market points read for series '{}' on "
-                                  "'{}' failed ({}): {}",
-            job.series_id, instance, request, fact.message)};
-    }
+    const auto answered = std::format("from_ns={} to_ns={}", fact.tick_from_ns,
+        fact.tick_to_ns == 0 ? std::string{"now"}
+                             : std::to_string(fact.tick_to_ns));
     if (fact.points.empty()) {
-        return {true, std::format("Market points for series '{}' on '{}' are "
-                                  "empty ({}): the deployment returned no "
-                                  "observations",
-            job.series_id, instance, request)};
+        return {true, std::format("Market {} for series '{}' on '{}' is empty "
+                                  "({}): the deployment returned no ticks "
+                                  "({} ticks of {} coordinates)",
+            kind, job.series_id, instance, answered, fact.ticks_read,
+            fact.tick_coordinates)};
     }
-    return {false, std::format("Market points for series '{}' on '{}': {} "
-                               "points ({}){}",
-        job.series_id, instance, fact.points.size(), request, bounds())};
+    const auto several = fact.tick_coordinates > 1;
+    return {false,
+        std::format("Market {} for series '{}' on '{}': {} ticks of '{}' "
+                    "({}){}{}{}",
+            kind, job.series_id, instance, fact.points.size(),
+            fact.tick_coordinate, answered,
+            fact.history_truncated
+                ? ", the reply was at the ceiling or a retry shortened the span"
+                : ", span read in full",
+            several ? std::format(", plotted the first of {} coordinates",
+                                  fact.tick_coordinates)
+                    : std::string{},
+            bounds())};
 }
 
 void spawn_market_read(boost::asio::io_context& context, market_job job,

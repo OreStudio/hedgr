@@ -61,6 +61,16 @@ using hedgr::session::transport::session_errc;
             return "the session is not connected";
         case session_expired:
             return "the session has expired; sign in again";
+        case range_too_large:
+            return "the span holds more ticks than one reply carries";
+        case party_required:
+            return "this session has no party, so it can read no ticks";
+        case range_inverted:
+            return "the span ends before it starts";
+        case filter_too_large:
+            return "the read names more coordinates than the deployment allows";
+        case read_refused:
+            return "the deployment refused the tick read";
     }
     return "the session could not be used";
 }
@@ -114,6 +124,16 @@ std::string_view to_string(session_errc value) noexcept {
             return "closed";
         case session_expired:
             return "session_expired";
+        case range_too_large:
+            return "range_too_large";
+        case party_required:
+            return "party_required";
+        case range_inverted:
+            return "range_inverted";
+        case filter_too_large:
+            return "filter_too_large";
+        case read_refused:
+            return "read_refused";
     }
     return "closed";
 }

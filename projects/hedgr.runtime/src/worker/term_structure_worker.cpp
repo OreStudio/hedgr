@@ -24,6 +24,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <span>
 #include <cstdint>
 #include <utility>
 
@@ -84,12 +85,13 @@ void spawn_term_structure_read(boost::asio::io_context& context,
          *
          * The newest max_history points per pillar are enough. An instant
          * among the newest max_history overall has fewer than max_history
-         * newer instants, so each pillar's value at it is within that page.
+         * newer instants, so each pillar's value at it is within that tail.
+         * The read is of a span of ticks, so the tail is cut here.
          */
         constexpr std::uint32_t max_history = 20;
         pillar_history by_term;
         for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
-            const auto read = client.market_series_points(ids[i], max_history);
+            const auto read = client.market_series_tail(ids[i], max_history);
             if (!read) {
                 /*
                  * A failed pillar is not a curve with no observations. Saying
@@ -100,7 +102,9 @@ void spawn_term_structure_read(boost::asio::io_context& context,
                     ? read.error().detail : read.error().message;
                 return;
             }
-            for (const auto& point : read->points) {
+            const auto tail = read->points.size() > max_history
+                ? read->points.size() - max_history : std::size_t{0};
+            for (const auto& point : std::span(read->points).subspan(tail)) {
                 const auto tenor = tenors[i].empty() ? point.term : tenors[i];
                 by_term[tenor][point.at_ns] = point.value;
             }
