@@ -28,6 +28,7 @@
 #include "hedgr.ui/widget/password_meter.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
@@ -296,11 +297,14 @@ void workspace::render(const render_input& input) {
             logo_svg_ = read_text_file(path);
     }
     menu_bar_result top_bar;
-    draw_menu_bar(input, logo_svg_, menu_bar_, top_bar);
+    draw_menu_bar(input, logo_svg_, desk_docked_, menu_bar_, top_bar);
     if (top_bar.focus_instances)
         focus_instances_ = true;
     lock_control_.close_requested |= top_bar.lock_requested;
     lock_control_.open_requested |= top_bar.unlock_requested;
+    if (top_bar.undock_all)
+        next_move_ = dock_move{.all = true};
+    exit_requested_ |= top_bar.quit_requested;
 
     draw_dock_space(input);
 
@@ -795,8 +799,16 @@ void workspace::draw_dock_space(const render_input& input) {
     dock_space_ = ImGui::GetID("desk");
     if (move_ && move_->into_desk)
         move_->to = dock_target(dock_space_);
+    /*
+     * The dock nodes' tab bars are submitted inside this call and take the
+     * font in force, which is how their labels get the reference's monospace
+     * without a hook per tab. Windows docked here draw their bodies later, in
+     * their own Begin, so their text keeps the base face.
+     */
+    ImGui::PushFont(icon::mono_font());
     ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
         ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::PopFont();
     ImGui::End();
 }
 

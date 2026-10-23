@@ -26,7 +26,8 @@ if(NOT files)
 endif()
 
 add_library(${lib_target_name} ${files})
-target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY)
+target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY
+    HEDGR_VERSION="${PROJECT_VERSION}")
 # Vendored upstream code is kept byte-for-byte apart from its patch, so it is
 # not held to the project's warning set.
 set_source_files_properties(../third_party/imcoolbar/ImCoolBar.cpp
@@ -87,6 +88,23 @@ add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMENT "Copying the icon sheet to publish/share/hedgr.ui/")
 
 install(FILES ${icon_sheet} DESTINATION share/hedgr.ui)
+
+# The menus' monospace face (JetBrains Mono, SIL OFL 1.1) and its licence go the
+# same way, under share/hedgr.ui/fonts, where the loader looks beside the icon
+# sheet. A missing file only costs the menus their face; the loader falls back to
+# the base font.
+set(mono_font_files
+    "${CMAKE_SOURCE_DIR}/assets/fonts/JetBrainsMono-Regular.ttf"
+    "${CMAKE_SOURCE_DIR}/assets/fonts/JetBrainsMono-OFL.txt")
+add_custom_command(TARGET ${lib_target_name} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/fonts"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${mono_font_files}
+        "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/fonts"
+    COMMENT "Copying the monospace font to publish/share/hedgr.ui/fonts/")
+
+install(FILES ${mono_font_files} DESTINATION share/hedgr.ui/fonts)
 
 # Copy the per-environment instance icons to the publish directory too, so a
 # deployed bundle can draw an environment's picture on a host that has no

@@ -106,8 +106,12 @@ HEDGR_UI_EXPORT void menu_heading(const char* text);
  * Bright while hovered or while its menu is @p open, dim otherwise, with no
  * fill. It is an item for navigation too. The caller opens the popup on the
  * click and anchors it at the item's lower left.
+ *
+ * The item is @p height tall, or one frame tall when that is zero. A bar that
+ * wants its popups flush under its own edge passes its own height.
  */
-HEDGR_UI_EXPORT bool menu_label(const char* text, bool open);
+HEDGR_UI_EXPORT bool menu_label(const char* text, bool open,
+    float height = 0.0f);
 
 }
 

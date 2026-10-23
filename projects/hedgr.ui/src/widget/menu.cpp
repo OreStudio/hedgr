@@ -19,6 +19,7 @@
  */
 #include "hedgr.ui/widget/menu.hpp"
 
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -103,11 +104,15 @@ menu_popup::menu_popup(const char* id, float width) {
         ImGui::SetNextWindowSizeConstraints(
             ImVec2(theme::menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
     open_ = ImGui::BeginPopup(id);
+    if (open_)
+        ImGui::PushFont(icon::mono_font());
 }
 
 menu_popup::~menu_popup() {
-    if (open_)
+    if (open_) {
+        ImGui::PopFont();
         ImGui::EndPopup();
+    }
     ImGui::PopStyleColor(style_colours_pushed);
     ImGui::PopStyleVar(style_vars_pushed);
 }
@@ -181,12 +186,13 @@ void menu_heading(const char* text) {
         text, ImGui::GetColorU32(ImGuiCol_TextDisabled));
 }
 
-bool menu_label(const char* text, bool open) {
+bool menu_label(const char* text, bool open, float height) {
+    ImGui::PushFont(icon::mono_font());
     const float width = draw_upper(nullptr, ImVec2(0.0f, 0.0f), text, 0)
         + 2.0f * theme::menu_label_padding_x;
     ImGui::PushID(text);
     const bool pressed = ImGui::InvisibleButton("##label",
-        ImVec2(width, ImGui::GetFrameHeight()));
+        ImVec2(width, height > 0.0f ? height : ImGui::GetFrameHeight()));
     ImGui::PopID();
     const ImVec2 min = ImGui::GetItemRectMin();
     const bool lit = open || ImGui::IsItemHovered();
@@ -195,6 +201,7 @@ bool menu_label(const char* text, bool open) {
             min.y + (ImGui::GetItemRectSize().y - ImGui::GetFontSize()) * 0.5f),
         text,
         lit ? ImGui::GetColorU32(ImGuiCol_Text) : u32(theme::dim_text()));
+    ImGui::PopFont();
     return pressed;
 }
 

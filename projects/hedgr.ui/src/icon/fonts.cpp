@@ -32,6 +32,8 @@
 
 namespace {
 
+constexpr const char* bundled_mono_file = "JetBrainsMono-Regular.ttf";
+
 /**
  * @brief The directory holding the running executable.
  *
@@ -97,6 +99,25 @@ std::filesystem::path instance_icon_directory_path() {
         candidates.push_back(exe_dir / "instances");
     }
     candidates.push_back("assets/instances");
+    return first_existing(candidates);
+}
+
+/**
+ * @brief Where the bundled monospace face lives, under @p exe_dir or @p root.
+ *
+ * Installed beside the library under share/hedgr.ui/fonts, as the icon sheet
+ * is, or, for a run out of the source tree, in its assets directory.
+ */
+std::filesystem::path find_mono_font(
+    const std::filesystem::path& exe_dir, const std::filesystem::path& root) {
+    std::vector<std::filesystem::path> candidates;
+    if (!exe_dir.empty()) {
+        candidates.push_back(exe_dir.parent_path() / "share" / "hedgr.ui"
+            / "fonts" / bundled_mono_file);
+        candidates.push_back(exe_dir / "fonts" / bundled_mono_file);
+    }
+    if (!root.empty())
+        candidates.push_back(root / "assets" / "fonts" / bundled_mono_file);
     return first_existing(candidates);
 }
 
@@ -235,6 +256,7 @@ namespace {
 namespace {
 
 ImFont* numeric_font_instance = nullptr;
+ImFont* mono_font_instance = nullptr;
 ImFont* bold_font_instance = nullptr;
 
 }
@@ -247,6 +269,19 @@ ImFont* numeric_font() {
         && io.Fonts->Fonts.contains(numeric_font_instance))
         return numeric_font_instance;
     return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
+}
+
+ImFont* mono_font() {
+    ImGuiIO& io = ImGui::GetIO();
+    if (mono_font_instance != nullptr
+        && io.Fonts->Fonts.contains(mono_font_instance))
+        return mono_font_instance;
+    return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
+}
+
+std::filesystem::path mono_font_path(const std::filesystem::path& exe_dir,
+    const std::filesystem::path& source_root) {
+    return find_mono_font(exe_dir, source_root);
 }
 
 ImFont* bold_font() {
@@ -297,7 +332,25 @@ void load_ui_fonts(float base_size_px) {
             io.Fonts->AddFontFromFileTTF(bold.string().c_str(), base_size_px);
     }
 
-    const auto numeric = numeric_font_path();
+    /*
+     * The bundled monospace is the menus' and tab labels' face. It doubles as
+     * the numeric face when it is there, so one file is one atlas entry, and
+     * the installed monospaces below remain the numbers' fallback.
+     */
+    const auto mono = find_mono_font(executable_directory(), ".");
+    if (!mono.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Loaded the monospace font from " << mono.string();
+        mono_font_instance =
+            io.Fonts->AddFontFromFileTTF(mono.string().c_str(), base_size_px);
+        numeric_font_instance = mono_font_instance;
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The bundled monospace font is missing; menus use the base font";
+    }
+
+    const auto numeric = mono.empty() ? numeric_font_path()
+                                      : std::filesystem::path{};
     if (!numeric.empty()) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Loaded the numeric font from " << numeric.string();

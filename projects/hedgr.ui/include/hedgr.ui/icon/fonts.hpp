@@ -56,6 +56,24 @@ HEDGR_UI_EXPORT void load_ui_fonts(float base_size_px);
 [[nodiscard]] HEDGR_UI_EXPORT ImFont* numeric_font();
 
 /**
+ * @brief The bundled monospace face the menus and tab labels are set in, or the
+ * base face when it is not installed.
+ *
+ * JetBrains Mono, as the reference's top bar and tabs are. The base font stays
+ * the body's; only the menu chrome asks for this one.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImFont* mono_font();
+
+/**
+ * @brief Where the bundled monospace file is, looking beside @p exe_dir as the
+ * icon sheet is looked for and under @p source_root/assets/fonts, or an empty
+ * path when it is in neither.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::filesystem::path mono_font_path(
+    const std::filesystem::path& exe_dir,
+    const std::filesystem::path& source_root);
+
+/**
  * @brief The bold weight of the base face, or the base face when there is none.
  *
  * Found beside the base face on disk, so a value in bold is the same family as

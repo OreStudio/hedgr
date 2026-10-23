@@ -855,6 +855,8 @@ void application::render_loop(GLFWwindow* window) {
         textures_.begin_frame();
         workspace_.render(input);
         textures_.end_frame();
+        if (workspace_.exit_requested())
+            exit_requested_ = true;
 
         /*
          * After the workspace, so the splash is the last thing submitted. It is

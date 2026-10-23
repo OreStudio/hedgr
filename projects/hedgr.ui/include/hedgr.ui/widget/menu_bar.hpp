@@ -30,13 +30,16 @@ namespace hedgr::ui::widget {
  *
  * One value for the whole bar, because at most one popup hangs off it. The
  * index is the entry's place in the bar, which the caller picks and keeps
- * stable; the logo is 0.
+ * stable.
  */
 struct menu_bar_state final {
     /** @brief The value of @c open when no menu is. */
     static constexpr int none = -1;
 
     int open = none;
+
+    /** @brief Whether the About window is showing. */
+    bool about_open = false;
 };
 
 /**
@@ -80,11 +83,12 @@ HEDGR_UI_EXPORT bool menu_bar_entry(menu_bar_state& state, int entry,
  * @brief A top-level label and its menu: the one call a bar needs per menu.
  *
  * @p rows draws the menu's rows and runs only while the menu is open.
+ * @p height is the label's height, as for @c menu_label.
  */
 template<class Rows>
 void menu_bar_label(menu_bar_state& state, int entry, const char* text,
-    Rows&& rows) {
-    const bool pressed = menu_label(text, state.open == entry);
+    Rows&& rows, float height = 0.0f) {
+    const bool pressed = menu_label(text, state.open == entry, height);
     if (menu_bar_entry(state, entry, text, pressed)) {
         const menu_popup popup(text);
         if (popup)

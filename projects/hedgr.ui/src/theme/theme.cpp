@@ -23,6 +23,7 @@
 #include "imgui_internal.h"
 #include "implot.h"
 #include <algorithm>
+#include <cmath>
 #include <span>
 
 namespace {
@@ -161,7 +162,6 @@ const ImVec4 tab_dimmed_active = colour(0x181a28ff); // derived
  */
 const ImVec4 menu_fill = colour(0x0b0e14ff); // derived
 const ImVec4 menu_edge = colour(0x262a36ff); // derived
-const ImVec4 menu_bar_fill = colour(0x10131bff); // derived
 constexpr float menu_hover_alpha = 0.55f; // derived
 const ImVec4 menu_active = colour(0x8d6cf0ff); // derived
 
@@ -410,8 +410,9 @@ ImVec4 menu_surface() noexcept {
     return menu_fill;
 }
 
-ImVec4 menu_bar_surface() noexcept {
-    return menu_bar_fill;
+ImVec4 menu_bar_edge() noexcept {
+    return ImVec4(menu_edge.x, menu_edge.y, menu_edge.z,
+        menu_edge.w * menu_bar_alpha);
 }
 
 ImVec4 menu_border() noexcept {
@@ -561,6 +562,65 @@ void fill_gradient(ImDrawList* draw, ImVec2 min, ImVec2 max,
         shade(added, min.y, max.y, colours, direction);
     else
         shade(added, min.x, max.x, colours, direction);
+}
+
+ImU32 stops_colour(std::span<const gradient_stop> stops, float t) noexcept {
+    if (stops.empty())
+        return 0;
+    if (t <= stops.front().at)
+        return stops.front().colour;
+    for (std::size_t i = 1; i < stops.size(); ++i) {
+        if (t > stops[i].at)
+            continue;
+        const gradient_stop& a = stops[i - 1];
+        const gradient_stop& b = stops[i];
+        const float u = b.at > a.at ? (t - a.at) / (b.at - a.at) : 1.0f;
+        const auto lerp = [&](unsigned int shift) {
+            return mix(channel(a.colour, shift), channel(b.colour, shift), u);
+        };
+        return IM_COL32(lerp(IM_COL32_R_SHIFT), lerp(IM_COL32_G_SHIFT),
+            lerp(IM_COL32_B_SHIFT), lerp(IM_COL32_A_SHIFT));
+    }
+    return stops.back().colour;
+}
+
+void fill_stops(ImDrawList* draw, ImVec2 min, ImVec2 max,
+    std::span<const gradient_stop> stops, float rounding) {
+    if (stops.size() < 2 || max.x <= min.x)
+        return;
+    /* Past the clip by more than an antialiased fringe is wide. */
+    constexpr float overlap = 2.0f;
+    const float width = max.x - min.x;
+    const std::size_t last = stops.size() - 2;
+    for (std::size_t i = 0; i <= last; ++i) {
+        const float from = i == 0 ? min.x
+            : std::round(min.x + stops[i].at * width);
+        const float to = i == last ? max.x
+            : std::round(min.x + stops[i + 1].at * width);
+        const ImVec2 clip_min(i == 0 ? from - overlap : from, min.y - overlap);
+        const ImVec2 clip_max(i == last ? to + overlap : to, max.y + overlap);
+        ImDrawFlags corners = ImDrawFlags_RoundCornersNone;
+        if (i == 0)
+            corners |= ImDrawFlags_RoundCornersLeft;
+        if (i == last)
+            corners |= ImDrawFlags_RoundCornersRight;
+        draw->PushClipRect(clip_min, clip_max, true);
+        const int first = draw->VtxBuffer.Size;
+        draw->AddRectFilled(
+            ImVec2(i == 0 ? min.x : from - overlap, min.y),
+            ImVec2(i == last ? max.x : to + overlap, max.y),
+            IM_COL32_WHITE, rounding, corners);
+        for (int v = first; v < draw->VtxBuffer.Size; ++v) {
+            ImDrawVert& vertex = draw->VtxBuffer[v];
+            const ImU32 colour = stops_colour(
+                stops, (vertex.pos.x - min.x) / width);
+            vertex.col = (colour & ~IM_COL32_A_MASK)
+                | ((channel(colour, IM_COL32_A_SHIFT)
+                       * channel(vertex.col, IM_COL32_A_SHIFT) / 255u)
+                    << IM_COL32_A_SHIFT);
+        }
+        draw->PopClipRect();
+    }
 }
 
 background_mark mark_background() {

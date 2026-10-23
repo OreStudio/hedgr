@@ -39,7 +39,16 @@ struct menu_bar_result final {
 
     /** @brief The password form should open, to unlock or to create. */
     bool unlock_requested = false;
+
+    /** @brief Every docked window should float again. */
+    bool undock_all = false;
+
+    /** @brief The operator asked to leave the application. */
+    bool quit_requested = false;
 };
+
+/** @brief The project version this build was configured with. */
+[[nodiscard]] HEDGR_UI_EXPORT std::string_view version_text() noexcept;
 
 /**
  * @brief Where the logo artwork lives at run time, or empty when it is nowhere.
@@ -61,13 +70,16 @@ struct menu_bar_result final {
  * for every window and the dock space alike: this is the one place the top is
  * inset. ImGui applies the inset a frame after the bar is first drawn.
  *
- * It holds the logo, which opens the system menu. @p logo_svg is the logo's
- * document and may be empty, which leaves the button without its swirl. A new
- * top-level menu is one more @c widget::menu_bar_label call in here.
+ * The bar is shaded with a gradient, drawn into ImGui's own window fill. It
+ * holds the logo, a plain brand mark that opens nothing, then the menus FILE,
+ * VIEW, TOOLS and HELP, one @c widget::menu_bar_label call each. While the
+ * store is shut only FILE is there. @p logo_svg is the logo's document and may
+ * be empty, which leaves the mark blank. @p desk_docked says whether anything
+ * is docked, which is what lets Undock all be chosen.
  */
 HEDGR_UI_EXPORT void draw_menu_bar(const render_input& input,
-    std::string_view logo_svg, widget::menu_bar_state& state,
-    menu_bar_result& result);
+    std::string_view logo_svg, bool desk_docked,
+    widget::menu_bar_state& state, menu_bar_result& result);
 
 }
 
