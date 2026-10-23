@@ -28,6 +28,8 @@
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "implot.h"
+#include "implot_internal.h"
 #include "software_raster.hpp"
 #include <algorithm>
 #include <catch2/catch_all.hpp>
@@ -543,6 +545,194 @@ TEST_CASE("a right click on a chart's plot opens no menu, docked or floating",
         REQUIRE(plot != nullptr);
         click(chart, centre_of(plot), ImGuiMouseButton_Right);
         CHECK(open_popup() == nullptr);
+    }
+}
+
+namespace {
+
+/** @brief The id of the header's period segment @p option, as ImGui hashes it. */
+ImGuiID period_segment_id(int option) {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    ImGuiID id = ImHashStr("chart", 0, frame->ID);
+    id = ImHashStr("period", 0, id);
+    id = ImHashData(&option, sizeof(option), id);
+    return ImHashStr(render::chart_span_labels[static_cast<std::size_t>(option)],
+        0, id);
+}
+
+/** @brief The id of the header's dropdown button. */
+ImGuiID period_more_id() {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    ImGuiID id = ImHashStr("chart", 0, frame->ID);
+    id = ImHashStr("period", 0, id);
+    id = ImHashStr("more", 0, id);
+    return ImHashStr("##more", 0, id);
+}
+
+/**
+ * @brief The x at which the pointer is over the item @p wanted in the header.
+ *
+ * Sweeps the header row from its right end, because the header's controls are
+ * placed by the layout and the test should not repeat it.
+ */
+float header_x_of(chart_fixture& chart, ImGuiID wanted) {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    REQUIRE(frame != nullptr);
+    const float y = frame->DC.CursorStartPos.y + ImGui::GetFrameHeight() * 0.5f;
+    for (float x = 990.0f; x > 0.0f; x -= 3.0f) {
+        hover(chart, ImVec2(x, y));
+        if (ImGui::GetCurrentContext()->HoveredId == wanted)
+            return x;
+    }
+    FAIL("no header item under the pointer");
+    return 0.0f;
+}
+
+float header_y() {
+    const ImGuiWindow* frame = ImGui::FindWindowByName("frame");
+    return frame->DC.CursorStartPos.y + ImGui::GetFrameHeight() * 0.5f;
+}
+
+}
+
+TEST_CASE("a period chosen in the header changes the span and is saved",
+    "[look][chart][period]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    static_cast<void>(chart.desk.commands.drain());
+    REQUIRE(chart.state.market_view.chart_span == 3);
+
+    const float x = header_x_of(chart, period_segment_id(0));
+    click(chart, ImVec2(x, header_y()), ImGuiMouseButton_Left);
+
+    CHECK(chart.state.market_view.chart_span == 0);
+    CHECK(chart.desk.market_view.chart_span == 0);
+    std::vector<model::command::command> saved;
+    for (auto& c : chart.desk.commands.drain()) {
+        if (c.kind == model::command::command_kind::configure_chart)
+            saved.push_back(std::move(c));
+    }
+    REQUIRE(saved.size() == 1);
+    CHECK(saved[0].window_id == "w");
+    CHECK(saved[0].chart_view.span_ns == 60'000'000'000);
+}
+
+TEST_CASE("the header's dropdown lists the periods it has no segment for",
+    "[look][chart][period]") {
+    chart_fixture chart{0.0001};
+    settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+    static_cast<void>(chart.desk.commands.drain());
+
+    const float x = header_x_of(chart, period_more_id());
+    click(chart, ImVec2(x, header_y()), ImGuiMouseButton_Left);
+    const ImGuiWindow* list = open_popup();
+    REQUIRE(list != nullptr);
+    chart.draw(newest_at_ns);
+
+    /* The first row is 5m, the one period with no segment besides All. */
+    const ImVec2 first(list->Pos.x + list->Size.x * 0.5f,
+        list->Pos.y + ImGui::GetStyle().WindowPadding.y
+            + ImGui::GetTextLineHeight() * 0.5f);
+    click(chart, first, ImGuiMouseButton_Left);
+    CHECK(chart.state.market_view.chart_span == 1);
+    std::vector<model::command::command> saved;
+    for (auto& c : chart.desk.commands.drain()) {
+        if (c.kind == model::command::command_kind::configure_chart)
+            saved.push_back(std::move(c));
+    }
+    REQUIRE(saved.size() == 1);
+    CHECK(saved[0].chart_view.span_ns == 300'000'000'000);
+}
+
+TEST_CASE("a chart's foot has no period combo", "[look][chart][period]") {
+    chart_fixture chart{0.0001};
+    chart.state.market_view.chart_span = render::chart_span_index(900'000'000'000);
+    std::string text;
+    hedgr::testing::frame([&] {
+        ImGui::LogToBuffer();
+        auto input = chart.desk.input();
+        input.wall_now_ns = newest_at_ns;
+        input.now_ns = newest_at_ns;
+        render::render_chart(chart.window, input, chart.state, chart.status,
+            chart.lock);
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
+    });
+    CHECK(text.find("Line") != std::string::npos);
+    CHECK(text.find("EMA off") != std::string::npos);
+    CHECK(text.find("15m") == std::string::npos);
+}
+
+namespace {
+
+/** @brief The vertices the chart's plot area drew in @p colour or its fade. */
+std::vector<ImDrawVert> plot_vertices_of(ImU32 colour) {
+    const ImGuiWindow* plot = active_child("##plot-area");
+    REQUIRE(plot != nullptr);
+    std::vector<ImDrawVert> found;
+    for (const auto& v : plot->DrawList->VtxBuffer) {
+        if (v.col == colour || v.col == (colour & ~IM_COL32_A_MASK))
+            found.push_back(v);
+    }
+    return found;
+}
+
+}
+
+TEST_CASE("a chart's plot draws no border and no frame",
+    "[look][chart][plot]") {
+    for (const int style : {1, 0}) {
+        chart_fixture chart{0.0001};
+        chart.state.market_view.chart_style = style;
+        settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+        CHECK(plot_vertices_of(ImGui::GetColorU32(ImGuiCol_Border)).empty());
+        CHECK(plot_vertices_of(ImGui::GetColorU32(ImGuiCol_FrameBg)).empty());
+    }
+}
+
+TEST_CASE("a chart's grid is faint dashed rules across the plot and no vertical ones",
+    "[look][chart][plot]") {
+    for (const int style : {1, 0}) {
+        chart_fixture chart{0.0001};
+        chart.state.market_view.chart_style = style;
+        settled([&] { chart.draw(newest_at_ns); }, frame_vertices);
+        const auto grid = plot_vertices_of(theme::plot_grid_colour);
+        REQUIRE_FALSE(grid.empty());
+
+        /* Vertices within two pixels of one another in y are one rule. */
+        auto by_y = grid;
+        std::ranges::sort(by_y, {}, [](const ImDrawVert& v) { return v.pos.y; });
+        std::vector<float> extents;
+        std::size_t begin = 0;
+        for (std::size_t i = 1; i <= by_y.size(); ++i) {
+            if (i < by_y.size() && by_y[i].pos.y - by_y[i - 1].pos.y <= 2.0f)
+                continue;
+            float low = FLT_MAX;
+            float high = -FLT_MAX;
+            for (std::size_t k = begin; k < i; ++k) {
+                low = std::min(low, by_y[k].pos.x);
+                high = std::max(high, by_y[k].pos.x);
+            }
+            extents.push_back(high - low);
+            begin = i;
+        }
+        CHECK(extents.size() >= 3);
+        CHECK(*std::ranges::max_element(extents) > 200.0f);
+
+        /*
+         * ImPlot's own rules are solid and run along both axes, so neither
+         * axis may draw them, and neither may mark its ticks.
+         */
+        const ImGuiWindow* plot_area = active_child("##plot-area");
+        const ImPlotPlot* series = ImPlot::GetCurrentContext()->Plots.GetByKey(
+            ImHashStr("##series", 0, plot_area->ID));
+        REQUIRE(series != nullptr);
+        for (const ImAxis axis : {ImAxis_X1, ImAxis_Y1}) {
+            CHECK_FALSE(series->Axes[axis].HasGridLines());
+            CHECK_FALSE(series->Axes[axis].HasTickMarks());
+        }
     }
 }
 

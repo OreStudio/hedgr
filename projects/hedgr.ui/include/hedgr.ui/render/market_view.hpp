@@ -46,7 +46,7 @@ struct chart_span final {
     std::int64_t ns;
 };
 
-/** @brief The spans the period combo offers, in the order it lists them. */
+/** @brief The spans the period selector offers, in the order it lists them. */
 inline constexpr std::array<chart_span, 6> chart_spans{{
     {"1m", "1m", "1M", std::int64_t{1} * 60 * 1'000'000'000},
     {"5m", "5m", "5M", std::int64_t{5} * 60 * 1'000'000'000},
@@ -56,7 +56,7 @@ inline constexpr std::array<chart_span, 6> chart_spans{{
     {"All", "all", "All", 0},
 }};
 
-/** @brief The period combo's labels, index for index with @c chart_spans. */
+/** @brief The period selector's labels, index for index with @c chart_spans. */
 inline constexpr std::array<const char*, chart_spans.size()> chart_span_labels
     = [] {
           std::array<const char*, chart_spans.size()> labels{};
@@ -64,6 +64,12 @@ inline constexpr std::array<const char*, chart_spans.size()> chart_span_labels
               labels[i] = chart_spans[i].label;
           return labels;
       }();
+
+/**
+ * @brief The spans a chart header draws as segments, as indices into
+ * @c chart_spans. The rest are in the header's dropdown.
+ */
+inline constexpr std::array<int, 4> chart_span_shown{0, 2, 3, 4};
 
 /** @brief The chart styles the style combo offers. */
 inline constexpr std::array<const char*, 2> chart_style_labels{
