@@ -21,6 +21,7 @@
 
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
+#include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -176,6 +177,58 @@ constexpr float notice_height = 200.0f;
 }
 
 namespace hedgr::ui::render {
+
+namespace {
+
+/** @brief The grid cards snap to, anchored at the desk's work area. */
+[[nodiscard]] card_grid card_grid_for(const ImGuiViewport& viewport) noexcept {
+    const ImVec2 pitch(
+        hedgr::ui::theme::mini_plot_width + hedgr::ui::theme::mini_plot_grid_gap,
+        hedgr::ui::theme::mini_plot_height + hedgr::ui::theme::mini_plot_grid_gap);
+    const auto fit = [](float room, float pitch_along) {
+        return std::max(static_cast<int>(std::floor(
+                            (room + hedgr::ui::theme::mini_plot_grid_gap)
+                            / pitch_along)),
+            1);
+    };
+    return card_grid{viewport.WorkPos, pitch,
+        fit(viewport.WorkSize.x, pitch.x), fit(viewport.WorkSize.y, pitch.y)};
+}
+
+}
+
+void workspace::occupied_cards(const card_grid& grid,
+    hedgr::model::state::window_handle self, const render_input& input) {
+    occupied_cells_.clear();
+    const auto& layout = input.windows.layout();
+    const auto kinds = input.windows.kind_column();
+    const auto open = input.windows.open_column();
+    for (std::size_t index = 0; index < layout.alive.size(); ++index) {
+        if (layout.alive[index] == 0 || open[index] == 0
+            || static_cast<hedgr::model::domain::window_kind>(kinds[index])
+                != hedgr::model::domain::window_kind::mini_plot
+            || index == self.index)
+            continue;
+        const hedgr::model::state::window_handle other{
+            static_cast<std::uint32_t>(index), layout.generation[index]};
+        card_key_ = "###";
+        card_key_ += input.windows.id(other);
+        /*
+         * A card not begun yet this frame is read from its saved settings, so
+         * a card opened before the rest of a restored desk is drawn still
+         * misses their cells.
+         */
+        if (const ImGuiWindow* w = ImGui::FindWindowByName(card_key_.c_str())) {
+            occupied_cells_.push_back(cell_for(grid, w->Pos));
+        } else if (const ImGuiWindowSettings* saved =
+                       ImGui::FindWindowSettingsByID(
+                           ImHashStr(card_key_.c_str()))) {
+            occupied_cells_.push_back(cell_for(grid,
+                ImVec2(static_cast<float>(saved->Pos.x),
+                    static_cast<float>(saved->Pos.y))));
+        }
+    }
+}
 
 workspace::workspace() = default;
 
@@ -421,11 +474,10 @@ void workspace::render(const render_input& input) {
         begin_label_ += "###";
         begin_label_ += input.windows.id(handle);
 
-        ImGui::SetNextWindowSizeConstraints(
-            kind == hedgr::model::domain::window_kind::mini_plot
-                ? ImVec2(64.0f, 64.0f)
-                : ImVec2(360.0f, 220.0f),
-            ImVec2(FLT_MAX, FLT_MAX));
+        const bool card = kind == hedgr::model::domain::window_kind::mini_plot;
+        if (!card)
+            ImGui::SetNextWindowSizeConstraints(ImVec2(360.0f, 220.0f),
+                ImVec2(FLT_MAX, FLT_MAX));
 
         /*
          * The size a window opens at, once. The browser surfaces are the reason
@@ -440,8 +492,6 @@ void workspace::render(const render_input& input) {
             ? ImVec2(1180.0f, 820.0f)
             : kind == hedgr::model::domain::window_kind::command_centre
             ? ImVec2(1120.0f, 760.0f)
-            : kind == hedgr::model::domain::window_kind::mini_plot
-            ? ImVec2(240.0f, 180.0f)
             : kind == hedgr::model::domain::window_kind::chart
             ? ImVec2(1000.0f, 620.0f)
             : kind == hedgr::model::domain::window_kind::crm_matrix
@@ -509,7 +559,6 @@ void workspace::render(const render_input& input) {
          * because this loop owns the Begin call and a renderer only fills the
          * body.
          */
-        const bool card = kind == hedgr::model::domain::window_kind::mini_plot;
         ImGuiWindowFlags window_flags =
             kind == hedgr::model::domain::window_kind::command_centre
                 || kind == hedgr::model::domain::window_kind::workspace
@@ -518,33 +567,34 @@ void workspace::render(const render_input& input) {
         /*
          * A card is its own tile, so its window has no padding, border or
          * background to show round it, and no title bar either. The body is the
-         * handle: a drag on it moves the card and docks it, and the context menu
-         * closes it. Pushed only around Begin because the window reads these
-         * when it is begun.
+         * handle: a drag on it moves the card, and the close control and the
+         * context menu close it. Pushed only around Begin because the window
+         * reads these when it is begun.
+         *
+         * A card never docks and never resizes. Dock nodes share their space,
+         * so a tile split off another shrinks both and docking cannot hold a
+         * fixed size. A card floats at one size and snaps to a grid instead.
+         * NoDocking also undocks a card whose saved settings say it was docked.
          */
         if (card) {
-            /*
-             * Cards dock like any window, and a node of them is a grid. Its tab
-             * bar is hidden (the set flag also stops the corner triangle from
-             * showing it again), so every card stays on screen with the whole
-             * node as its tile. For the same reason a card never tabs over
-             * another window and nothing tabs over it: a drop always splits,
-             * and over the empty desk centre it splits at the edge rather than
-             * filling the desk. The tile then takes the card's own size, which
-             * ImGui reads from the dragged window. The class is unclassed, so
-             * a card still docks beside a chart, and a chart's node keeps its
-             * tabs.
-             */
-            ImGuiWindowClass tile;
-            tile.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_HiddenTabBar
-                | ImGuiDockNodeFlags_NoDockingOverMe
-                | ImGuiDockNodeFlags_NoDockingOverOther
-                | ImGuiDockNodeFlags_NoDockingOverEmpty;
-            ImGui::SetNextWindowClass(&tile);
             window_flags |= ImGuiWindowFlags_NoTitleBar
+                | ImGuiWindowFlags_NoDocking
+                | ImGuiWindowFlags_NoResize
                 | ImGuiWindowFlags_NoBackground
                 | ImGuiWindowFlags_NoScrollbar
                 | ImGuiWindowFlags_NoScrollWithMouse;
+            ImGui::SetNextWindowSize(ImVec2(hedgr::ui::theme::mini_plot_width,
+                hedgr::ui::theme::mini_plot_height));
+            if (const ImGuiViewport& viewport = *ImGui::GetMainViewport();
+                !ImGui::FindWindowByName(begin_label_.c_str())
+                && ImGui::FindWindowSettingsByID(
+                       ImHashStr(begin_label_.c_str())) == nullptr) {
+                /* First open: the first cell no other card holds. */
+                const auto grid = card_grid_for(viewport);
+                occupied_cards(grid, handle, input);
+                ImGui::SetNextWindowPos(cell_position(grid,
+                    first_free_cell(grid, occupied_cells_)));
+            }
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -584,10 +634,23 @@ void workspace::render(const render_input& input) {
             draw(handle, input, state, status_, lock_control_);
 
         /*
-         * A card has no title bar and no tab, so no close button, and a click
-         * on it opens the chart, so the way to close it is its context menu,
-         * floating or docked.
+         * A card has no title bar, so no close button. Its close control shows
+         * on hover, and the context menu closes it too.
          */
+        if (card) {
+            ImGuiWindow* const window = ImGui::GetCurrentWindow();
+            const bool moving = ImGui::GetCurrentContext()->MovingWindow
+                == window;
+            if (state.was_moving && !moving) {
+                /* The drag ended: land on the grid, off any other card. */
+                const auto grid = card_grid_for(*ImGui::GetMainViewport());
+                occupied_cards(grid, handle, input);
+                ImGui::SetWindowPos(window,
+                    snap_position(grid, window->Pos, occupied_cells_),
+                    ImGuiCond_Always);
+            }
+            state.was_moving = moving;
+        }
         if (card
             && ImGui::BeginPopupContextWindow("##card-menu",
                 ImGuiPopupFlags_MouseButtonRight)) {
@@ -601,6 +664,9 @@ void workspace::render(const render_input& input) {
             break;
         case tile_request::dock:
             next_move_ = dock_move{.window = handle, .into_desk = true};
+            break;
+        case tile_request::close:
+            keep_open = false;
             break;
         }
 

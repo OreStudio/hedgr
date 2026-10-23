@@ -60,6 +60,13 @@ struct open_desk final {
         next_x += width + 40.0f;
     }
 
+    void place_at(const std::string& id, float x, float y,
+        const char* extra = "") {
+        settings += std::format(
+            "[Window][###{}]\nPos={},{}\nSize=240,180\n{}\n", id, x, y,
+            extra);
+    }
+
     void start() {
         ImGui::LoadIniSettingsFromMemory(settings.c_str(), settings.size());
         settle();
@@ -290,9 +297,9 @@ TEST_CASE("dragging on a card's tile opens no chart", "[mini_plot][open]") {
     const ImVec2 at(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.6f);
     const float left = w->Pos.x;
 
-    d.drag(at, ImVec2(at.x + 60.0f, at.y + 40.0f));
+    d.drag(at, ImVec2(at.x + 300.0f, at.y + 40.0f));
     CHECK(d.take().empty());
-    CHECK(d.window("###m")->Pos.x > left + 20.0f);
+    CHECK(d.window("###m")->Pos.x > left + 100.0f);
 }
 
 TEST_CASE("a card has no title bar", "[mini_plot][open]") {
@@ -319,12 +326,12 @@ TEST_CASE("a floating card is moved by dragging its body", "[mini_plot][open]") 
     const ImVec2 body(w->Pos.x + w->Size.x * 0.5f,
         w->Pos.y + w->Size.y * 0.5f);
 
-    d.drag(body, ImVec2(body.x + 80.0f, body.y + 60.0f));
+    d.drag(body, ImVec2(body.x + 300.0f, body.y + 200.0f));
     d.settle();
     const ImGuiWindow* after = d.window("###m");
     REQUIRE(after != nullptr);
-    CHECK(after->Pos.x > before.x + 40.0f);
-    CHECK(after->Pos.y > before.y + 30.0f);
+    CHECK(after->Pos.x > before.x + 100.0f);
+    CHECK(after->Pos.y > before.y + 100.0f);
     CHECK_FALSE(after->DockIsActive);
     CHECK(d.take().empty());
 }
@@ -359,273 +366,219 @@ TEST_CASE("a floating card is closed from its context menu",
     CHECK(closed);
 }
 
-TEST_CASE("a docked card is still undocked by dragging its corner triangle",
-    "[mini_plot][open]") {
-    open_desk d;
-    add_card(d, "m", "s-3");
-    add_card(d, "n", "s-4");
-    d.start();
-    ImGui::NewFrame();
-    {
-        const ImGuiID root = ImGui::GetID("test-dock");
-        ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
-        ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 20.0f));
-        ImGui::DockBuilderSetNodeSize(root, ImVec2(900.0f, 500.0f));
-        ImGuiID right = 0;
-        const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
-            0.5f, nullptr, &right);
-        ImGui::DockBuilderDockWindow("###m", left);
-        ImGui::DockBuilderDockWindow("###n", right);
-        ImGui::DockBuilderFinish(root);
-    }
-    d.workspace.render(d.input);
-    ImGui::Render();
-    d.settle();
-    const ImGuiWindow* w = d.window("###m");
-    REQUIRE(w != nullptr);
-    REQUIRE(w->DockIsActive);
-    /* The node hides its tab bar, so the triangle is what is left to grab. */
-    REQUIRE(w->DockNode->IsHiddenTabBar());
-    const ImVec2 grab(w->DockNode->Pos.x + 3.0f, w->DockNode->Pos.y + 3.0f);
-
-    d.hover(grab);
-    d.press();
-    for (float step = 1.0f; step <= 8.0f; step += 1.0f)
-        d.hover(ImVec2(grab.x + 20.0f * step, grab.y + 40.0f * step));
-    d.release();
-    d.settle();
-
-    const ImGuiWindow* after = d.window("###m");
-    REQUIRE(after != nullptr);
-    CHECK_FALSE(after->DockIsActive);
-    CHECK(d.take().empty());
-}
 
 namespace {
 
-/**
- * Five cards in a split tree: two stacked on the left, and on the right one
- * column beside a stack of two. Docked by the dock builder, which is the code
- * path a drag ends in.
- */
-constexpr std::array<const char*, 5> grid_ids{"g1", "g2", "g3", "g4", "g5"};
+constexpr float pitch_x = 244.0f;
+constexpr float pitch_y = 184.0f;
 
-void dock_grid() {
-    const ImGuiID root = ImGui::GetID("test-dock");
-    ImGui::DockBuilderRemoveNode(root);
-    ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
-    ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 20.0f));
-    ImGui::DockBuilderSetNodeSize(root, ImVec2(900.0f, 600.0f));
-    ImGuiID right = 0;
-    const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
-        0.4f, nullptr, &right);
-    ImGuiID bottom_left = 0;
-    const ImGuiID top_left = ImGui::DockBuilderSplitNode(left, ImGuiDir_Up,
-        0.5f, nullptr, &bottom_left);
-    ImGuiID rest = 0;
-    const ImGuiID column = ImGui::DockBuilderSplitNode(right, ImGuiDir_Left,
-        0.4f, nullptr, &rest);
-    ImGuiID bottom_right = 0;
-    const ImGuiID top_right = ImGui::DockBuilderSplitNode(rest, ImGuiDir_Up,
-        0.5f, nullptr, &bottom_right);
-    ImGui::DockBuilderDockWindow("###g1", top_left);
-    ImGui::DockBuilderDockWindow("###g2", bottom_left);
-    ImGui::DockBuilderDockWindow("###g3", column);
-    ImGui::DockBuilderDockWindow("###g4", top_right);
-    ImGui::DockBuilderDockWindow("###g5", bottom_right);
-    ImGui::DockBuilderFinish(root);
-}
-
-void add_grid(open_desk& d) {
-    for (const char* id : grid_ids)
-        add_card(d, id, id);
-}
-
-/** @brief Where each grid card sits, by id. */
-[[nodiscard]] std::vector<ImRect> grid_rects(const open_desk& d) {
-    std::vector<ImRect> rects;
-    for (const char* id : grid_ids) {
-        const ImGuiWindow* w = d.window(std::format("###{}", id).c_str());
-        REQUIRE(w != nullptr);
-        REQUIRE(w->DockIsActive);
-        rects.push_back(ImRect(w->Pos,
-            ImVec2(w->Pos.x + w->Size.x, w->Pos.y + w->Size.y)));
-    }
-    return rects;
+[[nodiscard]] ImVec2 centre_of(const ImGuiWindow* w) {
+    return ImVec2(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.5f);
 }
 
 }
 
-TEST_CASE("five docked cards each fill a tile and none overlaps another",
-    "[mini_plot][grid]") {
-    open_desk d;
-    add_grid(d);
-    d.start();
-    ImGui::NewFrame();
-    dock_grid();
-    d.workspace.render(d.input);
-    ImGui::Render();
-    d.settle();
-
-    const auto rects = grid_rects(d);
-    for (std::size_t i = 0; i < rects.size(); ++i) {
-        const ImGuiWindow* w =
-            d.window(std::format("###{}", grid_ids[i]).c_str());
-        CHECK(rects[i].GetWidth() > 100.0f);
-        CHECK(rects[i].GetHeight() > 100.0f);
-        CHECK_FALSE(w->DrawList->VtxBuffer.empty());
-        CHECK(w->DockNode->IsHiddenTabBar());
-        CHECK(w->DockNode->Windows.Size == 1);
-        for (std::size_t j = i + 1; j < rects.size(); ++j) {
-            INFO(grid_ids[i] << " against " << grid_ids[j]);
-            const ImRect shared(
-                ImVec2(std::max(rects[i].Min.x, rects[j].Min.x),
-                    std::max(rects[i].Min.y, rects[j].Min.y)),
-                ImVec2(std::min(rects[i].Max.x, rects[j].Max.x),
-                    std::min(rects[i].Max.y, rects[j].Max.y)));
-            CHECK((shared.GetWidth() <= 1.0f || shared.GetHeight() <= 1.0f));
-        }
-    }
-}
-
-TEST_CASE("docked cards keep their places after a restart through the ini file",
-    "[mini_plot][grid]") {
-    std::string saved;
-    std::vector<ImRect> before;
-    {
-        open_desk d;
-        add_grid(d);
-        d.start();
-        ImGui::NewFrame();
-        dock_grid();
-        d.workspace.render(d.input);
-        ImGui::Render();
-        d.settle();
-        before = grid_rects(d);
-        saved = ImGui::SaveIniSettingsToMemory();
-    }
-
-    open_desk d;
-    add_grid(d);
-    d.settings = saved;
-    d.start();
-
-    const auto after = grid_rects(d);
-    REQUIRE(after.size() == before.size());
-    for (std::size_t i = 0; i < after.size(); ++i) {
-        INFO(grid_ids[i]);
-        CHECK(after[i].Min.x == Catch::Approx(before[i].Min.x).margin(1.0));
-        CHECK(after[i].Min.y == Catch::Approx(before[i].Min.y).margin(1.0));
-        CHECK(after[i].Max.x == Catch::Approx(before[i].Max.x).margin(1.0));
-        CHECK(after[i].Max.y == Catch::Approx(before[i].Max.y).margin(1.0));
-        CHECK(d.window(std::format("###{}", grid_ids[i]).c_str())
-                ->DockNode->IsHiddenTabBar());
-    }
-}
-
-TEST_CASE("a card dropped on the middle of another card splits instead of tabbing",
-    "[mini_plot][grid]") {
+TEST_CASE("a card is not dockable and not resizable", "[mini_plot][snap]") {
     open_desk d;
     add_card(d, "m", "s-3");
-    add_card(d, "n", "s-4");
-    add_card(d, "f", "s-5");
+    add_chart(d, "c", "s-3");
     d.start();
-    ImGui::NewFrame();
-    {
-        const ImGuiID root = ImGui::GetID("test-dock");
-        ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
-        ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 300.0f));
-        ImGui::DockBuilderSetNodeSize(root, ImVec2(900.0f, 400.0f));
-        ImGuiID right = 0;
-        const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
-            0.5f, nullptr, &right);
-        ImGui::DockBuilderDockWindow("###m", left);
-        ImGui::DockBuilderDockWindow("###n", right);
-        ImGui::DockBuilderFinish(root);
-    }
-    d.workspace.render(d.input);
-    ImGui::Render();
-    d.settle();
-    const ImGuiWindow* target = d.window("###m");
-    REQUIRE(target != nullptr);
-    REQUIRE(target->DockIsActive);
-    const ImVec2 middle(target->Pos.x + target->Size.x * 0.5f,
-        target->Pos.y + target->Size.y * 0.5f);
-    const ImGuiWindow* dropped = d.window("###f");
-    REQUIRE(dropped != nullptr);
-    const ImVec2 title(dropped->Pos.x + 60.0f, dropped->Pos.y + 8.0f);
-
-    d.drag(title, middle);
-    d.settle();
-
-    const ImGuiWindow* m = d.window("###m");
-    const ImGuiWindow* f = d.window("###f");
-    REQUIRE(m != nullptr);
-    REQUIRE(f != nullptr);
-    CHECK(m->DockNode->Windows.Size == 1);
-    CHECK(f->DockNode != m->DockNode);
+    const ImGuiWindow* card = d.window("###m");
+    const ImGuiWindow* chart = d.window("###c");
+    REQUIRE(card != nullptr);
+    REQUIRE(chart != nullptr);
+    CHECK((card->Flags & ImGuiWindowFlags_NoDocking) != 0);
+    CHECK((card->Flags & ImGuiWindowFlags_NoResize) != 0);
+    CHECK((chart->Flags & ImGuiWindowFlags_NoDocking) == 0);
+    CHECK((chart->Flags & ImGuiWindowFlags_NoResize) == 0);
 }
 
-TEST_CASE("a card dropped on the empty desk centre does not fill the desk",
-    "[mini_plot][grid]") {
+TEST_CASE("a card dragged onto a dock target stays floating",
+    "[mini_plot][snap]") {
     open_desk d;
-    add_card(d, "f", "s-5");
+    add_chart(d, "c", "s-3");
+    add_card(d, "m", "s-3");
     d.start();
-    const ImGuiWindow* dropped = d.window("###f");
-    REQUIRE(dropped != nullptr);
-    const ImVec2 title(dropped->Pos.x + 60.0f, dropped->Pos.y + 8.0f);
-
-    d.drag(title, ImVec2(640.0f, 400.0f));
+    REQUIRE(d.click_chart_icon("###c", "dock", hedgr::ui::icon::panel));
     d.settle();
+    REQUIRE(d.window("###c")->DockIsActive);
+    const ImGuiWindow* chart = d.window("###c");
 
-    const ImGuiWindow* f = d.window("###f");
-    REQUIRE(f != nullptr);
-    CHECK_FALSE(f->DockIsActive);
+    /* ImGui docks by a drag that starts in the window's top strip. */
+    const auto grab = [&] {
+        const ImGuiWindow* card = d.window("###m");
+        return ImVec2(card->Pos.x + 60.0f, card->Pos.y + 8.0f);
+    };
+    d.drag(grab(), centre_of(chart));
+    d.settle();
+    REQUIRE(d.window("###m") != nullptr);
+    CHECK_FALSE(d.window("###m")->DockIsActive);
+
+    d.drag(grab(), ImVec2(chart->Pos.x + 4.0f, 400.0f));
+    d.settle();
+    CHECK_FALSE(d.window("###m")->DockIsActive);
+    CHECK(d.window("###c")->DockNode->Windows.Size == 1);
 }
 
-TEST_CASE("a docked card is closed from its context menu",
-    "[mini_plot][grid]") {
+TEST_CASE("a card keeps its size when its corner is dragged and when a saved size differs",
+    "[mini_plot][snap]") {
+    open_desk d;
+    d.settings += "[Window][###m]\nPos=20,40\nSize=400,300\n\n";
+    static_cast<void>(d.desk.open(window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "FX GBP/USD",
+            .series_id = "s-3"}, "m"));
+    d.start();
+    const ImGuiWindow* w = d.window("###m");
+    REQUIRE(w != nullptr);
+    CHECK(w->Size.x == Catch::Approx(240.0f));
+    CHECK(w->Size.y == Catch::Approx(180.0f));
+
+    const ImVec2 corner(w->Pos.x + w->Size.x - 2.0f,
+        w->Pos.y + w->Size.y - 2.0f);
+    d.drag(corner, ImVec2(corner.x + 150.0f, corner.y + 120.0f));
+    d.settle();
+    CHECK(d.window("###m")->Size.x == Catch::Approx(240.0f));
+    CHECK(d.window("###m")->Size.y == Catch::Approx(180.0f));
+}
+
+TEST_CASE("a card dropped after a drag snaps to the grid pitch",
+    "[mini_plot][snap]") {
     open_desk d;
     add_card(d, "m", "s-3");
-    add_card(d, "n", "s-4");
     d.start();
-    ImGui::NewFrame();
-    {
-        const ImGuiID root = ImGui::GetID("test-dock");
-        ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
-        ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 20.0f));
-        ImGui::DockBuilderSetNodeSize(root, ImVec2(900.0f, 500.0f));
-        ImGuiID right = 0;
-        const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
-            0.5f, nullptr, &right);
-        ImGui::DockBuilderDockWindow("###m", left);
-        ImGui::DockBuilderDockWindow("###n", right);
-        ImGui::DockBuilderFinish(root);
-    }
-    d.workspace.render(d.input);
-    ImGui::Render();
+    const ImVec2 origin = ImGui::GetMainViewport()->WorkPos;
+    const ImVec2 grab = centre_of(d.window("###m"));
+
+    d.drag(grab, ImVec2(grab.x + 300.0f, grab.y + 200.0f));
     d.settle();
     const ImGuiWindow* w = d.window("###m");
     REQUIRE(w != nullptr);
-    const ImVec2 at(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.5f);
+    CHECK(w->Pos.x == Catch::Approx(origin.x + pitch_x));
+    CHECK(w->Pos.y == Catch::Approx(origin.y + pitch_y));
+}
 
-    d.hover(at);
-    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
-    d.frame();
-    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
-    d.frame();
-    d.frame();
-    ImGuiContext& g = *ImGui::GetCurrentContext();
-    REQUIRE(g.OpenPopupStack.Size == 1);
-    const ImGuiWindow* menu = g.OpenPopupStack[0].Window;
-    REQUIRE(menu != nullptr);
-    d.click(ImVec2(menu->Pos.x + menu->WindowPadding.x + 12.0f,
-        menu->Pos.y + menu->WindowPadding.y + ImGui::GetFontSize() * 0.5f));
+TEST_CASE("a card dropped on an occupied cell goes to the nearest free cell",
+    "[mini_plot][snap]") {
+    open_desk d;
+    const ImVec2 origin = ImGui::GetMainViewport()->WorkPos;
+    d.place_at("m", origin.x + 20.0f, origin.y + 40.0f);
+    d.place_at("n", origin.x + pitch_x, origin.y);
+    static_cast<void>(d.desk.open(window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "FX GBP/USD",
+            .series_id = "s-3"}, "m"));
+    static_cast<void>(d.desk.open(window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "FX EUR/USD",
+            .series_id = "s-4"}, "n"));
+    d.start();
+    const ImVec2 grab = centre_of(d.window("###m"));
 
+    /* Lands at (260,50): cell (1,0) is n's, and (1,1) is the nearest free. */
+    d.drag(grab, ImVec2(grab.x + 240.0f, grab.y + 10.0f));
+    d.settle();
+    CHECK(d.window("###m")->Pos.x == Catch::Approx(origin.x + pitch_x));
+    CHECK(d.window("###m")->Pos.y == Catch::Approx(origin.y + pitch_y));
+    CHECK(d.window("###n")->Pos.x == Catch::Approx(origin.x + pitch_x));
+    CHECK(d.window("###n")->Pos.y == Catch::Approx(origin.y));
+}
+
+TEST_CASE("new cards open in the first free cells in order",
+    "[mini_plot][snap]") {
+    open_desk d;
+    const ImVec2 origin = ImGui::GetMainViewport()->WorkPos;
+    /* A restored card holds the second cell, and the new ones skip it. */
+    d.place_at("held", origin.x + pitch_x, origin.y);
+    for (const char* id : {"held", "a", "b"})
+        static_cast<void>(d.desk.open(window_kind::mini_plot,
+            model::domain::mini_plot_state{.label = "FX GBP/USD",
+                .series_id = id}, id));
+    d.start();
+
+    CHECK(d.window("###held")->Pos.x == Catch::Approx(origin.x + pitch_x));
+    CHECK(d.window("###a")->Pos.x == Catch::Approx(origin.x));
+    CHECK(d.window("###a")->Pos.y == Catch::Approx(origin.y));
+    CHECK(d.window("###b")->Pos.x == Catch::Approx(origin.x + 2.0f * pitch_x));
+    CHECK(d.window("###b")->Pos.y == Catch::Approx(origin.y));
+}
+
+TEST_CASE("a card's close control shows on hover and closes without opening the chart",
+    "[mini_plot][snap]") {
+    open_desk d;
+    add_card(d, "m", "s-3");
+    d.start();
+    const ImGuiWindow* w = d.window("###m");
+    REQUIRE(w != nullptr);
+    const ImVec2 close(w->Pos.x + w->Size.x - 14.0f, w->Pos.y + 14.0f);
+
+    d.hover(ImVec2(-50.0f, -50.0f));
+    const int idle = d.window("###m")->DrawList->VtxBuffer.Size;
+    d.hover(ImVec2(w->Pos.x + 5.0f, w->Pos.y + w->Size.y - 5.0f));
+    d.hover(ImVec2(w->Pos.x + 6.0f, w->Pos.y + w->Size.y - 5.0f));
+    const int over_body = d.window("###m")->DrawList->VtxBuffer.Size;
+    CHECK(over_body > idle);
+    d.hover(close);
+    CHECK(d.window("###m")->DrawList->VtxBuffer.Size > over_body);
+    d.hover(ImVec2(-50.0f, -50.0f));
+    CHECK(d.window("###m")->DrawList->VtxBuffer.Size == idle);
+
+    d.click(close);
     bool closed = false;
+    bool opened = false;
     for (auto& c : d.desk.commands.drain()) {
-        if (c.kind == command_kind::close_window)
-            closed = closed || c.window_id == "m";
+        closed = closed
+            || (c.kind == command_kind::close_window && c.window_id == "m");
+        opened = opened || c.kind == command_kind::open_window;
     }
     CHECK(closed);
+    CHECK_FALSE(opened);
+}
+
+TEST_CASE("pressing a card's close control does not start a drag",
+    "[mini_plot][snap]") {
+    open_desk d;
+    add_card(d, "m", "s-3");
+    d.start();
+    const ImGuiWindow* w = d.window("###m");
+    REQUIRE(w != nullptr);
+    const ImVec2 before = w->Pos;
+    const ImVec2 close(w->Pos.x + w->Size.x - 14.0f, w->Pos.y + 14.0f);
+
+    d.drag(close, ImVec2(close.x - 200.0f, close.y + 100.0f));
+    d.settle();
+    CHECK(d.window("###m")->Pos.x == Catch::Approx(before.x));
+    CHECK(d.window("###m")->Pos.y == Catch::Approx(before.y));
+    for (auto& c : d.desk.commands.drain())
+        CHECK(c.kind != command_kind::close_window);
+}
+
+TEST_CASE("a saved layout that docked a card brings it back floating at the fixed size",
+    "[mini_plot][snap]") {
+    /*
+     * A window of the same id, docked as a chart can be, writes the ini an old
+     * run left behind for a docked card.
+     */
+    std::string saved;
+    {
+        open_desk d;
+        add_chart(d, "m", "s-3");
+        d.start();
+        REQUIRE(d.click_chart_icon("###m", "dock", hedgr::ui::icon::panel));
+        d.settle();
+        REQUIRE(d.window("###m")->DockIsActive);
+        saved = ImGui::SaveIniSettingsToMemory();
+        REQUIRE(saved.find("DockId=") != std::string::npos);
+    }
+
+    open_desk d;
+    static_cast<void>(d.desk.open(window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "FX GBP/USD",
+            .series_id = "s-3"}, "m"));
+    d.settings = saved;
+    d.start();
+
+    const ImGuiWindow* w = d.window("###m");
+    REQUIRE(w != nullptr);
+    CHECK_FALSE(w->DockIsActive);
+    CHECK(w->DockNode == nullptr);
+    CHECK(w->Size.x == Catch::Approx(240.0f));
+    CHECK(w->Size.y == Catch::Approx(180.0f));
 }

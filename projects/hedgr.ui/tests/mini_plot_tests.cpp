@@ -457,8 +457,8 @@ void check_card_fills_window(const char* id) {
 
 }
 
-TEST_CASE("a mini plot window has no frame of its own, floating or docked",
-    "[mini_plot][docking][workspace]") {
+TEST_CASE("a mini plot window has no frame of its own",
+    "[mini_plot][workspace]") {
     hedgr::testing::headless_imgui imgui;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     theme::apply_theme();
@@ -467,9 +467,9 @@ TEST_CASE("a mini plot window has no frame of its own, floating or docked",
         return 1.20 + static_cast<double>(k) * 0.001;
     };
     static_cast<void>(card_with(desk, 60, rise, "float"));
-    static_cast<void>(card_with(desk, 60, rise, "left"));
-    static_cast<void>(card_with(desk, 60, rise, "right"));
-    const std::string settings = "[Window][###card-float]\nPos=700,60\nSize=240,170\n\n";
+    static_cast<void>(card_with(desk, 60, rise, "other"));
+    const std::string settings =
+        "[Window][###card-float]\nPos=700,60\nSize=240,170\n\n";
     ImGui::LoadIniSettingsFromMemory(settings.c_str(), settings.size());
     hedgr::ui::render::workspace workspace;
     auto input = desk.input();
@@ -477,30 +477,15 @@ TEST_CASE("a mini plot window has no frame of its own, floating or docked",
 
     for (int i = 0; i < 4; ++i) {
         ImGui::NewFrame();
-        if (i == 0) {
-            const ImGuiID root = ImGui::GetID("test-dock");
-            ImGui::DockBuilderRemoveNode(root);
-            ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
-            ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 20.0f));
-            ImGui::DockBuilderSetNodeSize(root, ImVec2(600.0f, 300.0f));
-            ImGuiID right = 0;
-            const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
-                0.5f, nullptr, &right);
-            ImGui::DockBuilderDockWindow("###card-left", left);
-            ImGui::DockBuilderDockWindow("###card-right", right);
-            ImGui::DockBuilderFinish(root);
-        }
         workspace.render(input);
         ImGui::Render();
     }
 
-    REQUIRE(ImGui::FindWindowByName("###card-left")->DockIsActive);
     REQUIRE_FALSE(ImGui::FindWindowByName("###card-float")->DockIsActive);
     CHECK(ImGui::FindWindowByName("###card-float")->Size.x == 240.0f);
-    CHECK(ImGui::FindWindowByName("###card-float")->Size.y == 170.0f);
+    CHECK(ImGui::FindWindowByName("###card-float")->Size.y == 180.0f);
     check_card_fills_window("###card-float");
-    check_card_fills_window("###card-left");
-    check_card_fills_window("###card-right");
+    check_card_fills_window("###card-other");
 }
 
 /*
@@ -577,4 +562,96 @@ TEST_CASE("mini plot capture", "[.gallery]") {
     raster.draw(*ImGui::GetDrawData(),
         ImGui::ColorConvertFloat4ToU32(theme::base_surface()));
     CHECK(raster.write_ppm(std::filesystem::path(out)));
+}
+
+namespace {
+
+const render::card_grid snap_grid{ImVec2(10.0f, 20.0f), ImVec2(244.0f, 184.0f),
+    4, 3};
+
+}
+
+TEST_CASE("cell_for takes the nearest cell and stays inside the grid",
+    "[mini_plot][snap]") {
+    using render::card_cell;
+    CHECK(render::cell_for(snap_grid, ImVec2(10.0f, 20.0f)) == card_cell{0, 0});
+    CHECK(render::cell_for(snap_grid, ImVec2(10.0f + 121.0f, 20.0f))
+        == card_cell{0, 0});
+    CHECK(render::cell_for(snap_grid, ImVec2(10.0f + 123.0f, 20.0f + 93.0f))
+        == card_cell{1, 1});
+    CHECK(render::cell_for(snap_grid, ImVec2(-500.0f, -500.0f))
+        == card_cell{0, 0});
+    CHECK(render::cell_for(snap_grid, ImVec2(9000.0f, 9000.0f))
+        == card_cell{3, 2});
+}
+
+TEST_CASE("cell_position is the grid pitch times the cell from the origin",
+    "[mini_plot][snap]") {
+    const auto at = render::cell_position(snap_grid, render::card_cell{2, 1});
+    CHECK(at.x == Catch::Approx(10.0f + 2 * 244.0f));
+    CHECK(at.y == Catch::Approx(20.0f + 184.0f));
+}
+
+TEST_CASE("snap_position lands a free drop on its own cell",
+    "[mini_plot][snap]") {
+    const std::array taken{render::card_cell{0, 0}};
+    const auto at = render::snap_position(snap_grid, ImVec2(270.0f, 30.0f),
+        taken);
+    CHECK(at.x == Catch::Approx(10.0f + 244.0f));
+    CHECK(at.y == Catch::Approx(20.0f));
+}
+
+TEST_CASE("snap_cell sends a drop on an occupied cell to the nearest free one",
+    "[mini_plot][snap]") {
+    using render::card_cell;
+    const std::array taken{card_cell{1, 0}};
+    /* Dropped a little right of cell (1,0) and well above (1,1). */
+    CHECK(render::snap_cell(snap_grid, ImVec2(10.0f + 244.0f + 60.0f, 20.0f),
+              taken) == card_cell{2, 0});
+    CHECK(render::snap_cell(snap_grid, ImVec2(10.0f + 244.0f - 60.0f, 20.0f),
+              taken) == card_cell{0, 0});
+    /* A drop low in the cell is nearer the cell below than any beside it. */
+    CHECK(render::snap_cell(snap_grid,
+              ImVec2(10.0f + 244.0f, 20.0f + 60.0f), taken)
+        == card_cell{1, 1});
+    const std::array row_taken{card_cell{1, 0}, card_cell{0, 0},
+        card_cell{2, 0}};
+    CHECK(render::snap_cell(snap_grid, ImVec2(10.0f + 244.0f, 20.0f + 30.0f),
+              row_taken) == card_cell{1, 1});
+}
+
+TEST_CASE("snap_cell breaks a tie in row order and keeps its own cell when full",
+    "[mini_plot][snap]") {
+    using render::card_cell;
+    /* A drop on the taken middle cell is as near (0,0) as (0,2): row order. */
+    const render::card_grid column{ImVec2(0.0f, 0.0f), ImVec2(100.0f, 100.0f),
+        1, 3};
+    const std::array middle{card_cell{0, 1}};
+    CHECK(render::snap_cell(column, ImVec2(0.0f, 100.0f), middle)
+        == card_cell{0, 0});
+
+    std::vector<card_cell> all;
+    for (int row = 0; row < snap_grid.rows; ++row)
+        for (int col = 0; col < snap_grid.columns; ++col)
+            all.push_back(card_cell{col, row});
+    CHECK(render::snap_cell(snap_grid, ImVec2(10.0f + 244.0f, 20.0f), all)
+        == card_cell{1, 0});
+}
+
+TEST_CASE("first_free_cell scans left to right then top to bottom",
+    "[mini_plot][snap]") {
+    using render::card_cell;
+    CHECK(render::first_free_cell(snap_grid, {}) == card_cell{0, 0});
+    const std::array two{card_cell{0, 0}, card_cell{1, 0}};
+    CHECK(render::first_free_cell(snap_grid, two) == card_cell{2, 0});
+    const std::array gap{card_cell{0, 0}, card_cell{2, 0}};
+    CHECK(render::first_free_cell(snap_grid, gap) == card_cell{1, 0});
+    const std::array full_row{card_cell{0, 0}, card_cell{1, 0}, card_cell{2, 0},
+        card_cell{3, 0}};
+    CHECK(render::first_free_cell(snap_grid, full_row) == card_cell{0, 1});
+    std::vector<card_cell> all;
+    for (int row = 0; row < snap_grid.rows; ++row)
+        for (int col = 0; col < snap_grid.columns; ++col)
+            all.push_back(card_cell{col, row});
+    CHECK(render::first_free_cell(snap_grid, all) == card_cell{0, 3});
 }

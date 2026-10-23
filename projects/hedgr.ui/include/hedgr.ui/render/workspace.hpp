@@ -22,6 +22,7 @@
 
 #include "hedgr.model/state/composite_key.hpp"
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -29,6 +30,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace hedgr::ui::render {
 
@@ -124,6 +126,16 @@ private:
         ImVec2 size{};
     };
 
+    /**
+     * @brief Fills @c occupied_cells_ with the cell of every open card but
+     * @p self.
+     *
+     * Called only when a card opens or a drag ends, so a steady frame does not
+     * touch it and the vector's capacity is kept between calls.
+     */
+    void occupied_cards(const card_grid& grid,
+        hedgr::model::state::window_handle self, const render_input& input);
+
     /** @brief Draws the dock space that fills the desk above the shortcut bar. */
     void draw_dock_space(const render_input& input);
 
@@ -186,6 +198,9 @@ private:
 
     /** @brief The choices the market-data screens share across windows. */
     market_view_state market_view_;
+
+    std::vector<card_cell> occupied_cells_;
+    std::string card_key_;
 
     ImGuiID dock_space_ = 0;
 

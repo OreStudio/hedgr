@@ -29,8 +29,61 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace hedgr::ui::render {
+
+/** @brief One cell of the card grid, counted from the grid's origin. */
+struct card_cell final {
+    int column = 0;
+    int row = 0;
+
+    [[nodiscard]] friend bool operator==(card_cell, card_cell) noexcept = default;
+};
+
+/**
+ * @brief The grid cards snap to.
+ *
+ * Cells start at @c origin and repeat every @c pitch, which is a card plus its
+ * gap. @c columns and @c rows are the cells that fit the desk, at least one
+ * each, and bound where a card is moved to.
+ */
+struct card_grid final {
+    ImVec2 origin;
+    ImVec2 pitch;
+    int columns = 1;
+    int rows = 1;
+};
+
+/** @brief The cell whose corner is nearest @p position, inside the grid. */
+[[nodiscard]] HEDGR_UI_EXPORT card_cell cell_for(const card_grid& grid,
+    ImVec2 position) noexcept;
+
+/** @brief The top-left corner of @p cell. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec2 cell_position(const card_grid& grid,
+    card_cell cell) noexcept;
+
+/**
+ * @brief The cell a card dropped at @p position takes.
+ *
+ * Its own cell when that is free, else the free cell whose corner is nearest
+ * @p position, the first in row order on a tie. When every cell is taken the
+ * card keeps its own.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT card_cell snap_cell(const card_grid& grid,
+    ImVec2 position, std::span<const card_cell> occupied) noexcept;
+
+/** @brief The corner a card dropped at @p position snaps to. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec2 snap_position(const card_grid& grid,
+    ImVec2 position, std::span<const card_cell> occupied) noexcept;
+
+/**
+ * @brief The first free cell, left to right then top to bottom.
+ *
+ * Rows past the grid's own continue the scan, so a full desk still gets a cell.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT card_cell first_free_cell(const card_grid& grid,
+    std::span<const card_cell> occupied) noexcept;
 
 /**
  * @brief The span a card shows.

@@ -208,11 +208,14 @@ struct command_centre_ui_state final {
  * that docking and floating need. Where a window sits is ImGui's state, saved
  * in its own settings file, so none of these becomes a command.
  */
-enum class tile_request : std::uint8_t { none, dock };
+enum class tile_request : std::uint8_t { none, dock, close };
 
 struct window_ui_state final {
     /** @brief The request the window's controls made this frame. */
     tile_request tile = tile_request::none;
+
+    /** @brief Whether a card was being dragged on the previous frame. */
+    bool was_moving = false;
 
     /** @brief The window's size when it last floated, zero until it has. */
     ImVec2 floating_size{};
