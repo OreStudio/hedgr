@@ -22,6 +22,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cards.hpp"
 #include "hedgr.ui/widget/cells.hpp"
+#include "hedgr.ui/widget/menu.hpp"
 #include "hedgr.ui/widget/tabs.hpp"
 #include "imgui.h"
 #include "software_raster.hpp"
@@ -87,6 +88,28 @@ void variants_card() {
     widget::end_section_card();
 }
 
+void menu_panel() {
+    static bool opened = false;
+    if (!opened) {
+        ImGui::OpenPopup("gallery-menu");
+        opened = true;
+    }
+    ImGui::SetNextWindowPos(ImVec2(240.0f, 360.0f));
+    const widget::menu_popup popup("gallery-menu", 230.0f);
+    if (!popup)
+        return;
+    widget::menu_heading("Window");
+    static_cast<void>(widget::menu_item_row({.label = "Instances",
+        .selected = true}));
+    static_cast<void>(widget::menu_item_row({.label = "Lock store",
+        .shortcut = "Ctrl+L"}));
+    static_cast<void>(widget::menu_item_row({.label = "Undock all",
+        .enabled = false}));
+    widget::menu_separator();
+    static_cast<void>(widget::menu_item_row({.label = "Accounts",
+        .submenu = true}));
+}
+
 void gallery() {
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(gallery_width, gallery_height));
@@ -105,7 +128,11 @@ void gallery() {
     }
     signal_card();
     variants_card();
+    static_cast<void>(widget::menu_label("File", false));
+    ImGui::SameLine();
+    static_cast<void>(widget::menu_label("View", true));
     ImGui::End();
+    menu_panel();
 }
 
 }

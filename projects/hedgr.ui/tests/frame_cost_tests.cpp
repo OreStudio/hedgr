@@ -24,6 +24,8 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
+#include "hedgr.ui/theme/theme.hpp"
+#include "hedgr.ui/widget/menu.hpp"
 #include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
@@ -1038,4 +1040,45 @@ TEST_CASE("a chart in each connection state allocates no more than a chart with 
         ImGui::End();
         ImGui::Render();
     }) <= with_data);
+}
+
+TEST_CASE("an open menu with every kind of row costs a steady frame no allocation",
+    "[frame][menu]") {
+    headless_imgui imgui;
+    hedgr::ui::theme::apply_theme();
+    namespace widget = hedgr::ui::widget;
+    bool opened = false;
+    bool rows_drawn = false;
+    const auto allocations = steady_allocations([&] {
+        ImGui::NewFrame();
+        if (!opened) {
+            ImGui::OpenPopup("menu");
+            opened = true;
+        }
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(600.0f, 100.0f));
+        ImGui::Begin("bar", nullptr, ImGuiWindowFlags_NoDecoration);
+        static_cast<void>(widget::menu_label("File", true));
+        ImGui::End();
+        {
+            const widget::menu_popup popup("menu");
+            if (popup) {
+                widget::menu_heading("Windows");
+                static_cast<void>(widget::menu_item_row({.label = "Open"}));
+                static_cast<void>(widget::menu_item_row(
+                    {.label = "Pick", .icon = "i", .selected = true}));
+                static_cast<void>(widget::menu_item_row(
+                    {.label = "Locked", .enabled = false}));
+                widget::menu_separator();
+                static_cast<void>(widget::menu_item_row(
+                    {.label = "More", .submenu = true}));
+                static_cast<void>(widget::menu_item_row(
+                    {.label = "Save", .shortcut = "Ctrl+S"}));
+            }
+            rows_drawn = static_cast<bool>(popup);
+        }
+        ImGui::Render();
+    });
+    CHECK(rows_drawn);
+    CHECK(allocations == 0);
 }

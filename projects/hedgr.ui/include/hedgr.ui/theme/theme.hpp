@@ -349,6 +349,68 @@ inline constexpr float tab_rounding = 6.0f;
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
 
 /**
+ * @brief The look of a menu: the flat dark panel a popup opens as and the rows
+ * in it, after the menu of the tab reference.
+ *
+ * The panel is a step darker than a card, so it reads as floating over the
+ * desk, with a one pixel outline. The chosen row is the chart purple in a
+ * rounded bar across the panel and a row under the pointer is the same purple
+ * at a lower alpha. Rows are sized from these, never from the font alone, so a
+ * menu looks the same wherever it opens.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_surface() noexcept;
+
+/** @brief The one pixel outline of a menu panel. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_border() noexcept;
+
+/** @brief The fill of the chosen row, the reference's chip purple. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_selected_colour() noexcept;
+
+/** @brief The fill of a row under the pointer, the chosen fill at a lower alpha. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_hover_colour() noexcept;
+
+/** @brief The fill of a row while it is pressed, a step brighter than chosen. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_active_colour() noexcept;
+
+/** @brief The corner radius of a menu panel. */
+inline constexpr float menu_rounding = 8.0f;
+
+/** @brief The corner radius of the chosen row's bar. */
+inline constexpr float menu_row_rounding = 5.0f;
+
+/** @brief The room between a menu panel's edge and its rows. */
+inline constexpr float menu_padding = 6.0f;
+
+/** @brief The room inside a row, left and right, and above and below the text. */
+inline constexpr float menu_row_padding_x = 10.0f;
+inline constexpr float menu_row_padding_y = 6.0f;
+
+/** @brief The gap between two rows. */
+inline constexpr float menu_row_gap = 2.0f;
+
+/** @brief The narrowest a menu panel gets, so a short label does not make a sliver. */
+inline constexpr float menu_min_width = 200.0f;
+
+/** @brief The gap between a row's label and its shortcut text, at least. */
+inline constexpr float menu_shortcut_gap = 24.0f;
+
+/** @brief The width an icon column takes in a row that has an icon, as a font-size share. */
+inline constexpr float menu_icon_share = 1.5f;
+
+/** @brief The half height and the weight of a submenu row's chevron. */
+inline constexpr float menu_chevron_half_height = 4.0f;
+inline constexpr float menu_chevron_weight = 1.5f;
+
+/**
+ * @brief The letter spacing of an upper-case label, as a share of the font
+ * size. The reference spaces its FILE and VIEW out a little.
+ */
+inline constexpr float menu_label_spacing_share = 0.08f;
+
+/** @brief The room inside a top-level label, left and right. */
+inline constexpr float menu_label_padding_x = 10.0f;
+
+/**
  * @brief The faint dashed rules across a plot, in a purple grey at a low
  * alpha, so a rule is a guide and never a line of data.
  */

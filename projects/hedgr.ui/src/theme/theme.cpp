@@ -153,6 +153,17 @@ const ImVec4 tab_active = colour(0x211e3aff); // derived
 const ImVec4 tab_dimmed = colour(0x0b0e14ff); // derived
 const ImVec4 tab_dimmed_active = colour(0x181a28ff); // derived
 
+/*
+ * The menu panel of the tab reference: a flat fill under the card, an outline,
+ * and the chart purple for the chosen row. The reference's menu fill and rows
+ * are read by eye off its Grid Size popup, so the fill and outline are marked
+ * derived; the purple is the one already sampled above.
+ */
+const ImVec4 menu_fill = colour(0x0b0e14ff); // derived
+const ImVec4 menu_edge = colour(0x262a36ff); // derived
+constexpr float menu_hover_alpha = 0.55f; // derived
+const ImVec4 menu_active = colour(0x8d6cf0ff); // derived
+
 /* The glyph in a bookmark chip, brightest eighth of x 22 to 46 y 122 to 146. */
 constexpr ImU32 glow = IM_COL32(197, 224, 252, 255);
 
@@ -225,7 +236,7 @@ void apply_theme() {
     style.WindowRounding = 8.0f;
     style.ChildRounding = 8.0f;
     style.FrameRounding = 4.0f;
-    style.PopupRounding = 6.0f;
+    style.PopupRounding = hedgr::ui::theme::menu_rounding;
     style.GrabRounding = 3.0f;
     style.TabRounding = hedgr::ui::theme::tab_rounding;
     style.TabBorderSize = 1.0f;
@@ -392,6 +403,26 @@ ImVec4 tab_active_colour() noexcept {
 
 ImVec4 chart_tag_colour() noexcept {
     return chart_tag;
+}
+
+ImVec4 menu_surface() noexcept {
+    return menu_fill;
+}
+
+ImVec4 menu_border() noexcept {
+    return menu_edge;
+}
+
+ImVec4 menu_selected_colour() noexcept {
+    return chart_tag;
+}
+
+ImVec4 menu_hover_colour() noexcept {
+    return with_alpha(chart_tag, menu_hover_alpha);
+}
+
+ImVec4 menu_active_colour() noexcept {
+    return menu_active;
 }
 
 ImU32 card_title_icon_colour() noexcept {
