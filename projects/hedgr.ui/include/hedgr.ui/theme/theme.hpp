@@ -419,6 +419,29 @@ HEDGR_UI_EXPORT void shade_tab(ImDrawList* draw, int first, ImVec2 min,
  */
 HEDGR_UI_EXPORT void shade_dock_tabs();
 
+/**
+ * @brief The room between two docked panes, and the radius of a docked pane's
+ * corners. The radius is the tab's, so the first tab's corner sits in the
+ * strip's.
+ */
+inline constexpr float dock_gap = 6.0f;
+inline constexpr float dock_rounding = tab_rounding;
+
+/**
+ * @brief Paints each docked pane of the dock space @p dock_space as a rounded
+ * card: the strip behind its tabs rounded at the top, and the body rounded at
+ * the bottom, or at all four corners when the node shows no strip.
+ *
+ * ImGui rounds a docked window's fill only at the corners it shares with the
+ * dock space, so a pane next to another stays square, and the space paints
+ * its whole rect in the window colour behind them. The desk therefore pushes a
+ * clear window colour and title colours around the dock space and has docked
+ * windows draw no background, and this paints what they
+ * would have, into each host window's background channel. Call it after the
+ * dock space is submitted.
+ */
+HEDGR_UI_EXPORT void paint_dock_cards(ImGuiID dock_space);
+
 /** @brief The fill of the last price chip, the reference's chip purple. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
 

@@ -20,9 +20,13 @@
 #include "headless_desk.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/workspace.hpp"
+#include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <algorithm>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <format>
 #include <initializer_list>
 #include <string>
@@ -520,4 +524,139 @@ TEST_CASE("the undock control is on the bar only while something is docked",
     d.settle();
     CHECK_FALSE(d.in_desk("###a"));
     CHECK(desk_window("##hedgr-shortcuts") == nullptr);
+}
+
+namespace {
+
+namespace theme = hedgr::ui::theme;
+
+/**
+ * @brief Docks "a" and "b" into the desk's space, side by side, as the dock
+ * builder does for a drag, under the theme the desk runs with.
+ */
+void dock_pair(dock_desk& d) {
+    theme::apply_theme();
+    const ImGuiID space = d.workspace.dock_space();
+    ImGuiID right = 0;
+    const ImGuiID left = ImGui::DockBuilderSplitNode(space, ImGuiDir_Left, 0.5f,
+        nullptr, &right);
+    ImGui::DockBuilderDockWindow("###a", left);
+    ImGui::DockBuilderDockWindow("###b", right);
+    ImGui::DockBuilderFinish(space);
+    d.settle();
+    d.settle();
+}
+
+/** @brief A themed desk with charts "a" and "b" docked side by side. */
+struct docked_pair final {
+    dock_desk d{"a", "b"};
+
+    docked_pair() {
+        dock_pair(d);
+    }
+
+    [[nodiscard]] const ImGuiDockNode& node(const char* window) const {
+        return *desk_window(window)->DockNode;
+    }
+
+    /** @brief The distance from @p at to the nearest vertex the node's host drew. */
+    [[nodiscard]] float nearest(const char* window, ImVec2 at) const {
+        float best = 1.0e9f;
+        for (const ImDrawVert& v : node(window).HostWindow->DrawList->VtxBuffer)
+            best = std::min(best, std::hypot(v.pos.x - at.x, v.pos.y - at.y));
+        return best;
+    }
+};
+
+}
+
+TEST_CASE("the tabs of the desk's docked windows are faded by the desk frame",
+    "[docking][workspace][tabs]") {
+    dock_desk d{"a", "b"};
+    dock_pair(d);
+
+    const ImGuiDockNode* node = desk_window("###a")->DockNode;
+    REQUIRE(node != nullptr);
+    REQUIRE(node->HostWindow != nullptr);
+    const auto& buffer = node->HostWindow->DrawList->VtxBuffer;
+    const auto has = [&](ImU32 col) {
+        return std::ranges::any_of(buffer,
+            [&](const ImDrawVert& v) { return v.col == col; });
+    };
+    /* ImGui paints a tab flat, so a head colour is the fade's doing. */
+    CHECK(has(theme::tab_active_top));
+    CHECK(has(ImGui::ColorConvertFloat4ToU32(theme::tab_active_colour())));
+}
+
+TEST_CASE("two docked windows are a gap apart", "[docking][workspace][look]") {
+    docked_pair p;
+    const ImGuiWindow* a = desk_window("###a");
+    const ImGuiWindow* b = desk_window("###b");
+    REQUIRE(p.d.in_desk("###a"));
+    REQUIRE(p.d.in_desk("###b"));
+    REQUIRE(a->Pos.x < b->Pos.x);
+    CHECK(ImGui::GetStyle().DockingSeparatorSize == theme::dock_gap);
+    CHECK(b->Pos.x - (a->Pos.x + a->Size.x) == Catch::Approx(theme::dock_gap));
+}
+
+TEST_CASE("a docked window's body is a card, rounded at the bottom and square "
+          "under its strip",
+    "[docking][workspace][look]") {
+    docked_pair p;
+    const ImGuiDockNode& left = p.node("###a");
+    const ImGuiDockNode& right = p.node("###b");
+    const float top = left.TabBar->BarRect.Max.y;
+    const float foot = left.Pos.y + left.Size.y;
+    /* The corners beside the gap are the ones ImGui would have left square. */
+    const float inner_left = left.Pos.x + left.Size.x;
+    const float inner_right = right.Pos.x;
+    CHECK(p.nearest("###a", ImVec2(inner_left, foot)) > 1.5f);
+    CHECK(p.nearest("###b", ImVec2(inner_right, foot)) > 1.5f);
+    CHECK(p.nearest("###a", ImVec2(left.Pos.x, foot)) > 1.5f);
+    /* A vertex on the cut-back corner is dock_rounding away from it. */
+    CHECK(p.nearest("###a", ImVec2(inner_left - theme::dock_rounding * 0.3f,
+              foot - theme::dock_rounding * 0.3f))
+        < theme::dock_rounding);
+    /* Under the strip the body meets it square, on a vertex. */
+    CHECK(p.nearest("###a", ImVec2(inner_left, top)) < 1.0f);
+}
+
+TEST_CASE("a docked window's strip is rounded at its top corners, the gap "
+          "side included",
+    "[docking][workspace][look]") {
+    docked_pair p;
+    const ImGuiDockNode& left = p.node("###a");
+    const ImGuiDockNode& right = p.node("###b");
+    CHECK(p.nearest("###a", ImVec2(left.Pos.x + left.Size.x, left.Pos.y)) > 1.5f);
+    CHECK(p.nearest("###b", ImVec2(right.Pos.x, right.Pos.y)) > 1.5f);
+}
+
+TEST_CASE("a docked window draws no fill of its own", "[docking][workspace][look]") {
+    docked_pair p;
+    /* ImGui's square fill would put a vertex on the gap's corner. */
+    const ImGuiWindow* a = desk_window("###a");
+    const ImGuiDockNode& left = p.node("###a");
+    CHECK(p.nearest("###a", ImVec2(left.Pos.x + left.Size.x,
+              left.Pos.y + left.Size.y)) > 1.5f);
+    CHECK(a->DockIsActive);
+}
+
+TEST_CASE("a floating window keeps its own rounded fill and no gap",
+    "[docking][workspace][look]") {
+    dock_desk d{"c"};
+    theme::apply_theme();
+    d.settle();
+    const ImGuiWindow* w = desk_window("###c");
+    REQUIRE(w != nullptr);
+    REQUIRE_FALSE(w->DockIsActive);
+    CHECK(w->WindowRounding == ImGui::GetStyle().WindowRounding);
+    /* Its own fill, shaded by the window gradient to its foot colour. */
+    CHECK(std::ranges::any_of(w->DrawList->VtxBuffer, [](const ImDrawVert& v) {
+        return v.col == theme::window_gradient_bottom;
+    }));
+    /* And rounded: no vertex on its top-left. */
+    float best = 1.0e9f;
+    for (const ImDrawVert& v : w->DrawList->VtxBuffer)
+        best = std::min(best, std::hypot(v.pos.x - w->Pos.x, v.pos.y - w->Pos.y));
+    CHECK(best > 1.5f);
 }
