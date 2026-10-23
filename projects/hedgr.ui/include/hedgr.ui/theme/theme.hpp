@@ -333,6 +333,18 @@ inline constexpr float flag_height_fraction = 0.75f;
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_line_colour() noexcept;
 
+/** @brief The corner radius of a tab's top corners, the tab reference's folder. */
+inline constexpr float tab_rounding = 6.0f;
+
+/** @brief The fill of a tab that is neither chosen nor hovered. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_idle_colour() noexcept;
+
+/** @brief The fill of a tab under the pointer, tinted toward the chart purple. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_hover_colour() noexcept;
+
+/** @brief The fill of the chosen tab, a step lighter than an idle one. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_active_colour() noexcept;
+
 /** @brief The fill of the last price chip, the reference's chip purple. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
 

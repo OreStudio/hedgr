@@ -140,6 +140,19 @@ const ImVec4 accent_active = colour(0x5a88c4ff); // derived
 const ImVec4 chart_line = colour(0x8068d6ff); // Price line, x 40 to 430 y 80 to 410
 const ImVec4 chart_tag = colour(0x7c59e9ff); // Price chip, x 470 y 272
 
+/*
+ * The tab strip of the tab reference (docs/samples/572312177-...png). Its tabs
+ * are folders: a dim idle tab, an active one a step lighter with a violet cast,
+ * and a hover that tints toward the violet. The values are read by eye off the
+ * flat fills of its ImPlot Demo, Dear ImGui Demo and Statistics tabs and are
+ * not sampled, so each is marked derived.
+ */
+const ImVec4 tab_idle = colour(0x10131aff); // derived
+const ImVec4 tab_hover = colour(0x2a2548ff); // derived
+const ImVec4 tab_active = colour(0x211e3aff); // derived
+const ImVec4 tab_dimmed = colour(0x0b0e14ff); // derived
+const ImVec4 tab_dimmed_active = colour(0x181a28ff); // derived
+
 /* The glyph in a bookmark chip, brightest eighth of x 22 to 46 y 122 to 146. */
 constexpr ImU32 glow = IM_COL32(197, 224, 252, 255);
 
@@ -214,7 +227,10 @@ void apply_theme() {
     style.FrameRounding = 4.0f;
     style.PopupRounding = 6.0f;
     style.GrabRounding = 3.0f;
-    style.TabRounding = 4.0f;
+    style.TabRounding = hedgr::ui::theme::tab_rounding;
+    style.TabBorderSize = 1.0f;
+    style.TabBarBorderSize = 1.0f;
+    style.TabBarOverlineSize = 2.0f;
     style.ScrollbarRounding = 6.0f;
     style.WindowBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
@@ -269,16 +285,17 @@ void apply_theme() {
     colors[ImGuiCol_ResizeGripHovered] = accent_hover;
     colors[ImGuiCol_ResizeGripActive] = accent_active;
     /*
-     * A selected tab is a raised surface with a thin blue rule, which is how
-     * the reference marks its chosen tab, not a block of the accent. A tab is
-     * a place, and a tab strip painted solid would outshout the content.
+     * A folder tab: rounded top, a dim idle fill, a lighter violet-cast active
+     * fill with a violet overline, a violet-tinted hover, and a dimmer pair
+     * for a tab bar whose window has lost focus. The bar's own rule takes the
+     * selected tab's colour in ImGui, which is what joins the two.
      */
-    colors[ImGuiCol_Tab] = bg_base;
-    colors[ImGuiCol_TabHovered] = bg_title;
-    colors[ImGuiCol_TabSelected] = bg_panel;
-    colors[ImGuiCol_TabSelectedOverline] = accent;
-    colors[ImGuiCol_TabDimmed] = bg_base;
-    colors[ImGuiCol_TabDimmedSelected] = bg_title;
+    colors[ImGuiCol_Tab] = tab_idle;
+    colors[ImGuiCol_TabHovered] = tab_hover;
+    colors[ImGuiCol_TabSelected] = tab_active;
+    colors[ImGuiCol_TabSelectedOverline] = chart_line;
+    colors[ImGuiCol_TabDimmed] = tab_dimmed;
+    colors[ImGuiCol_TabDimmedSelected] = tab_dimmed_active;
     colors[ImGuiCol_TabDimmedSelectedOverline] = border;
     /*
      * The menu bar is a strip of its own above the tabs, in the title bar's
@@ -359,6 +376,18 @@ ImVec4 accent_colour() noexcept {
 
 ImVec4 chart_line_colour() noexcept {
     return chart_line;
+}
+
+ImVec4 tab_idle_colour() noexcept {
+    return tab_idle;
+}
+
+ImVec4 tab_hover_colour() noexcept {
+    return tab_hover;
+}
+
+ImVec4 tab_active_colour() noexcept {
+    return tab_active;
 }
 
 ImVec4 chart_tag_colour() noexcept {
