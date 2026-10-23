@@ -17,9 +17,10 @@ import sys
 import wave
 
 RATE = 44100
-HIT_S = 1.2           # the impact starts here and is loudest 0.2 s later, at 1.4 s
-TOTAL_S = 3.2         # (intro_peak_ns and intro_total_ns in hedgr.ui/render/intro.hpp)
-SWELL_TAIL_S = 0.25   # the swell rings briefly past the impact
+HIT_S = 2.568         # the impact starts here and is loudest ~0.23 s later, at the peak
+TOTAL_S = 6.0         # (intro_peak_ns and intro_total_ns in hedgr.ui/render/intro.hpp)
+SWELL_TAIL_S = 2.6    # the swell dies away through the dimming, to the dark point
+TAIL_TAU_S = 0.7
 
 
 def read_mono(path):
@@ -37,10 +38,10 @@ def swell(n_rise, n_tail):
     for i in range(n_rise + n_tail):
         if i < n_rise:
             x = i / n_rise
-            gain = x ** 2.2
+            gain = x ** 2.6
         else:
             x = 1.0
-            gain = math.exp(-(i - n_rise) / (SWELL_TAIL_S * RATE / 4.0))
+            gain = math.exp(-(i - n_rise) / (TAIL_TAU_S * RATE))
         cutoff = 200.0 * (40.0 ** x)
         a = 1.0 - math.exp(-2.0 * math.pi * cutoff / RATE)
         low += a * (rng.uniform(-1.0, 1.0) - low)

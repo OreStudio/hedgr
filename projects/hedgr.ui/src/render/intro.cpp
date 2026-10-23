@@ -107,6 +107,10 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
         origin.y + viewport->Size.y * 0.5f);
     const float veil = intro_timing::veil_alpha(elapsed_ns);
     const float glow = intro_timing::brightness(elapsed_ns);
+    const float bloom = intro_timing::expansion(elapsed_ns);
+    /* The glow layers thin as they spread; the crisp shapes do not. */
+    const float layer_fade = 1.0f - theme::intro_glow_expand_fade * bloom;
+    const float crisp_alpha = theme::intro_peak_intensity * glow * veil;
 
     /*
      * Black under the wallpaper, so a launch whose wallpaper failed to load is
@@ -126,7 +130,8 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
     if (glow > 0.0f) {
         const float strength = glow * veil;
         const ImVec4 inner = layer_colour(theme::intro_glow_layers - 1);
-        radial_fan(list, centre, side * theme::intro_halo_radius,
+        radial_fan(list, centre,
+            side * theme::intro_halo_radius * intro_timing::spread(bloom),
             colour(inner.x, inner.y, inner.z,
                 theme::intro_halo_alpha * strength),
             colour(inner.x, inner.y, inner.z, 0.0f));
@@ -159,11 +164,12 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
     };
     for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
         const ImVec4 c = layer_colour(i);
-        draw_word(theme::intro_glow_scales[i],
-            colour(c.x, c.y, c.z, theme::intro_glow_alphas[i] * glow * veil));
+        draw_word(intro_timing::glow_scale(theme::intro_glow_scales[i], bloom),
+            colour(c.x, c.y, c.z,
+                theme::intro_glow_alphas[i] * glow * veil * layer_fade));
     }
     draw_word(1.0f, colour(theme::intro_core_rgb[0], theme::intro_core_rgb[1],
-        theme::intro_core_rgb[2], glow * veil));
+        theme::intro_core_rgb[2], crisp_alpha));
 
     if (logo_svg.empty() || input.textures == nullptr)
         return;
@@ -184,15 +190,16 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
     if (soft != 0) {
         for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
             const ImVec4 c = layer_colour(i);
-            draw_logo(soft, theme::intro_glow_scales[i],
+            draw_logo(soft,
+                intro_timing::glow_scale(theme::intro_glow_scales[i], bloom),
                 colour(c.x, c.y, c.z,
-                    theme::intro_glow_alphas[i] * glow * veil));
+                    theme::intro_glow_alphas[i] * glow * veil * layer_fade));
         }
     }
     if (crisp != 0) {
         draw_logo(crisp, 1.0f,
             colour(theme::intro_core_rgb[0], theme::intro_core_rgb[1],
-                theme::intro_core_rgb[2], glow * veil));
+                theme::intro_core_rgb[2], crisp_alpha));
     }
 }
 

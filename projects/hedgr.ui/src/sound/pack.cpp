@@ -54,10 +54,10 @@ using hedgr::ui::sound::registration;
  * column in this table would put mixing back into the mapping, which is exactly
  * where ADR 8 keeps it out.
  *
- * The intro is the one long file, 3.2s, because it is the launch's brand moment
+ * The intro is the one long file, 6s, because it is the launch's brand moment
  * and is raised once. It is built by tools/make_intro_sound.py from a
  * synthesised swell and Kenney's lowFrequency_explosion_000, and is loudest
- * 1.4s in, which is when the intro's logo is brightest.
+ * 2.795s in, which is when the intro's logo is brightest.
  */
 constexpr std::array<registration, 10> table{{
     {names::application_started, "bong_001.wav"},

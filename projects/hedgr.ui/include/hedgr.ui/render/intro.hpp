@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/theme/theme.hpp"
 #include <cstdint>
 #include <string_view>
 
@@ -30,16 +31,22 @@ namespace hedgr::ui::render {
 /**
  * @name The launch intro's timeline
  *
- * The logo is dark at the start, rises to its brightest at the peak, is dark
- * again by the dark point, and from there the whole intro fades out over the
- * main window until the total. The peak is where the intro's sound is loudest:
- * assets/sounds/intro_swell.wav is built by tools/make_intro_sound.py so its
- * impact peaks 1.4 s in, and the two constants move together.
+ * One slow pulse. The logo and the word are dark at the start, brighten
+ * smoothly to their peak, dim smoothly back to dark by the dark point, and from
+ * there the whole intro fades out over the main window until the total. The
+ * peak is where the intro's sound is loudest: assets/sounds/intro_swell.wav is
+ * built by tools/make_intro_sound.py so its loudest sample falls on it, and the
+ * two move together.
+ *
+ * @c intro_max_step is the most the brightness may change between two samples
+ * 10 ms apart. Smoothstep's steepest slope is 1.5 over the longer ramp, which
+ * is a step of about 0.006, so this holds a pulse that cannot jump or flicker.
  * @{
  */
-inline constexpr std::int64_t intro_peak_ns = 1'400'000'000;
-inline constexpr std::int64_t intro_dark_ns = 2'400'000'000;
-inline constexpr std::int64_t intro_total_ns = 3'200'000'000;
+inline constexpr std::int64_t intro_peak_ns = 2'795'000'000;
+inline constexpr std::int64_t intro_dark_ns = 5'200'000'000;
+inline constexpr std::int64_t intro_total_ns = 6'000'000'000;
+inline constexpr float intro_max_step = 0.01f;
 /** @} */
 
 /**
@@ -58,24 +65,51 @@ struct intro_timing final {
     bool skipped = false;
 
     /**
-     * @brief How bright the logo is, 0 for dark and 1 at the peak.
+     * @brief How bright the logo and word are, 0 for dark and 1 at the peak.
      *
-     * A square on the way up, so the glow gathers slowly and then arrives, as
-     * the sound's swell does, and a square on the way down so the impact decays
-     * rather than hanging. Before the start and after the dark point it is 0.
+     * Smoothstep up to the peak and smoothstep down to the dark point, so the
+     * slope is zero at the start, the peak and the dark point: one eased
+     * swell with a single maximum. Before the start and after the dark point it
+     * is 0.
      */
     [[nodiscard]] static constexpr float brightness(
         std::int64_t elapsed_ns) noexcept {
         if (elapsed_ns <= 0 || elapsed_ns >= intro_dark_ns)
             return 0.0f;
-        if (elapsed_ns <= intro_peak_ns) {
-            const float x = static_cast<float>(elapsed_ns)
-                / static_cast<float>(intro_peak_ns);
-            return x * x;
-        }
-        const float x = static_cast<float>(intro_dark_ns - elapsed_ns)
-            / static_cast<float>(intro_dark_ns - intro_peak_ns);
-        return x * x;
+        const float x = elapsed_ns <= intro_peak_ns
+            ? static_cast<float>(elapsed_ns) / static_cast<float>(intro_peak_ns)
+            : static_cast<float>(intro_dark_ns - elapsed_ns)
+                / static_cast<float>(intro_dark_ns - intro_peak_ns);
+        return x * x * (3.0f - 2.0f * x);
+    }
+
+    /**
+     * @brief How far the glow has spread outwards, 0 contracted and 1 at the peak.
+     *
+     * It follows the brightness exactly, so the light blooms outwards as it
+     * brightens and draws back in as it dims.
+     */
+    [[nodiscard]] static constexpr float expansion(
+        std::int64_t elapsed_ns) noexcept {
+        return brightness(elapsed_ns);
+    }
+
+    /**
+     * @brief The size of a glow layer whose size at full spread is @p peak_scale.
+     *
+     * The layer's distance beyond the shape grows from @c intro_glow_rest of
+     * its full value, at expansion 0, to all of it at expansion 1. The shape
+     * itself is never scaled.
+     */
+    [[nodiscard]] static constexpr float glow_scale(float peak_scale,
+        float expansion) noexcept {
+        return 1.0f + (peak_scale - 1.0f) * spread(expansion);
+    }
+
+    /** @brief The fraction of its full reach the glow has at @p expansion. */
+    [[nodiscard]] static constexpr float spread(float expansion) noexcept {
+        return theme::intro_glow_rest
+            + (1.0f - theme::intro_glow_rest) * expansion;
     }
 
     /**
@@ -119,7 +153,7 @@ struct intro_timing final {
  * @brief Draws the launch intro over the whole viewport, above every window.
  *
  * The desk wallpaper, darker, with the ORE swirl large and centred and
- * glowing at @p elapsed_ns. Emitted on the foreground draw list, so it is above
+ * pulsing at @p elapsed_ns, its glow spreading outwards as it brightens. Emitted on the foreground draw list, so it is above
  * every window and popup, and the whole of it is faded by the veil alpha so
  * the main window comes up through it. The logo and its glow are textures
  * drawn through @p input's texture source; with no source or no document the

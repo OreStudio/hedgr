@@ -24,11 +24,14 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include <algorithm>
+#include <cmath>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/catch_approx.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <vector>
 
 using hedgr::ui::render::draw_intro;
 using hedgr::ui::render::intro_dark_ns;
@@ -87,9 +90,10 @@ intro_frame read_intro(hedgr::testing::desk& desk, std::int64_t elapsed_ns,
 }
 
 TEST_CASE("the intro's timeline is the one the sound is cut to", "[intro]") {
-    CHECK(intro_peak_ns == 1'400'000'000);
-    CHECK(intro_dark_ns == 2'400'000'000);
-    CHECK(intro_total_ns == 3'200'000'000);
+    /* The peak is the loudest sample of intro_swell.wav, measured: 123281 / 44100 s. */
+    CHECK(intro_peak_ns == 2'795'000'000);
+    CHECK(intro_dark_ns == 5'200'000'000);
+    CHECK(intro_total_ns == 6'000'000'000);
 }
 
 TEST_CASE("the logo starts dark, peaks at the peak and is dark again",
@@ -98,8 +102,45 @@ TEST_CASE("the logo starts dark, peaks at the peak and is dark again",
     CHECK(intro_timing::brightness(intro_peak_ns) == 1.0f);
     CHECK(intro_timing::brightness(intro_dark_ns) == 0.0f);
     CHECK(intro_timing::brightness(intro_total_ns) == 0.0f);
-    CHECK(intro_timing::brightness(intro_peak_ns / 2) < 0.5f);
-    CHECK(intro_timing::brightness(intro_peak_ns / 2) > 0.0f);
+    CHECK(intro_timing::brightness(intro_peak_ns / 2)
+        == Catch::Approx(0.5f).margin(0.01));
+}
+
+TEST_CASE("the brightness eases: a gentle start and a gentle landing",
+    "[intro]") {
+    CHECK(intro_timing::brightness(step_ns) < 0.0001f);
+    CHECK(intro_timing::brightness(intro_peak_ns - step_ns) > 0.9999f);
+    CHECK(intro_timing::brightness(intro_dark_ns - step_ns) < 0.0001f);
+}
+
+TEST_CASE("the brightness never jumps between samples 10 ms apart", "[intro]") {
+    float biggest = 0.0f;
+    float previous = intro_timing::brightness(0);
+    for (std::int64_t t = step_ns; t <= intro_total_ns; t += step_ns) {
+        const float now = intro_timing::brightness(t);
+        biggest = std::max(biggest, std::abs(now - previous));
+        previous = now;
+    }
+    CHECK(biggest < hedgr::ui::render::intro_max_step);
+    /* A bound that loose would let a slow pulse hide a step, so it is also tight. */
+    CHECK(biggest > hedgr::ui::render::intro_max_step * 0.3f);
+}
+
+TEST_CASE("the expansion follows the brightness and clamps with it", "[intro]") {
+    for (std::int64_t t = -step_ns; t <= intro_total_ns + step_ns; t += step_ns)
+        CHECK(intro_timing::expansion(t) == intro_timing::brightness(t));
+    CHECK(intro_timing::expansion(0) == 0.0f);
+    CHECK(intro_timing::expansion(intro_peak_ns) == 1.0f);
+    CHECK(intro_timing::expansion(intro_total_ns) == 0.0f);
+    CHECK(intro_timing::expansion(-1) == 0.0f);
+}
+
+TEST_CASE("a glow layer reaches out as the expansion grows", "[intro]") {
+    const float full = hedgr::ui::theme::intro_glow_scales[5];
+    CHECK(intro_timing::glow_scale(full, 1.0f) == Catch::Approx(full));
+    CHECK(intro_timing::glow_scale(full, 0.0f) < intro_timing::glow_scale(full, 0.5f));
+    CHECK(intro_timing::glow_scale(full, 0.5f) < intro_timing::glow_scale(full, 1.0f));
+    CHECK(intro_timing::glow_scale(1.0f, 0.5f) == 1.0f);
 }
 
 TEST_CASE("the brightness only rises to the peak and only falls after it",
@@ -118,6 +159,17 @@ TEST_CASE("the brightness only rises to the peak and only falls after it",
         CHECK(now >= 0.0f);
         previous = now;
     }
+}
+
+TEST_CASE("the pulse has exactly one maximum", "[intro]") {
+    int maxima = 0;
+    for (std::int64_t t = 0; t <= intro_total_ns; t += step_ns)
+        if (intro_timing::brightness(t) >= 0.9999f)
+            ++maxima;
+    /* The plateau of the smoothstep is a few samples wide and contiguous. */
+    CHECK(maxima >= 1);
+    CHECK(maxima <= 3);
+    CHECK(intro_timing::brightness(intro_peak_ns) == 1.0f);
 }
 
 TEST_CASE("the brightness clamps outside the timeline", "[intro]") {
@@ -236,6 +288,8 @@ TEST_CASE("the glow draws the configured layers and the crisp logo", "[intro]") 
     CHECK(read_intro(desk, 0).logo_quads == 0);
     CHECK(read_intro(desk, intro_peak_ns).logo_quads
         == hedgr::ui::theme::intro_glow_layers + 1);
+    CHECK(read_intro(desk, intro_peak_ns / 3).logo_quads
+        == hedgr::ui::theme::intro_glow_layers + 1);
 }
 
 TEST_CASE("without a logo document the wallpaper and halo still draw",
@@ -275,17 +329,26 @@ struct word_read final {
     float alpha_sum = 0.0f;
     float min_x = 1e9f;
     float max_x = -1e9f;
+    /** @brief The width of the outermost glow layer, the first one drawn. */
+    float outer_width = 0.0f;
     /** @brief The widest layer's advance width: the box the word is centred in. */
     float advance = 0.0f;
 };
 
+/*
+ * ImGui drops a draw whose alpha rounds to 0, so the faintest layers vanish
+ * near the dark ends. The shape tests sample where every layer is still drawn:
+ * from 3/10 of the way up the ramp to 7/10 of the way down it.
+ */
+constexpr int first_tenth = 3;
+constexpr int last_falling_tenth = 7;
+
+/** @brief The black fill, the halo's fan and the vignette's fan come before any text. */
+constexpr int under_text_vertices = 4 + 33 + 33;
+
 /**
- * @brief Draws the intro with no logo document, so the only lit vertices under
- * the swirl's lower edge are the word's glyphs.
- *
- * The halo's rim is transparent, its centre is above the line, the vignette is
- * black and the wallpaper is off, so the filter below keeps glyphs and nothing
- * else.
+ * @brief Draws the intro with no logo document, so the lit vertices after the
+ * halo and vignette are the word's glyphs, glow layers first.
  */
 word_read read_word(hedgr::testing::desk& desk, std::int64_t elapsed_ns) {
     ImGui::NewFrame();
@@ -295,19 +358,29 @@ word_read read_word(hedgr::testing::desk& desk, std::int64_t elapsed_ns) {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float side = std::min(viewport->Size.x, viewport->Size.y)
         * hedgr::ui::theme::intro_logo_fraction;
-    const float line = viewport->Size.y * 0.5f + side * 0.5f;
     word_read out;
     out.submitted = ImGui::GetForegroundDrawList()->VtxBuffer.Size;
+    std::vector<float> xs;
+    int index = 0;
     for (const ImDrawVert& v : ImGui::GetForegroundDrawList()->VtxBuffer) {
         const float a = static_cast<float>((v.col >> IM_COL32_A_SHIFT) & 0xff)
             / 255.0f;
         const bool lit = (v.col & 0x00ffffffu) != 0 && a > 0.0f;
-        if (!lit || v.pos.y <= line)
+        if (index++ < under_text_vertices || !lit)
             continue;
+        xs.push_back(v.pos.x);
         ++out.vertices;
         out.alpha_sum += a;
         out.min_x = std::min(out.min_x, v.pos.x);
         out.max_x = std::max(out.max_x, v.pos.x);
+    }
+    /* Seven draws of the same text, outermost first: the glow layers, then the crisp. */
+    if (!xs.empty()) {
+        const std::size_t per_layer = xs.size()
+            / (hedgr::ui::theme::intro_glow_layers + 1);
+        const auto outer = std::minmax_element(xs.begin(),
+            xs.begin() + static_cast<std::ptrdiff_t>(per_layer));
+        out.outer_width = *outer.second - *outer.first;
     }
     const float size = side * hedgr::ui::theme::intro_word_size
         * hedgr::ui::theme::intro_glow_scales[hedgr::ui::theme::intro_glow_layers - 1];
@@ -335,16 +408,38 @@ TEST_CASE("the word takes the logo's brightness", "[intro][word]") {
     hedgr::testing::desk desk;
 
     const auto peak = read_word(desk, intro_peak_ns);
-    const std::int64_t at = intro_peak_ns * 4 / 5;
-    const auto rising = read_word(desk, at);
     REQUIRE(peak.alpha_sum > 0.0f);
-    CHECK(rising.vertices == peak.vertices);
-    CHECK(rising.alpha_sum / peak.alpha_sum
-        == Catch::Approx(intro_timing::brightness(at)).epsilon(0.06));
-
+    float previous = 0.0f;
+    for (int tenth = first_tenth; tenth < 10; ++tenth) {
+        const auto rising = read_word(desk, intro_peak_ns * tenth / 10);
+        CHECK(rising.vertices == peak.vertices);
+        CHECK(rising.alpha_sum > previous);
+        CHECK(rising.alpha_sum < peak.alpha_sum);
+        previous = rising.alpha_sum;
+    }
     const auto falling = read_word(desk,
         (intro_peak_ns + intro_dark_ns) / 2);
     CHECK(falling.alpha_sum < peak.alpha_sum);
+}
+
+TEST_CASE("the word's glow spreads outwards with the pulse and draws back in",
+    "[intro][word]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+
+    float previous = 0.0f;
+    for (int tenth = first_tenth; tenth <= 10; ++tenth) {
+        const float width = read_word(desk, intro_peak_ns * tenth / 10).outer_width;
+        CHECK(width > previous);
+        previous = width;
+    }
+    for (int tenth = 1; tenth <= last_falling_tenth; ++tenth) {
+        const float width = read_word(desk,
+            intro_peak_ns + (intro_dark_ns - intro_peak_ns) * tenth / 10)
+                                .outer_width;
+        CHECK(width < previous);
+        previous = width;
+    }
 }
 
 TEST_CASE("the word is centred on the viewport", "[intro][word]") {
@@ -353,6 +448,7 @@ TEST_CASE("the word is centred on the viewport", "[intro][word]") {
 
     const auto peak = read_word(desk, intro_peak_ns);
     REQUIRE(peak.vertices > 0);
+    CHECK(peak.outer_width == Catch::Approx(peak.max_x - peak.min_x).margin(1.0));
     const float centre = ImGui::GetIO().DisplaySize.x * 0.5f;
     /*
      * The ink is not symmetric in its advance box, because the full stop's
@@ -363,4 +459,133 @@ TEST_CASE("the word is centred on the viewport", "[intro][word]") {
     const float margin = peak.advance * 0.1f;
     CHECK(peak.min_x == Catch::Approx(centre - peak.advance * 0.5f).margin(margin));
     CHECK(peak.max_x <= centre + peak.advance * 0.5f + 1.0f);
+}
+
+namespace {
+
+struct quad_extent final {
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
+/** @brief Every logo quad the intro drew, in draw order: the glow layers, then the crisp one. */
+std::vector<quad_extent> read_logo_quads(hedgr::testing::desk& desk,
+    std::int64_t elapsed_ns) {
+    ImGui::NewFrame();
+    draw_intro(desk.input(), logo, elapsed_ns);
+    const ImDrawList* list = ImGui::GetForegroundDrawList();
+    std::vector<quad_extent> out;
+    for (const ImDrawCmd& cmd : list->CmdBuffer) {
+        if (cmd.GetTexID() != static_cast<ImTextureID>(7))
+            continue;
+        for (unsigned i = 0; i + 6 <= cmd.ElemCount; i += 6) {
+            float lo_x = 1e9f, hi_x = -1e9f, lo_y = 1e9f, hi_y = -1e9f;
+            for (unsigned k = 0; k < 6; ++k) {
+                const ImDrawVert& v = list->VtxBuffer[static_cast<int>(
+                    cmd.VtxOffset + list->IdxBuffer[static_cast<int>(
+                        cmd.IdxOffset + i + k)])];
+                lo_x = std::min(lo_x, v.pos.x);
+                hi_x = std::max(hi_x, v.pos.x);
+                lo_y = std::min(lo_y, v.pos.y);
+                hi_y = std::max(hi_y, v.pos.y);
+            }
+            out.push_back({hi_x - lo_x, hi_y - lo_y});
+        }
+    }
+    ImGui::EndFrame();
+    return out;
+}
+
+}
+
+TEST_CASE("the logo's glow spreads outwards with the pulse and draws back in",
+    "[intro][logo]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+
+    float previous = 0.0f;
+    for (int tenth = first_tenth; tenth <= 10; ++tenth) {
+        const auto quads = read_logo_quads(desk, intro_peak_ns * tenth / 10);
+        REQUIRE(quads.size() == hedgr::ui::theme::intro_glow_layers + 1);
+        CHECK(quads.front().width > previous);
+        previous = quads.front().width;
+    }
+    for (int tenth = 1; tenth <= last_falling_tenth; ++tenth) {
+        const auto quads = read_logo_quads(desk,
+            intro_peak_ns + (intro_dark_ns - intro_peak_ns) * tenth / 10);
+        REQUIRE_FALSE(quads.empty());
+        CHECK(quads.front().width < previous);
+        previous = quads.front().width;
+    }
+}
+
+TEST_CASE("the glow's outermost layer reaches the configured scale at the peak",
+    "[intro][logo]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+
+    const auto peak = read_logo_quads(desk, intro_peak_ns);
+    const auto early = read_logo_quads(desk, intro_peak_ns * first_tenth / 10);
+    REQUIRE(peak.size() == hedgr::ui::theme::intro_glow_layers + 1);
+    REQUIRE(early.size() == peak.size());
+    const float crisp = peak.back().width;
+    CHECK(peak.front().width / crisp
+        == Catch::Approx(hedgr::ui::theme::intro_glow_scales[5]).epsilon(0.01));
+    CHECK(early.front().width / crisp < 1.0f + 0.5f * (peak.front().width / crisp - 1.0f));
+}
+
+TEST_CASE("the crisp logo keeps its size through the whole pulse",
+    "[intro][logo]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+
+    const float reference = read_logo_quads(desk, intro_peak_ns).back().width;
+    REQUIRE(reference > 0.0f);
+    const std::int64_t last = intro_peak_ns
+        + (intro_dark_ns - intro_peak_ns) * last_falling_tenth / 10;
+    for (std::int64_t t = intro_peak_ns * first_tenth / 10; t <= last;
+         t += intro_total_ns / 40) {
+        const auto quads = read_logo_quads(desk, t);
+        REQUIRE_FALSE(quads.empty());
+        CHECK(quads.back().width == Catch::Approx(reference).epsilon(0.02));
+        CHECK(quads.back().height == Catch::Approx(reference).epsilon(0.02));
+    }
+}
+
+namespace {
+
+/** @brief The brightest any one channel of any drawn vertex is, after its alpha. */
+float brightest_channel(hedgr::testing::desk& desk, std::int64_t elapsed_ns) {
+    ImGui::NewFrame();
+    draw_intro(desk.input(), logo, elapsed_ns);
+    float top = 0.0f;
+    for (const ImDrawVert& v : ImGui::GetForegroundDrawList()->VtxBuffer) {
+        const float a = static_cast<float>((v.col >> IM_COL32_A_SHIFT) & 0xff)
+            / 255.0f;
+        for (const int shift : {IM_COL32_R_SHIFT, IM_COL32_G_SHIFT,
+                 IM_COL32_B_SHIFT})
+            top = std::max(top,
+                static_cast<float>((v.col >> shift) & 0xff) / 255.0f * a);
+    }
+    ImGui::EndFrame();
+    return top;
+}
+
+/** @brief The first version drew the crisp logo at full alpha in a 255 blue channel. */
+constexpr float first_version_peak_channel = 1.0f;
+/** @brief The most any channel may reach at the peak: bright, never clipped. */
+constexpr float max_peak_channel = 0.82f;
+
+}
+
+TEST_CASE("the peak glows softly: no channel clips and it is dimmer than the first version",
+    "[intro][brightness]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+
+    const float peak = brightest_channel(desk, intro_peak_ns);
+    CHECK(peak <= max_peak_channel);
+    CHECK(peak < first_version_peak_channel);
+    CHECK(peak > 0.5f);
+    CHECK(brightest_channel(desk, intro_peak_ns) >= brightest_channel(desk, intro_peak_ns / 2));
 }

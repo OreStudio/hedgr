@@ -842,22 +842,45 @@ inline constexpr float intro_logo_fraction = 0.46f;
 /** @brief The pixel side of the blurred raster the glow layers stretch. */
 inline constexpr int intro_glow_raster = 40;
 inline constexpr int intro_glow_layers = 6;
+/**
+ * @brief Each layer's size at full spread, as a multiple of the shape's.
+ *
+ * The layers are the glow: they grow from @c intro_glow_rest of this reach, as
+ * the pulse begins, to all of it at the peak, so the light blooms outwards.
+ */
 inline constexpr float intro_glow_scales[intro_glow_layers] = {
-    1.04f, 1.10f, 1.20f, 1.34f, 1.52f, 1.78f};
+    1.06f, 1.16f, 1.32f, 1.55f, 1.85f, 2.25f};
+/** @brief The fraction of the full reach the glow keeps when the pulse is dark. */
+inline constexpr float intro_glow_rest = 0.15f;
+/**
+ * @brief Each layer's alpha at the peak. The first version used
+ * 0.55, 0.42, 0.30, 0.20, 0.12, 0.07, which stacked to a blown-out white.
+ */
 inline constexpr float intro_glow_alphas[intro_glow_layers] = {
-    0.55f, 0.42f, 0.30f, 0.20f, 0.12f, 0.07f};
+    0.30f, 0.22f, 0.15f, 0.10f, 0.06f, 0.035f};
+/** @brief How much of the glow's alpha is gone by the peak, as it spreads. */
+inline constexpr float intro_glow_expand_fade = 0.3f;
+/**
+ * @brief The crisp logo's and word's alpha at the peak. The first version
+ * drew them at 1, a clipped white.
+ */
+inline constexpr float intro_peak_intensity = 0.8f;
 /** @brief The core of the glow, a cyan-white. */
 inline constexpr float intro_core_rgb[3] = {0.86f, 0.97f, 1.0f};
 /** @brief How far the outermost layer has moved from the core to the purple. */
 inline constexpr float intro_glow_purple_mix = 0.65f;
-/** @brief The halo's radius as a multiple of the logo's side, and its alpha at the peak. */
-inline constexpr float intro_halo_radius = 1.5f;
-inline constexpr float intro_halo_alpha = 0.5f;
+/**
+ * @brief The halo's radius as a multiple of the logo's side at full spread, and
+ * its alpha at the peak. The first version used 1.5 and 0.5.
+ */
+inline constexpr float intro_halo_radius = 1.6f;
+inline constexpr float intro_halo_alpha = 0.16f;
 /**
  * @brief The word set under the swirl, with the full stop that is part of the name.
  *
- * It takes the swirl's brightness and glows with the same layers, set in the
- * bold face. @c intro_word_size is the font size as a fraction of the swirl's
+ * It takes the swirl's brightness and glows with the same layers, spread by the
+ * same curve, set in the bold face. @c intro_word_size is the font size as a
+ * fraction of the swirl's
  * side, which puts the capitals at about a quarter of the swirl's height, and
  * @c intro_word_gap is the room between the swirl and the word's line, also a
  * fraction of the swirl's side.
