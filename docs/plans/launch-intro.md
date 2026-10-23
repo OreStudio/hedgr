@@ -106,6 +106,49 @@ finds the centre of the loudest 50 ms window, 3.023 s, which fixes
 and the total (6.0 s) stay where the audio fades out, so the rise is 3.023 s and
 the fall 2.177 s.
 
+## Keeping the sound and the picture together
+
+A report said the sound came about a second after the pulse. The old order
+raised `application.intro` on the bus just before the frame loop and started the
+visual clock on the same line; the bus was drained on the first frame, the
+player queued the name, its worker called `ma_engine_play_sound`, which reads
+and decodes the six second file on that call, and the first frames also built
+the swirl texture, three blurs and the glyphs while the clock ran. The swell's
+exponential fade-in makes its first second nearly silent too.
+
+Now, on the first intro frame (`application::launch_intro`):
+
+1. The player preloaded `intro_swell.wav` at startup (`player::preload`, a
+   decoded `ma_sound`), so starting it is a seek and a start.
+2. `warm_intro` builds the textures (the swirl and the three glows) before
+   anything is timed.
+3. `start_intro_clock` starts the sound on the calling thread
+   (`player::start_now`), and only then reads the steady clock. The visual clock
+   starts at that instant plus the output buffer's length (`output_latency_ns`)
+   plus the offset: `intro_clock_start(audio_started_ns, offset_ns)`.
+
+The intro's sound no longer travels on the bus: the name is still resolved by
+`sound_for`, but delivery is synchronous, because a queue is the wrong tool for
+a sound that has to line up with a picture.
+
+**Tuning.** `intro_audio_offset_ms` (0) is the calibration and
+`HEDGR_INTRO_AUDIO_OFFSET_MS` overrides it for one run, within 5000 ms either
+way. Positive means the sound is heard later than the picture shows it, and the
+picture starts that much later; negative brings the picture forward. If the
+sound still seems late, raise it in steps of 100 and watch the pulse's peak
+against the impact. The log shows where time goes. A run prints, at info:
+
+    Intro audio: preloaded <path>/intro_swell.wav in X ms
+    Intro warm-up: textures built in X ms
+    Intro audio: ma_sound_start called at T1 ns, returned at T2 ns (X ms), result 0, engine time E ms
+    Intro audio: output R Hz, period P frames x N periods, latency L ms
+    Intro clock: sound requested at T0 ns, started at T2 ns (X ms), output latency L ms, offset O ms, visual clock starts at T3 ns
+    Intro first frame: drawn at T4 ns, X ms after the visual clock started
+
+The two ends to compare are the preload and warm-up costs, the time `ma_sound_start`
+takes, the reported output latency and the gap between the clock start and the
+first frame (a hitch there is the visual side running late).
+
 ## Ending and skipping
 
 - Any key or mouse button ends it (`intro_skip_requested`). Wheel and gamepad do not.

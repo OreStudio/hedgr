@@ -28,9 +28,11 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
+#include "hedgr.ui/render/intro.hpp"
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
+#include "hedgr.ui/sound/pack.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/capture.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -204,7 +206,16 @@ void application::run() {
      * at all, and a check that only fires in one build would prove nothing
      * about the one that ships.
      */
-    if (!intro_allowed_) {
+    if (intro_allowed_) {
+        /*
+         * Decoded now, while the window is still being built, so that starting
+         * it later is a call that returns at once. The intro's own sound is not
+         * raised on the bus: see launch_intro.
+         */
+        if (const auto file = ui::sound::sound_for(
+                hedgr::model::signal::names::application_intro))
+            sound_.preload(*file);
+    } else {
         hedgr::model::signal::signal started;
         started.name = std::string(
             hedgr::model::signal::names::application_started);
@@ -296,22 +307,6 @@ void application::run() {
      */
     if (cfg_.fullscreen && capture_path_.empty())
         toggle_fullscreen(window);
-
-    /*
-     * The intro's clock starts when the graphics are ready, so its few seconds
-     * are time on screen rather than time spent creating the window and
-     * uploading textures. Its sound is raised here, in place of the plain
-     * startup sound, so it begins with the first frame of the intro.
-     */
-    intro_.started_ns = now_ns();
-    if (intro_allowed_) {
-        hedgr::model::signal::signal intro;
-        intro.name = std::string(
-            hedgr::model::signal::names::application_intro);
-        intro.detail = "Hedgr intro";
-        intro.at_ns = intro_.started_ns;
-        hedgr::model::signal::bus().raise(std::move(intro));
-    }
 
     /*
      * Both channels have writers off the frame thread, so either can end the
@@ -623,6 +618,23 @@ void application::load_instance_icon_textures() {
                               << " instance icon(s).";
 }
 
+void application::launch_intro() {
+    intro_launched_ = true;
+
+    /*
+     * The first intro frame is inside a frame, where the viewport has its size,
+     * so the textures are built here, before anything is timed. Then the sound
+     * is started and only after that is the clock read: the picture never
+     * begins before the sound. HEDGR_INTRO_AUDIO_OFFSET_MS holds the picture
+     * back (positive) or brings it forward (negative) by that many milliseconds
+     * when the sound is heard late or early.
+     */
+    ui::render::warm_intro(textures_, intro_logo_svg_);
+    intro_.started_ns = ui::render::start_intro_clock(sound_,
+        ui::render::intro_audio_offset_ns(
+            std::getenv("HEDGR_INTRO_AUDIO_OFFSET_MS")));
+}
+
 void application::load_intro_logo() {
     /*
      * The same document the menu bar draws. The texture is rasterised by the
@@ -801,6 +813,8 @@ void application::render_loop(GLFWwindow* window) {
          * or a store that failed to open ends it, because the failure notice
          * behind it is what the operator needs to read.
          */
+        if (intro_allowed_ && !intro_launched_)
+            launch_intro();
         const std::int64_t frame_now_ns = now_ns();
         if (intro_allowed_ && !intro_.skipped
             && (ui::render::intro_skip_requested()
@@ -851,9 +865,17 @@ void application::render_loop(GLFWwindow* window) {
          * popup, so it covers the lock prompt rather than depending on a window
          * ordering ImGui owns.
          */
-        if (show_intro)
+        if (show_intro) {
             ui::render::draw_intro(input, intro_logo_svg_,
                 frame_now_ns - intro_.started_ns);
+            if (!intro_first_frame_logged_) {
+                intro_first_frame_logged_ = true;
+                BOOST_LOG_SEV(lg(), info)
+                    << "Intro first frame: drawn at " << frame_now_ns
+                    << " ns, " << (frame_now_ns - intro_.started_ns) / 1'000'000
+                    << " ms after the visual clock started";
+            }
+        }
 
         /*
          * Every signal raised since the last frame goes to the player, which

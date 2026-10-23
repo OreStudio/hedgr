@@ -320,3 +320,42 @@ TEST_CASE("a player with no output device stays silent and safe", "[sound][playe
     CHECK_NOTHROW((void)subject.submit(signals));
     subject.stop();
 }
+
+TEST_CASE("start_now hands the sound to the sink on the caller's thread and returns after it",
+    "[sound][now]") {
+    std::vector<std::thread::id> threads;
+    std::vector<std::string> files;
+    std::int64_t sink_returned_ns = 0;
+    const auto steady = [] {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    player p([&](std::string_view file) {
+        threads.push_back(std::this_thread::get_id());
+        files.emplace_back(file);
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        sink_returned_ns = steady();
+    });
+    p.start();
+
+    const auto at = p.start_now(names::application_intro);
+    REQUIRE(at.has_value());
+    /* Synchronous: the sink has already run, here, by the time this returns. */
+    REQUIRE(files.size() == 1);
+    CHECK(files[0] == "intro_swell.wav");
+    CHECK(threads[0] == std::this_thread::get_id());
+    CHECK(*at >= sink_returned_ns);
+}
+
+TEST_CASE("start_now does nothing for an unregistered name or a player that is not started",
+    "[sound][now]") {
+    int calls = 0;
+    player p([&](std::string_view) { ++calls; });
+    CHECK_FALSE(p.start_now(names::application_intro).has_value());
+    p.start();
+    CHECK_FALSE(p.start_now("no.such.name").has_value());
+    CHECK(calls == 0);
+    CHECK(p.output_latency_ns() == 0);
+    p.preload("intro_swell.wav");
+    CHECK(calls == 0);
+}

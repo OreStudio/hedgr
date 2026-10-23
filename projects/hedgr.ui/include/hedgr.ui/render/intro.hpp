@@ -22,6 +22,7 @@
 
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/sound/player.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include <cmath>
 #include <cstdint>
@@ -50,7 +51,63 @@ inline constexpr std::int64_t intro_peak_ns = 3'023'000'000;
 inline constexpr std::int64_t intro_rest_ns = 5'200'000'000;
 inline constexpr std::int64_t intro_total_ns = 6'000'000'000;
 inline constexpr float intro_max_step = 0.01f;
+/**
+ * @brief The calibration between the sound and the picture, in milliseconds.
+ *
+ * Positive means the sound is heard later than the picture would otherwise
+ * show it, and the visual clock starts that much later. Zero is the best
+ * static estimate until a real run's log says otherwise: the intro already
+ * waits out the output buffer's own length, which the player reports.
+ * HEDGR_INTRO_AUDIO_OFFSET_MS overrides it for a run.
+ */
+inline constexpr std::int64_t intro_audio_offset_ms = 0;
 /** @} */
+
+/**
+ * @brief When the intro's visual clock starts, given when its sound did.
+ *
+ * The clock never starts before the sound has been started, and a positive
+ * @p offset_ns, the sound's delay before it is heard, holds the picture back by
+ * as much. A negative offset starts the clock earlier than the sound call
+ * returned, for a sound that is heard before the call comes back.
+ */
+[[nodiscard]] constexpr std::int64_t intro_clock_start(
+    std::int64_t audio_started_ns, std::int64_t offset_ns) noexcept {
+    return audio_started_ns + offset_ns;
+}
+
+/**
+ * @brief The audio offset a run uses, from the text of HEDGR_INTRO_AUDIO_OFFSET_MS.
+ *
+ * Null, or text that is not a whole number of milliseconds within a few
+ * seconds either way, is the compiled-in @c intro_audio_offset_ms.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::int64_t intro_audio_offset_ns(
+    const char* environment_text) noexcept;
+
+/**
+ * @brief Starts the intro's sound, then returns the visual clock's start.
+ *
+ * The order is the point: the sound is started on the calling thread first, and
+ * only then is the steady clock read, so the picture cannot begin before the
+ * sound has. The returned instant is the sound call's return, plus the player's
+ * output latency and @p offset_ns, through intro_clock_start. A silent host, or
+ * a player that is not started, begins the clock now. Logs the instants at info
+ * so a run shows where any delay goes.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::int64_t start_intro_clock(
+    sound::player& player, std::int64_t offset_ns);
+
+/**
+ * @brief Builds everything the intro's first frames would otherwise build.
+ *
+ * Asks @p textures for the crisp swirl and the three blurred glows, so the SVG
+ * is rasterised and blurred and uploaded before the intro's clock starts and
+ * the first frames do not hitch. Call it inside a frame, where the viewport
+ * has its size.
+ */
+HEDGR_UI_EXPORT void warm_intro(image_texture_source& textures,
+    std::string_view logo_svg);
 
 /**
  * @brief The launch intro's clock, as values a test can drive.

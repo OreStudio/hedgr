@@ -79,6 +79,8 @@ private:
     void load_instance_icon_textures();
     void release_instance_icon_textures();
     void load_intro_logo();
+    /** @brief Warms the intro, starts its sound, then starts its clock. */
+    void launch_intro();
     void render_loop(GLFWwindow* window);
     void toggle_fullscreen(GLFWwindow* window);
     void capture_frame(GLFWwindow* window);
@@ -119,6 +121,8 @@ private:
     std::string intro_logo_svg_;
     ui::render::intro_timing intro_;
     bool intro_allowed_ = false;
+    bool intro_launched_ = false;
+    bool intro_first_frame_logged_ = false;
     int windowed_x_ = 0;
     int windowed_y_ = 0;
     int windowed_width_ = 1280;

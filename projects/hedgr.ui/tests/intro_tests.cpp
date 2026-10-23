@@ -21,7 +21,9 @@
 #include "headless_desk.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/image/svg_raster.hpp"
+#include "hedgr.model/signal/names.hpp"
 #include "hedgr.ui/render/intro.hpp"
+#include "hedgr.ui/sound/player.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "software_raster.hpp"
@@ -30,6 +32,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/catch_approx.hpp>
+#include <chrono>
+#include <thread>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -887,6 +891,76 @@ TEST_CASE("the peak glows softly: no channel clips and it is dimmer than the fir
     CHECK(peak < first_version_peak_channel);
     CHECK(peak > 0.5f);
     CHECK(brightest_channel(desk, intro_peak_ns) >= brightest_channel(desk, intro_peak_ns / 2));
+}
+
+TEST_CASE("the visual clock starts at the sound's start plus its offset", "[intro][sync]") {
+    using hedgr::ui::render::intro_clock_start;
+    CHECK(intro_clock_start(1'000, 0) == 1'000);
+    CHECK(intro_clock_start(1'000, 250) == 1'250);
+    CHECK(intro_clock_start(1'000, -250) == 750);
+    /* A positive offset holds the picture back: the later the sound, the later the clock. */
+    CHECK(intro_clock_start(1'000, 500) > intro_clock_start(1'000, 100));
+    CHECK(intro_clock_start(2'000, 100) > intro_clock_start(1'000, 100));
+}
+
+TEST_CASE("HEDGR_INTRO_AUDIO_OFFSET_MS is read as whole milliseconds within a few seconds",
+    "[intro][sync]") {
+    using hedgr::ui::render::intro_audio_offset_ns;
+    constexpr std::int64_t fallback = hedgr::ui::render::intro_audio_offset_ms * 1'000'000;
+    CHECK(intro_audio_offset_ns(nullptr) == fallback);
+    CHECK(intro_audio_offset_ns("250") == 250'000'000);
+    CHECK(intro_audio_offset_ns("-100") == -100'000'000);
+    CHECK(intro_audio_offset_ns("0") == 0);
+    CHECK(intro_audio_offset_ns("") == fallback);
+    CHECK(intro_audio_offset_ns("fast") == fallback);
+    CHECK(intro_audio_offset_ns("12ms") == fallback);
+    CHECK(intro_audio_offset_ns("5001") == fallback);
+    CHECK(intro_audio_offset_ns("-5001") == fallback);
+    CHECK(intro_audio_offset_ns("5000") == 5'000'000'000);
+}
+
+TEST_CASE("the intro's sound is started before the visual clock is read",
+    "[intro][sync]") {
+    const auto steady = [] {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    std::int64_t sink_called_ns = 0;
+    std::int64_t sink_returned_ns = 0;
+    std::vector<std::string> files;
+    hedgr::ui::sound::player player([&](std::string_view file) {
+        sink_called_ns = steady();
+        files.emplace_back(file);
+        /* A slow start, as a lazily opened device would be. */
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        sink_returned_ns = steady();
+    });
+    player.start();
+
+    const std::int64_t clock_ns = hedgr::ui::render::start_intro_clock(player, 0);
+    REQUIRE(files.size() == 1);
+    CHECK(files[0] == "intro_swell.wav");
+    /* Read after the sound call returned, so the 30 ms are not on the clock. */
+    CHECK(clock_ns >= sink_returned_ns);
+    CHECK(clock_ns - sink_called_ns >= 30'000'000);
+
+    const std::int64_t held = hedgr::ui::render::start_intro_clock(player,
+        200'000'000);
+    CHECK(held >= sink_returned_ns + 200'000'000);
+    const std::int64_t early = hedgr::ui::render::start_intro_clock(player,
+        -200'000'000);
+    CHECK(early < sink_returned_ns);
+}
+
+TEST_CASE("a silent player starts the visual clock now", "[intro][sync]") {
+    hedgr::ui::sound::player player([](std::string_view) {});
+    const auto before = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const std::int64_t clock_ns = hedgr::ui::render::start_intro_clock(player, 0);
+    const auto after = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    CHECK(clock_ns >= before);
+    CHECK(clock_ns <= after);
 }
 
 namespace {

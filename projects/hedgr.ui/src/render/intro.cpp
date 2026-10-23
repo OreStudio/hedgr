@@ -19,14 +19,30 @@
  */
 #include "hedgr.ui/render/intro.hpp"
 
+#include "hedgr.model/signal/names.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <cfloat>
+#include <charconv>
+#include <chrono>
 #include <cmath>
 
 namespace {
+
+/** @brief This file's logger. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.intro");
+    return instance;
+}
+
+[[nodiscard]] std::int64_t steady_ns() {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 constexpr const char* logo_texture_id = "ore-logo-white";
 constexpr int fan_segments = 32;
@@ -116,6 +132,59 @@ bool intro_skip_requested() {
             return true;
     }
     return false;
+}
+
+std::int64_t intro_audio_offset_ns(const char* environment_text) noexcept {
+    constexpr std::int64_t fallback = intro_audio_offset_ms * 1'000'000;
+    if (environment_text == nullptr)
+        return fallback;
+    const std::string_view text(environment_text);
+    std::int64_t milliseconds = 0;
+    const auto [end, error] = std::from_chars(text.data(),
+        text.data() + text.size(), milliseconds);
+    constexpr std::int64_t limit_ms = 5000;
+    if (error != std::errc() || end != text.data() + text.size()
+        || milliseconds < -limit_ms || milliseconds > limit_ms)
+        return fallback;
+    return milliseconds * 1'000'000;
+}
+
+std::int64_t start_intro_clock(sound::player& player, std::int64_t offset_ns) {
+    const std::int64_t asked_ns = steady_ns();
+    const auto returned_ns = player.start_now(
+        hedgr::model::signal::names::application_intro);
+    const std::int64_t latency_ns = player.output_latency_ns();
+    const std::int64_t audio_ns = returned_ns.value_or(asked_ns);
+    const std::int64_t start_ns = returned_ns
+        ? intro_clock_start(audio_ns, offset_ns + latency_ns)
+        : steady_ns();
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Intro clock: sound requested at " << asked_ns << " ns, "
+        << (returned_ns ? "started" : "not started (silent host)")
+        << " at " << audio_ns << " ns (" << (audio_ns - asked_ns) / 1'000'000
+        << " ms), output latency " << latency_ns / 1'000'000
+        << " ms, offset " << offset_ns / 1'000'000
+        << " ms, visual clock starts at " << start_ns << " ns";
+    return start_ns;
+}
+
+void warm_intro(image_texture_source& textures, std::string_view logo_svg) {
+    if (logo_svg.empty())
+        return;
+    const auto began = steady_ns();
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const float side = std::min(viewport->Size.x, viewport->Size.y)
+        * theme::intro_logo_fraction;
+    const float dpi = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.y);
+    const int pixels = static_cast<int>(std::lround(side * dpi));
+    static_cast<void>(textures.svg(logo_texture_id, logo_svg, pixels, pixels));
+    for (int i = 0; i < theme::intro_glow_layers; ++i)
+        static_cast<void>(textures.svg_glow(logo_texture_id, logo_svg,
+            theme::intro_glow_raster, theme::intro_glow_inner,
+            theme::intro_glow_sigmas[i]));
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Intro warm-up: textures built in " << (steady_ns() - began) / 1'000'000
+        << " ms";
 }
 
 void draw_intro(const render_input& input, std::string_view logo_svg,
