@@ -69,7 +69,7 @@ TEST_CASE("a command centre state survives the stored form", "[window]") {
 
 TEST_CASE("a saved window state missing fields reads with their defaults",
     "[window]") {
-    for (auto value = 0; value <= static_cast<int>(domain::window_kind::crm_matrix);
+    for (auto value = 0; value < static_cast<int>(domain::window_kind_count);
          ++value) {
         const auto kind = static_cast<domain::window_kind>(value);
         INFO("kind " << domain::to_string(kind));
@@ -118,4 +118,33 @@ TEST_CASE("a chart saved before charts kept a view reads with none",
     REQUIRE(chart != nullptr);
     CHECK(chart->series_id == "s-1");
     CHECK_FALSE(chart->view.has_value());
+}
+
+TEST_CASE("every window kind's text parses back to the kind", "[window]") {
+    for (auto value = 0; value < static_cast<int>(domain::window_kind_count);
+         ++value) {
+        const auto kind = static_cast<domain::window_kind>(value);
+        INFO("kind " << value);
+        const auto parsed =
+            domain::window_kind_from_string(domain::to_string(kind));
+        REQUIRE(parsed.has_value());
+        CHECK(*parsed == kind);
+    }
+    CHECK(domain::window_kind_count == 11);
+    CHECK(domain::to_string(domain::window_kind::mini_plot) == "mini_plot");
+}
+
+TEST_CASE("a mini plot's state survives the stored form", "[window]") {
+    const domain::window_state state =
+        domain::mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1"};
+    const auto encoded =
+        domain::window_state_to_json(domain::window_kind::mini_plot, state);
+    REQUIRE(encoded.has_value());
+    const auto decoded = domain::window_state_from_json(
+        domain::window_kind::mini_plot, *encoded);
+    REQUIRE(decoded.has_value());
+    const auto* card = std::get_if<domain::mini_plot_state>(&*decoded);
+    REQUIRE(card != nullptr);
+    CHECK(card->label == "FX GBP/USD");
+    CHECK(card->series_id == "s-1");
 }

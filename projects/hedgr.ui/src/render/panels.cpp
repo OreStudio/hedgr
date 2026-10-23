@@ -89,6 +89,10 @@ void append_window_title(std::string& out, domain::window_kind kind,
         if (kind == domain::window_kind::chart)
             return put(or_else(chart->label, "Chart"));
     }
+    if (const auto* card = std::get_if<domain::mini_plot_state>(&state)) {
+        if (kind == domain::window_kind::mini_plot)
+            return put(or_else(card->label, "Mini plot"));
+    }
     if (const auto* grid = std::get_if<domain::grid_state>(&state)) {
         if (kind == domain::window_kind::grid)
             return put(or_else(grid->resource, "Grid"));
@@ -125,6 +129,8 @@ void append_window_title(std::string& out, domain::window_kind kind,
     switch (kind) {
     case domain::window_kind::chart:
         return put("Chart");
+    case domain::window_kind::mini_plot:
+        return put("Mini plot");
     case domain::window_kind::grid:
         return put("Grid");
     case domain::window_kind::notice:
@@ -335,6 +341,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::notice:
     case domain::window_kind::instance_manager:
     case domain::window_kind::crm_matrix:
+    case domain::window_kind::mini_plot:
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:

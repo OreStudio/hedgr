@@ -37,6 +37,7 @@
 #include "hedgr.store/sqlite/database.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -55,6 +56,7 @@ namespace {
 
 using hedgr::model::domain::account;
 using hedgr::model::domain::chart_state;
+using hedgr::model::domain::mini_plot_state;
 using hedgr::model::domain::folder;
 using hedgr::model::domain::folder_tree;
 using hedgr::model::domain::instance;
@@ -1043,4 +1045,73 @@ TEST_CASE("every entity reads back from the schema this build applies",
 
     REQUIRE(instances.remove("inst-1").has_value());
     REQUIRE(account_repository(db).list().value().empty());
+}
+
+TEST_CASE("a mini plot window round-trips through the store", "[store]") {
+    auto db = fresh_store();
+    window_repository windows(db);
+
+    window_spec spec;
+    spec.id = "mini:inst-1:id-1:s-1";
+    spec.kind = window_kind::mini_plot;
+    spec.session = session_key{"inst-1", "id-1"};
+    spec.state = mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1"};
+    REQUIRE(windows.save(spec).has_value());
+
+    const auto rows = windows.list();
+    REQUIRE(rows.has_value());
+    REQUIRE(rows.value().size() == 1);
+    const auto& stored = rows.value().front();
+    CHECK(stored.id == spec.id);
+    CHECK(stored.kind == window_kind::mini_plot);
+    REQUIRE(stored.session.has_value());
+    CHECK(stored.session->account_id == "id-1");
+    const auto* card = std::get_if<mini_plot_state>(&stored.state);
+    REQUIRE(card != nullptr);
+    CHECK(card->label == "FX GBP/USD");
+    CHECK(card->series_id == "s-1");
+}
+
+TEST_CASE("a file written before the mini plot kind still loads, and takes one",
+    "[store]") {
+    const temporary_database scratch;
+
+    /* The previous build's rows: a chart and a notice, written as text. */
+    {
+        auto opened = database::open(scratch.path());
+        REQUIRE(opened.has_value());
+        REQUIRE(opened.value().apply_schema().has_value());
+        REQUIRE(opened.value().execute(
+            "INSERT INTO window_spec (window_id, kind, cadence_ms, state_json) "
+            "VALUES ('old-chart', 'chart', 2000, "
+            "'{\"label\":\"Trades\",\"series_id\":\"trades\"}')")
+                    .has_value());
+        REQUIRE(opened.value().execute(
+            "INSERT INTO window_spec (window_id, kind, cadence_ms, state_json) "
+            "VALUES ('old-notice', 'notice', 1000, '{}')").has_value());
+    }
+
+    auto reopened = database::open(scratch.path());
+    REQUIRE(reopened.has_value());
+    auto db = std::move(reopened).value();
+    REQUIRE(db.apply_schema().has_value());
+    window_repository windows(db);
+
+    const auto before = windows.list();
+    REQUIRE(before.has_value());
+    REQUIRE(before.value().size() == 2);
+
+    window_spec card;
+    card.id = "mini:i:a:trades";
+    card.kind = window_kind::mini_plot;
+    card.state = mini_plot_state{.label = "Trades", .series_id = "trades"};
+    REQUIRE(windows.save(card).has_value());
+
+    const auto after = windows.list();
+    REQUIRE(after.has_value());
+    REQUIRE(after.value().size() == 3);
+    const auto found = std::ranges::find(after.value(), "mini:i:a:trades",
+        &window_spec::id);
+    REQUIRE(found != after.value().end());
+    CHECK(found->kind == window_kind::mini_plot);
 }

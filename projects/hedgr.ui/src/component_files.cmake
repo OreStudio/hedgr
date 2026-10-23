@@ -19,6 +19,7 @@ set(files
     "render/grid_window.cpp"
     "render/instances_window.cpp"
     "render/market_view.cpp"
+    "render/mini_plot_window.cpp"
     "render/notice_window.cpp"
     "render/panels.cpp"
     "render/renderer.cpp"

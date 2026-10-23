@@ -86,6 +86,13 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         chart.series_id = std::string{series_id};
         return chart;
     }
+    case domain::window_kind::mini_plot: {
+        domain::mini_plot_state card;
+        card.label = series_label.empty() ? "Series"
+                                          : std::string{series_label};
+        card.series_id = std::string{series_id};
+        return card;
+    }
     case domain::window_kind::series_browser:
         return domain::series_browser_state{};
     case domain::window_kind::crm_matrix:
@@ -163,6 +170,11 @@ std::string window_key_for(domain::window_kind kind,
         return series_id.empty()
             ? std::string{}
             : std::format("chart:{}:{}:{}", instance_id, account_id, series_id);
+    case domain::window_kind::mini_plot:
+        /* One card per series per session, as for a chart (plan D4). */
+        return series_id.empty()
+            ? std::string{}
+            : std::format("mini:{}:{}:{}", instance_id, account_id, series_id);
     case domain::window_kind::term_structure:
         return series_id.empty()
             ? std::string{}
@@ -184,13 +196,16 @@ window_service::window_service(const model_state::session_table& sessions,
 
 void window_service::hold_series(model_state::window_handle window,
     std::string_view instance_id, std::string_view account_id) {
-    const auto* chart =
-        std::get_if<domain::chart_state>(&windows_.state(window));
-    if (chart == nullptr || chart->series_id.empty())
+    const auto& shape = windows_.state(window);
+    std::string_view series_id;
+    if (const auto* chart = std::get_if<domain::chart_state>(&shape))
+        series_id = chart->series_id;
+    else if (const auto* card = std::get_if<domain::mini_plot_state>(&shape))
+        series_id = card->series_id;
+    if (series_id.empty())
         return;
 
-    const auto wanted =
-        series_.intern(instance_id, account_id, chart->series_id);
+    const auto wanted = series_.intern(instance_id, account_id, series_id);
     const auto held = windows_.series(window);
     if (held.size() == 1 && held.front() == wanted)
         return;
