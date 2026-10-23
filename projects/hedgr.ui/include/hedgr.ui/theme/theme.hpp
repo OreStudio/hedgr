@@ -828,66 +828,78 @@ store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
 /**
  * @name The launch intro's look
  *
- * The wallpaper is the desk's, tinted down from the 97 the desk uses. The logo
- * is drawn once crisp and then as glow layers, each a larger copy of a
- * low-resolution raster of the same swirl, so the bilinear stretch blurs it
- * and each layer is a wider, fainter bloom. The layers shade from the core
- * colour toward the chart purple the further out they sit. Behind them a
- * radial halo lights the wallpaper, and a vignette keeps the corners black.
+ * A neon sign: the geometry is fixed and only the light changes. The wallpaper
+ * is the desk's, tinted down from the 97 the desk uses. The swirl is the crisp
+ * shape on top of three genuinely blurred copies of itself, tight, medium and
+ * wide, each a gaussian-blurred silhouette rasterised once (see
+ * image::rasterize_svg_glow) and drawn at one fixed size. A vignette keeps the
+ * corners black.
+ *
+ * Brightness, from the timeline, moves three things. The crisp shapes' colour
+ * climbs from near-black blue through blue-grey to a white-hot core. The halo's
+ * alpha follows the brightness to a power, so it ignites late and fades early.
+ * The halo's colour moves from deep indigo when dim to cyan-white near the
+ * peak, the wide layer staying a faint purple haze at the top.
+ *
+ * The word's halo is the word drawn again in rings of fixed tiny offsets at
+ * very low alpha, which sums to a blur. The font atlas gives no CPU copy of a
+ * glyph at the size drawn, so there is no mask to blur, and the rings need no
+ * texture.
  * @{
  */
 inline constexpr int intro_wallpaper_grey = 38;
-/** @brief The logo's side as a fraction of the viewport's shorter side. */
-inline constexpr float intro_logo_fraction = 0.46f;
-/** @brief The pixel side of the blurred raster the glow layers stretch. */
-inline constexpr int intro_glow_raster = 40;
-inline constexpr int intro_glow_layers = 6;
+/** @brief The swirl's side as a fraction of the viewport's shorter side. */
+inline constexpr float intro_logo_fraction = 0.20f;
+/** @brief The glow texture's side and the swirl's side inside it, in pixels. */
+inline constexpr int intro_glow_raster = 256;
+inline constexpr int intro_glow_inner = 96;
+inline constexpr int intro_glow_layers = 3;
+/** @brief Each layer's gaussian sigma in glow texture pixels: tight, medium, wide. */
+inline constexpr float intro_glow_sigmas[intro_glow_layers] = {3.0f, 8.0f, 20.0f};
+/** @brief Each layer's alpha at the peak. */
+inline constexpr float intro_glow_alphas[intro_glow_layers] = {0.82f, 0.80f, 0.70f};
+/** @brief The power of the brightness the halo's alpha follows. */
+inline constexpr float intro_halo_gamma = 2.0f;
 /**
- * @brief Each layer's size at full spread, as a multiple of the shape's.
- *
- * The layers are the glow: they grow from @c intro_glow_rest of this reach, as
- * the pulse begins, to all of it at the peak, so the light blooms outwards.
- */
-inline constexpr float intro_glow_scales[intro_glow_layers] = {
-    1.06f, 1.16f, 1.32f, 1.55f, 1.85f, 2.25f};
-/** @brief The fraction of the full reach the glow keeps when the pulse is dark. */
-inline constexpr float intro_glow_rest = 0.15f;
-/**
- * @brief Each layer's alpha at the peak. The first version used
- * 0.55, 0.42, 0.30, 0.20, 0.12, 0.07, which stacked to a blown-out white.
- */
-inline constexpr float intro_glow_alphas[intro_glow_layers] = {
-    0.30f, 0.22f, 0.15f, 0.10f, 0.06f, 0.035f};
-/** @brief How much of the glow's alpha is gone by the peak, as it spreads. */
-inline constexpr float intro_glow_expand_fade = 0.3f;
-/**
- * @brief The crisp logo's and word's alpha at the peak. The first version
- * drew them at 1, a clipped white.
+ * @brief The crisp shapes' alpha, held fixed. Their colour carries the pulse,
+ * and at the peak it is bright, never clipped. The first version drew them at
+ * 1, a clipped white.
  */
 inline constexpr float intro_peak_intensity = 0.8f;
-/** @brief The core of the glow, a cyan-white. */
+/** @brief The white-hot core at the peak, a cyan-white. */
 inline constexpr float intro_core_rgb[3] = {0.86f, 0.97f, 1.0f};
-/** @brief How far the outermost layer has moved from the core to the purple. */
-inline constexpr float intro_glow_purple_mix = 0.65f;
 /**
- * @brief The halo's radius as a multiple of the logo's side at full spread, and
- * its alpha at the peak. The first version used 1.5 and 0.5.
+ * @brief The power of the brightness each channel of the crisp colour follows:
+ * red climbs slowest and blue fastest, so a dim shape is blue and a bright one
+ * white.
  */
-inline constexpr float intro_halo_radius = 1.6f;
-inline constexpr float intro_halo_alpha = 0.16f;
+inline constexpr float intro_crisp_gammas[3] = {2.2f, 1.6f, 1.0f};
+/** @brief The halo's colour when dim, a deep indigo. */
+inline constexpr float intro_halo_cold_rgb[3] = {0.22f, 0.26f, 1.0f};
+/** @brief How far the wide layer's colour at the peak is toward the chart purple. */
+inline constexpr float intro_glow_purple_mix = 0.5f;
 /**
  * @brief The word set under the swirl, with the full stop that is part of the name.
  *
- * It takes the swirl's brightness and glows with the same layers, spread by the
- * same curve, set in the bold face. @c intro_word_size is the font size as a
- * fraction of the swirl's
- * side, which puts the capitals at about a quarter of the swirl's height, and
- * @c intro_word_gap is the room between the swirl and the word's line, also a
- * fraction of the swirl's side.
+ * It takes the swirl's brightness. @c intro_word_width is its width as a
+ * multiple of the swirl's side, which fixes the font size, and
+ * @c intro_word_gap is the room between the swirl and the word's line, a
+ * fraction of the swirl's side. The swirl and word are one lockup, centred
+ * horizontally and @c intro_lockup_lift of the viewport's height above the
+ * vertical centre.
  */
 inline constexpr const char* intro_word = "HEDGR.";
-inline constexpr float intro_word_size = 0.40f;
-inline constexpr float intro_word_gap = 0.06f;
+inline constexpr float intro_word_width = 1.2f;
+inline constexpr float intro_word_gap = 0.10f;
+inline constexpr float intro_lockup_lift = 0.04f;
+/**
+ * @brief The rings of offset copies that blur the word: how many copies, how
+ * far out as a fraction of the font size, and each copy's alpha at the peak.
+ */
+inline constexpr int intro_word_rings = 3;
+inline constexpr int intro_word_ring_copies[intro_word_rings] = {10, 12, 14};
+inline constexpr float intro_word_ring_radii[intro_word_rings] = {0.035f, 0.08f, 0.15f};
+inline constexpr float intro_word_ring_alphas[intro_word_rings] = {0.08f, 0.055f, 0.035f};
 /** @brief The vignette's alpha at the corners. */
 inline constexpr float intro_vignette_alpha = 0.7f;
 /** @} */

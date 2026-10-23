@@ -68,6 +68,17 @@ struct counting_textures final : render::image_texture_source {
         svg_height = height;
         return static_cast<ImTextureID>(7);
     }
+
+    /** @brief The blurred glow textures: one id, 8, and the asks counted. */
+    std::size_t glow_gets = 0;
+    float last_glow_sigma = 0.0f;
+
+    ImTextureID svg_glow(std::string_view, std::string_view, int, int,
+        float sigma) override {
+        ++glow_gets;
+        last_glow_sigma = sigma;
+        return static_cast<ImTextureID>(8);
+    }
 };
 
 /** @brief One ImGui and ImPlot context for the life of a test. */

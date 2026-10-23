@@ -4,64 +4,102 @@ The intro replaces the splash. It plays once, at launch, over the main window.
 
 ## Timeline
 
-The intro is one slow pulse of light, not a flash. All times are from the first
+The intro is one slow pulse of light, like a neon sign switching on and off,
+not a flash. Nothing moves or grows: only the light changes. All times are from the first
 frame the intro is drawn. The constants live in `hedgr.ui/render/intro.hpp`; the
 look constants live in `hedgr.ui/theme/theme.hpp`.
 
-| Time | Brightness and expansion | Veil |
+| Time | Brightness | Veil |
 | --- | --- | --- |
-| 0.0 s | 0 (dark, glow contracted) | opaque |
-| 2.795 s (`intro_peak_ns`) | 1 (brightest, glow fully spread) | opaque |
+| 0.0 s | 0 (dark) | opaque |
+| 3.023 s (`intro_peak_ns`) | 1 (brightest) | opaque |
 | 5.2 s (`intro_dark_ns`) | 0 (dark again) | opaque |
 | 6.0 s (`intro_total_ns`) | 0 | 0, the main window is fully shown |
 
 Brightness is a smoothstep up to the peak and a smoothstep down to the dark
 point: the slope is zero at the start, the peak and the dark point, so there is
 no jump, no flicker and one maximum. The steepest step between samples 10 ms
-apart is about 0.006, and `intro_max_step` (0.01) bounds it in a test.
-`expansion(elapsed)` follows the brightness exactly. The veil is opaque until
+apart is about 0.007 (on the falling ramp), and `intro_max_step` (0.01) bounds it in a test.
+The veil is opaque until
 the dark point and then fades linearly. `intro_timing` holds `brightness`,
-`expansion`, `glow_scale`, `veil_alpha` and `finished` as pure functions of
+`halo_gain`, `veil_alpha` and `finished` as pure functions of
 elapsed time, and a `skipped` flag. Any key or click skips, so the length costs
 nobody anything.
 
 ## What is drawn
 
 On the foreground draw list, so it covers every window: black, the desk
-wallpaper tinted to `intro_wallpaper_grey` (38; the desk uses 97), a radial
-halo, a vignette, then the ORE swirl and the word `HEDGR.` under it. The swirl
-is `intro_logo_fraction` of the shorter viewport side.
+wallpaper tinted to `intro_wallpaper_grey` (38; the desk uses 97), a vignette,
+then the ORE swirl and the word `HEDGR.` under it as one lockup. The swirl is
+`intro_logo_fraction` (0.20) of the shorter viewport side. The word is set so
+its width is `intro_word_width` (1.2) swirl widths, which puts its capitals at
+about a fifth of the swirl's height. The lockup is centred horizontally and
+`intro_lockup_lift` (0.04) of the viewport height above the vertical centre.
 
-The glow is `intro_glow_layers` larger copies of a 40 px raster of the swirl
-(the bilinear stretch blurs it) with falling alpha and a tint that moves from
-cyan-white toward the chart purple, then the crisp swirl on top. The word uses
-the same layers as larger font sizes of `icon::bold_font()`, scaled about the
-text's centre. The glow expands outwards with the pulse: a layer's size is
-`1 + (intro_glow_scales[i] - 1) * spread`, where spread runs from
-`intro_glow_rest` (0.15) when dark to 1 at the peak, and the halo's radius
-spreads the same way. The layers thin by `intro_glow_expand_fade` as they
-spread. The crisp swirl and word never change size.
+The reference is a soft bloom: a gaussian-like halo hugging a crisp icon, with
+a bright tight core, fading smoothly into the dark. The first build stacked
+scaled copies of a small sharp raster, which read as hard ghost outlines. The
+glow is now genuinely blurred.
 
-The first version blew out: the crisp shapes and the layers stacked to a clipped
-white. Now the crisp shapes draw at `intro_peak_intensity` (0.8, was 1.0), the
-layer alphas at the peak are 0.30 to 0.035 (were 0.55 to 0.07) and the halo is
-0.16 (was 0.5). The brightest channel of any vertex after its alpha is 0.8
-at the peak (was 1.0), and a test caps it at `max_peak_channel` (0.82).
+**Swirl.** `image::rasterize_svg_glow` rasterises the swirl at
+`intro_glow_inner` (96) px, centres it on a transparent `intro_glow_raster`
+(256) px canvas and blurs the alpha with a separable gaussian
+(`image::blur_alpha`, kernel cut at three sigma). The intro asks the texture
+source for three of them through `image_texture_source::svg_glow`, at the
+sigmas in `intro_glow_sigmas` (3, 8, 20 px): tight, medium, wide. The cache
+(`image_texture_cache`) builds each once and keeps it under its own key, so
+a steady frame is three cache hits and nothing is computed. Each is drawn at
+one fixed size, `raster/inner` times the swirl's, with the crisp swirl on top.
 
-There is no shader and no additive blend: the layers alpha-blend over a dark
-scene, which looks close to additive. Steady frames allocate nothing.
+**Word.** The font atlas gives no CPU copy of a glyph at the size drawn, so
+there is no mask to blur. The word's halo is the word drawn again in three rings
+of copies at fixed tiny offsets (`intro_word_ring_copies`, 10, 12 and 14 copies
+at 0.035, 0.08 and 0.15 of the font size) at very low alpha each, which sums to
+a soft blur. It costs 37 text draws and no texture.
+
+**Light.** Only brightness `b` varies, and nothing changes size, place or
+radius at any time: no layer, ring offset or vignette depends on the time.
+
+- The crisp swirl and word keep a fixed alpha (`intro_peak_intensity`, 0.8) and
+  their colour climbs: each channel of `intro_core_rgb` times `b` to the power
+  in `intro_crisp_gammas` (2.2, 1.6, 1.0 for red, green, blue). Dim is a deep
+  blue, the middle a blue-grey, the peak the white-hot core.
+- The halo's alpha is its peak (`intro_glow_alphas`) times `b` to the power
+  `intro_halo_gamma` (2), so it ignites late and fades early, as a neon tube
+  does. The word's rings follow the same gain.
+- The halo's colour moves from the indigo `intro_halo_cold_rgb` at `b` = 0 to
+  its layer's peak colour at `b` = 1: the core for the tight layer, shading
+  toward the chart purple (`intro_glow_purple_mix`) for the wide one, so the top
+  of the pulse has a faint wide purple haze.
+
+The brightest channel of any vertex after its alpha is 0.8 at the peak, and a
+test caps it at `max_peak_channel` (0.82). There is no shader and no additive
+blend: the layers alpha-blend over a dark scene, which looks close to additive.
+Steady frames allocate nothing.
+
+**Checking it.** The hidden test `intro capture` renders frames through the
+headless software rasteriser, with the real SVG rasterised and blurred, and
+writes a PPM per sample time when `HEDGR_INTRO_PPM` names a directory:
+
+    hedgr.ui.tests "intro capture"
+
+The wallpaper is left out of the capture, so the scene is black under the
+vignette.
 
 ## Sound
 
 `assets/sounds/intro_swell.wav`, mono 44.1 kHz 16-bit, 6.0 s, raised as the
-signal `application.intro` on the first intro frame. Kenney's Sci-fi Sounds has
-no swell, so `tools/make_intro_sound.py` synthesises a rising noise and sine
-sweep that grows slowly over 2.57 s and layers Kenney's
-`lowFrequency_explosion_000` (CC0) as the impact, then lets the swell die away
-through the dimming. The impact starts at 2.568 s and the loudest sample of the
-file is sample 123281, at 2.7955 s (measured), which fixes `intro_peak_ns`.
-Change one and rerun the script with the other. The sample's position moves a
-few milliseconds with the impact's start, so measure rather than add.
+signal `application.intro` on the first intro frame. It is the engine swell
+the operator chose: Kenney's `spaceEngineLow_000` faded in over 2.8 s and out
+over the next 2.6 s, with `lowFrequency_explosion_000` (both Sci-Fi Sounds,
+CC0) delayed to 2.8 s as the impact, loudness-normalised and faded out over the
+last 1.2 s. `tools/make_intro_sound.sh` is the ffmpeg recipe; it matches the
+committed file in shape (correlation 0.99) and level, not byte for byte, since
+loudnorm's output depends on the ffmpeg build. `tools/measure_intro_peak.py`
+finds the centre of the loudest 50 ms window, 3.023 s, which fixes
+`intro_peak_ns`. The visual timeline moved to the sound: the dark point (5.2 s)
+and the total (6.0 s) stay where the audio fades out, so the rise is 3.023 s and
+the fall 2.177 s.
 
 ## Ending and skipping
 

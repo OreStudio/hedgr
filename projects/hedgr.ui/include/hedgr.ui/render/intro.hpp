@@ -23,6 +23,7 @@
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"
+#include <cmath>
 #include <cstdint>
 #include <string_view>
 
@@ -31,19 +32,20 @@ namespace hedgr::ui::render {
 /**
  * @name The launch intro's timeline
  *
- * One slow pulse. The logo and the word are dark at the start, brighten
+ * One slow pulse, like a neon sign switching on and off. The geometry never
+ * changes, only the light: the logo and the word are dark at the start, brighten
  * smoothly to their peak, dim smoothly back to dark by the dark point, and from
  * there the whole intro fades out over the main window until the total. The
  * peak is where the intro's sound is loudest: assets/sounds/intro_swell.wav is
- * built by tools/make_intro_sound.py so its loudest sample falls on it, and the
- * two move together.
+ * measured by tools/measure_intro_peak.py: the centre of its loudest 50 ms window
+ * is 3.023 s, and the two move together.
  *
  * @c intro_max_step is the most the brightness may change between two samples
  * 10 ms apart. Smoothstep's steepest slope is 1.5 over the longer ramp, which
- * is a step of about 0.006, so this holds a pulse that cannot jump or flicker.
+ * is a step of about 0.007 on the falling ramp, so this holds a pulse that cannot jump or flicker.
  * @{
  */
-inline constexpr std::int64_t intro_peak_ns = 2'795'000'000;
+inline constexpr std::int64_t intro_peak_ns = 3'023'000'000;
 inline constexpr std::int64_t intro_dark_ns = 5'200'000'000;
 inline constexpr std::int64_t intro_total_ns = 6'000'000'000;
 inline constexpr float intro_max_step = 0.01f;
@@ -84,32 +86,13 @@ struct intro_timing final {
     }
 
     /**
-     * @brief How far the glow has spread outwards, 0 contracted and 1 at the peak.
+     * @brief The halo's share of its peak alpha at @p brightness.
      *
-     * It follows the brightness exactly, so the light blooms outwards as it
-     * brightens and draws back in as it dims.
+     * A power of the brightness, so the halo ignites late and fades early, as
+     * a neon tube's does: dim light on the sign is mostly the crisp shapes.
      */
-    [[nodiscard]] static constexpr float expansion(
-        std::int64_t elapsed_ns) noexcept {
-        return brightness(elapsed_ns);
-    }
-
-    /**
-     * @brief The size of a glow layer whose size at full spread is @p peak_scale.
-     *
-     * The layer's distance beyond the shape grows from @c intro_glow_rest of
-     * its full value, at expansion 0, to all of it at expansion 1. The shape
-     * itself is never scaled.
-     */
-    [[nodiscard]] static constexpr float glow_scale(float peak_scale,
-        float expansion) noexcept {
-        return 1.0f + (peak_scale - 1.0f) * spread(expansion);
-    }
-
-    /** @brief The fraction of its full reach the glow has at @p expansion. */
-    [[nodiscard]] static constexpr float spread(float expansion) noexcept {
-        return theme::intro_glow_rest
-            + (1.0f - theme::intro_glow_rest) * expansion;
+    [[nodiscard]] static float halo_gain(float brightness) noexcept {
+        return std::pow(brightness, theme::intro_halo_gamma);
     }
 
     /**
@@ -152,12 +135,14 @@ struct intro_timing final {
 /**
  * @brief Draws the launch intro over the whole viewport, above every window.
  *
- * The desk wallpaper, darker, with the ORE swirl large and centred and
- * pulsing at @p elapsed_ns, its glow spreading outwards as it brightens. Emitted on the foreground draw list, so it is above
- * every window and popup, and the whole of it is faded by the veil alpha so
- * the main window comes up through it. The logo and its glow are textures
- * drawn through @p input's texture source; with no source or no document the
- * wallpaper and the halo still draw. Nothing allocates after the first frame,
+ * The desk wallpaper, darker, with the ORE swirl and the word
+ * as a lockup a little above the centre, lit at @p elapsed_ns like a neon
+ * sign: fixed geometry, with the colour of the shapes and the alpha and colour
+ * of their soft halo following the brightness. Emitted on the foreground
+ * draw list, so it is above every window and popup, and the whole of it is
+ * faded by the veil alpha so the main window comes up through it. The logo and
+ * its blurred glow are textures drawn through @p input's texture source; with
+ * no source or no document the wallpaper and the word still draw. Nothing allocates after the first frame,
  * because the textures are cached by the source.
  *
  * @param logo_svg The logo's SVG document, as the menu bar draws it.

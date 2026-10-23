@@ -9,8 +9,9 @@ the credit below is kept because the packs ask for it.
   error_002.wav         Interface Sounds (1.0), by Kenney (www.kenney.nl)
   bong_001.wav          Interface Sounds (1.0), by Kenney (www.kenney.nl)
   intro_swell.wav       Sci-Fi Sounds (1.0), by Kenney (www.kenney.nl), CC0:
-                        its impact is lowFrequency_explosion_000, layered on a
-                        synthesised swell by tools/make_intro_sound.py
+                        spaceEngineLow_000 as the swell and
+                        lowFrequency_explosion_000 as the impact, mixed with
+                        ffmpeg (see tools/make_intro_sound.sh)
 
 Downloaded from https://kenney.nl/assets/sci-fi-sounds (intro_swell.wav).
 Mirrored at:

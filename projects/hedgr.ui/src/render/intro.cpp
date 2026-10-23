@@ -65,17 +65,36 @@ void radial_fan(ImDrawList* list, ImVec2 centre, float radius, ImU32 inner,
     }
 }
 
-/** @brief The glow colour of layer @p index: the core, moving toward the purple. */
-[[nodiscard]] ImVec4 layer_colour(int index) {
+/** @brief The crisp shapes' colour at @p brightness: blue when dim, white-hot at the peak. */
+[[nodiscard]] ImVec4 crisp_colour(float brightness) {
+    namespace theme = hedgr::ui::theme;
+    return ImVec4(
+        theme::intro_core_rgb[0] * std::pow(brightness, theme::intro_crisp_gammas[0]),
+        theme::intro_core_rgb[1] * std::pow(brightness, theme::intro_crisp_gammas[1]),
+        theme::intro_core_rgb[2] * std::pow(brightness, theme::intro_crisp_gammas[2]),
+        1.0f);
+}
+
+/**
+ * @brief The halo colour of layer @p index at @p brightness.
+ *
+ * Indigo when dim, moving to the layer's colour at the peak: the core for the
+ * tight layer, shading toward the chart purple the wider it is.
+ */
+[[nodiscard]] ImVec4 halo_colour(int index, float brightness) {
     namespace theme = hedgr::ui::theme;
     const ImVec4 purple = theme::chart_line_colour();
     const float mix = theme::intro_glow_purple_mix * static_cast<float>(index)
         / static_cast<float>(theme::intro_glow_layers - 1);
-    return ImVec4(
+    const float peak[3] = {
         theme::intro_core_rgb[0] + (purple.x - theme::intro_core_rgb[0]) * mix,
         theme::intro_core_rgb[1] + (purple.y - theme::intro_core_rgb[1]) * mix,
-        theme::intro_core_rgb[2] + (purple.z - theme::intro_core_rgb[2]) * mix,
-        1.0f);
+        theme::intro_core_rgb[2] + (purple.z - theme::intro_core_rgb[2]) * mix};
+    const auto blend = [&](int k) {
+        return theme::intro_halo_cold_rgb[k]
+            + (peak[k] - theme::intro_halo_cold_rgb[k]) * brightness;
+    };
+    return ImVec4(blend(0), blend(1), blend(2), 1.0f);
 }
 
 }
@@ -103,14 +122,11 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
     ImDrawList* list = ImGui::GetForegroundDrawList();
     const ImVec2 origin = viewport->Pos;
     const ImVec2 extent(origin.x + viewport->Size.x, origin.y + viewport->Size.y);
-    const ImVec2 centre(origin.x + viewport->Size.x * 0.5f,
-        origin.y + viewport->Size.y * 0.5f);
     const float veil = intro_timing::veil_alpha(elapsed_ns);
     const float glow = intro_timing::brightness(elapsed_ns);
-    const float bloom = intro_timing::expansion(elapsed_ns);
-    /* The glow layers thin as they spread; the crisp shapes do not. */
-    const float layer_fade = 1.0f - theme::intro_glow_expand_fade * bloom;
-    const float crisp_alpha = theme::intro_peak_intensity * glow * veil;
+    const float halo = intro_timing::halo_gain(glow) * veil;
+    const float crisp_alpha = theme::intro_peak_intensity * veil;
+    const ImVec4 lit = crisp_colour(glow);
 
     /*
      * Black under the wallpaper, so a launch whose wallpaper failed to load is
@@ -124,19 +140,9 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
             origin, extent, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
             colour(grey, grey, grey, veil));
     }
-
-    const float side = std::min(viewport->Size.x, viewport->Size.y)
-        * theme::intro_logo_fraction;
-    if (glow > 0.0f) {
-        const float strength = glow * veil;
-        const ImVec4 inner = layer_colour(theme::intro_glow_layers - 1);
-        radial_fan(list, centre,
-            side * theme::intro_halo_radius * intro_timing::spread(bloom),
-            colour(inner.x, inner.y, inner.z,
-                theme::intro_halo_alpha * strength),
-            colour(inner.x, inner.y, inner.z, 0.0f));
-    }
-    radial_fan(list, centre,
+    radial_fan(list,
+        ImVec2(origin.x + viewport->Size.x * 0.5f,
+            origin.y + viewport->Size.y * 0.5f),
         0.5f * std::hypot(viewport->Size.x, viewport->Size.y),
         colour(0.0f, 0.0f, 0.0f, 0.0f),
         colour(0.0f, 0.0f, 0.0f, theme::intro_vignette_alpha * veil));
@@ -145,31 +151,55 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
         return;
 
     /*
-     * The word is the same layers as the logo, each a larger size of the same
-     * text centred on the same point, outermost first, then the crisp text.
+     * The lockup: the swirl over the word, the pair centred a little above the
+     * middle. The font size is whatever makes the word as wide as asked.
      */
     ImFont* const font = icon::bold_font() != nullptr ? icon::bold_font()
                                                        : ImGui::GetFont();
-    const float word_size = side * theme::intro_word_size;
-    const ImVec2 word_centre(centre.x,
-        centre.y + side * (0.5f + theme::intro_word_gap) + word_size * 0.5f);
-    const auto draw_word = [&](float scale, ImU32 tint) {
-        const float size = word_size * scale;
-        const ImVec2 extent_px = font->CalcTextSizeA(size, FLT_MAX, 0.0f,
-            theme::intro_word);
-        list->AddText(font, size,
-            ImVec2(word_centre.x - extent_px.x * 0.5f,
-                word_centre.y - extent_px.y * 0.5f),
+    const float side = std::min(viewport->Size.x, viewport->Size.y)
+        * theme::intro_logo_fraction;
+    constexpr float probe_size = 100.0f;
+    const float probe_width = font->CalcTextSizeA(probe_size, FLT_MAX, 0.0f,
+        theme::intro_word).x;
+    const float word_size = probe_width > 0.0f
+        ? theme::intro_word_width * side * probe_size / probe_width
+        : side * 0.2f;
+    const float lockup = side * (1.0f + theme::intro_word_gap) + word_size;
+    const float top = origin.y + viewport->Size.y * (0.5f - theme::intro_lockup_lift)
+        - lockup * 0.5f;
+    const ImVec2 logo_centre(origin.x + viewport->Size.x * 0.5f, top + side * 0.5f);
+    const ImVec2 word_centre(logo_centre.x,
+        top + side * (1.0f + theme::intro_word_gap) + word_size * 0.5f);
+
+    const ImVec2 word_extent = font->CalcTextSizeA(word_size, FLT_MAX, 0.0f,
+        theme::intro_word);
+    const auto draw_word = [&](ImVec2 offset, ImU32 tint) {
+        list->AddText(font, word_size,
+            ImVec2(word_centre.x - word_extent.x * 0.5f + offset.x,
+                word_centre.y - word_extent.y * 0.5f + offset.y),
             tint, theme::intro_word);
     };
-    for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
-        const ImVec4 c = layer_colour(i);
-        draw_word(intro_timing::glow_scale(theme::intro_glow_scales[i], bloom),
-            colour(c.x, c.y, c.z,
-                theme::intro_glow_alphas[i] * glow * veil * layer_fade));
+    /*
+     * The word's glow: rings of copies at tiny offsets, widest first, each at
+     * a very low alpha, which sums to a soft blur. The offsets are fixed: only
+     * the alpha and colour follow the pulse.
+     */
+    const ImVec4 word_glow = halo_colour(1, glow);
+    constexpr float two_pi = 6.2831853f;
+    for (int ring = theme::intro_word_rings - 1; ring >= 0; --ring) {
+        const int copies = theme::intro_word_ring_copies[ring];
+        const float radius = word_size * theme::intro_word_ring_radii[ring];
+        const ImU32 tint = colour(word_glow.x, word_glow.y, word_glow.z,
+            theme::intro_word_ring_alphas[ring] * halo);
+        const float turn = 0.5f * static_cast<float>(ring);
+        for (int k = 0; k < copies; ++k) {
+            const float angle = turn + two_pi * static_cast<float>(k)
+                / static_cast<float>(copies);
+            draw_word(ImVec2(std::cos(angle) * radius, std::sin(angle) * radius),
+                tint);
+        }
     }
-    draw_word(1.0f, colour(theme::intro_core_rgb[0], theme::intro_core_rgb[1],
-        theme::intro_core_rgb[2], crisp_alpha));
+    draw_word(ImVec2(0.0f, 0.0f), colour(lit.x, lit.y, lit.z, crisp_alpha));
 
     if (logo_svg.empty() || input.textures == nullptr)
         return;
@@ -177,29 +207,33 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
     const ImTextureID crisp = input.textures->svg(logo_texture_id, logo_svg,
         static_cast<int>(std::lround(side * dpi)),
         static_cast<int>(std::lround(side * dpi)));
-    const ImTextureID soft = input.textures->svg(logo_texture_id, logo_svg,
-        theme::intro_glow_raster, theme::intro_glow_raster);
     const auto draw_logo = [&](ImTextureID texture, float scale, ImU32 tint) {
         const float half = side * scale * 0.5f;
-        list->AddImage(texture, ImVec2(centre.x - half, centre.y - half),
-            ImVec2(centre.x + half, centre.y + half), ImVec2(0.0f, 0.0f),
-            ImVec2(1.0f, 1.0f), tint);
+        list->AddImage(texture,
+            ImVec2(logo_centre.x - half, logo_centre.y - half),
+            ImVec2(logo_centre.x + half, logo_centre.y + half),
+            ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), tint);
     };
 
-    /* Outermost first, so each nearer layer lies over the fainter bloom. */
-    if (soft != 0) {
-        for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
-            const ImVec4 c = layer_colour(i);
-            draw_logo(soft,
-                intro_timing::glow_scale(theme::intro_glow_scales[i], bloom),
-                colour(c.x, c.y, c.z,
-                    theme::intro_glow_alphas[i] * glow * veil * layer_fade));
-        }
+    /*
+     * The glow textures hold the swirl at inner/raster of their side, so each
+     * is drawn raster/inner times larger than the swirl, at that one size for
+     * the whole intro. Widest first, so the tight layer lies over the haze.
+     */
+    constexpr float canvas = static_cast<float>(theme::intro_glow_raster)
+        / static_cast<float>(theme::intro_glow_inner);
+    for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
+        const ImTextureID soft = input.textures->svg_glow(logo_texture_id,
+            logo_svg, theme::intro_glow_raster, theme::intro_glow_inner,
+            theme::intro_glow_sigmas[i]);
+        if (soft == 0)
+            continue;
+        const ImVec4 c = halo_colour(i, glow);
+        draw_logo(soft, canvas,
+            colour(c.x, c.y, c.z, theme::intro_glow_alphas[i] * halo));
     }
     if (crisp != 0) {
-        draw_logo(crisp, 1.0f,
-            colour(theme::intro_core_rgb[0], theme::intro_core_rgb[1],
-                theme::intro_core_rgb[2], crisp_alpha));
+        draw_logo(crisp, 1.0f, colour(lit.x, lit.y, lit.z, crisp_alpha));
     }
 }
 

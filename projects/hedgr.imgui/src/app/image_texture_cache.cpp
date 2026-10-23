@@ -137,6 +137,28 @@ ImTextureID image_texture_cache::svg(std::string_view image_id,
     return touch(by_key.find(key));
 }
 
+ImTextureID image_texture_cache::svg_glow(std::string_view image_id,
+    std::string_view document, int size, int inner, float sigma) {
+    const auto key = model::state::make_tenant_key("",
+        std::format("{}@glow{}/{}x{:.2f}", image_id, size, inner, sigma));
+    auto& by_key = entries_.get<0>();
+    if (const auto found = by_key.find(key); found != by_key.end())
+        return touch(found);
+    if (failed_.contains(key))
+        return 0;
+
+    const auto raster = ui::image::rasterize_svg_glow(document, size, inner,
+        sigma);
+    const unsigned int texture = raster
+        ? upload_rgba(raster->pixels.data(), raster->width, raster->height) : 0;
+    if (texture == 0) {
+        failed_.insert(key);
+        return 0;
+    }
+    insert(key, "", image_id, texture, raster->pixels.size());
+    return touch(by_key.find(key));
+}
+
 void image_texture_cache::begin_frame() {
     ++frame_;
 }

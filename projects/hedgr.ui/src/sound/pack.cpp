@@ -55,9 +55,9 @@ using hedgr::ui::sound::registration;
  * where ADR 8 keeps it out.
  *
  * The intro is the one long file, 6s, because it is the launch's brand moment
- * and is raised once. It is built by tools/make_intro_sound.py from a
- * synthesised swell and Kenney's lowFrequency_explosion_000, and is loudest
- * 2.795s in, which is when the intro's logo is brightest.
+ * and is raised once. It is a swell of Kenney's spaceEngineLow_000
+ * with lowFrequency_explosion_000 as the impact (tools/make_intro_sound.sh),
+ * and is loudest 3.023s in, which is when the intro's logo is brightest.
  */
 constexpr std::array<registration, 10> table{{
     {names::application_started, "bong_001.wav"},

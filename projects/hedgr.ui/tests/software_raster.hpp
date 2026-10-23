@@ -82,6 +82,13 @@ public:
         }
     }
 
+    /** @brief Registers a straight-alpha RGBA picture as a texture and returns its id. */
+    std::uint64_t add_texture(int width, int height,
+        std::vector<std::uint8_t> rgba) {
+        pages_.push_back(page{width, height, std::move(rgba)});
+        return static_cast<std::uint64_t>(pages_.size());
+    }
+
     /** @brief Clears to @p colour and paints @p data over it. */
     void draw(const ImDrawData& data, ImU32 colour) {
         const float clear[3] = {channel(colour, IM_COL32_R_SHIFT),
