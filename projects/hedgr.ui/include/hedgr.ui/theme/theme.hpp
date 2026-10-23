@@ -592,6 +592,48 @@ inline constexpr float menu_bar_logo_padding = 9.0f;
 inline constexpr float menu_bar_plate_inset = 4.0f;
 
 /**
+ * @brief The floating toolbar: a pill with a purple outline over the desk, a
+ * grip at its left and a row of square icon buttons.
+ *
+ * The pill's radius is half its height, so its ends are semicircles. The fill
+ * is the menu panels' translucent dark and the outline is the chart purple.
+ * Every size of the capsule comes from these, so its layout is a pure function
+ * of them.
+ */
+inline constexpr float toolbar_button_side = 32.0f;
+
+/** @brief The room between the capsule's top or bottom edge and its buttons. */
+inline constexpr float toolbar_pad_y = 6.0f;
+
+/** @brief The room between the capsule's left or right end and its content. */
+inline constexpr float toolbar_pad_x = 14.0f;
+
+/** @brief The gap between the grip and the first button, and between buttons. */
+inline constexpr float toolbar_gap = 4.0f;
+
+/** @brief The width of the grip's hit area at the capsule's left. */
+inline constexpr float toolbar_grip_width = 14.0f;
+
+/** @brief The grip's six dots: their radius and the distance between centres. */
+inline constexpr float toolbar_grip_dot_radius = 1.5f;
+inline constexpr float toolbar_grip_dot_pitch = 6.0f;
+
+/** @brief The outline's thickness. */
+inline constexpr float toolbar_outline_width = 1.5f;
+
+/** @brief How far the capsule keeps clear of the work area's left, right and bottom edges. */
+inline constexpr float toolbar_edge_margin = 6.0f;
+
+/** @brief Where the capsule starts, below the menu bar's edge. */
+inline constexpr float toolbar_top_gap = 8.0f;
+
+/** @brief The capsule's fill: the menu panels' translucent dark. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 toolbar_fill() noexcept;
+
+/** @brief The capsule's outline: the chart purple. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 toolbar_outline() noexcept;
+
+/**
  * @brief The faint dashed rules across a plot, in a purple grey at a low
  * alpha, so a rule is a guide and never a line of data.
  */

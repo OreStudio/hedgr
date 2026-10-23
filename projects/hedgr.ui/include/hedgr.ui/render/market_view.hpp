@@ -104,6 +104,9 @@ struct market_view_state final {
 
     /** @brief How many recent curves an IR window overlays. */
     int term_history = 5;
+
+    /** @brief Whether the floating toolbar is shown; VIEW > Toolbar flips it. */
+    bool toolbar_visible = true;
 };
 
 /** @brief The nanoseconds a span index names, or zero for the whole series. */

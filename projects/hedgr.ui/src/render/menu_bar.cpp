@@ -89,39 +89,6 @@ void draw_logo(const render_input& input, std::string_view logo_svg) {
 }
 
 /**
- * @brief The session the TOOLS rows act on: the first one signed in, or none.
- *
- * Series browsers and the command centre belong to a session, and the bar has
- * no notion of a chosen one yet.
- */
-[[nodiscard]] std::optional<hedgr::model::state::session_handle>
-current_session(const render_input& input) {
-    const auto& layout = input.sessions.layout();
-    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
-        if (layout.alive[index] == 0)
-            continue;
-        const hedgr::model::state::session_handle session{index,
-            layout.generation[index]};
-        if (input.sessions.status(session)
-            == hedgr::model::domain::session_status::authenticated)
-            return session;
-    }
-    return std::nullopt;
-}
-
-/** @brief Asks the runtime for a window of @p kind bound to @p session. */
-void request_session_window(const render_input& input,
-    hedgr::model::state::session_handle session,
-    hedgr::model::domain::window_kind kind) {
-    hedgr::model::command::command request;
-    request.kind = hedgr::model::command::command_kind::open_window;
-    request.instance_id = std::string{input.sessions.instance_id(session)};
-    request.account_id = std::string{input.sessions.account_id(session)};
-    request.new_window_kind = kind;
-    input.commands.push(std::move(request));
-}
-
-/**
  * @brief FILE: Instances, the store's lock rows, then Quit.
  *
  * While the store is shut the catalogue is behind the master password, so the
@@ -155,10 +122,17 @@ void draw_file_menu(const render_input& input, menu_bar_result& result) {
         result.quit_requested = true;
 }
 
-/** @brief VIEW: Undock all, live only while something is docked. */
-void draw_view_menu(bool desk_docked, menu_bar_result& result) {
+/**
+ * @brief VIEW: Undock all, live only while something is docked, and the
+ * Toolbar row, lit while the floating toolbar is shown.
+ */
+void draw_view_menu(const render_input& input, bool desk_docked,
+    menu_bar_result& result) {
     if (widget::menu_item_row({.label = "Undock all", .enabled = desk_docked}))
         result.undock_all = true;
+    auto& visible = input.market_view.toolbar_visible;
+    if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
+        visible = !visible;
 }
 
 /**
@@ -383,7 +357,7 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
         if (shows_instances(input)) {
             ImGui::SameLine();
             widget::menu_bar_label(state, view_entry, "View",
-                [&] { draw_view_menu(desk_docked, result); }, height);
+                [&] { draw_view_menu(input, desk_docked, result); }, height);
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);

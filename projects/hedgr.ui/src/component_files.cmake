@@ -29,6 +29,7 @@ set(files
     "render/term_structure_window.cpp"
     "render/menu_bar.cpp"
     "render/intro.cpp"
+    "render/toolbar.cpp"
     "render/workspace.cpp"
     "render/workspace_window.cpp"
     "sound/pack.cpp"
@@ -51,6 +52,7 @@ set(files
     "widget/status_bar.cpp"
     "widget/status_foot.cpp"
     "widget/tabs.cpp"
+    "widget/toolbar.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
@@ -72,6 +74,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/renderer.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/menu_bar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/intro.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/toolbar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/windows.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/workspace.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/sound/pack.hpp"
@@ -98,4 +101,5 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/status_bar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/status_foot.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/tabs.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/toolbar.hpp"
 )

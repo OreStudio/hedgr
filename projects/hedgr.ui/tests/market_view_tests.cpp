@@ -72,6 +72,7 @@ TEST_CASE("market view preferences survive the text form", "[market-view]") {
     state.chart_style = 0;
     state.chart_ema = 1;
     state.term_history = 8;
+    state.toolbar_visible = false;
 
     const auto text = serialize_market_view(state);
     market_view_state read;
@@ -81,6 +82,18 @@ TEST_CASE("market view preferences survive the text form", "[market-view]") {
     CHECK(read.chart_style == 0);
     CHECK(read.chart_ema == 1);
     CHECK(read.term_history == 8);
+    CHECK_FALSE(read.toolbar_visible);
+}
+
+TEST_CASE("the toolbar is shown unless the file says it is off", "[market-view]") {
+    market_view_state state;
+    CHECK(state.toolbar_visible);
+    parse_market_view("toolbar=off\n", state);
+    CHECK_FALSE(state.toolbar_visible);
+    parse_market_view("toolbar=on\n", state);
+    CHECK(state.toolbar_visible);
+    parse_market_view("toolbar=maybe\n", state);
+    CHECK(state.toolbar_visible);
 }
 
 TEST_CASE("a damaged preference line leaves the other choices alone",

@@ -33,6 +33,7 @@
 #include "hedgr.ui/widget/view_state.hpp"
 #include "hedgr.ui/widget/segmented.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/toolbar.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include "implot.h"
@@ -306,25 +307,7 @@ struct header_icons_drawn final {
  */
 [[nodiscard]] bool tile_icon(const header_icon& icon, ImVec2 origin,
     float side) {
-    ImGui::SetCursorScreenPos(origin);
-    ImGui::PushID(icon.id);
-    const bool pressed = ImGui::InvisibleButton(icon.glyph, ImVec2(side, side));
-    ImGui::PopID();
-    ImGui::SetItemTooltip("%s", icon.tooltip);
-
-    const bool hovered = ImGui::IsItemHovered();
-    auto* draw = ImGui::GetWindowDrawList();
-    const ImVec2 max(origin.x + side, origin.y + side);
-    if (hovered)
-        draw->AddRectFilled(origin, max,
-            ImGui::GetColorU32(ImGuiCol_ButtonHovered),
-            ImGui::GetStyle().FrameRounding);
-    const ImVec2 glyph = ImGui::CalcTextSize(icon.glyph);
-    draw->AddText(ImVec2(origin.x + std::floor((side - glyph.x) * 0.5f),
-                       origin.y + std::floor((side - glyph.y) * 0.5f)),
-        ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled),
-        icon.glyph);
-    return pressed;
+    return widget::icon_tile(icon.id, icon.glyph, icon.tooltip, origin, side);
 }
 
 /**

@@ -597,6 +597,18 @@ TEST_CASE("VIEW: Undock all is chosen only while something is docked",
     CHECK(h.result.undock_all);
 }
 
+TEST_CASE("VIEW: Toolbar flips whether the floating toolbar is shown",
+    "[menu_bar][view]") {
+    bar_harness h;
+    REQUIRE(h.desk.market_view.toolbar_visible);
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(1));
+    CHECK_FALSE(h.desk.market_view.toolbar_visible);
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(1));
+    CHECK(h.desk.market_view.toolbar_visible);
+}
+
 TEST_CASE("TOOLS: Series browser opens the browser of the signed-in session",
     "[menu_bar][tools]") {
     bar_harness h;

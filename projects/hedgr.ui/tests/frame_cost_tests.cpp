@@ -23,6 +23,7 @@
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/toolbar.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -1141,6 +1142,32 @@ TEST_CASE("the top bar costs a steady frame no allocation, closed and with each 
 
     state.open = hedgr::ui::widget::menu_bar_state::none;
     state.about_open = true;
+    draw();
+    draw();
+    CHECK(steady_allocations(draw) == 0);
+}
+
+TEST_CASE("the floating toolbar costs a steady frame no allocation",
+    "[frame][toolbar]") {
+    headless_imgui imgui;
+    hedgr::ui::theme::apply_theme();
+    desk desk;
+    auto input = desk.input();
+    const auto draw = [&] {
+        hedgr::ui::render::toolbar_result result;
+        ImGui::NewFrame();
+        hedgr::ui::render::draw_toolbar(input, true, result);
+        ImGui::Render();
+    };
+    draw();
+    draw();
+    REQUIRE(ImGui::FindWindowByName("###hedgr-toolbar") != nullptr);
+    CHECK(steady_allocations(draw) == 0);
+
+    /* With the pointer over a button, for its hover fill and tooltip. */
+    ImGui::GetIO().AddMousePosEvent(
+        ImGui::FindWindowByName("###hedgr-toolbar")->Pos.x + 80.0f,
+        ImGui::FindWindowByName("###hedgr-toolbar")->Pos.y + 20.0f);
     draw();
     draw();
     CHECK(steady_allocations(draw) == 0);

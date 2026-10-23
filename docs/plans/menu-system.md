@@ -114,7 +114,7 @@ Each step is one PR, with tests, and leaves the app working.
      its edge (`menu_label` takes a height). Not checked in a real window. The label
      face was the proportional sans at first; it is now the bundled monospace
      (decisions 6 and 11).
-4. **The toolbar.** A floating capsule over the desk, not a fixed strip,
+4. [x] **The toolbar.** A floating capsule over the desk, not a fixed strip,
    styled like the reference's schematic toolbar: a rounded capsule with a purple
    outline holding a row of flat icon buttons, a small grip handle at its left
    that drags it, and the selected tool filled purple (`chart_tag_colour`). It
@@ -129,6 +129,29 @@ Each step is one PR, with tests, and leaves the app working.
    chart if one is wanted. Opening actions are momentary (no selected fill); only
    a real mode stays filled. Because it floats it takes no height from the
    work-area inset. It draws nothing while the store is locked.
+   - Notes. `widget/toolbar.{hpp,cpp}` is the pure layout (capsule size, grip and
+     button rectangles, `toolbar_clamp`, `toolbar_default_pos`,
+     `toolbar_enabled`) and `render/toolbar.cpp` draws it, one ImGui window
+     (`###hedgr-toolbar`) with NoDocking, no title bar, no resize, no scrollbar
+     and auto-fit, so its position is the window's ini entry and survives a
+     restart. The window is NoMove; the grip drags it by hand (the grab offset is
+     kept in the window's state storage) so the body never moves it by accident.
+     It is clamped to the main viewport's `WorkPos` and `WorkSize` after `Begin`
+     every frame, so a restored or resized position is corrected in the frame it
+     is read. The pill is `AddRectFilled` and `AddRect` at half the height, the
+     outline 1.5 px of `chart_tag_colour()`, the fill `menu_surface()`. The
+     buttons are `widget::icon_tile`, the look `tile_icon` in `chart_window.cpp`
+     had, which now calls it. Buttons: Series browser and Accounts (the first
+     signed-in session, as the TOOLS rows; `current_session` and
+     `request_session_window` moved to `panels` to be shared) and Undock all.
+     VIEW gains a Toolbar row (lit while shown), stored as `toolbar=` in the
+     market view preferences file. It is submitted after the desk's windows and
+     brought to the display front each frame unless a popup is open, which is
+     what keeps it above windows and below menus. Not checked in a real window.
+   - Left out. CRM has no button: opening a CRM needs a party and a matrix name,
+     which only the series browser's picker can supply (see step 3). Mini plot of
+     the focused chart is omitted, as nothing here tracks which chart has focus.
+     No button is a mode, so none is drawn as the selected purple fill.
 5. **The Instances panel.** An Instances menu opens a large panel: a filter box
    and a tile grid of instances with their photos from the image cache. A click
    opens or raises the Instances window on that instance. The catalogue
