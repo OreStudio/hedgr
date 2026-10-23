@@ -59,6 +59,8 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/hedgr.ui.icon.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/icon/icons.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/chart_plot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/mini_plot.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/series_text.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/series_browser_view.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/term_ladder.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/hedgr.ui.render.hpp"

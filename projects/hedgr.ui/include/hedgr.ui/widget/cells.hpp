@@ -73,6 +73,9 @@ HEDGR_UI_EXPORT void caption(std::string_view text, std::string_view help = {});
  */
 HEDGR_UI_EXPORT void headline_value(std::string_view text);
 
+/** @brief The height of a headline value, for laying out around one. */
+[[nodiscard]] HEDGR_UI_EXPORT float headline_height();
+
 /** @brief The corner radius of a value pill: a chip rather than a capsule. */
 inline constexpr float value_pill_rounding = 4.0f;
 

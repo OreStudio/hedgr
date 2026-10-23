@@ -76,7 +76,7 @@ does for charts, so a card does not close with its session. Nothing in the UI
 opens one yet, so step 4 owns that. The placeholder card draws the tile, the
 label and a dim "Reading the series..." line until the row exists.
 
-### 3. The card
+### 3. The card (done)
 
 Draw the card: rounded tile on the card surface, the flags and pair chip, the
 price in the bold face, a line of the span drawn straight into the window's draw
@@ -85,6 +85,20 @@ tone. The line is one polyline over a fixed point budget, so a card costs a few
 hundred vertices and no allocations on a steady frame. Check: headless frames
 assert the green and red cases, the empty and reading states, and zero
 allocations per steady card.
+
+What differed. The line is one polyline over at most 96 points
+(`theme::mini_plot_point_budget`) with a vertex-colour fill under it, drawn by
+`draw_sparkline` into the window draw list, so a card costs about 600 vertices
+whatever the series holds. The span is 24 hours, read from the level
+`market_level_for_span` picks, and the change is the last value against the
+first in that span. The tone is the chart's `change_tone`, so a stale series
+is neutral and a delayed one is amber. The price formatter and `change_tone`
+moved from `chart_window.cpp` to `render/series_text.hpp` so both windows share
+them. A card too short for the stacked foot puts the period and the pill on
+one row, and one too short for any line draws it behind the text. The tile sits
+inside the window's own padding, so a card in a titled window shows the
+window's frame round the tile. Step 5 owns removing that. The tests read the
+draw list vertices (line and fill by colour and the white pixel uv), not text.
 
 ### 4. Make one, open one
 

@@ -25,6 +25,7 @@
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
+#include "hedgr.ui/render/series_text.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -142,42 +143,6 @@ namespace {
 constexpr ImU32 up_colour = IM_COL32(38, 166, 91, 255);
 
 
-/**
- * @brief A price, with the decimals its magnitude needs.
- *
- * An FX pair quotes to five places and a rate to two, and the plot has no way
- * to ask which is which: the magnitude answers, and the alternative is a label
- * reading "1.23456" beside one reading "0.00000".
- */
-/** @brief A number formatted into storage of its own, so a frame allocates nothing. */
-struct number_text final {
-    std::array<char, 32> buffer{};
-    std::size_t size = 0;
-
-    [[nodiscard]] std::string_view view() const { return {buffer.data(), size}; }
-    [[nodiscard]] const char* c_str() const { return buffer.data(); }
-};
-
-template<class... Args>
-[[nodiscard]] number_text format_number(std::format_string<Args...> pattern,
-    Args&&... args) {
-    number_text text;
-    const auto written = std::format_to_n(text.buffer.data(),
-        static_cast<std::ptrdiff_t>(text.buffer.size() - 1), pattern,
-        std::forward<Args>(args)...);
-    text.size = static_cast<std::size_t>(written.out - text.buffer.data());
-    return text;
-}
-
-[[nodiscard]] number_text format_price(double value) {
-    const double magnitude = std::fabs(value);
-    const int decimals = magnitude >= 1000.0 ? 2
-        : magnitude >= 100.0 ? 3
-        : magnitude >= 10.0 ? 4
-        : 5;
-    return format_number("{:.{}f}", value, decimals);
-}
-
 /** @brief An axis tick, worded as the last price tag is. */
 int format_price_tick(double value, char* buffer, int size, void*) {
     const auto text = format_price(value);
@@ -197,26 +162,6 @@ void dashed_hline(ImDrawList* draw, float left, float right, float y,
     for (float x = left; x < right; x += dash + gap)
         draw->AddLine(ImVec2(x, row), ImVec2(std::min(x + dash, right), row),
             colour, 1.0f);
-}
-
-/**
- * @brief The verdict the change pill wears.
- *
- * The direction, unless the data is too old to have one: a stale move is no
- * news, so it is neutral, and a delayed one wears the delay rather than the
- * direction, as the price tag on the plot does.
- */
-[[nodiscard]] theme::tone change_tone(domain::data_health health,
-    double change) {
-    if (health == domain::data_health::stale)
-        return theme::tone::neutral;
-    if (health == domain::data_health::delayed)
-        return theme::tone::warning;
-    if (change > 0.0)
-        return theme::tone::good;
-    if (change < 0.0)
-        return theme::tone::bad;
-    return theme::tone::neutral;
 }
 
 /** @brief A length of time in the fewest words the period combo uses. */
