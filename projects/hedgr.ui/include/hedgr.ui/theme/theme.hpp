@@ -430,7 +430,9 @@ inline constexpr float dock_rounding = tab_rounding;
 /**
  * @brief Paints each docked pane of the dock space @p dock_space as a rounded
  * card: the strip behind its tabs rounded at the top, and the body rounded at
- * the bottom, or at all four corners when the node shows no strip.
+ * the bottom, or at all four corners when the node shows no strip. The body is
+ * shaded with window_gradient over its own rect, so a card and a floating
+ * window match.
  *
  * ImGui rounds a docked window's fill only at the corners it shares with the
  * dock space, so a pane next to another stays square, and the space paints

@@ -702,7 +702,6 @@ void shade_dock_tabs() {
 
 void paint_dock_cards(ImGuiID dock_space) {
     const ImGuiContext& g = *ImGui::GetCurrentContext();
-    const ImU32 body = ImGui::GetColorU32(ImGuiCol_WindowBg);
     const ImU32 strip = ImGui::ColorConvertFloat4ToU32(tab_bar);
     for (const ImGuiStoragePair& pair : g.DockContext.Nodes.Data) {
         const auto* node = static_cast<const ImGuiDockNode*>(pair.val_p);
@@ -720,7 +719,9 @@ void paint_dock_cards(ImGuiID dock_space) {
         if (has_strip)
             draw->AddRectFilled(node->Pos, ImVec2(end.x, top), strip,
                 dock_rounding, ImDrawFlags_RoundCornersTop);
-        draw->AddRectFilled(ImVec2(node->Pos.x, top), end, body, dock_rounding,
+        /* The body's own rect carries the window gradient, as a window's fill does. */
+        fill_gradient(draw, ImVec2(node->Pos.x, top), end, window_gradient,
+            axis::vertical, dock_rounding,
             has_strip ? ImDrawFlags_RoundCornersBottom
                       : ImDrawFlags_RoundCornersAll);
         draw->ChannelsSetCurrent(1);
