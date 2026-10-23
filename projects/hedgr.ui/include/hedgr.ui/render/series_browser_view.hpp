@@ -37,7 +37,6 @@ struct series_browser_query final {
     std::string_view filter;
     std::string_view asset_class;
     std::string_view party;
-    bool synthetic_only = false;
 };
 
 /**
@@ -71,7 +70,6 @@ struct series_browser_view final {
     std::string filter;
     std::string asset_class;
     std::string party;
-    bool synthetic_only = false;
 
     /** @brief The generation @c classes was taken at, valid once @c class_builds is above zero. */
     std::uint64_t classes_generation = 0;

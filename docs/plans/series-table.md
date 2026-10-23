@@ -223,6 +223,15 @@ party's live buckets, which the code today avoids because the watch is by id and
 the ring is per id (`market_feed.cpp:183-189`). The URI is a cold column of the
 row, used only to route ticks.
 
+The id is also the only safe key now that OreStudio keys a series by item,
+provider and party. One party can hold the same URI under two providers, as two
+series with two ids and one tick URI. A `market_tick` names no provider, so the
+sink cannot tell which of the two a tick belongs to and routes it to the first
+watched. The catalogue row carries `provider_code` so the browser can tell the
+rows apart. The series no longer says who produced it, only the provider whose
+ids it carries, and the synthetic feeds publish under the provider `ore` like
+the ORE import, so the browser has no synthetic-only filter.
+
 ### What identifies a series, and the ORE codec
 
 Hedgr does not parse the grammar. For routing, the row stores the canonical
@@ -363,7 +372,7 @@ bumped by `set`, `fail` and `begin`.
 Who reads what. The chart keys its plot on the row stamp and the span, as now.
 The term structure window keys its ladder on the stamp of its source (today the
 term structure row, later the maximum of its members). The series browser keys its
-filtered view on `(catalogue.generation, filter, class, party, synthetic)`. The
+filtered view on `(catalogue.generation, filter, class, party)`. The
 feed does not read stamps. It reads a change list (step 3).
 
 One cost the single stamp accepts: a medium or coarse append bumps the stamp of a
@@ -888,7 +897,7 @@ Deleted: `term_structure_window.cpp:180-193`, `:236-242` per frame, `:277`.
 - `series_catalogue::generation`, readable through `series.catalogue(...)`.
 - The browser caches, in `window_ui_state`, the filtered and sorted view as
   **indices into the catalogue**, not pointers, keyed on `(generation, filter
-  text, asset class, party, synthetic)`. A pointer into the catalogue's vector
+  text, asset class, party)`. A pointer into the catalogue's vector
   dangles when `set_catalogue` replaces it, which is the failure the generation
   key and the index exist to prevent.
 - The two id copies and the party copy at `:273-274,300-301` become views. The

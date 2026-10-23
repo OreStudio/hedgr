@@ -48,8 +48,8 @@ struct market_series_row final {
     /** @brief The asset class, upper-cased. */
     std::string asset_class;
 
-    /** @brief Who produced the series, for example SYNTHETIC. */
-    std::string producer_kind;
+    /** @brief The provider whose ids the series carries, for example ore. */
+    std::string provider_code;
 
     /** @brief The party that owns the series. */
     std::string party_id;

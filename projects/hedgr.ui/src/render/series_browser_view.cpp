@@ -53,7 +53,6 @@ namespace domain = hedgr::model::domain;
 [[nodiscard]] bool listed_as_curve(const domain::market_series_row& row,
     const series_browser_query& query) {
     return row.asset_class == "IR"
-        && (!query.synthetic_only || row.producer_kind == "SYNTHETIC")
         && (query.party.empty() || row.party_id == query.party)
         && (contains_ci(row.label, query.filter)
             || contains_ci(row.uri, query.filter));
@@ -62,12 +61,11 @@ namespace domain = hedgr::model::domain;
 [[nodiscard]] bool listed_as_series(const domain::market_series_row& row,
     const series_browser_query& query) {
     return (query.asset_class.empty() || row.asset_class == query.asset_class)
-        && (!query.synthetic_only || row.producer_kind == "SYNTHETIC")
         && (query.party.empty() || row.party_id == query.party)
         && (contains_ci(row.label, query.filter)
             || contains_ci(row.asset_class, query.filter)
             || contains_ci(row.uri, query.filter)
-            || contains_ci(row.producer_kind, query.filter));
+            || contains_ci(row.provider_code, query.filter));
 }
 
 }
@@ -76,7 +74,6 @@ bool update_series_browser_view(series_browser_view& view,
     const series_browser_query& query,
     const std::vector<domain::market_series_row>& catalogue) {
     if (view.builds != 0 && view.generation == query.generation
-        && view.synthetic_only == query.synthetic_only
         && view.filter == query.filter
         && view.asset_class == query.asset_class
         && view.party == query.party)
@@ -86,7 +83,6 @@ bool update_series_browser_view(series_browser_view& view,
     view.filter = query.filter;
     view.asset_class = query.asset_class;
     view.party = query.party;
-    view.synthetic_only = query.synthetic_only;
 
     const bool curves = query.asset_class == "IR";
     view.rows.clear();
