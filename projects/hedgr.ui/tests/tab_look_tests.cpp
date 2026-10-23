@@ -114,6 +114,9 @@ TEST_CASE("the chosen tab is the active fill, the others the idle fill",
     "[look][tabs]") {
     tab_strip strip;
     strip.settle();
+    /* The reference's sampled fills: Statistics tab and Dear ImGui Demo tab. */
+    CHECK(u32(theme::tab_active_colour()) == IM_COL32(0x73, 0x60, 0x8d, 255));
+    CHECK(u32(theme::tab_idle_colour()) == IM_COL32(0x2b, 0x2d, 0x38, 255));
     CHECK(strip.filled(0, u32(theme::tab_active_colour())));
     CHECK_FALSE(strip.filled(0, u32(theme::tab_idle_colour())));
     CHECK(strip.filled(1, u32(theme::tab_idle_colour())));
@@ -150,21 +153,40 @@ TEST_CASE("a tab's top corners are rounded and its bottom ones are not",
         < 1.0f);
 }
 
-TEST_CASE("the chosen tab wears the chart purple overline", "[look][tabs]") {
+TEST_CASE("a tab has no outline and the chosen one no overline", "[look][tabs]") {
     tab_strip strip;
     strip.settle();
+    CHECK(ImGui::GetStyle().TabBorderSize == 0.0f);
+    CHECK(ImGui::GetStyle().TabBarOverlineSize == 0.0f);
+    CHECK_FALSE(strip.filled(0, u32(theme::chart_line_colour())));
+    /* The widget tabs still draw their underline from this colour. */
     CHECK(ImGui::GetStyle().Colors[ImGuiCol_TabSelectedOverline].x
         == theme::chart_line_colour().x);
-    CHECK(strip.filled(0, u32(theme::chart_line_colour())));
-    CHECK_FALSE(strip.filled(1, u32(theme::chart_line_colour())));
 }
 
-TEST_CASE("a tab bar whose window lost focus is dimmer", "[look][tabs]") {
+TEST_CASE("the rule under the strip is the chosen tab's colour and runs past "
+          "the last tab",
+    "[look][tabs]") {
     tab_strip strip;
     strip.settle();
-    const ImU32 focused = u32(ImGui::GetStyle().Colors[ImGuiCol_TabSelected]);
-    const ImU32 dimmed = u32(ImGui::GetStyle().Colors[ImGuiCol_TabDimmedSelected]);
+    CHECK(ImGui::GetStyle().TabBarBorderSize == 1.0f);
+    const ImU32 active = u32(theme::tab_active_colour());
+    const float past = strip.rects[2].Max.x + 20.0f;
+    const auto all = strip.vertices();
+    CHECK(std::ranges::any_of(all, [&](const ImDrawVert& v) {
+        return v.col == active && v.pos.x >= past;
+    }));
+}
+
+TEST_CASE("a strip that lost focus is drawn as the focused one, as the "
+          "reference draws its strips",
+    "[look][tabs]") {
+    tab_strip strip;
     strip.settle(true);
-    CHECK(strip.filled(0, dimmed));
-    CHECK_FALSE(strip.filled(0, focused));
+    const ImGuiStyle& style = ImGui::GetStyle();
+    CHECK(u32(style.Colors[ImGuiCol_TabDimmedSelected])
+        == u32(style.Colors[ImGuiCol_TabSelected]));
+    CHECK(u32(style.Colors[ImGuiCol_TabDimmed]) == u32(style.Colors[ImGuiCol_Tab]));
+    CHECK(strip.filled(0, u32(theme::tab_active_colour())));
+    CHECK(strip.filled(1, u32(theme::tab_idle_colour())));
 }

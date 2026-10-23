@@ -408,6 +408,21 @@ TEST_CASE("a bar with no logo document still draws its menus", "[menu_bar]") {
     CHECK(bar_harness::popup_open());
 }
 
+TEST_CASE("a menu opens a small gap below the bar's plate", "[menu_bar]") {
+    for (const char* name : {"File", "Tools"}) {
+        bar_harness h;
+        h.open_menu(name);
+        REQUIRE(GImGui->OpenPopupStack.Size > 0);
+        const ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
+        const ImGuiWindow* bar = bar_harness::bar();
+        const float plate_bottom = bar->Pos.y + theme::menu_bar_margin
+            + theme::menu_bar_height;
+        CHECK(theme::menu_popup_gap > 0.0f);
+        CHECK(popup->Pos.y - plate_bottom
+            == Catch::Approx(theme::menu_popup_gap));
+    }
+}
+
 TEST_CASE("clicking a label opens its menu and clicking it again closes it",
     "[menu_bar]") {
     bar_harness h;
@@ -913,7 +928,12 @@ TEST_CASE("the desk's dock tabs are set in the monospace, the windows' bodies "
     const auto width_in = [&](ImFont* font) {
         ImGui::NewFrame();
         ImGui::PushFont(font);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+            ImVec2(theme::tab_padding_x, theme::tab_padding_y));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing,
+            ImVec2(theme::tab_spacing, 0.0f));
         const float w = ImGui::TabItemCalcSize(chart->Name, true).x;
+        ImGui::PopStyleVar(2);
         ImGui::PopFont();
         ImGui::Render();
         return w;
@@ -922,6 +942,73 @@ TEST_CASE("the desk's dock tabs are set in the monospace, the windows' bodies "
     const float base = width_in(ImGui::GetIO().Fonts->Fonts[0]);
     REQUIRE(mono != Catch::Approx(base));
     CHECK(tab->ContentWidth == Catch::Approx(mono).margin(0.5));
+}
+
+TEST_CASE("the desk's dock tabs are 28 pixels tall and four apart, and the "
+          "style is put back",
+    "[menu_bar][fonts][docking]") {
+    headless_imgui imgui;
+    hedgr::ui::icon::load_ui_fonts(15.0f);
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    theme::apply_theme();
+    desk desk;
+    static_cast<void>(desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"},
+        "left"));
+    static_cast<void>(desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "FX EUR/USD", .series_id = "t"},
+        "right"));
+    render::workspace workspace;
+    auto input = desk.input();
+    const ImGuiStyle before = ImGui::GetStyle();
+    for (int i = 0; i < 5; ++i) {
+        ImGui::NewFrame();
+        if (i == 1) {
+            const ImGuiWindow* host = ImGui::FindWindowByName("###hedgr-desk");
+            REQUIRE(host != nullptr);
+            const ImGuiID space = ImHashStr("desk", 0, host->ID);
+            ImGui::DockBuilderDockWindow("###left", space);
+            ImGui::DockBuilderDockWindow("###right", space);
+        }
+        workspace.render(input);
+        ImGui::Render();
+    }
+    const ImGuiWindow* left = ImGui::FindWindowByName("###left");
+    REQUIRE(left != nullptr);
+    REQUIRE(left->DockNode != nullptr);
+    const ImGuiTabBar* bar = left->DockNode->TabBar;
+    REQUIRE(bar != nullptr);
+    REQUIRE(bar->Tabs.Size == 2);
+    /* The reference's tab is 28 pixels from top to the rule. */
+    CHECK(bar->BarRect.GetHeight() == Catch::Approx(28.0f));
+    const ImGuiTabItem& first = bar->Tabs[0];
+    const ImGuiTabItem& second = bar->Tabs[1];
+    const ImGuiTabItem& lead = first.Offset < second.Offset ? first : second;
+    const ImGuiTabItem& next = first.Offset < second.Offset ? second : first;
+    CHECK(next.Offset - (lead.Offset + lead.Width) == Catch::Approx(4.0f));
+
+    const ImGuiStyle& after = ImGui::GetStyle();
+    CHECK(after.FramePadding.y == before.FramePadding.y);
+    CHECK(after.ItemInnerSpacing.x == before.ItemInnerSpacing.x);
+    CHECK(after.Colors[ImGuiCol_Text].x == before.Colors[ImGuiCol_Text].x);
+    CHECK(after.Colors[ImGuiCol_TitleBg].x == before.Colors[ImGuiCol_TitleBg].x);
+}
+
+TEST_CASE("every window kind's icon is a glyph of the monospace the dock tabs "
+          "use",
+    "[menu_bar][fonts]") {
+    headless_imgui imgui;
+    hedgr::ui::icon::load_ui_fonts(15.0f);
+    ImFont* const mono = hedgr::ui::icon::mono_font();
+    ImFont* const base = ImGui::GetIO().Fonts->Fonts[0];
+    REQUIRE(mono != base);
+    ImFontBaked* const baked = mono->GetFontBaked(15.0f);
+    const char* const glyph = theme::window_kind_icon(
+        model::domain::window_kind::chart);
+    unsigned int codepoint = 0;
+    ImTextCharFromUtf8(&codepoint, glyph, nullptr);
+    REQUIRE(codepoint != 0);
+    CHECK(baked->FindGlyphNoFallback(static_cast<ImWchar>(codepoint)) != nullptr);
 }
 
 TEST_CASE("a menu popup's rows are set in the monospace and the font is put back",

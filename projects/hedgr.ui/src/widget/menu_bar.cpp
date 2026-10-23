@@ -19,9 +19,12 @@
  */
 #include "hedgr.ui/widget/menu_bar.hpp"
 
+#include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 
 namespace hedgr::ui::widget {
+
+namespace theme = hedgr::ui::theme;
 
 bool menu_bar_entry(menu_bar_state& state, int entry, const char* popup_id,
     bool pressed) {
@@ -32,9 +35,9 @@ bool menu_bar_entry(menu_bar_state& state, int entry, const char* popup_id,
 
     const bool now_open = state.open == entry;
     if (now_open) {
-        /* Under the entry, flush with its left edge, like a pull-down. */
+        /* Under the entry, flush with its left edge, a gap below the plate. */
         ImGui::SetNextWindowPos(ImVec2(ImGui::GetItemRectMin().x,
-            ImGui::GetItemRectMax().y));
+            ImGui::GetItemRectMax().y + theme::menu_popup_gap));
         if (!alive)
             ImGui::OpenPopup(popup_id);
     }

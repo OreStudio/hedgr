@@ -359,8 +359,8 @@ void load_ui_fonts(float base_size_px) {
     }
 
     /*
-     * The icons are registered as glyphs of the base font rather than as a
-     * font of their own, which is what lets a label say an icon and a word in
+     * The icons are registered as glyphs of the base font (and the monospace,
+     * below) rather than as a font of their own, which is what lets a label say an icon and a word in
      * one string without a PushFont around the icon.
      */
     ImFont* font = io.Fonts->Fonts[0];
@@ -387,15 +387,13 @@ void load_ui_fonts(float base_size_px) {
     }
 
     /*
-     * A normal glyph's Y0 is measured from the top of the text line and the
-     * line box runs from that top down to the descent, so centring the icon on
-     * that box is what makes it sit with the text beside it instead of hanging
-     * below the baseline.
+     * The tab labels and the menus are set in the monospace, and a window's
+     * title begins with its icon, so the monospace carries the icons as well.
+     * Each face gets its own rectangles because a glyph belongs to one font.
      */
-    const ImFontBaked* metrics = font->GetFontBaked(base_size_px);
-    const float line_height = metrics->Ascent - metrics->Descent;
-    const ImVec2 offset(0.0f,
-        (line_height - static_cast<float>(cell)) * 0.5f);
+    std::vector<ImFont*> faces{font};
+    if (mono_font_instance != nullptr && mono_font_instance != font)
+        faces.push_back(mono_font_instance);
 
     /*
      * A fixed advance width for every icon is what makes an icon-only toolbar
@@ -405,11 +403,23 @@ void load_ui_fonts(float base_size_px) {
     const float advance = base_size_px;
 
     std::vector<ImFontAtlasRectId> ids;
-    ids.reserve(icon_count);
-    for (std::size_t i = 0; i < icon_count; ++i) {
-        ids.push_back(io.Fonts->AddCustomRectFontGlyphForSize(font, base_size_px,
-            static_cast<ImWchar>(icon_sources[i].codepoint),
-            glyph_pixel_size, glyph_pixel_size, advance, offset));
+    ids.reserve(icon_count * faces.size());
+    for (ImFont* face : faces) {
+        /*
+         * A normal glyph's Y0 is measured from the top of the text line and the
+         * line box runs from that top down to the descent, so centring the icon
+         * on that box is what makes it sit with the text beside it instead of
+         * hanging below the baseline.
+         */
+        const ImFontBaked* metrics = face->GetFontBaked(base_size_px);
+        const float line_height = metrics->Ascent - metrics->Descent;
+        const ImVec2 offset(0.0f,
+            (line_height - static_cast<float>(cell)) * 0.5f);
+        for (std::size_t i = 0; i < icon_count; ++i) {
+            ids.push_back(io.Fonts->AddCustomRectFontGlyphForSize(face,
+                base_size_px, static_cast<ImWchar>(icon_sources[i].codepoint),
+                glyph_pixel_size, glyph_pixel_size, advance, offset));
+        }
     }
 
     /*
@@ -418,11 +428,13 @@ void load_ui_fonts(float base_size_px) {
      * what lets ImGui multiply the glyph by the current text colour, and that
      * is the property the rest of the interface relies on.
      */
-    ImFontBaked* baked = font->GetFontBaked(base_size_px);
-    for (std::size_t i = 0; i < icon_count; ++i) {
-        if (ImFontGlyph* glyph = baked->FindGlyphNoFallback(
-                static_cast<ImWchar>(icon_sources[i].codepoint)))
-            glyph->Colored = false;
+    for (ImFont* face : faces) {
+        ImFontBaked* baked = face->GetFontBaked(base_size_px);
+        for (std::size_t i = 0; i < icon_count; ++i) {
+            if (ImFontGlyph* glyph = baked->FindGlyphNoFallback(
+                    static_cast<ImWchar>(icon_sources[i].codepoint)))
+                glyph->Colored = false;
+        }
     }
 
     /*
@@ -434,9 +446,10 @@ void load_ui_fonts(float base_size_px) {
         || texture->BytesPerPixel != 4)
         return;
 
-    for (std::size_t i = 0; i < icon_count; ++i) {
+    for (std::size_t n = 0; n < ids.size(); ++n) {
+        const std::size_t i = n % icon_count;
         ImFontAtlasRect rect;
-        if (!io.Fonts->GetCustomRect(ids[i], &rect))
+        if (!io.Fonts->GetCustomRect(ids[n], &rect))
             continue;
         for (std::size_t y = 0; y < cell; ++y) {
             const std::uint8_t* source =
