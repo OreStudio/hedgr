@@ -34,8 +34,14 @@ namespace theme = hedgr::ui::theme;
 using hedgr::model::domain::session_status;
 
 [[nodiscard]] const char* caption_of(plot_state state) noexcept {
-    return state == plot_state::reading ? "Reading the series..."
-                                        : "Not connected";
+    switch (state) {
+    case plot_state::reading:
+        return "Reading the series...";
+    case plot_state::history_unavailable:
+        return "History unavailable";
+    default:
+        return "Not connected";
+    }
 }
 
 /** @brief Writes @p text dim and centred on @p x, wrapped within @p wrap. */
@@ -93,7 +99,9 @@ void draw_plot_state(plot_state state, ImVec2 min, ImVec2 max,
         draw->AddText(ImGui::GetFont(), glyph_size,
             ImVec2(std::floor(centre.x - size.x * 0.5f),
                 std::floor(centre.y - size.y * 0.5f)),
-            state == plot_state::failed ? theme::plot_failed_colour
+            state == plot_state::failed
+                    || state == plot_state::history_unavailable
+                ? theme::plot_failed_colour
                                         : theme::plot_disconnected_colour,
             plug);
     }

@@ -23,6 +23,7 @@ set(files
     "seed_store_tests.cpp"
     "store_lock_tests.cpp"
     "term_curve_tests.cpp"
+    "tick_silence_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

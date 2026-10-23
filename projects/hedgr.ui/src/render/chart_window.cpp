@@ -637,6 +637,12 @@ void render_chart(window_handle handle, const render_input& input,
             widget::draw_plot_state(widget::plot_state::reading, at,
                 ImVec2(at.x + room.x, at.y + room.y),
                 theme::plot_state_glyph_size, true);
+        } else if (no_points && row && !series.failure(*row).empty()) {
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 room = ImGui::GetContentRegionAvail();
+            widget::draw_plot_state(widget::plot_state::history_unavailable,
+                at, ImVec2(at.x + room.x, at.y + room.y),
+                theme::plot_state_glyph_size, true);
         } else if (no_points) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {

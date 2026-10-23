@@ -197,6 +197,12 @@ TEST_CASE("a plot state draws its own glyph and no other", "[plot_state]") {
     CHECK(failed.failed > 0);
     CHECK(failed.spinner == 0);
 
+    const auto history
+        = marks_of(widget_frame(plot_state::history_unavailable, false));
+    CHECK(history.failed > 0);
+    CHECK(history.disconnected == 0);
+    CHECK(history.spinner == 0);
+
     const auto reading = marks_of(widget_frame(plot_state::reading, false));
     CHECK(reading.disconnected == 0);
     CHECK(reading.failed == 0);
@@ -264,6 +270,12 @@ TEST_CASE("a captioned state says its words and an uncaptioned one says none",
     CHECK(widget_frame(plot_state::reading, true).says("Reading the series..."));
     CHECK_FALSE(widget_frame(plot_state::reading, true).says("Not connected"));
 
+    const auto history = widget_frame(plot_state::history_unavailable, true,
+        "no answer");
+    CHECK(history.says("History unavailable"));
+    CHECK(history.says("no answer"));
+    CHECK_FALSE(history.says("Not connected"));
+
     const auto failed = widget_frame(plot_state::failed, true, "bad password");
     CHECK(failed.says("Not connected"));
     CHECK(failed.says("bad password"));
@@ -319,8 +331,8 @@ TEST_CASE("a chart whose session is connecting spins and says it is reading",
     CHECK(marks_of(connecting).disconnected + marks_of(connecting).failed == 0);
 }
 
-TEST_CASE("a connected chart still reading its series spins, and one with"
-          " nothing to show says so",
+TEST_CASE("a connected chart still reading its series spins, and one whose"
+          " read failed says history is unavailable",
     "[plot_state][chart]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -336,10 +348,13 @@ TEST_CASE("a connected chart still reading its series spins, and one with"
     const auto series = desk.windows.series(handle).front();
     desk.market.fail(series, "no such series", 1);
     const auto empty = window_frame(desk, handle, state);
-    CHECK(empty.says("No observations for this series yet."));
+    CHECK(empty.says("History unavailable"));
+    CHECK(empty.says("no such series"));
     CHECK_FALSE(empty.says("Reading the series"));
+    CHECK_FALSE(empty.says("No observations for this series yet."));
     CHECK(marks_of(empty).spinner == 0);
-    CHECK(marks_of(empty).disconnected + marks_of(empty).failed == 0);
+    CHECK(marks_of(empty).failed > 0);
+    CHECK(marks_of(empty).disconnected == 0);
 }
 
 TEST_CASE("a card shows the glyph alone for each state, under its header",

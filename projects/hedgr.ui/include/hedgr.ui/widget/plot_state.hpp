@@ -38,6 +38,8 @@ enum class plot_state : std::uint8_t {
     failed,
     /** @brief A connection or a read is in flight. */
     reading,
+    /** @brief The session is fine and the series' history read failed. */
+    history_unavailable,
 };
 
 /**
