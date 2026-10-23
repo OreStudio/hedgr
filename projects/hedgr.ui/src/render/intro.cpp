@@ -65,20 +65,21 @@ void radial_fan(ImDrawList* list, ImVec2 centre, float radius, ImU32 inner,
     }
 }
 
-/** @brief The crisp shapes' colour at @p brightness: blue when dim, white-hot at the peak. */
+/** @brief The crisp shapes' colour at @p brightness: the rest grey-white, climbing to the core. */
 [[nodiscard]] ImVec4 crisp_colour(float brightness) {
     namespace theme = hedgr::ui::theme;
-    return ImVec4(
-        theme::intro_core_rgb[0] * std::pow(brightness, theme::intro_crisp_gammas[0]),
-        theme::intro_core_rgb[1] * std::pow(brightness, theme::intro_crisp_gammas[1]),
-        theme::intro_core_rgb[2] * std::pow(brightness, theme::intro_crisp_gammas[2]),
-        1.0f);
+    const float lift = hedgr::ui::render::intro_timing::lift(brightness);
+    const auto blend = [&](int k) {
+        return theme::intro_rest_rgb[k]
+            + (theme::intro_core_rgb[k] - theme::intro_rest_rgb[k]) * lift;
+    };
+    return ImVec4(blend(0), blend(1), blend(2), 1.0f);
 }
 
 /**
  * @brief The halo colour of layer @p index at @p brightness.
  *
- * Indigo when dim, moving to the layer's colour at the peak: the core for the
+ * Indigo as it first lights, moving to the layer's colour at the peak: the core for the
  * tight layer, shading toward the chart purple the wider it is.
  */
 [[nodiscard]] ImVec4 halo_colour(int index, float brightness) {
@@ -92,7 +93,8 @@ void radial_fan(ImDrawList* list, ImVec2 centre, float radius, ImU32 inner,
         theme::intro_core_rgb[2] + (purple.z - theme::intro_core_rgb[2]) * mix};
     const auto blend = [&](int k) {
         return theme::intro_halo_cold_rgb[k]
-            + (peak[k] - theme::intro_halo_cold_rgb[k]) * brightness;
+            + (peak[k] - theme::intro_halo_cold_rgb[k])
+                * hedgr::ui::render::intro_timing::lift(brightness);
     };
     return ImVec4(blend(0), blend(1), blend(2), 1.0f);
 }
@@ -147,9 +149,6 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
         colour(0.0f, 0.0f, 0.0f, 0.0f),
         colour(0.0f, 0.0f, 0.0f, theme::intro_vignette_alpha * veil));
 
-    if (glow <= 0.0f)
-        return;
-
     /*
      * The lockup: the swirl over the word, the pair centred a little above the
      * middle. The font size is whatever makes the word as wide as asked.
@@ -186,7 +185,7 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
      */
     const ImVec4 word_glow = halo_colour(1, glow);
     constexpr float two_pi = 6.2831853f;
-    for (int ring = theme::intro_word_rings - 1; ring >= 0; --ring) {
+    for (int ring = theme::intro_word_rings - 1; ring >= 0 && halo > 0.0f; --ring) {
         const int copies = theme::intro_word_ring_copies[ring];
         const float radius = word_size * theme::intro_word_ring_radii[ring];
         const ImU32 tint = colour(word_glow.x, word_glow.y, word_glow.z,
@@ -222,7 +221,7 @@ void draw_intro(const render_input& input, std::string_view logo_svg,
      */
     constexpr float canvas = static_cast<float>(theme::intro_glow_raster)
         / static_cast<float>(theme::intro_glow_inner);
-    for (int i = theme::intro_glow_layers - 1; i >= 0; --i) {
+    for (int i = theme::intro_glow_layers - 1; i >= 0 && halo > 0.0f; --i) {
         const ImTextureID soft = input.textures->svg_glow(logo_texture_id,
             logo_svg, theme::intro_glow_raster, theme::intro_glow_inner,
             theme::intro_glow_sigmas[i]);

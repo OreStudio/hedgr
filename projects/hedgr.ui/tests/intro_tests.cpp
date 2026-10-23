@@ -41,7 +41,7 @@
 #include <vector>
 
 using hedgr::ui::render::draw_intro;
-using hedgr::ui::render::intro_dark_ns;
+using hedgr::ui::render::intro_rest_ns;
 using hedgr::ui::render::intro_peak_ns;
 using hedgr::ui::render::intro_skip_requested;
 using hedgr::ui::render::intro_timing;
@@ -122,25 +122,38 @@ intro_frame read_intro(hedgr::testing::desk& desk, std::int64_t elapsed_ns,
 TEST_CASE("the intro's timeline is the one the sound is cut to", "[intro]") {
     /* The peak is the centre of the loudest 50 ms window of intro_swell.wav, measured. */
     CHECK(intro_peak_ns == 3'023'000'000);
-    CHECK(intro_dark_ns == 5'200'000'000);
+    CHECK(intro_rest_ns == 5'200'000'000);
     CHECK(intro_total_ns == 6'000'000'000);
 }
 
-TEST_CASE("the logo starts dark, peaks at the peak and is dark again",
+TEST_CASE("the logo starts at rest, peaks at the peak and returns to the same rest",
     "[intro]") {
-    CHECK(intro_timing::brightness(0) == 0.0f);
+    const float rest = hedgr::ui::theme::intro_rest_brightness;
+    /* A dim white, not very bright: about a third of full. */
+    CHECK(rest >= 0.30f);
+    CHECK(rest <= 0.35f);
+    CHECK(intro_timing::brightness(0) == rest);
     CHECK(intro_timing::brightness(intro_peak_ns) == 1.0f);
-    CHECK(intro_timing::brightness(intro_dark_ns) == 0.0f);
-    CHECK(intro_timing::brightness(intro_total_ns) == 0.0f);
+    CHECK(intro_timing::brightness(intro_rest_ns) == rest);
+    CHECK(intro_timing::brightness(intro_total_ns) == rest);
     CHECK(intro_timing::brightness(intro_peak_ns / 2)
-        == Catch::Approx(0.5f).margin(0.01));
+        == Catch::Approx(rest + (1.0f - rest) * 0.5f).margin(0.01));
+}
+
+TEST_CASE("the lift above rest is 0 at rest and 1 at the peak", "[intro]") {
+    CHECK(intro_timing::lift(hedgr::ui::theme::intro_rest_brightness) == 0.0f);
+    CHECK(intro_timing::lift(1.0f) == Catch::Approx(1.0f));
+    CHECK(intro_timing::lift(0.0f) == 0.0f);
+    CHECK(intro_timing::halo_gain(hedgr::ui::theme::intro_rest_brightness) == 0.0f);
+    CHECK(intro_timing::halo_gain(1.0f) == Catch::Approx(1.0f));
 }
 
 TEST_CASE("the brightness eases: a gentle start and a gentle landing",
     "[intro]") {
-    CHECK(intro_timing::brightness(step_ns) < 0.0001f);
+    const float rest = hedgr::ui::theme::intro_rest_brightness;
+    CHECK(intro_timing::brightness(step_ns) - rest < 0.0001f);
     CHECK(intro_timing::brightness(intro_peak_ns - step_ns) > 0.9999f);
-    CHECK(intro_timing::brightness(intro_dark_ns - step_ns) < 0.0001f);
+    CHECK(intro_timing::brightness(intro_rest_ns - step_ns) - rest < 0.0001f);
 }
 
 TEST_CASE("the brightness never jumps between samples 10 ms apart", "[intro]") {
@@ -158,18 +171,19 @@ TEST_CASE("the brightness never jumps between samples 10 ms apart", "[intro]") {
 
 TEST_CASE("the brightness only rises to the peak and only falls after it",
     "[intro]") {
-    float previous = 0.0f;
+    const float rest = hedgr::ui::theme::intro_rest_brightness;
+    float previous = rest;
     for (std::int64_t t = step_ns; t <= intro_peak_ns; t += step_ns) {
         const float now = intro_timing::brightness(t);
         CHECK(now > previous);
         CHECK(now <= 1.0f);
         previous = now;
     }
-    for (std::int64_t t = intro_peak_ns + step_ns; t < intro_dark_ns;
+    for (std::int64_t t = intro_peak_ns + step_ns; t < intro_rest_ns;
          t += step_ns) {
         const float now = intro_timing::brightness(t);
         CHECK(now < previous);
-        CHECK(now >= 0.0f);
+        CHECK(now >= rest);
         previous = now;
     }
 }
@@ -185,23 +199,24 @@ TEST_CASE("the pulse has exactly one maximum", "[intro]") {
     CHECK(intro_timing::brightness(intro_peak_ns) == 1.0f);
 }
 
-TEST_CASE("the brightness clamps outside the timeline", "[intro]") {
-    CHECK(intro_timing::brightness(-1) == 0.0f);
-    CHECK(intro_timing::brightness(-intro_total_ns) == 0.0f);
-    CHECK(intro_timing::brightness(intro_total_ns * 10) == 0.0f);
+TEST_CASE("the brightness is the rest level outside the timeline", "[intro]") {
+    const float rest = hedgr::ui::theme::intro_rest_brightness;
+    CHECK(intro_timing::brightness(-1) == rest);
+    CHECK(intro_timing::brightness(-intro_total_ns) == rest);
+    CHECK(intro_timing::brightness(intro_total_ns * 10) == rest);
 }
 
 TEST_CASE("the veil holds through the glow and only fades after the dip",
     "[intro]") {
     CHECK(intro_timing::veil_alpha(0) == 1.0f);
     CHECK(intro_timing::veil_alpha(intro_peak_ns) == 1.0f);
-    CHECK(intro_timing::veil_alpha((intro_peak_ns + intro_dark_ns) / 2) == 1.0f);
-    CHECK(intro_timing::veil_alpha(intro_dark_ns) == 1.0f);
-    CHECK(intro_timing::veil_alpha(intro_dark_ns + step_ns) < 1.0f);
+    CHECK(intro_timing::veil_alpha((intro_peak_ns + intro_rest_ns) / 2) == 1.0f);
+    CHECK(intro_timing::veil_alpha(intro_rest_ns) == 1.0f);
+    CHECK(intro_timing::veil_alpha(intro_rest_ns + step_ns) < 1.0f);
     CHECK(intro_timing::veil_alpha(intro_total_ns) == 0.0f);
 
     float previous = 1.0f;
-    for (std::int64_t t = intro_dark_ns; t <= intro_total_ns; t += step_ns) {
+    for (std::int64_t t = intro_rest_ns; t <= intro_total_ns; t += step_ns) {
         const float now = intro_timing::veil_alpha(t);
         CHECK(now <= previous);
         previous = now;
@@ -263,7 +278,7 @@ TEST_CASE("a key or a click asks to skip, a scroll does not", "[intro]") {
     }
 }
 
-TEST_CASE("the intro is darkest at the start and brightest at the peak",
+TEST_CASE("the intro is at rest at the start and the rest point and brightest at the peak",
     "[intro]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -271,9 +286,10 @@ TEST_CASE("the intro is darkest at the start and brightest at the peak",
     const auto first = read_intro(desk, 0);
     const auto rising = read_intro(desk, intro_peak_ns / 2);
     const auto peak = read_intro(desk, intro_peak_ns);
-    const auto falling = read_intro(desk, (intro_peak_ns + intro_dark_ns) / 2);
-    const auto dark = read_intro(desk, intro_dark_ns);
+    const auto falling = read_intro(desk, (intro_peak_ns + intro_rest_ns) / 2);
+    const auto dark = read_intro(desk, intro_rest_ns);
 
+    CHECK(first.light > 0.0f);
     CHECK(first.light < rising.light);
     CHECK(rising.light < peak.light);
     CHECK(falling.light < peak.light);
@@ -285,8 +301,8 @@ TEST_CASE("the veil's vertices fade out after the dip", "[intro]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
 
-    const auto held = read_intro(desk, intro_dark_ns);
-    const auto fading = read_intro(desk, (intro_dark_ns + intro_total_ns) / 2);
+    const auto held = read_intro(desk, intro_rest_ns);
+    const auto fading = read_intro(desk, (intro_rest_ns + intro_total_ns) / 2);
     const auto gone = read_intro(desk, intro_total_ns);
 
     CHECK(fading.alpha_sum < held.alpha_sum);
@@ -298,8 +314,10 @@ TEST_CASE("the glow draws the blurred layers and the crisp logo", "[intro]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
 
-    CHECK(read_intro(desk, 0).logo_quads == 0);
+    /* At rest the crisp swirl is drawn and no halo is. */
+    CHECK(read_intro(desk, 0).logo_quads == 1);
     CHECK(read_intro(desk, 0).glow_quads == 0);
+    CHECK(read_intro(desk, intro_rest_ns).glow_quads == 0);
     for (const auto t : {intro_peak_ns, intro_peak_ns / 3}) {
         const auto frame = read_intro(desk, t);
         CHECK(frame.logo_quads == 1);
@@ -307,7 +325,7 @@ TEST_CASE("the glow draws the blurred layers and the crisp logo", "[intro]") {
     }
 }
 
-TEST_CASE("the glow's intensity is nothing when dark and greatest at the peak",
+TEST_CASE("the halo is nothing at rest and greatest at the peak",
     "[intro][glow]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -315,7 +333,7 @@ TEST_CASE("the glow's intensity is nothing when dark and greatest at the peak",
     const float peak = read_intro(desk, intro_peak_ns).glow_alpha;
     REQUIRE(peak > 0.0f);
     CHECK(read_intro(desk, 0).glow_alpha == 0.0f);
-    CHECK(read_intro(desk, intro_dark_ns).glow_alpha == 0.0f);
+    CHECK(read_intro(desk, intro_rest_ns).glow_alpha == 0.0f);
     CHECK(read_intro(desk, intro_total_ns).glow_alpha == 0.0f);
     float previous = 0.0f;
     for (int tenth = first_tenth; tenth < 10; ++tenth) {
@@ -324,7 +342,7 @@ TEST_CASE("the glow's intensity is nothing when dark and greatest at the peak",
         CHECK(rising < peak);
         previous = rising;
     }
-    CHECK(read_intro(desk, (intro_peak_ns + intro_dark_ns) / 2).glow_alpha < peak);
+    CHECK(read_intro(desk, (intro_peak_ns + intro_rest_ns) / 2).glow_alpha < peak);
     /* Barely visible a hundredth of the pulse in, and never more than the peak. */
     CHECK(read_intro(desk, intro_peak_ns / 20).glow_alpha < peak * 0.02f);
 }
@@ -369,11 +387,13 @@ struct word_read final {
     float max_x = -1e9f;
     /** @brief The width of the outermost ring of copies, the first drawn. */
     float outer_width = 0.0f;
-    /** @brief The crisp word's ink, the last copy drawn. */
+    /** @brief The crisp word's ink: its vertices are the only ones drawn near full alpha. */
     float crisp_min_x = 1e9f;
     float crisp_max_x = -1e9f;
     float crisp_min_y = 1e9f;
     float crisp_max_y = -1e9f;
+    /** @brief How many vertices the crisp word is. */
+    int crisp_vertices = 0;
 };
 
 /** @brief How many draws of the word there are: every ring's copies, then the crisp. */
@@ -406,21 +426,28 @@ word_read read_word(hedgr::testing::desk& desk, std::int64_t elapsed_ns) {
         out.min_x = std::min(out.min_x, v.pos.x);
         out.max_x = std::max(out.max_x, v.pos.x);
     }
-    if (!lit.empty()) {
-        const std::size_t per_draw = lit.size() / word_draws;
+    /* The crisp word draws at the held alpha, the ring copies at a sliver of it. */
+    std::vector<ImDrawVert> rings;
+    for (const ImDrawVert& v : lit) {
+        if (((v.col >> IM_COL32_A_SHIFT) & 0xff) < 128) {
+            rings.push_back(v);
+            continue;
+        }
+        out.crisp_min_x = std::min(out.crisp_min_x, v.pos.x);
+        out.crisp_max_x = std::max(out.crisp_max_x, v.pos.x);
+        out.crisp_min_y = std::min(out.crisp_min_y, v.pos.y);
+        out.crisp_max_y = std::max(out.crisp_max_y, v.pos.y);
+        ++out.crisp_vertices;
+    }
+    /* The outermost ring is drawn first: its 14 copies lead the ring vertices. */
+    if (out.crisp_vertices > 0 && rings.size() >= static_cast<std::size_t>(out.crisp_vertices) * 14) {
         float lo = 1e9f;
         float hi = -1e9f;
-        for (std::size_t i = 0; i < per_draw * 14; ++i) {
-            lo = std::min(lo, lit[i].pos.x);
-            hi = std::max(hi, lit[i].pos.x);
+        for (std::size_t i = 0; i < static_cast<std::size_t>(out.crisp_vertices) * 14; ++i) {
+            lo = std::min(lo, rings[i].pos.x);
+            hi = std::max(hi, rings[i].pos.x);
         }
         out.outer_width = hi - lo;
-        for (std::size_t i = lit.size() - per_draw; i < lit.size(); ++i) {
-            out.crisp_min_x = std::min(out.crisp_min_x, lit[i].pos.x);
-            out.crisp_max_x = std::max(out.crisp_max_x, lit[i].pos.x);
-            out.crisp_min_y = std::min(out.crisp_min_y, lit[i].pos.y);
-            out.crisp_max_y = std::max(out.crisp_max_y, lit[i].pos.y);
-        }
     }
     ImGui::EndFrame();
     return out;
@@ -428,15 +455,21 @@ word_read read_word(hedgr::testing::desk& desk, std::int64_t elapsed_ns) {
 
 }
 
-TEST_CASE("the word is dark at the start and drawn at the peak", "[intro][word]") {
+TEST_CASE("the word rests as the crisp word alone and gains its halo at the peak",
+    "[intro][word]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
 
-    CHECK(read_word(desk, 0).vertices == 0);
-    /* Dark means nothing is submitted for it: the black fill and the vignette only. */
-    CHECK(read_word(desk, 0).submitted == 4 + 33);
-    CHECK(read_word(desk, intro_dark_ns).vertices == 0);
-    CHECK(read_word(desk, intro_peak_ns).vertices > 0);
+    const auto peak = read_word(desk, intro_peak_ns);
+    REQUIRE(peak.crisp_vertices > 0);
+    CHECK(peak.vertices == peak.crisp_vertices * word_draws);
+    /* At rest the black fill, the vignette and one draw of the word, with no ring copies. */
+    for (const std::int64_t t : {std::int64_t{0}, intro_rest_ns}) {
+        const auto rest = read_word(desk, t);
+        CHECK(rest.vertices == peak.crisp_vertices);
+        CHECK(rest.crisp_vertices == peak.crisp_vertices);
+        CHECK(rest.submitted == 4 + 33 + peak.crisp_vertices);
+    }
 }
 
 TEST_CASE("the word takes the logo's brightness", "[intro][word]") {
@@ -454,7 +487,7 @@ TEST_CASE("the word takes the logo's brightness", "[intro][word]") {
         previous = rising.alpha_sum;
     }
     const auto falling = read_word(desk,
-        (intro_peak_ns + intro_dark_ns) / 2);
+        (intro_peak_ns + intro_rest_ns) / 2);
     CHECK(falling.alpha_sum < peak.alpha_sum);
 }
 
@@ -470,7 +503,7 @@ TEST_CASE("the word and its halo keep one fixed size through the whole pulse",
 
     const std::int64_t times[] = {intro_peak_ns * word_first_tenth / 10,
         intro_peak_ns,
-        intro_peak_ns + (intro_dark_ns - intro_peak_ns) * 3 / 10};
+        intro_peak_ns + (intro_rest_ns - intro_peak_ns) * 3 / 10};
     const auto reference = read_word(desk, intro_peak_ns);
     REQUIRE(reference.vertices > 0);
     for (const std::int64_t t : times) {
@@ -599,8 +632,8 @@ TEST_CASE("every quad keeps one fixed size and place through the whole pulse",
                                          .epsilon(0.001));
     const std::int64_t times[] = {intro_peak_ns * first_tenth / 10,
         intro_peak_ns * 6 / 10,
-        intro_peak_ns + (intro_dark_ns - intro_peak_ns) * 3 / 10,
-        intro_peak_ns + (intro_dark_ns - intro_peak_ns) * last_falling_tenth / 10};
+        intro_peak_ns + (intro_rest_ns - intro_peak_ns) * 3 / 10,
+        intro_peak_ns + (intro_rest_ns - intro_peak_ns) * last_falling_tenth / 10};
     for (const std::int64_t t : times) {
         const auto quads = read_logo_quads(desk, t);
         REQUIRE(quads.size() == reference.size());
@@ -664,7 +697,7 @@ TEST_CASE("the halo's alpha rises with the brightness and falls with it",
         }
         for (int tenth = 2; tenth <= last_falling_tenth; ++tenth) {
             const float alpha = read_quad_colours(desk,
-                intro_peak_ns + (intro_dark_ns - intro_peak_ns) * tenth / 10)[layer].a;
+                intro_peak_ns + (intro_rest_ns - intro_peak_ns) * tenth / 10)[layer].a;
             CHECK(alpha < previous);
             previous = alpha;
         }
@@ -709,24 +742,38 @@ TEST_CASE("the halo is indigo when dim and cyan-white at the peak, the core brig
     CHECK(crisp_peak.b > 0.95f);
 }
 
-TEST_CASE("the crisp swirl climbs from blue to white as the brightness rises",
+TEST_CASE("the crisp swirl rests as a soft grey-white and climbs to white-hot",
     "[intro][logo]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
 
+    const auto rest = read_quad_colours(desk, 0).back();
+    const auto at_rest_point = read_quad_colours(desk, intro_rest_ns).back();
     const auto low = read_quad_colours(desk, intro_peak_ns * first_tenth / 10).back();
     const auto mid = read_quad_colours(desk, intro_peak_ns * 6 / 10).back();
     const auto peak = read_quad_colours(desk, intro_peak_ns).back();
-    CHECK(low.b > 3.0f * low.r);
-    CHECK(low.b < 0.35f);
+    /* Dim, neutral and a little cool: neither black nor indigo. */
+    for (const float c : {rest.r, rest.g, rest.b}) {
+        CHECK(c > 0.25f);
+        CHECK(c < 0.45f);
+    }
+    CHECK(rest.b < rest.r * 1.25f);
+    CHECK(rest.b >= rest.r);
+    /* The pulse returns to the very colour it started from. */
+    CHECK(at_rest_point.r == rest.r);
+    CHECK(at_rest_point.g == rest.g);
+    CHECK(at_rest_point.b == rest.b);
+    CHECK(rest.r < low.r);
     CHECK(low.r < mid.r);
     CHECK(mid.r < peak.r);
+    CHECK(rest.g < low.g);
+    CHECK(low.g < mid.g);
+    CHECK(mid.g < peak.g);
+    CHECK(rest.b < low.b);
     CHECK(low.b < mid.b);
     CHECK(mid.b < peak.b);
-    CHECK(mid.b / mid.r < low.b / low.r);
-    CHECK(peak.b / peak.r < mid.b / mid.r);
     /* Its alpha is held: only its colour carries the pulse. */
-    CHECK(low.a == Catch::Approx(peak.a).margin(0.005));
+    CHECK(rest.a == Catch::Approx(peak.a).margin(0.005));
 }
 
 TEST_CASE("the scene under the sign does not pulse: the vignette and fill are constant",
@@ -745,7 +792,7 @@ TEST_CASE("the scene under the sign does not pulse: the vignette and fill are co
     };
     const auto reference = under(0);
     for (const std::int64_t t : {intro_peak_ns / 3, intro_peak_ns,
-             (intro_peak_ns + intro_dark_ns) / 2}) {
+             (intro_peak_ns + intro_rest_ns) / 2}) {
         const auto frame = under(t);
         for (std::size_t i = 0; i < frame.size(); ++i) {
             CHECK(frame[i].col == reference[i].col);
@@ -794,7 +841,7 @@ TEST_CASE("the crisp logo keeps its size through the whole pulse",
     const float reference = read_logo_quads(desk, intro_peak_ns).back().width;
     REQUIRE(reference > 0.0f);
     const std::int64_t last = intro_peak_ns
-        + (intro_dark_ns - intro_peak_ns) * last_falling_tenth / 10;
+        + (intro_rest_ns - intro_peak_ns) * last_falling_tenth / 10;
     for (std::int64_t t = intro_peak_ns * first_tenth / 10; t <= last;
          t += intro_total_ns / 40) {
         const auto quads = read_logo_quads(desk, t);
@@ -997,7 +1044,7 @@ TEST_CASE("intro capture", "[.gallery]") {
     std::string svg(swirl_svg);
     const std::pair<const char*, double> samples[] = {{"t0.0", 0.0},
         {"t1.0", 1.0}, {"t2.0", 2.0}, {"t3.023", 3.023}, {"t3.6", 3.6},
-        {"t4.6", 4.6}, {"t5.4", 5.4}};
+        {"t4.6", 4.6}, {"t5.2", 5.2}, {"t5.6", 5.6}};
     for (const auto& [name, seconds] : samples) {
         for (int pass = 0; pass < 3; ++pass) {
             ImGui::NewFrame();

@@ -33,20 +33,21 @@ namespace hedgr::ui::render {
  * @name The launch intro's timeline
  *
  * One slow pulse, like a neon sign switching on and off. The geometry never
- * changes, only the light: the logo and the word are dark at the start, brighten
- * smoothly to their peak, dim smoothly back to dark by the dark point, and from
- * there the whole intro fades out over the main window until the total. The
+ * changes, only the light: the logo and the word start as a dim white, the
+ * rest level, brighten smoothly to their peak, dim smoothly back to the rest
+ * level by the rest point, and from there the whole intro fades out over the
+ * main window until the total. The
  * peak is where the intro's sound is loudest: assets/sounds/intro_swell.wav is
  * measured by tools/measure_intro_peak.py: the centre of its loudest 50 ms window
  * is 3.023 s, and the two move together.
  *
  * @c intro_max_step is the most the brightness may change between two samples
  * 10 ms apart. Smoothstep's steepest slope is 1.5 over the longer ramp, which
- * is a step of about 0.007 on the falling ramp, so this holds a pulse that cannot jump or flicker.
+ * is a step of about 0.005 on the falling ramp, so this holds a pulse that cannot jump or flicker.
  * @{
  */
 inline constexpr std::int64_t intro_peak_ns = 3'023'000'000;
-inline constexpr std::int64_t intro_dark_ns = 5'200'000'000;
+inline constexpr std::int64_t intro_rest_ns = 5'200'000'000;
 inline constexpr std::int64_t intro_total_ns = 6'000'000'000;
 inline constexpr float intro_max_step = 0.01f;
 /** @} */
@@ -67,48 +68,62 @@ struct intro_timing final {
     bool skipped = false;
 
     /**
-     * @brief How bright the logo and word are, 0 for dark and 1 at the peak.
+     * @brief How bright the logo and word are: the rest level at rest, 1 at the peak.
      *
-     * Smoothstep up to the peak and smoothstep down to the dark point, so the
-     * slope is zero at the start, the peak and the dark point: one eased
-     * swell with a single maximum. Before the start and after the dark point it
-     * is 0.
+     * Smoothstep from @c intro_rest_brightness up to 1 at the peak and
+     * smoothstep back down to the rest level at the rest point, so the slope is
+     * zero at the start, the peak and the rest point: one eased swell with a
+     * single maximum. Before the start and after the rest point it is the rest
+     * level.
      */
     [[nodiscard]] static constexpr float brightness(
         std::int64_t elapsed_ns) noexcept {
-        if (elapsed_ns <= 0 || elapsed_ns >= intro_dark_ns)
-            return 0.0f;
+        constexpr float rest = theme::intro_rest_brightness;
+        if (elapsed_ns <= 0 || elapsed_ns >= intro_rest_ns)
+            return rest;
         const float x = elapsed_ns <= intro_peak_ns
             ? static_cast<float>(elapsed_ns) / static_cast<float>(intro_peak_ns)
-            : static_cast<float>(intro_dark_ns - elapsed_ns)
-                / static_cast<float>(intro_dark_ns - intro_peak_ns);
-        return x * x * (3.0f - 2.0f * x);
+            : static_cast<float>(intro_rest_ns - elapsed_ns)
+                / static_cast<float>(intro_rest_ns - intro_peak_ns);
+        return rest + (1.0f - rest) * (x * x * (3.0f - 2.0f * x));
+    }
+
+    /**
+     * @brief How far @p brightness is above the rest level, 0 at rest and 1 at the peak.
+     *
+     * What the light is made of: the halo and the colour shift take it, not the
+     * raw brightness, so nothing glows at rest.
+     */
+    [[nodiscard]] static constexpr float lift(float brightness) noexcept {
+        const float above = (brightness - theme::intro_rest_brightness)
+            / (1.0f - theme::intro_rest_brightness);
+        return above < 0.0f ? 0.0f : above;
     }
 
     /**
      * @brief The halo's share of its peak alpha at @p brightness.
      *
-     * A power of the brightness, so the halo ignites late and fades early, as
-     * a neon tube's does: dim light on the sign is mostly the crisp shapes.
+     * A power of the lift, so the halo is nothing at rest, ignites late and
+     * fades early, as a neon tube's does.
      */
     [[nodiscard]] static float halo_gain(float brightness) noexcept {
-        return std::pow(brightness, theme::intro_halo_gamma);
+        return std::pow(lift(brightness), theme::intro_halo_gamma);
     }
 
     /**
      * @brief How much of the intro is still over the main window, 1 to 0.
      *
-     * Opaque until the dark point, so the main window is never seen through a
+     * Opaque until the rest point, so the main window is never seen through a
      * lit logo, and then a straight fade to nothing at the total.
      */
     [[nodiscard]] static constexpr float veil_alpha(
         std::int64_t elapsed_ns) noexcept {
-        if (elapsed_ns <= intro_dark_ns)
+        if (elapsed_ns <= intro_rest_ns)
             return 1.0f;
         if (elapsed_ns >= intro_total_ns)
             return 0.0f;
         return static_cast<float>(intro_total_ns - elapsed_ns)
-            / static_cast<float>(intro_total_ns - intro_dark_ns);
+            / static_cast<float>(intro_total_ns - intro_rest_ns);
     }
 
     /** @brief Whether the intro is over, by its own length or by a skip. */

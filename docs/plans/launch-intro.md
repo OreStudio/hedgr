@@ -4,27 +4,32 @@ The intro replaces the splash. It plays once, at launch, over the main window.
 
 ## Timeline
 
-The intro is one slow pulse of light, like a neon sign switching on and off,
-not a flash. Nothing moves or grows: only the light changes. All times are from the first
-frame the intro is drawn. The constants live in `hedgr.ui/render/intro.hpp`; the
-look constants live in `hedgr.ui/theme/theme.hpp`.
+The intro is one slow pulse of light, like a neon sign that rests dim, flares
+and settles back. Nothing moves or grows: only the light changes. All times are
+from the first frame the intro is drawn. The constants live in
+`hedgr.ui/render/intro.hpp`; the look constants live in
+`hedgr.ui/theme/theme.hpp`.
+
+The sign starts and ends at a resting level, `intro_rest_brightness` (0.32 of
+full): a dim, soft, slightly cool grey-white, not black and not blue.
 
 | Time | Brightness | Veil |
 | --- | --- | --- |
-| 0.0 s | 0 (dark) | opaque |
+| 0.0 s | 0.32 (rest) | opaque |
 | 3.023 s (`intro_peak_ns`) | 1 (brightest) | opaque |
-| 5.2 s (`intro_dark_ns`) | 0 (dark again) | opaque |
-| 6.0 s (`intro_total_ns`) | 0 | 0, the main window is fully shown |
+| 5.2 s (`intro_rest_ns`) | 0.32 (rest again) | opaque |
+| 6.0 s (`intro_total_ns`) | 0.32 | 0, the main window is fully shown |
 
-Brightness is a smoothstep up to the peak and a smoothstep down to the dark
-point: the slope is zero at the start, the peak and the dark point, so there is
-no jump, no flicker and one maximum. The steepest step between samples 10 ms
-apart is about 0.007 (on the falling ramp), and `intro_max_step` (0.01) bounds it in a test.
-The veil is opaque until
-the dark point and then fades linearly. `intro_timing` holds `brightness`,
-`halo_gain`, `veil_alpha` and `finished` as pure functions of
-elapsed time, and a `skipped` flag. Any key or click skips, so the length costs
-nobody anything.
+Brightness is a smoothstep from the rest level up to the peak and a smoothstep
+back down to the rest level at the rest point: the slope is zero at the start,
+the peak and the rest point, so there is no jump, no flicker and one maximum.
+The steepest step between samples 10 ms apart is about 0.005 (on the falling
+ramp), and `intro_max_step` (0.01) bounds it in a test. The veil is opaque until
+the rest point and then fades linearly, so the whole screen dissolves into the
+main window over the last 0.8 s. `intro_timing` holds `brightness`, `lift` (how
+far above rest, 0 to 1), `halo_gain`, `veil_alpha` and `finished` as pure
+functions of elapsed time, and a `skipped` flag. Any key or click skips, so the
+length costs nobody anything.
 
 ## What is drawn
 
@@ -57,18 +62,18 @@ of copies at fixed tiny offsets (`intro_word_ring_copies`, 10, 12 and 14 copies
 at 0.035, 0.08 and 0.15 of the font size) at very low alpha each, which sums to
 a soft blur. It costs 37 text draws and no texture.
 
-**Light.** Only brightness `b` varies, and nothing changes size, place or
+**Light.** Only the brightness varies, and nothing changes size, place or
 radius at any time: no layer, ring offset or vignette depends on the time.
 
 - The crisp swirl and word keep a fixed alpha (`intro_peak_intensity`, 0.8) and
-  their colour climbs: each channel of `intro_core_rgb` times `b` to the power
-  in `intro_crisp_gammas` (2.2, 1.6, 1.0 for red, green, blue). Dim is a deep
-  blue, the middle a blue-grey, the peak the white-hot core.
-- The halo's alpha is its peak (`intro_glow_alphas`) times `b` to the power
-  `intro_halo_gamma` (2), so it ignites late and fades early, as a neon tube
-  does. The word's rings follow the same gain.
-- The halo's colour moves from the indigo `intro_halo_cold_rgb` at `b` = 0 to
-  its layer's peak colour at `b` = 1: the core for the tight layer, shading
+  their colour runs from the rest grey-white `intro_rest_rgb` to the white-hot
+  `intro_core_rgb` in step with the lift above rest. At rest nothing is blue.
+- The halo's alpha is its peak (`intro_glow_alphas`) times the lift to the power
+  `intro_halo_gamma` (2), so there is none at rest, it ignites late and fades
+  early, as a neon tube does. The word's rings follow the same gain, and at rest
+  neither the rings nor the halo textures are drawn.
+- The halo's colour moves from the indigo `intro_halo_cold_rgb` as it first
+  lights to its layer's peak colour at the peak: the core for the tight layer, shading
   toward the chart purple (`intro_glow_purple_mix`) for the wide one, so the top
   of the pulse has a faint wide purple haze.
 
@@ -97,7 +102,7 @@ last 1.2 s. `tools/make_intro_sound.sh` is the ffmpeg recipe; it matches the
 committed file in shape (correlation 0.99) and level, not byte for byte, since
 loudnorm's output depends on the ffmpeg build. `tools/measure_intro_peak.py`
 finds the centre of the loudest 50 ms window, 3.023 s, which fixes
-`intro_peak_ns`. The visual timeline moved to the sound: the dark point (5.2 s)
+`intro_peak_ns`. The visual timeline moved to the sound: the rest point (5.2 s)
 and the total (6.0 s) stay where the audio fades out, so the rise is 3.023 s and
 the fall 2.177 s.
 

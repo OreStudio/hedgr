@@ -835,11 +835,13 @@ store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
  * image::rasterize_svg_glow) and drawn at one fixed size. A vignette keeps the
  * corners black.
  *
- * Brightness, from the timeline, moves three things. The crisp shapes' colour
- * climbs from near-black blue through blue-grey to a white-hot core. The halo's
- * alpha follows the brightness to a power, so it ignites late and fades early.
- * The halo's colour moves from deep indigo when dim to cyan-white near the
- * peak, the wide layer staying a faint purple haze at the top.
+ * The sign rests as a dim, soft white and pulses up to a white-hot core and back
+ * to the rest. Brightness, from the timeline, moves three things. The crisp
+ * shapes' colour climbs from the rest grey-white to the white-hot core. The
+ * halo's alpha follows the brightness above rest to a power, so there is none
+ * at rest and it ignites late and fades early. The halo's colour moves from
+ * deep indigo when it first lights to cyan-white near the peak, the wide layer
+ * staying a faint purple haze at the top.
  *
  * The word's halo is the word drawn again in rings of fixed tiny offsets at
  * very low alpha, which sums to a blur. The font atlas gives no CPU copy of a
@@ -848,6 +850,10 @@ store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
  * @{
  */
 inline constexpr int intro_wallpaper_grey = 38;
+/** @brief The brightness the sign rests at, as a fraction of the peak. */
+inline constexpr float intro_rest_brightness = 0.32f;
+/** @brief The crisp shapes' colour at rest: a soft, slightly cool grey-white. */
+inline constexpr float intro_rest_rgb[3] = {0.34f, 0.36f, 0.39f};
 /** @brief The swirl's side as a fraction of the viewport's shorter side. */
 inline constexpr float intro_logo_fraction = 0.20f;
 /** @brief The glow texture's side and the swirl's side inside it, in pixels. */
@@ -858,7 +864,7 @@ inline constexpr int intro_glow_layers = 3;
 inline constexpr float intro_glow_sigmas[intro_glow_layers] = {3.0f, 8.0f, 20.0f};
 /** @brief Each layer's alpha at the peak. */
 inline constexpr float intro_glow_alphas[intro_glow_layers] = {0.82f, 0.80f, 0.70f};
-/** @brief The power of the brightness the halo's alpha follows. */
+/** @brief The power of the lift above rest the halo's alpha follows. */
 inline constexpr float intro_halo_gamma = 2.0f;
 /**
  * @brief The crisp shapes' alpha, held fixed. Their colour carries the pulse,
@@ -868,13 +874,7 @@ inline constexpr float intro_halo_gamma = 2.0f;
 inline constexpr float intro_peak_intensity = 0.8f;
 /** @brief The white-hot core at the peak, a cyan-white. */
 inline constexpr float intro_core_rgb[3] = {0.86f, 0.97f, 1.0f};
-/**
- * @brief The power of the brightness each channel of the crisp colour follows:
- * red climbs slowest and blue fastest, so a dim shape is blue and a bright one
- * white.
- */
-inline constexpr float intro_crisp_gammas[3] = {2.2f, 1.6f, 1.0f};
-/** @brief The halo's colour when dim, a deep indigo. */
+/** @brief The halo's colour as it first lights, a deep indigo. */
 inline constexpr float intro_halo_cold_rgb[3] = {0.22f, 0.26f, 1.0f};
 /** @brief How far the wide layer's colour at the peak is toward the chart purple. */
 inline constexpr float intro_glow_purple_mix = 0.5f;
