@@ -850,3 +850,71 @@ TEST_CASE("an IR curve row with no flag keeps the series row's text indent",
     CHECK(curve.text_x < 200.0f);
     CHECK(curve.text_x == series.text_x);
 }
+
+namespace {
+
+/** @brief Allocations of one steady frame with @p count mini plot cards. */
+std::size_t allocations_with_cards(std::size_t count, int& vertices_out) {
+    headless_imgui imgui;
+    desk desk;
+    std::vector<model::state::window_handle> windows;
+    std::vector<std::string> names;
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto id = std::format("s-{}", i);
+        const auto series = desk.market.intern("i", "a", id);
+        for (std::size_t p = 0; p < 1500; ++p)
+            static_cast<void>(desk.market.append(series,
+                model::domain::market_level_for_span(
+                    24LL * 3600 * 1'000'000'000),
+                model::state::series_point{
+                    .at_ns = series_start_ns
+                        + static_cast<std::int64_t>(p) * 60'000'000'000,
+                    .value = 1.0 + static_cast<double>(p % 97) / 1000.0},
+                1));
+        const auto window = desk.open(model::domain::window_kind::mini_plot,
+            model::domain::mini_plot_state{.label = "FX GBP/USD",
+                .series_id = id},
+            std::format("card-{}", i));
+        desk.windows.set_series(window, std::span{&series, 1});
+        windows.push_back(window);
+        names.push_back(std::format("card-window-{}", i));
+    }
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+    input.wall_now_ns = series_start_ns + 1500 * 60'000'000'000;
+    const auto draw = [&] {
+        ImGui::NewFrame();
+        for (std::size_t i = 0; i < count; ++i) {
+            ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+            ImGui::SetNextWindowSize(ImVec2(220.0f, 150.0f));
+            ImGui::Begin(names[i].c_str());
+            render::render_mini_plot(windows[i], input, state, status, lock);
+            ImGui::End();
+        }
+        ImGui::Render();
+        return ImGui::GetDrawData()->TotalVtxCount;
+    };
+    for (int i = 0; i < 3; ++i)
+        vertices_out = draw();
+    const auto before = hedgr::testing::allocations();
+    const auto steady = draw();
+    const auto allocations = hedgr::testing::allocations() - before;
+    CHECK(steady == vertices_out);
+    return allocations;
+}
+
+}
+
+TEST_CASE("a steady mini plot card frame allocates nothing", "[frame][mini_plot]") {
+    int few_vertices = 0;
+    int many_vertices = 0;
+    const auto few = allocations_with_cards(10, few_vertices);
+    const auto many = allocations_with_cards(60, many_vertices);
+    INFO("allocations with 10 cards: " << few << ", with 60: " << many);
+    CHECK(static_cast<std::size_t>(few_vertices) >= 10 * 95 * 6);
+    CHECK(static_cast<std::size_t>(many_vertices) >= 60 * 95 * 6);
+    CHECK(few == 0);
+    CHECK(many == 0);
+}
