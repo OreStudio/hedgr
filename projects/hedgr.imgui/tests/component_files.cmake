@@ -13,6 +13,7 @@
 # are the pure choices the glue makes, such as where the layout file lives.
 set(files
     "layout_file_tests.cpp"
+    "log_file_tests.cpp"
     "minimised_frames_tests.cpp"
 )
 

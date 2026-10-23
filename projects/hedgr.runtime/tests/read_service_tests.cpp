@@ -26,9 +26,11 @@
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/service/pending_reads.hpp"
 #include "hedgr.runtime/service/read_service.hpp"
+#include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
+#include <string_view>
 #include <chrono>
 #include <functional>
 #include <string>
@@ -488,4 +490,106 @@ TEST_CASE("a period for a series the table does not hold starts no read",
     f.open();
     f.reads.load_history(history_command(hour));
     CHECK(f.reads.history_reads_started() == 0);
+}
+
+TEST_CASE("a failed first read marks the series row as failed and ends the read",
+    "[reads][backfill]") {
+    fixture f;
+    f.open();
+    const auto row = f.series.intern(instance_id, account_id, "s-1");
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+    REQUIRE_FALSE(f.reads.pending().empty());
+
+    auto failed = answer_of(event::event_kind::series_points);
+    failed.series_id = "s-1";
+    failed.observed_at_ns = 2;
+    failed.message = "the observation answer could not be decoded";
+    REQUIRE(f.reads.apply(failed));
+
+    CHECK(f.series.failure(row) == "the observation answer could not be decoded");
+    CHECK(f.series.columns(row, domain::market_level::fine).size == 0);
+    CHECK(f.reads.pending().empty());
+}
+
+namespace {
+
+namespace worker = hedgr::runtime::worker;
+
+[[nodiscard]] worker::market_job points_job() {
+    worker::market_job job;
+    job.series_id = "s-1";
+    job.limit = 2000;
+    return job;
+}
+
+[[nodiscard]] worker::market_job history_job() {
+    auto job = points_job();
+    job.history = true;
+    job.history_from_ns = 5;
+    job.history_to_ns = 9;
+    return job;
+}
+
+[[nodiscard]] event::event read_fact(int points, std::string message = {}) {
+    auto fact = answer_of(event::event_kind::series_points);
+    fact.series_id = "s-1";
+    fact.message = std::move(message);
+    for (int i = 0; i < points; ++i)
+        fact.points.push_back({.at_ns = base + i * second, .value = 1.0});
+    return fact;
+}
+
+[[nodiscard]] bool names(const worker::market_read_report& report,
+    std::string_view words) {
+    return report.text.find(words) != std::string::npos;
+}
+
+}
+
+TEST_CASE("a first read logs its series, request and count at info",
+    "[reads][log]") {
+    const auto report = worker::report_market_read(points_job(), read_fact(45));
+
+    CHECK_FALSE(report.warn);
+    CHECK(names(report, "'s-1'"));
+    CHECK(names(report, "limit=2000 offset=0"));
+    CHECK(names(report, "45 points"));
+}
+
+TEST_CASE("a history read logs its series, range and count at info",
+    "[reads][log]") {
+    const auto report = worker::report_market_read(history_job(), read_fact(7));
+
+    CHECK_FALSE(report.warn);
+    CHECK(names(report, "'s-1'"));
+    CHECK(names(report, "from_ns=5 to_ns=9"));
+    CHECK(names(report, "7 observations"));
+}
+
+TEST_CASE("a failed read warns with the series, the request and the reason",
+    "[reads][log]") {
+    const auto points = worker::report_market_read(points_job(),
+        read_fact(0, "the deployment refused the observations"));
+    CHECK(points.warn);
+    CHECK(names(points, "'s-1'"));
+    CHECK(names(points, "limit=2000 offset=0"));
+    CHECK(names(points, "the deployment refused the observations"));
+
+    const auto history = worker::report_market_read(history_job(),
+        read_fact(0, "the observation answer could not be decoded"));
+    CHECK(history.warn);
+    CHECK(names(history, "'s-1'"));
+    CHECK(names(history, "from_ns=5 to_ns=9"));
+    CHECK(names(history, "the observation answer could not be decoded"));
+}
+
+TEST_CASE("an empty answer warns that the deployment returned nothing",
+    "[reads][log]") {
+    for (const auto& job : {points_job(), history_job()}) {
+        const auto report = worker::report_market_read(job, read_fact(0));
+        INFO(report.text);
+        CHECK(report.warn);
+        CHECK(names(report, "'s-1'"));
+        CHECK(names(report, "no observations"));
+    }
 }

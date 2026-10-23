@@ -485,7 +485,8 @@ void read_service::start_market_backfill(std::string_view instance_id,
     pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Seeding live history for series '" << series_id << "' on '"
-        << instance_id << "' / '" << account_id << "'";
+        << instance_id << "' / '" << account_id << "': first read asks for "
+        << "the newest " << job.limit << " observations (offset 0)";
     worker::spawn_market_read(pool_, std::move(job), events_);
 }
 

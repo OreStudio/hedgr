@@ -22,6 +22,7 @@
 
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
@@ -80,6 +81,29 @@ struct market_job final {
  *
  * @pre Run on an executor thread. Never call this from the frame loop.
  */
+/** @brief The log line one finished market read earns, and how loud it is. */
+struct market_read_report final {
+    /** @brief Whether the line is a warning rather than information. */
+    bool warn = false;
+
+    /** @brief The line: the series, the request and what came back. */
+    std::string text;
+};
+
+/**
+ * @brief What to log for a finished read.
+ *
+ * Every read says which series it was, what it asked for and how many
+ * observations came back. A failure, which includes an answer that could not
+ * be decoded or was refused, and an empty answer are warnings, because a chart
+ * short of history is otherwise silent about why.
+ *
+ * @param job the read that ran.
+ * @param fact the event it produced, before it is queued.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT market_read_report report_market_read(
+    const market_job& job, const model::event::event& fact);
+
 HEDGR_RUNTIME_EXPORT void
 spawn_market_read(boost::asio::io_context& context, market_job job,
                   model::command::event_queue& events);

@@ -215,3 +215,40 @@ TEST_CASE("the foot's age takes the colour of its verdict", "[health][chart]") {
     render::set_health_foot(foot, data_health::unavailable, 0, now, false);
     CHECK(foot.age.empty());
 }
+
+TEST_CASE("a chart whose history read failed says so in its foot",
+    "[health][chart][history]") {
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::desk desk;
+    const auto handle = desk.open(window_kind::chart,
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = "s"});
+
+    const auto series = desk.market.intern("i", "a", "s");
+    desk.windows.set_series(handle, std::span{&series, 1});
+    desk.market.append(series, model::domain::market_level::fine,
+        {.at_ns = now - second, .value = 1.26}, 1);
+
+    render::window_ui_state state;
+    CHECK_FALSE(says(drawn_text(desk, handle, state), "history unavailable"));
+
+    desk.market.fail(series, "the observation answer could not be decoded", 2);
+    const auto text = drawn_text(desk, handle, state);
+    CHECK(says(text, "history unavailable"));
+    CHECK(says(text, "the observation answer could not be decoded"));
+}
+
+TEST_CASE("the history note takes the failure colour and only on a failure",
+    "[health][chart][history]") {
+    using model::domain::data_health;
+    hedgr::testing::headless_imgui imgui;
+    hedgr::ui::widget::foot_state foot;
+    render::set_health_foot(foot, data_health::live, now - second, now, false);
+    const auto live = foot.word;
+
+    render::set_history_unavailable_foot(foot, "");
+    CHECK(foot.word == live);
+
+    render::set_history_unavailable_foot(foot, "refused");
+    CHECK(foot.word == "history unavailable");
+    CHECK(foot.colour == hedgr::ui::theme::failure_colour);
+}

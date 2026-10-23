@@ -582,6 +582,8 @@ void render_chart(window_handle handle, const render_input& input,
     {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
+        if (row)
+            set_history_unavailable_foot(*foot, series.failure(*row));
         foot_height = widget::status_foot_height(status, *foot)
             + ImGui::GetStyle().ItemSpacing.y;
     }

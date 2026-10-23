@@ -138,42 +138,74 @@ boost::asio::awaitable<void> run_market(market_job job,
     job.token.clear();
     job.principal.clear();
 
-    if (!fact.message.empty()) {
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "Market read for '" << key.instance_id << "' failed: "
-            << fact.message;
-    } else if (job.catalogue) {
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Market catalogue for '" << key.instance_id << "' holds "
-            << fact.series.size() << " series";
-    } else if (job.history) {
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Market history for series '" << job.series_id << "' on '"
-            << key.instance_id << "': " << fact.points.size()
-            << " observations from_ns=" << job.history_from_ns
-            << " to_ns=" << job.history_to_ns
-            << (fact.history_truncated ? " (stopped at the page bound)"
-                                       : " (range read in full)")
-            << (fact.points.empty()
-                    ? std::string{}
-                    : std::format(", oldest_at_ns={} newest_at_ns={}",
-                          fact.points.front().at_ns,
-                          fact.points.back().at_ns));
+    const auto report = report_market_read(job, fact);
+    if (report.warn) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn) << report.text;
     } else {
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Market points for series '" << job.series_id << "' on '"
-            << key.instance_id << "': " << fact.points.size()
-            << " points (limit " << job.limit << ")"
-            << (fact.points.empty()
-                    ? std::string{}
-                    : std::format(", oldest_at_ns={} newest_at_ns={}",
-                          fact.points.front().at_ns,
-                          fact.points.back().at_ns));
+        BOOST_LOG_SEV(lg(), ores::logging::info) << report.text;
     }
 
     events.push(std::move(fact));
 }
 
+}
+
+market_read_report report_market_read(const market_job& job,
+    const model::event::event& fact) {
+    const auto& instance = fact.instance_id;
+    const auto bounds = [&] {
+        return fact.points.empty()
+            ? std::string{}
+            : std::format(", oldest_at_ns={} newest_at_ns={}",
+                  fact.points.front().at_ns, fact.points.back().at_ns);
+    };
+
+    if (job.catalogue) {
+        if (!fact.message.empty()) {
+            return {true, std::format("Market catalogue read for '{}' "
+                                      "failed: {}", instance, fact.message)};
+        }
+        return {false, std::format("Market catalogue for '{}' holds {} series",
+            instance, fact.series.size())};
+    }
+
+    if (job.history) {
+        const auto request = std::format("from_ns={} to_ns={}",
+            job.history_from_ns, job.history_to_ns);
+        if (!fact.message.empty()) {
+            return {true, std::format("Market history read for series '{}' "
+                                      "on '{}' failed ({}): {}",
+                job.series_id, instance, request, fact.message)};
+        }
+        if (fact.points.empty()) {
+            return {true, std::format("Market history for series '{}' on '{}' "
+                                      "is empty ({}): the deployment "
+                                      "returned no observations",
+                job.series_id, instance, request)};
+        }
+        return {false, std::format("Market history for series '{}' on '{}': "
+                                   "{} observations {}{}{}",
+            job.series_id, instance, fact.points.size(), request,
+            fact.history_truncated ? " (stopped at the page bound)"
+                                   : " (range read in full)",
+            bounds())};
+    }
+
+    const auto request = std::format("limit={} offset=0", job.limit);
+    if (!fact.message.empty()) {
+        return {true, std::format("Market points read for series '{}' on "
+                                  "'{}' failed ({}): {}",
+            job.series_id, instance, request, fact.message)};
+    }
+    if (fact.points.empty()) {
+        return {true, std::format("Market points for series '{}' on '{}' are "
+                                  "empty ({}): the deployment returned no "
+                                  "observations",
+            job.series_id, instance, request)};
+    }
+    return {false, std::format("Market points for series '{}' on '{}': {} "
+                               "points ({}){}",
+        job.series_id, instance, fact.points.size(), request, bounds())};
 }
 
 void spawn_market_read(boost::asio::io_context& context, market_job job,
