@@ -130,12 +130,11 @@ install(FILES ${instance_icons} DESTINATION share/hedgr.ui/instances)
 
 # Copy the branding artwork to the publish directory, for the same reason the
 # icon sheet and the instance pictures go there: the deployed host has no
-# checkout beside it, and a splash whose image is missing draws as an empty box
-# and a top bar without its logo is an empty button. It lives in a branding
+# checkout beside it, and a top bar without its logo, or an intro without it,
+# is an empty button. It lives in a branding
 # subdirectory so a reader can tell it apart from the sheet and the
 # per-environment illustrations.
 set(branding_files
-    "${CMAKE_SOURCE_DIR}/assets/branding/ore-studio-splash.png"
     "${CMAKE_SOURCE_DIR}/assets/branding/ore-logo-white.svg")
 add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
@@ -159,7 +158,8 @@ set(sounds
     "${sound_dir}/confirmation_002.wav"
     "${sound_dir}/error_001.wav"
     "${sound_dir}/error_002.wav"
-    "${sound_dir}/bong_001.wav")
+    "${sound_dir}/bong_001.wav"
+    "${sound_dir}/intro_swell.wav")
 add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/../share/hedgr.ui/sounds"

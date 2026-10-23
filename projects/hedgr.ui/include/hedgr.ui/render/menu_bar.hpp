@@ -53,7 +53,7 @@ struct menu_bar_result final {
 /**
  * @brief Where the logo artwork lives at run time, or empty when it is nowhere.
  *
- * The same candidates the splash uses: beside the library under
+ * The same candidates the icon sheet uses: beside the library under
  * share/hedgr.ui/branding, or the source tree for a run out of the build tree.
  */
 [[nodiscard]] HEDGR_UI_EXPORT std::filesystem::path logo_svg_path();

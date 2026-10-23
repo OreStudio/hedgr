@@ -28,6 +28,7 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
+#include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -186,6 +187,15 @@ void application::run() {
     }
 
     /*
+     * The intro is the launch's one moment and plays on an ordinary run only.
+     * A capture would have it cover the thing being checked, so a capture skips
+     * it unless it asks for it, and HEDGR_NO_INTRO skips it for any run.
+     */
+    intro_allowed_ = std::getenv("HEDGR_NO_INTRO") == nullptr
+        && (capture_path_.empty()
+            || std::getenv("HEDGR_CAPTURE_SHOW_INTRO") != nullptr);
+
+    /*
      * The launch is announced rather than played from here, so the startup
      * sound takes the one path ADR 8 describes: a name is raised on the bus and
      * the player decides what, if anything, it maps to. This runs on every
@@ -194,7 +204,7 @@ void application::run() {
      * at all, and a check that only fires in one build would prove nothing
      * about the one that ships.
      */
-    {
+    if (!intro_allowed_) {
         hedgr::model::signal::signal started;
         started.name = std::string(
             hedgr::model::signal::names::application_started);
@@ -288,11 +298,20 @@ void application::run() {
         toggle_fullscreen(window);
 
     /*
-     * The splash's clock starts when the graphics are ready, so its few seconds
+     * The intro's clock starts when the graphics are ready, so its few seconds
      * are time on screen rather than time spent creating the window and
-     * uploading textures.
+     * uploading textures. Its sound is raised here, in place of the plain
+     * startup sound, so it begins with the first frame of the intro.
      */
-    splash_.started_ns = now_ns();
+    intro_.started_ns = now_ns();
+    if (intro_allowed_) {
+        hedgr::model::signal::signal intro;
+        intro.name = std::string(
+            hedgr::model::signal::names::application_intro);
+        intro.detail = "Hedgr intro";
+        intro.at_ns = intro_.started_ns;
+        hedgr::model::signal::bus().raise(std::move(intro));
+    }
 
     /*
      * Both channels have writers off the frame thread, so either can end the
@@ -499,8 +518,7 @@ GLFWwindow* application::initialise_graphics() {
 
     load_background_texture();
     load_instance_icon_textures();
-    load_splash_texture();
-
+    load_intro_logo();
 
     BOOST_LOG_SEV(lg(), info) << "Graphics initialised successfully.";
     return window;
@@ -605,38 +623,16 @@ void application::load_instance_icon_textures() {
                               << " instance icon(s).";
 }
 
-void application::load_splash_texture() {
+void application::load_intro_logo() {
     /*
-     * The splash artwork takes the same path as the background and the instance
-     * pictures, stb_image for the decode and raw GL for the upload, because
-     * hedgr.ui links neither. The file comes from hedgr.ui's own asset lookup
-     * so the component that packages it is the component that names it.
+     * The same document the menu bar draws. The texture is rasterised by the
+     * texture cache on the first frame the intro is drawn, so only the text is
+     * read here.
      */
-    const auto image_path = ui::render::splash_image_path();
-    if (image_path.empty()) {
-        BOOST_LOG_SEV(lg(), warn) << "Splash image not found.";
-        return;
-    }
-
-    int channels = 0;
-    unsigned char* data = stbi_load(image_path.string().c_str(), &splash_width_,
-        &splash_height_, &channels, 4);
-    if (data == nullptr) {
-        BOOST_LOG_SEV(lg(), warn)
-            << "Failed to load splash image: " << stbi_failure_reason();
-        return;
-    }
-
-    glGenTextures(1, &splash_texture_);
-    glBindTexture(GL_TEXTURE_2D, splash_texture_);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, splash_width_, splash_height_, 0,
-        GL_RGBA, GL_UNSIGNED_BYTE, data);
-    stbi_image_free(data);
-
-    BOOST_LOG_SEV(lg(), info)
-        << "Loaded splash image: " << splash_width_ << "x" << splash_height_;
+    if (const auto path = ui::render::logo_svg_path(); !path.empty())
+        intro_logo_svg_ = ui::render::read_text_file(path);
+    if (intro_logo_svg_.empty())
+        BOOST_LOG_SEV(lg(), warn) << "Intro logo not found.";
 }
 
 void application::release_instance_icon_textures() {
@@ -714,6 +710,7 @@ void application::capture_frame(GLFWwindow* window) {
 }
 
 void application::render_loop(GLFWwindow* window) {
+    const bool capturing = !capture_path_.empty();
     /*
      * A hidden Wayland window is never mapped, so the compositor never sends
      * the frame callbacks a visible swap waits on and the loop would run as
@@ -732,17 +729,6 @@ void application::render_loop(GLFWwindow* window) {
             mode != nullptr && mode->refreshRate > 0 ? mode->refreshRate : 60;
         capture_interval = 1.0 / static_cast<double>(refresh);
     }
-
-    /*
-     * A capture is how this project verifies itself, and every check reads the
-     * interface behind the splash, so a splash in a capture frame would cover
-     * the thing being checked. The one capture that is about the splash asks
-     * for it through the same environment channel the other capture fixtures
-     * use, which is what keeps the default out of everyone else's way.
-     */
-    const bool capturing = !capture_path_.empty();
-    const bool splash_allowed = !capturing
-        || std::getenv("HEDGR_CAPTURE_SHOW_SPLASH") != nullptr;
 
     while (glfwWindowShouldClose(window) == 0 && !exit_requested_) {
         glfwPollEvents();
@@ -810,16 +796,17 @@ void application::render_loop(GLFWwindow* window) {
         manager_.pump();
 
         /*
-         * One clock reading serves the frame and the splash, so the two cannot
-         * disagree about when the splash's floor or maximum passed. The splash
-         * ends itself: there is no dismissal here, and the store becoming ready
-         * ends it early once it has been seen for long enough.
+         * One clock reading serves the frame and the intro. The store unlocks
+         * underneath it and the intro does not wait for that, but a key, a click
+         * or a store that failed to open ends it, because the failure notice
+         * behind it is what the operator needs to read.
          */
         const std::int64_t frame_now_ns = now_ns();
-        const bool store_ready = manager_.store_lock()
-            == hedgr::model::domain::store_lock::unlocked;
-        const bool show_splash = splash_allowed
-            && splash_.visible(frame_now_ns, store_ready);
+        if (intro_allowed_ && !intro_.skipped
+            && (ui::render::intro_skip_requested()
+                || !manager_.startup_failure().empty()))
+            intro_.skipped = true;
+        const bool show_intro = intro_allowed_ && intro_.active(frame_now_ns);
 
         const ui::render::render_input input{
             .instances = manager_.instances(),
@@ -859,16 +846,14 @@ void application::render_loop(GLFWwindow* window) {
             exit_requested_ = true;
 
         /*
-         * After the workspace, so the splash is the last thing submitted. It is
+         * After the workspace, so the intro is the last thing submitted. It is
          * drawn on the foreground list, which is emitted above every window and
          * popup, so it covers the lock prompt rather than depending on a window
-         * ordering ImGui owns. Drawing it costs one image quad, because the
-         * decode and the upload happened once when the graphics were
-         * initialised.
+         * ordering ImGui owns.
          */
-        if (show_splash)
-            ui::render::draw_splash(splash_texture_, splash_width_,
-                splash_height_);
+        if (show_intro)
+            ui::render::draw_intro(input, intro_logo_svg_,
+                frame_now_ns - intro_.started_ns);
 
         /*
          * Every signal raised since the last frame goes to the player, which
@@ -941,8 +926,6 @@ void application::render_loop(GLFWwindow* window) {
 void application::shutdown_graphics(GLFWwindow* window) {
     if (background_texture_ != 0)
         glDeleteTextures(1, &background_texture_);
-    if (splash_texture_ != 0)
-        glDeleteTextures(1, &splash_texture_);
     release_instance_icon_textures();
     textures_.clear();
 

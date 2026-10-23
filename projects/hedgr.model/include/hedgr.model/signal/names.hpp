@@ -86,6 +86,15 @@ inline constexpr std::string_view window_closed = "window.closed";
  */
 inline constexpr std::string_view application_started = "application.started";
 
+/**
+ * @brief The launch intro began, on the first frame it is drawn.
+ *
+ * Raised instead of application.started when the intro plays, so the launch
+ * has one sound and not two; its sound is timed to the intro's brightest
+ * moment.
+ */
+inline constexpr std::string_view application_intro = "application.intro";
+
 }
 
 #endif

@@ -30,10 +30,10 @@ using hedgr::ui::sound::registration;
 /*
  * The mapping, and the whole of it.
  *
- * Nine entries, one per transition the application can raise, one for the
- * launch, one for the pointer moving along the bar, one for a window closing
+ * Ten entries, one per transition the application can raise, one for the
+ * launch, one for the intro, one for the pointer moving along the bar, one for a window closing
  * and one per click, because those are the facts that exist rather than because
- * nine is a round number. Every one of them is raised on a change and never on
+ * ten is a round number. Every one of them is raised on a change and never on
  * a poll, so a deployment that has been unreachable for an hour has raised its
  * lost signal once; the noise a sound makes is bounded by how often the estate
  * flaps and not by how often it is probed. That bound is the reason the table
@@ -53,9 +53,15 @@ using hedgr::ui::sound::registration;
  * chime on every entry would be heavier than the movement it marks, and a gain
  * column in this table would put mixing back into the mapping, which is exactly
  * where ADR 8 keeps it out.
+ *
+ * The intro is the one long file, 3.2s, because it is the launch's brand moment
+ * and is raised once. It is built by tools/make_intro_sound.py from a
+ * synthesised swell and Kenney's lowFrequency_explosion_000, and is loudest
+ * 1.4s in, which is when the intro's logo is brightest.
  */
-constexpr std::array<registration, 9> table{{
+constexpr std::array<registration, 10> table{{
     {names::application_started, "bong_001.wav"},
+    {names::application_intro, "intro_swell.wav"},
     {names::instance_readiness_degraded, "error_001.wav"},
     {names::instance_readiness_recovered, "confirmation_001.wav"},
     {names::instance_readiness_bootstrapping, "bong_001.wav"},

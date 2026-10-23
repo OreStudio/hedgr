@@ -31,7 +31,7 @@ set(files
     "plot_state_tests.cpp"
     "render_tests.cpp"
     "sound_tests.cpp"
-    "splash_tests.cpp"
+    "intro_tests.cpp"
     "status_bar_tests.cpp"
     "series_browser_view_tests.cpp"
     "tab_look_tests.cpp"

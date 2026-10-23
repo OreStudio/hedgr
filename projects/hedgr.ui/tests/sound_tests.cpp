@@ -93,11 +93,15 @@ struct recording_sink final {
  * under it.
  */
 TEST_CASE("every registered name maps to its own short sound", "[sound]") {
-    REQUIRE(registrations().size() == 9);
+    REQUIRE(registrations().size() == 10);
 
     const auto started = sound_for(names::application_started);
     REQUIRE(started.has_value());
     CHECK(*started == "bong_001.wav");
+
+    const auto intro = sound_for(names::application_intro);
+    REQUIRE(intro.has_value());
+    CHECK(*intro == "intro_swell.wav");
 
     const auto hovered = sound_for(names::shortcut_hovered);
     REQUIRE(hovered.has_value());
@@ -162,6 +166,31 @@ TEST_CASE("the startup signal raised on the bus reaches the player as a file",
     REQUIRE(recorder->wait_for(1, std::chrono::seconds(5)));
     CHECK(recorder->files.at(0) == "bong_001.wav");
     CHECK(recorder->threads.at(0) != std::this_thread::get_id());
+
+    subject.stop();
+}
+
+TEST_CASE("the intro signal raised on the bus reaches the player as the swell",
+    "[sound][player]") {
+    auto recorder = std::make_shared<recording_sink>();
+    player subject([recorder](std::string_view file) { recorder->push(file); });
+    subject.start();
+    REQUIRE(subject.started());
+
+    (void)hedgr::model::signal::bus().drain();
+
+    signal intro;
+    intro.name = std::string(names::application_intro);
+    intro.detail = "Hedgr intro";
+    intro.at_ns = 1;
+    hedgr::model::signal::bus().raise(std::move(intro));
+
+    const auto drained = hedgr::model::signal::bus().drain();
+    REQUIRE(drained.size() == 1);
+    CHECK(subject.submit(drained) == 1);
+
+    REQUIRE(recorder->wait_for(1, std::chrono::seconds(5)));
+    CHECK(recorder->files.at(0) == "intro_swell.wav");
 
     subject.stop();
 }

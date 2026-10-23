@@ -824,6 +824,51 @@ store_lock_colour(hedgr::model::domain::store_lock value) noexcept;
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImU32 strength_colour(int strength) noexcept;
 
+
+/**
+ * @name The launch intro's look
+ *
+ * The wallpaper is the desk's, tinted down from the 97 the desk uses. The logo
+ * is drawn once crisp and then as glow layers, each a larger copy of a
+ * low-resolution raster of the same swirl, so the bilinear stretch blurs it
+ * and each layer is a wider, fainter bloom. The layers shade from the core
+ * colour toward the chart purple the further out they sit. Behind them a
+ * radial halo lights the wallpaper, and a vignette keeps the corners black.
+ * @{
+ */
+inline constexpr int intro_wallpaper_grey = 38;
+/** @brief The logo's side as a fraction of the viewport's shorter side. */
+inline constexpr float intro_logo_fraction = 0.46f;
+/** @brief The pixel side of the blurred raster the glow layers stretch. */
+inline constexpr int intro_glow_raster = 40;
+inline constexpr int intro_glow_layers = 6;
+inline constexpr float intro_glow_scales[intro_glow_layers] = {
+    1.04f, 1.10f, 1.20f, 1.34f, 1.52f, 1.78f};
+inline constexpr float intro_glow_alphas[intro_glow_layers] = {
+    0.55f, 0.42f, 0.30f, 0.20f, 0.12f, 0.07f};
+/** @brief The core of the glow, a cyan-white. */
+inline constexpr float intro_core_rgb[3] = {0.86f, 0.97f, 1.0f};
+/** @brief How far the outermost layer has moved from the core to the purple. */
+inline constexpr float intro_glow_purple_mix = 0.65f;
+/** @brief The halo's radius as a multiple of the logo's side, and its alpha at the peak. */
+inline constexpr float intro_halo_radius = 1.5f;
+inline constexpr float intro_halo_alpha = 0.5f;
+/**
+ * @brief The word set under the swirl, with the full stop that is part of the name.
+ *
+ * It takes the swirl's brightness and glows with the same layers, set in the
+ * bold face. @c intro_word_size is the font size as a fraction of the swirl's
+ * side, which puts the capitals at about a quarter of the swirl's height, and
+ * @c intro_word_gap is the room between the swirl and the word's line, also a
+ * fraction of the swirl's side.
+ */
+inline constexpr const char* intro_word = "HEDGR.";
+inline constexpr float intro_word_size = 0.40f;
+inline constexpr float intro_word_gap = 0.06f;
+/** @brief The vignette's alpha at the corners. */
+inline constexpr float intro_vignette_alpha = 0.7f;
+/** @} */
+
 }
 
 #endif
