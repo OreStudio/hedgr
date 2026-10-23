@@ -166,6 +166,17 @@ HEDGR_UI_EXPORT void render_chart(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
+/**
+ * @brief The card for one series: a rounded tile on the card surface with the
+ * pair label.
+ *
+ * It holds the series through the window's watch and has no controls.
+ */
+HEDGR_UI_EXPORT void render_mini_plot(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 /** @brief The party's cross-rates matrix, base against quote. */
 HEDGR_UI_EXPORT void render_crm_matrix(
     hedgr::model::state::window_handle handle, const render_input& input,

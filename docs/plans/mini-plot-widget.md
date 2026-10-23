@@ -59,12 +59,22 @@ A docked chart draws as a full chart. Delete the compact path and its tests, kee
 the Dock icon on floating charts. Check: the docked-chart tests now assert a full
 header, foot and plot, and the frame cost of a docked chart equals a floating one.
 
-### 2. The mini plot window kind
+### 2. The mini plot window kind (done)
 
 `window_kind::mini_plot`, its state, JSON and persistence, `open` and `close`
 through the existing window commands, and an empty card renderer that draws the
 name. Check: a round trip through the store, and a headless frame that draws the
 card for a held series.
+
+What differed. The state is `{label, series_id}` as planned, the session lives
+on the window spec as for a chart. The kind is stored as text, so no schema
+change was needed and an old database loads unchanged. The window id is
+`mini:instance:account:series`, one card per series per session (D4). The
+runtime holds the series through the same `hold_series` a chart uses. Removing
+an account or instance releases a card's series and leaves the window, as it
+does for charts, so a card does not close with its session. Nothing in the UI
+opens one yet, so step 4 owns that. The placeholder card draws the tile, the
+label and a dim "Reading the series..." line until the row exists.
 
 ### 3. The card
 

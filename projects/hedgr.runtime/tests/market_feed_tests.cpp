@@ -320,6 +320,28 @@ struct world final {
         push(std::move(open));
     }
 
+    void open_mini_plot(const std::string& account_id,
+        const std::string& series) {
+        command open;
+        open.kind = command_kind::open_window;
+        open.instance_id = instance_id;
+        open.account_id = account_id;
+        open.new_window_kind = window_kind::mini_plot;
+        open.series_id = series;
+        open.series_label = series;
+        open.party_id = party;
+        push(std::move(open));
+    }
+
+    void close_mini_plot(const std::string& account_id,
+        const std::string& series) {
+        command close;
+        close.kind = command_kind::close_window;
+        close.window_id =
+            std::format("mini:{}:{}:{}", instance_id, account_id, series);
+        push(std::move(close));
+    }
+
     void close_chart(const std::string& account_id, const std::string& series) {
         command close;
         close.kind = command_kind::close_window;
@@ -1129,5 +1151,51 @@ TEST_CASE("removing an instance gives back what its charts held and forgets "
     CHECK(series.watcher_total() == 0);
     CHECK(w.feeds.at(0)->stops == 1);
     CHECK(w.feeds.at(1)->stops == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a mini plot holds its series while open and gives it back on close",
+    "[feed][mini_plot]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    auto& feed = *w.feeds.at(0);
+
+    w.open_mini_plot("a-1", "s-1");
+    CHECK(watches(w, feed, "a-1", {"s-1"}));
+    const auto series = w.handle_of("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+
+    w.open_mini_plot("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+
+    w.open_chart("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 2);
+    CHECK(feed.unwatches.empty());
+
+    w.close_mini_plot("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 1);
+    CHECK(feed.unwatches.empty());
+    w.close_chart("a-1", "s-1");
+    CHECK(w.manager->market().watchers(series) == 0);
+    CHECK(feed.unwatches.size() == 1);
+    hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("removing the account gives back what its mini plots held",
+    "[feed][mini_plot]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_mini_plot("a-1", "s-1");
+    REQUIRE(w.manager->market().watchers(w.handle_of("a-1", "s-1")) == 1);
+
+    command remove;
+    remove.kind = command_kind::remove_account;
+    remove.instance_id = instance_id;
+    remove.account_id = "a-1";
+    w.push(std::move(remove));
+
+    CHECK(w.manager->market().size() == 0);
     hedgr::testing::audit_holders(*w.manager);
 }

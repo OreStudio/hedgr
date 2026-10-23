@@ -69,10 +69,12 @@ enum class window_kind : std::uint8_t {
     term_structure = 8,
     /** @brief A cross-rates matrix for one party. */
     crm_matrix = 9,
+    /** @brief A small card for one series: a window of its own, not a chart. */
+    mini_plot = 10,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 10;
+inline constexpr std::size_t window_kind_count = 11;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -122,6 +124,15 @@ struct chart_state final {
      * defaults by another chart does not move it.
      */
     std::optional<chart_view> view;
+};
+
+/** @brief State of a mini plot window, the card for one series. */
+struct mini_plot_state final {
+    /** @brief Human label of the series, drawn on the card. */
+    std::string label;
+
+    /** @brief Key of the market series this card reads. */
+    std::string series_id;
 };
 
 /** @brief State of a term-structure window. */
@@ -220,7 +231,8 @@ struct command_centre_state final {
 /** @brief The kind-specific state of a window. */
 using window_state = std::variant<chart_state, grid_state, notice_state,
     accounts_state, workspace_state, command_centre_state,
-    series_browser_state, term_structure_state, crm_matrix_state>;
+    series_browser_state, term_structure_state, crm_matrix_state,
+    mini_plot_state>;
 
 /**
  * @brief The persisted description of a window.

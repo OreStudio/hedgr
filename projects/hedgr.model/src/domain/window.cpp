@@ -44,6 +44,8 @@ std::string_view to_string(window_kind value) noexcept {
         return "term_structure";
     case window_kind::crm_matrix:
         return "crm_matrix";
+    case window_kind::mini_plot:
+        return "mini_plot";
     }
     return "unknown";
 }
@@ -70,6 +72,8 @@ window_kind_from_string(std::string_view text) {
         return window_kind::term_structure;
     if (text == "crm_matrix")
         return window_kind::crm_matrix;
+    if (text == "mini_plot")
+        return window_kind::mini_plot;
     return std::unexpected(std::format("unknown window kind '{}'", text));
 }
 
