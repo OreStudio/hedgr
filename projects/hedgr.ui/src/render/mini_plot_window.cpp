@@ -79,15 +79,15 @@ struct card_layout final {
     l.stacked_foot = height - above - 2.0f * l.gap - stacked >= least;
     l.foot = l.stacked_foot ? stacked : inline_row;
 
-    const float top = l.min.y + above + l.gap;
-    const float bottom = l.max.y - l.foot - l.gap;
-    if (bottom - top >= least) {
-        l.line_min = ImVec2(l.min.x, top);
-        l.line_max = ImVec2(l.max.x, bottom);
-    } else {
-        l.line_min = ImVec2(l.min.x, std::max(l.min.y, l.max.y - least));
-        l.line_max = l.max;
-    }
+    /*
+     * The line always ends above the foot row. When the rows above leave less
+     * than a half-height line, it rises behind the price instead of dropping
+     * onto the pill. A card too small for any foot row clips it.
+     */
+    const float bottom = std::max(l.max.y - l.foot - l.gap, l.min.y + 4.0f);
+    const float top = std::min(l.min.y + above + l.gap, bottom - least * 0.5f);
+    l.line_min = ImVec2(l.min.x, std::max(l.min.y, top));
+    l.line_max = ImVec2(l.max.x, bottom);
     return l;
 }
 

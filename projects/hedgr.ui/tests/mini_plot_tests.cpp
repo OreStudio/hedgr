@@ -23,11 +23,15 @@
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "software_raster.hpp"
 #include <catch2/catch_all.hpp>
+#include <algorithm>
 #include <array>
+#include <cfloat>
+#include <format>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -70,6 +74,8 @@ struct card_draw final {
     int fill_vertices = 0;
     int total_vertices = 0;
     ImVec4 window_clip;
+    float spark_bottom = -FLT_MAX;
+    float pill_top = FLT_MAX;
 };
 
 [[nodiscard]] bool same_rgb(ImU32 a, ImU32 b) {
@@ -97,8 +103,26 @@ card_draw draw_card(hedgr::testing::desk& desk,
             handle, input, state, status, lock);
         const ImDrawList* draw = ImGui::GetWindowDrawList();
         const ImVec2 white = draw->_Data->TexUvWhitePixel;
+        const ImU32 pill_fill = theme::pill_colours(tone).fill;
+        /*
+         * The line and its fill are the first run of the tone's colour in the
+         * list. The pill shares that colour at other alphas and is drawn after
+         * the header, so the run ends before it.
+         */
+        bool in_run = false;
+        bool run_done = false;
         for (int i = 0; i < draw->VtxBuffer.Size; ++i) {
             const ImDrawVert& v = draw->VtxBuffer[i];
+            const bool white_tone = v.uv.x == white.x && v.uv.y == white.y
+                && same_rgb(v.col, colour);
+            if (white_tone && !run_done) {
+                in_run = true;
+                result.spark_bottom = std::max(result.spark_bottom, v.pos.y);
+            } else if (in_run) {
+                run_done = true;
+            }
+            if (v.uv.x == white.x && v.uv.y == white.y && v.col == pill_fill)
+                result.pill_top = std::min(result.pill_top, v.pos.y);
             if (v.uv.x != white.x || v.uv.y != white.y || !same_rgb(v.col, colour))
                 continue;
             if ((v.col >> 24) == 255)
@@ -239,6 +263,26 @@ TEST_CASE("a card scales from tiny to large and keeps its line inside its tile",
     }
 }
 
+TEST_CASE("a card's line stops above the change pill at every size",
+    "[mini_plot]") {
+    hedgr::testing::headless_imgui imgui;
+    ImGui::GetIO().DisplaySize = ImVec2(1000.0f, 700.0f);
+    hedgr::ui::icon::load_ui_fonts(15.0f);
+    theme::apply_theme();
+    hedgr::testing::desk desk;
+    const auto handle = card_with(desk, 60,
+        [](std::size_t k) { return 1.20 + static_cast<double>(k) * 0.001; });
+
+    for (const ImVec2 size : {ImVec2(160.0f, 110.0f), ImVec2(200.0f, 140.0f),
+             ImVec2(900.0f, 600.0f)}) {
+        INFO("size " << size.x << "x" << size.y);
+        const auto drawn = draw_card(desk, handle, theme::tone::good, size);
+        REQUIRE(drawn.line_vertices > 0);
+        REQUIRE(drawn.pill_top < FLT_MAX);
+        CHECK(drawn.spark_bottom < drawn.pill_top);
+    }
+}
+
 TEST_CASE("a card's line has the same cost for a short and a very long series",
     "[mini_plot]") {
     hedgr::testing::headless_imgui imgui;
@@ -294,6 +338,100 @@ TEST_CASE("the sparkline reduces any series to the point budget and the unit box
     CHECK(first == 899);
 }
 
+namespace {
+
+/**
+ * @brief The vertices a window drew itself, of the colour @p colour, outside
+ * @p box on the left, right or bottom. Above is the title bar, which stays.
+ */
+int outside(const ImGuiWindow* window, ImU32 colour, ImRect box) {
+    box.Expand(1.5f);
+    box.Min.y = -FLT_MAX;
+    int count = 0;
+    for (const ImDrawVert& v : window->DrawList->VtxBuffer)
+        if (v.col == colour && !box.Contains(v.pos))
+            ++count;
+    return count;
+}
+
+/** @brief Checks that the card tile is the whole content region of @p id. */
+void check_card_fills_window(const char* id) {
+    const ImGuiWindow* w = ImGui::FindWindowByName(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->Active);
+    const ImU32 surface = ImGui::ColorConvertFloat4ToU32(theme::card_surface());
+    const ImVec2 white = ImGui::GetDrawListSharedData()->TexUvWhitePixel;
+    ImRect tile(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+    for (const ImDrawVert& v : w->DrawList->VtxBuffer)
+        if (v.col == surface && v.uv.x == white.x && v.uv.y == white.y)
+            tile.Add(v.pos);
+    INFO(id << " tile " << tile.Min.x << "," << tile.Min.y << " " << tile.Max.x
+            << "," << tile.Max.y << " inner " << w->InnerRect.Min.x << ","
+            << w->InnerRect.Min.y << " " << w->InnerRect.Max.x << ","
+            << w->InnerRect.Max.y);
+    CHECK(std::abs(tile.Min.x - w->InnerRect.Min.x) <= 1.5f);
+    CHECK(std::abs(tile.Min.y - w->InnerRect.Min.y) <= 1.5f);
+    CHECK(std::abs(tile.Max.x - w->InnerRect.Max.x) <= 1.5f);
+    CHECK(std::abs(tile.Max.y - w->InnerRect.Max.y) <= 1.5f);
+
+    const ImRect inner = w->InnerRect;
+    CHECK(outside(w, ImGui::GetColorU32(ImGuiCol_Border), inner) == 0);
+    const ImU32 background = ImGui::GetColorU32(ImGuiCol_WindowBg);
+    CHECK(std::ranges::none_of(w->DrawList->VtxBuffer,
+        [&](const ImDrawVert& v) { return v.col == background; }));
+    CHECK(w->WindowPadding.x == 0.0f);
+    CHECK(w->WindowPadding.y == 0.0f);
+    CHECK(w->WindowBorderSize == 0.0f);
+}
+
+}
+
+TEST_CASE("a mini plot window has no frame of its own, floating or docked",
+    "[mini_plot][docking][workspace]") {
+    hedgr::testing::headless_imgui imgui;
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    theme::apply_theme();
+    hedgr::testing::desk desk;
+    const auto rise = [](std::size_t k) {
+        return 1.20 + static_cast<double>(k) * 0.001;
+    };
+    static_cast<void>(card_with(desk, 60, rise, "float"));
+    static_cast<void>(card_with(desk, 60, rise, "left"));
+    static_cast<void>(card_with(desk, 60, rise, "right"));
+    const std::string settings = "[Window][###card-float]\nPos=700,60\nSize=240,170\n\n";
+    ImGui::LoadIniSettingsFromMemory(settings.c_str(), settings.size());
+    hedgr::ui::render::workspace workspace;
+    auto input = desk.input();
+    input.wall_now_ns = now_ns;
+
+    for (int i = 0; i < 4; ++i) {
+        ImGui::NewFrame();
+        if (i == 0) {
+            const ImGuiID root = ImGui::GetID("test-dock");
+            ImGui::DockBuilderRemoveNode(root);
+            ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(root, ImVec2(20.0f, 20.0f));
+            ImGui::DockBuilderSetNodeSize(root, ImVec2(600.0f, 300.0f));
+            ImGuiID right = 0;
+            const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
+                0.5f, nullptr, &right);
+            ImGui::DockBuilderDockWindow("###card-left", left);
+            ImGui::DockBuilderDockWindow("###card-right", right);
+            ImGui::DockBuilderFinish(root);
+        }
+        workspace.render(input);
+        ImGui::Render();
+    }
+
+    REQUIRE(ImGui::FindWindowByName("###card-left")->DockIsActive);
+    REQUIRE_FALSE(ImGui::FindWindowByName("###card-float")->DockIsActive);
+    CHECK(ImGui::FindWindowByName("###card-float")->Size.x == 240.0f);
+    CHECK(ImGui::FindWindowByName("###card-float")->Size.y == 170.0f);
+    check_card_fills_window("###card-float");
+    check_card_fills_window("###card-left");
+    check_card_fills_window("###card-right");
+}
+
 /*
  * Hidden from the suite: it writes a picture of cards for a person to look at.
  * Run it by name with HEDGR_MINI_PLOT_PPM set.
@@ -301,11 +439,12 @@ TEST_CASE("the sparkline reduces any series to the point budget and the unit box
 TEST_CASE("mini plot capture", "[.gallery]") {
     const char* out = std::getenv("HEDGR_MINI_PLOT_PPM");
     REQUIRE(out != nullptr);
-    constexpr float width = 760.0f;
-    constexpr float height = 420.0f;
+    constexpr float width = 900.0f;
+    constexpr float height = 520.0f;
 
     hedgr::testing::headless_imgui imgui;
     ImGui::GetIO().DisplaySize = ImVec2(width, height);
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     hedgr::ui::icon::load_ui_fonts(15.0f);
     theme::apply_theme();
     hedgr::testing::desk desk;
@@ -314,45 +453,53 @@ TEST_CASE("mini plot capture", "[.gallery]") {
         double start;
         double slope;
         double wobble;
+        ImVec2 pos;
         ImVec2 size;
     };
-    const std::array<shape, 5> shapes{{
-        {"a", 1.2000, 0.0006, 0.004, ImVec2(220, 150)},
-        {"b", 1.4000, -0.0007, 0.004, ImVec2(220, 150)},
-        {"c", 0.7000, 0.0003, 0.002, ImVec2(160, 110)},
-        {"d", 2400.0, 0.9, 6.0, ImVec2(160, 110)},
-        {"e", 1.1000, 0.0004, 0.003, ImVec2(300, 220)}}};
-    std::vector<model::state::window_handle> handles;
-    for (const auto& s : shapes)
-        handles.push_back(card_with(desk, 200,
+    /* The first five float. The last two are docked side by side. */
+    const std::array<shape, 7> shapes{{
+        {"a", 1.2000, 0.0006, 0.004, ImVec2(10, 10), ImVec2(220, 170)},
+        {"b", 1.4000, -0.0007, 0.004, ImVec2(240, 10), ImVec2(220, 170)},
+        {"c", 0.7000, 0.0003, 0.002, ImVec2(470, 10), ImVec2(160, 130)},
+        {"d", 2400.0, 0.9, 6.0, ImVec2(640, 10), ImVec2(160, 130)},
+        {"e", 1.1000, 0.0004, 0.003, ImVec2(10, 200), ImVec2(300, 250)},
+        {"f", 1.2000, 0.0006, 0.004, ImVec2(0, 0), ImVec2(0, 0)},
+        {"g", 1.4000, -0.0007, 0.004, ImVec2(0, 0), ImVec2(0, 0)}}};
+    std::string settings;
+    for (const auto& s : shapes) {
+        static_cast<void>(card_with(desk, 200,
             [&](std::size_t k) {
                 return s.start + s.slope * static_cast<double>(k)
                     + s.wobble * std::sin(static_cast<double>(k) * 0.4);
             },
             s.id));
+        if (s.size.x > 0.0f)
+            settings += std::format("[Window][###card-{}]\nPos={},{}\nSize={},{}\n\n",
+                s.id, s.pos.x, s.pos.y, s.size.x, s.size.y);
+    }
+    ImGui::LoadIniSettingsFromMemory(settings.c_str(), settings.size());
 
-    hedgr::ui::widget::status_bar status;
-    render::lock_control lock;
+    hedgr::ui::render::workspace workspace;
+    auto input = desk.input();
+    input.wall_now_ns = now_ns;
     hedgr::testing::software_raster raster(static_cast<int>(width),
         static_cast<int>(height));
-    for (int pass = 0; pass < 3; ++pass) {
-        auto input = desk.input();
-        input.wall_now_ns = now_ns;
+    for (int pass = 0; pass < 4; ++pass) {
         ImGui::NewFrame();
-        ImVec2 at(10.0f, 10.0f);
-        for (std::size_t i = 0; i < shapes.size(); ++i) {
-            if (at.x + shapes[i].size.x > width) {
-                at = ImVec2(10.0f, at.y + 240.0f);
-            }
-            render::window_ui_state state;
-            ImGui::SetNextWindowPos(at);
-            ImGui::SetNextWindowSize(shapes[i].size);
-            ImGui::Begin(shapes[i].id, nullptr, ImGuiWindowFlags_NoDecoration);
-            render::renderer_for(model::domain::window_kind::mini_plot)(
-                handles[i], input, state, status, lock);
-            ImGui::End();
-            at.x += shapes[i].size.x + 10.0f;
+        if (pass == 0) {
+            const ImGuiID root = ImGui::GetID("test-dock");
+            ImGui::DockBuilderRemoveNode(root);
+            ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);
+            ImGui::DockBuilderSetNodePos(root, ImVec2(330.0f, 200.0f));
+            ImGui::DockBuilderSetNodeSize(root, ImVec2(450.0f, 250.0f));
+            ImGuiID right = 0;
+            const ImGuiID left = ImGui::DockBuilderSplitNode(root, ImGuiDir_Left,
+                0.5f, nullptr, &right);
+            ImGui::DockBuilderDockWindow("###card-f", left);
+            ImGui::DockBuilderDockWindow("###card-g", right);
+            ImGui::DockBuilderFinish(root);
         }
+        workspace.render(input);
         ImGui::Render();
         raster.update_textures();
     }

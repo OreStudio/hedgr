@@ -95,9 +95,14 @@ first in that span. The tone is the chart's `change_tone`, so a stale series
 is neutral and a delayed one is amber. The price formatter and `change_tone`
 moved from `chart_window.cpp` to `render/series_text.hpp` so both windows share
 them. A card too short for the stacked foot puts the period and the pill on
-one row, and one too short for any line draws it behind the text. The tile sits
-inside the window's own padding, so a card in a titled window shows the
-window's frame round the tile. Step 5 owns removing that. The tests read the
+one row. A card's window has
+no padding, border or background of its own (`workspace.cpp` sets that for
+`mini_plot` only), so the tile is the whole content region, floating or docked.
+A floating card keeps its title bar, which is how it is moved, closed and
+docked, and a docked one keeps ImGui's tab. A floating card also opens at
+240x180 and may shrink to 64x64, where charts open at 1000x620 and stop at
+360x220. The line always ends above the foot row, rising behind the price when
+the rows leave little room. The tests read the
 draw list vertices (line and fill by colour and the white pixel uv), not text.
 
 ### 4. Make one, open one
