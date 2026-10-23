@@ -90,6 +90,11 @@ float luminance(ImU32 colour) {
     return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
 }
 
+/** @brief The tab reference's violet, the colour of a chosen tab's marks. */
+ImU32 tab_accent() {
+    return ImGui::ColorConvertFloat4ToU32(theme::chart_line_colour());
+}
+
 ImU32 accent() {
     return ImGui::GetColorU32(ImGuiCol_CheckMark);
 }
@@ -592,7 +597,7 @@ TEST_CASE("a section card grows to its contents and divides its header",
     CHECK(has_colour(divider, ImGui::GetColorU32(ImGuiCol_Separator)));
 }
 
-TEST_CASE("the chosen tab is underlined in the accent", "[cells][tabs]") {
+TEST_CASE("the chosen tab is underlined in the tab violet", "[cells][tabs]") {
     themed context;
     frame([] {
         REQUIRE(ImGui::BeginTabBar("tabs"));
@@ -602,7 +607,7 @@ TEST_CASE("the chosen tab is underlined in the accent", "[cells][tabs]") {
             const auto line = vertices_of([] { widget::underline_selected_tab(); });
             REQUIRE_FALSE(line.empty());
             for (const auto& v : line) {
-                CHECK(v.col == accent());
+                CHECK(v.col == tab_accent());
                 CHECK(v.pos.x >= min.x);
                 CHECK(v.pos.x <= max.x);
                 CHECK(v.pos.y >= max.y - widget::tab_underline_thickness);
@@ -621,7 +626,7 @@ std::size_t glyphs_in(const std::vector<ImDrawVert>& vertices, ImU32 colour) {
     return static_cast<std::size_t>(count) / 4u;
 }
 
-TEST_CASE("a tab count badge is an accent capsule holding its number",
+TEST_CASE("a tab count badge is a violet capsule holding its number",
     "[cells][tabs][badge]") {
     themed context;
     struct drawn_tab final {
@@ -662,7 +667,7 @@ TEST_CASE("a tab count badge is an accent capsule holding its number",
     CHECK(tracked.max.x - tracked.min.x
         == Approx(ImGui::TabItemCalcSize("Tracked", false).x + badge));
     const ImU32 number = ImGui::ColorConvertFloat4ToU32(theme::base_surface());
-    CHECK(has_colour(tracked.badge, accent()));
+    CHECK(has_colour(tracked.badge, tab_accent()));
     CHECK(glyphs_in(tracked.badge, number) == 2u);
     const float label_end = tracked.min.x + ImGui::GetStyle().FramePadding.x
         + ImGui::CalcTextSize("Tracked").x;
