@@ -21,7 +21,10 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -30,6 +33,7 @@
 #include "imgui_internal.h"
 #include "ores.platform/process/executable.hpp"
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -53,6 +57,7 @@ constexpr int view_entry = 1;
 constexpr int tools_entry = 2;
 constexpr int help_entry = 3;
 
+constexpr const char* accounts_submenu_id = "##tools-accounts";
 constexpr const char* logo_texture_id = "ore-logo-white";
 constexpr const char* about_title = "About ORE Studio###hedgr-about";
 constexpr float about_logo_side = 72.0f;
@@ -120,7 +125,7 @@ void request_session_window(const render_input& input,
  * @brief FILE: Instances, the store's lock rows, then Quit.
  *
  * While the store is shut the catalogue is behind the master password, so the
- * menu offers the way in and Quit, as the shortcuts bar draws nothing then.
+ * menu offers the way in and Quit, and the other menus are not drawn.
  */
 void draw_file_menu(const render_input& input, menu_bar_result& result) {
     if (shows_instances(input)) {
@@ -156,7 +161,110 @@ void draw_view_menu(bool desk_docked, menu_bar_result& result) {
         result.undock_all = true;
 }
 
-/** @brief TOOLS: the windows that belong to a signed-in session. */
+/**
+ * @brief Calls @p visit with each instance id the Accounts submenu lists, in
+ * the order drawn.
+ *
+ * The signed-in session's instance leads, so it stays reachable without a
+ * pinned shortcut, then one id per catalogue shortcut that targets an
+ * instance's accounts, in the catalogue's order. An instance is visited once.
+ * It is a walk rather than a built list so that drawing the menu allocates
+ * nothing.
+ */
+template <typename visitor>
+void for_each_accounts_target(const render_input& input,
+    std::optional<hedgr::model::state::session_handle> session,
+    visitor&& visit) {
+    using hedgr::model::domain::window_kind;
+    std::string_view lead;
+    if (session) {
+        lead = input.sessions.instance_id(*session);
+        visit(lead);
+    }
+    const auto& rows = input.shortcuts.rows();
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        const auto& row = rows[i];
+        if (row.target_kind != window_kind::accounts
+            || (session && row.target_id == lead))
+            continue;
+        const bool repeated = std::any_of(rows.begin(),
+            rows.begin() + static_cast<std::ptrdiff_t>(i),
+            [&](const auto& earlier) {
+                return earlier.target_kind == window_kind::accounts
+                    && earlier.target_id == row.target_id;
+            });
+        if (!repeated)
+            visit(std::string_view{row.target_id});
+    }
+}
+
+/**
+ * @brief Raises the signal that says a shortcut was used, for the sound pack.
+ *
+ * The menu plays nothing itself: it raises a name and the player decides
+ * whether the name has a sound (ADR 0008).
+ */
+void raise_activation(const render_input& input, std::string detail) {
+    hedgr::model::signal::signal value;
+    value.name = std::string(hedgr::model::signal::names::shortcut_activated);
+    value.detail = std::move(detail);
+    value.at_ns = input.now_ns;
+    hedgr::model::signal::bus().raise(std::move(value));
+}
+
+/**
+ * @brief The Accounts row and the panel that opens beside it.
+ *
+ * The panel opens on a click or on hover and stays until the menu closes. A
+ * pick opens that instance's accounts window and closes both panels. A row is
+ * labelled with the instance's name, or its id when the store no longer holds
+ * the row, as an entry nobody expects is still better drawn than dropped.
+ */
+void draw_accounts_submenu(const render_input& input,
+    std::optional<hedgr::model::state::session_handle> session) {
+    bool any = false;
+    for_each_accounts_target(input, session,
+        [&](std::string_view) { any = true; });
+    const bool pressed = widget::menu_item_row({.label = "Accounts",
+        .submenu = true, .enabled = any});
+    if (!any)
+        return;
+    const ImVec2 anchor(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y);
+    if ((pressed || ImGui::IsItemHovered())
+        && !ImGui::IsPopupOpen(accounts_submenu_id))
+        ImGui::OpenPopup(accounts_submenu_id);
+    ImGui::SetNextWindowPos(anchor);
+    bool picked = false;
+    {
+        const widget::menu_popup panel(accounts_submenu_id);
+        if (panel) {
+            for_each_accounts_target(input, session, [&](std::string_view id) {
+                const auto handle = input.instances.find(id);
+                char fallback[96];
+                const char* label = nullptr;
+                if (handle) {
+                    label = input.instances.get(*handle)->name.c_str();
+                } else {
+                    ImFormatString(fallback, sizeof fallback, "%.*s",
+                        static_cast<int>(id.size()), id.data());
+                    label = fallback;
+                }
+                ImGui::PushID(id.data(), id.data() + id.size());
+                if (widget::menu_item_row({.label = label})) {
+                    request_accounts_window(input, id);
+                    raise_activation(input,
+                        std::string("Open the accounts of ") + label);
+                    picked = true;
+                }
+                ImGui::PopID();
+            });
+        }
+    }
+    if (picked)
+        ImGui::CloseCurrentPopup();
+}
+
+/** @brief TOOLS: the windows that belong to a signed-in session, and Accounts. */
 void draw_tools_menu(const render_input& input) {
     namespace domain = hedgr::model::domain;
     const auto session = current_session(input);
@@ -164,9 +272,7 @@ void draw_tools_menu(const render_input& input) {
             .enabled = session.has_value()}))
         request_session_window(input, *session,
             domain::window_kind::series_browser);
-    if (widget::menu_item_row({.label = "Accounts",
-            .enabled = session.has_value()}))
-        request_accounts_window(input, input.sessions.instance_id(*session));
+    draw_accounts_submenu(input, session);
     const bool admin = session
         && input.sessions.mode(*session)
             == domain::session_mode::system_administration;

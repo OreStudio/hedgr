@@ -36,6 +36,7 @@ namespace {
 
 namespace model = hedgr::model;
 namespace render = hedgr::ui::render;
+namespace theme = hedgr::ui::theme;
 using hedgr::testing::desk;
 using hedgr::testing::headless_imgui;
 
@@ -341,28 +342,30 @@ TEST_CASE("the desk's empty centre lets a click through to the background",
     desk_frame(d.workspace, d.input);
 }
 
-TEST_CASE("a docked chart stops above the shortcut bar",
+TEST_CASE("the dock space reaches the bottom of the work area, shortcuts or not",
     "[docking][workspace]") {
     dock_desk d{"c"};
     model::domain::shortcut row;
     row.id = "s";
-    row.target_kind = model::domain::window_kind::instance_manager;
+    row.target_kind = model::domain::window_kind::accounts;
     row.target_id = "i";
     d.desk.shortcuts.upsert(row);
     d.settle();
     REQUIRE(d.dock("###c"));
 
-    const ImGuiWindow* bar = desk_window("##hedgr-shortcuts");
-    REQUIRE(bar != nullptr);
-    const ImGuiWindow* chart = desk_window("###c");
-    REQUIRE(d.in_desk("###c"));
-    CHECK(chart->Pos.y + chart->Size.y <= bar->Pos.y + 0.5f);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiWindow* space = desk_window("###hedgr-desk");
+    REQUIRE(space != nullptr);
+    CHECK(space->Pos.y + space->Size.y
+        == Catch::Approx(viewport->WorkPos.y + viewport->WorkSize.y));
+    REQUIRE(d.in_desk("###c"));
+    const ImGuiWindow* chart = desk_window("###c");
     CHECK(chart->Pos.y + chart->Size.y
-        < viewport->WorkPos.y + viewport->WorkSize.y);
+        <= viewport->WorkPos.y + viewport->WorkSize.y + 0.5f);
+    CHECK(desk_window("##hedgr-shortcuts") == nullptr);
 }
 
-TEST_CASE("the startup notice and the shortcut bar stay out of the desk",
+TEST_CASE("the startup notice and the lock prompt stay out of the desk",
     "[docking][workspace]") {
     SECTION("the startup notice") {
         dock_desk d{};
@@ -375,21 +378,6 @@ TEST_CASE("the startup notice and the shortcut bar stay out of the desk",
         const ImGuiWindow* notice = desk_window("###hedgr-startup-failure");
         REQUIRE(notice != nullptr);
         CHECK_FALSE(notice->DockIsActive);
-    }
-    SECTION("the shortcut bar") {
-        dock_desk d{};
-        model::domain::shortcut row;
-        row.id = "s";
-        row.target_kind = model::domain::window_kind::instance_manager;
-        row.target_id = "i";
-        d.desk.shortcuts.upsert(row);
-        d.settle();
-        ImGui::DockBuilderDockWindow("##hedgr-shortcuts",
-            d.workspace.dock_space());
-        d.settle();
-        const ImGuiWindow* bar = desk_window("##hedgr-shortcuts");
-        REQUIRE(bar != nullptr);
-        CHECK_FALSE(bar->DockIsActive);
     }
     SECTION("the lock prompt") {
         dock_desk d{};
@@ -415,20 +403,34 @@ bool holds_docked_windows(ImGuiID space) {
     return walk(walk, ImGui::DockBuilderGetNode(space));
 }
 
-/** @brief Clicks the bar's undock control, found by hovering along the bar. */
+/**
+ * @brief Chooses VIEW > Undock all, finding VIEW by sweeping along the top bar
+ * until ImGui reports its label hovered, and the row as the popup's first.
+ */
 bool click_undock_all(dock_desk& d) {
-    const ImGuiWindow* bar = desk_window("##hedgr-shortcuts");
+    const ImGuiWindow* bar = desk_window("###hedgr-menu-bar");
     if (bar == nullptr)
         return false;
-    const ImGuiID button = ImHashStr("entry", 0,
-        ImHashStr("undock-all", 0, bar->ID));
+    const ImGuiID label = ImHashStr("##label", 0, ImHashStr("View", 0, bar->ID));
     const float y = bar->Pos.y + bar->Size.y * 0.5f;
-    for (float x = bar->Pos.x + bar->Size.x - 1.0f; x > bar->Pos.x; x -= 2.0f) {
+    for (float x = bar->Pos.x + 2.0f; x < bar->Pos.x + 600.0f; x += 2.0f) {
         hover(d.workspace, d.input, ImVec2(x, y));
-        if (ImGui::GetCurrentContext()->HoveredId == button) {
-            click(d.workspace, d.input, ImVec2(x, y));
-            return true;
-        }
+        if (ImGui::GetCurrentContext()->HoveredId != label)
+            continue;
+        click(d.workspace, d.input, ImVec2(x, y));
+        d.settle();
+        const ImGuiContext& context = *ImGui::GetCurrentContext();
+        if (context.OpenPopupStack.Size == 0)
+            return false;
+        const ImGuiWindow* popup = context.OpenPopupStack.back().Window;
+        if (popup == nullptr)
+            return false;
+        click(d.workspace, d.input,
+            ImVec2(popup->Pos.x + theme::menu_padding + 30.0f,
+                popup->Pos.y + theme::menu_padding
+                    + (ImGui::GetTextLineHeight()
+                        + 2.0f * theme::menu_row_padding_y) * 0.5f));
+        return true;
     }
     return false;
 }
@@ -509,21 +511,17 @@ TEST_CASE("the undock control floats every docked window and only those",
     CHECK(desk_window("###f")->Size.x == floating_size.x);
     CHECK(desk_window("###f")->Size.y == floating_size.y);
     CHECK_FALSE(desk_window("###g")->DockIsActive);
-    CHECK_FALSE(desk_window("##hedgr-shortcuts")->DockIsActive);
     CHECK_FALSE(holds_docked_windows(d.workspace.dock_space()));
 }
 
-TEST_CASE("the undock control is on the bar only while something is docked",
+TEST_CASE("VIEW > Undock all floats a docked window",
     "[docking][workspace]") {
     dock_desk d{"a"};
-    CHECK(desk_window("##hedgr-shortcuts") == nullptr);
     REQUIRE(d.dock("###a"));
-    d.settle();
-    CHECK(desk_window("##hedgr-shortcuts") != nullptr);
+    REQUIRE(d.in_desk("###a"));
     REQUIRE(click_undock_all(d));
     d.settle();
     CHECK_FALSE(d.in_desk("###a"));
-    CHECK(desk_window("##hedgr-shortcuts") == nullptr);
 }
 
 namespace {

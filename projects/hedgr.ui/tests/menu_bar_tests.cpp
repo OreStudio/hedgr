@@ -19,6 +19,9 @@
  */
 #include "headless_desk.hpp"
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/domain/shortcut.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/workspace.hpp"
@@ -580,19 +583,130 @@ TEST_CASE("TOOLS: Series browser opens the browser of the signed-in session",
     CHECK(commands[0].account_id == "a");
 }
 
-TEST_CASE("TOOLS: Accounts opens the accounts of the session's instance",
+namespace {
+
+void add_instance(bar_harness& h, const char* id, const char* name) {
+    model::domain::instance row;
+    row.id = id;
+    row.name = name;
+    static_cast<void>(h.desk.instances.upsert(row));
+}
+
+void pin_accounts(bar_harness& h, const char* instance_id) {
+    model::domain::shortcut row;
+    row.id = std::string("accounts-") + instance_id;
+    row.target_kind = model::domain::window_kind::accounts;
+    row.target_id = instance_id;
+    h.desk.shortcuts.upsert(row);
+}
+
+/** @brief The signals raised since the last call. */
+std::vector<model::signal::signal> drained_signals() {
+    return model::signal::bus().drain();
+}
+
+}
+
+TEST_CASE("TOOLS: Accounts is a submenu row with the session's instance first",
     "[menu_bar][tools]") {
     bar_harness h;
-    model::domain::instance row;
-    row.id = "i";
-    row.name = "inst";
-    static_cast<void>(h.desk.instances.upsert(row));
+    add_instance(h, "i", "inst");
     h.open_menu("Tools");
     h.click(bar_harness::row_centre(1));
+    h.settle();
+    /* The child panel is the top of the popup stack, beside the TOOLS panel. */
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    h.click(bar_harness::row_centre(0));
     const auto commands = h.commands();
     REQUIRE(commands.size() == 1);
     CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
     CHECK(commands[0].instance_id == "i");
+}
+
+TEST_CASE("TOOLS > Accounts lists one row per accounts shortcut, once each",
+    "[menu_bar][tools]") {
+    bar_harness h;
+    add_instance(h, "i", "inst");
+    add_instance(h, "j", "other");
+    add_instance(h, "k", "third");
+    pin_accounts(h, "j");
+    pin_accounts(h, "i");
+    pin_accounts(h, "k");
+    /* A second shortcut to the same instance adds no second row. */
+    model::domain::shortcut twin;
+    twin.id = "accounts-j-again";
+    twin.target_kind = model::domain::window_kind::accounts;
+    twin.target_id = "j";
+    h.desk.shortcuts.upsert(twin);
+    model::domain::shortcut surface;
+    surface.id = "instances";
+    surface.target_kind = model::domain::window_kind::instance_manager;
+    h.desk.shortcuts.upsert(surface);
+    h.open_menu("Tools");
+    h.click(bar_harness::row_centre(1));
+    h.settle();
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    const float row = ImGui::GetTextLineHeight()
+        + 2.0f * theme::menu_row_padding_y;
+    /* i (the session's), j, k: three rows tall and no more. */
+    CHECK(panel->Size.y == Catch::Approx(2.0f * theme::menu_padding
+        + 3.0f * row + 2.0f * theme::menu_row_gap).margin(1.0f));
+    /* Beside the Accounts row, not under it. */
+    const ImGuiWindow* tools = GImGui->OpenPopupStack[0].Window;
+    CHECK(panel->Pos.x >= tools->Pos.x + tools->Size.x
+        - theme::menu_padding - 0.5f);
+
+    h.click(bar_harness::row_centre(2));
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
+    CHECK(commands[0].instance_id == "k");
+}
+
+TEST_CASE("TOOLS > Accounts: a pick raises the activation signal and closes the "
+          "menu",
+    "[menu_bar][tools]") {
+    bar_harness h;
+    add_instance(h, "i", "inst");
+    h.open_menu("Tools");
+    h.click(bar_harness::row_centre(1));
+    h.settle();
+    static_cast<void>(drained_signals());
+    h.click(bar_harness::row_centre(0));
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].name == model::signal::names::shortcut_activated);
+    CHECK(raised[0].detail == "Open the accounts of inst");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("TOOLS > Accounts is disabled with no session and no shortcut",
+    "[menu_bar][tools]") {
+    bar_harness h;
+    h.desk.sessions.set_status(h.desk.session,
+        model::domain::session_status::disconnected);
+    h.open_menu("Tools");
+    h.click(bar_harness::row_centre(1));
+    h.settle();
+    CHECK(GImGui->OpenPopupStack.Size == 1);
+    CHECK(h.commands().empty());
+}
+
+TEST_CASE("TOOLS > Accounts still lists the shortcuts of a signed-out store",
+    "[menu_bar][tools]") {
+    bar_harness h;
+    h.desk.sessions.set_status(h.desk.session,
+        model::domain::session_status::disconnected);
+    add_instance(h, "j", "other");
+    pin_accounts(h, "j");
+    h.open_menu("Tools");
+    h.click(bar_harness::row_centre(1));
+    h.settle();
+    h.click(bar_harness::row_centre(0));
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].instance_id == "j");
 }
 
 TEST_CASE("TOOLS: Command centre is there for an administrator's session only",
@@ -765,9 +879,34 @@ TEST_CASE("the work area is inset by the bar exactly once, and the desk starts "
     CHECK(space->Pos.y == Catch::Approx(bar_bottom));
     CHECK(viewport->WorkSize.y
         == Catch::Approx(viewport->Size.y - theme::menu_bar_extent));
-    /* The cool bar's own inset at the foot is still taken from the same area. */
-    CHECK(space->Pos.y + space->Size.y
-        <= viewport->WorkPos.y + viewport->WorkSize.y + 0.5f);
+    /* Nothing is inset at the foot: the desk ends at the viewport's edge. */
+    CHECK(viewport->WorkSize.y + viewport->WorkPos.y
+        == Catch::Approx(viewport->Size.y));
+    CHECK(space->Pos.y + space->Size.y == Catch::Approx(viewport->Size.y));
+}
+
+TEST_CASE("pinned shortcuts draw nothing at the foot and inset nothing",
+    "[menu_bar][workspace]") {
+    headless_imgui imgui;
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    desk desk;
+    model::domain::shortcut row;
+    row.id = "s";
+    row.target_kind = model::domain::window_kind::accounts;
+    row.target_id = "i";
+    desk.shortcuts.upsert(row);
+    render::workspace workspace;
+    auto input = desk.input();
+    for (int i = 0; i < 4; ++i) {
+        ImGui::NewFrame();
+        workspace.render(input);
+        ImGui::Render();
+    }
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiWindow* space = ImGui::FindWindowByName("###hedgr-desk");
+    REQUIRE(space != nullptr);
+    CHECK(space->Pos.y + space->Size.y == Catch::Approx(viewport->Size.y));
+    CHECK(ImGui::FindWindowByName("##hedgr-shortcuts") == nullptr);
 }
 
 TEST_CASE("the workspace draws the bar before everything and the bar is not "

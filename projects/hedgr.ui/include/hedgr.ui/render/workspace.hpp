@@ -25,7 +25,6 @@
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
-#include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/menu_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include <array>
@@ -148,8 +147,8 @@ private:
     void occupied_cards(const card_grid& grid,
         hedgr::model::state::window_handle self, const render_input& input);
 
-    /** @brief Draws the dock space that fills the desk above the shortcut bar. */
-    void draw_dock_space(const render_input& input);
+    /** @brief Draws the dock space that fills the desk's work area. */
+    void draw_dock_space();
 
     /**
      * @brief Draws the notice that says the store could not be opened.
@@ -317,13 +316,10 @@ private:
     bool startup_notice_open_ = true;
 
     /**
-     * @brief Whether the shortcuts bar asked for the Instances window on top.
+     * @brief Whether a menu row asked for the Instances window on top.
      *
-     * Bringing a window to the front has to happen before that window is
-     * submitted, and the bar is drawn after every window so that it stays above
-     * them. The request is therefore carried from one frame to the next rather
-     * than acted on where it is made, which costs a frame nobody can see and
-     * keeps the bar the topmost surface it should be.
+     * Bringing a window to the front has to happen as that window is submitted,
+     * so the request is kept until the walk reaches it.
      */
     bool focus_instances_ = false;
 
@@ -347,15 +343,6 @@ private:
      * across the boundary. It is scratch, like everything else in this class.
      */
     lock_control lock_control_;
-
-    /**
-     * @brief The shortcuts bar's own memory of the last hovered entry.
-     *
-     * The bar is drawn by the frame, so its cross-frame state lives here with
-     * the rest of the frame's scratch. A tick announces a change, and a change
-     * needs the previous frame's answer to know there was one.
-     */
-    shortcut_bar_state shortcut_bar_;
 
     /** @brief Which top-level menu of the top bar is open. */
     hedgr::ui::widget::menu_bar_state menu_bar_;

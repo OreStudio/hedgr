@@ -232,7 +232,7 @@ shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
  * rather than making another.
  *
  * The action lives here rather than at either of its callers because the
- * Instances window's own toolbar and the shortcuts bar both open an instance's
+ * Instances window's own toolbar and the TOOLS menu both open an instance's
  * accounts, and one description of what that means is what stops the two from
  * drifting.
  *
@@ -267,8 +267,8 @@ HEDGR_UI_EXPORT void request_series_window(const render_input& input,
  * open rather than adding a second, so the same call both raises a window on
  * screen and reopens one that was closed.
  *
- * The shortcut bar asks through this because its Instances entry is a shortcut
- * like any other and the bar should not have to know how a window is made.
+ * The FILE menu's Instances row asks through this so the menu need not know
+ * how a window is made.
  */
 HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
 
@@ -279,7 +279,7 @@ HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
  * An instance typed by hand carries no illustration key, and a key whose asset
  * is not installed has no texture either; both are ordinary states and the
  * caller draws its own fallback for them. The keys are resolved here because
- * both the shortcuts bar and the details pane ask the same question of the same
+ * both the TOOLS menu's Accounts list and the details pane ask the same question of the same
  * row.
  */
 [[nodiscard]] HEDGR_UI_EXPORT std::uint64_t instance_icon_texture(

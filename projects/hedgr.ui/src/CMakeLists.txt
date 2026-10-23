@@ -28,10 +28,6 @@ endif()
 add_library(${lib_target_name} ${files})
 target_compile_definitions(${lib_target_name} PRIVATE HEDGR_UI_LIBRARY
     HEDGR_VERSION="${PROJECT_VERSION}")
-# Vendored upstream code is kept byte-for-byte apart from its patch, so it is
-# not held to the project's warning set.
-set_source_files_properties(../third_party/imcoolbar/ImCoolBar.cpp
-    PROPERTIES COMPILE_OPTIONS $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-w>)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${lib_target_name} PRIVATE
         -fvisibility=hidden -fvisibility-inlines-hidden)
@@ -44,12 +40,9 @@ set_target_properties(${lib_target_name}
 target_include_directories(${lib_target_name} PUBLIC
     ${CMAKE_SOURCE_DIR}/projects/hedgr.ui/include)
 # The component's own src/ is on the include path for the renderers' shared
-# private headers, which are deliberately not part of the public interface. The
-# vendored ImCoolBar directory is on it as well, so a ui source reaches the
-# widget by its upstream name rather than by a path into the vendored tree.
+# private headers, which are deliberately not part of the public interface.
 target_include_directories(${lib_target_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/imcoolbar
     ${HEDGR_MINIAUDIO_INCLUDE_DIR})
 
 target_link_libraries(${lib_target_name}

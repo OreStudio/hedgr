@@ -23,7 +23,6 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/panels.hpp"
-#include "hedgr.ui/render/shortcut_bar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/password_meter.hpp"
 
@@ -306,7 +305,7 @@ void workspace::render(const render_input& input) {
         next_move_ = dock_move{.all = true};
     exit_requested_ |= top_bar.quit_requested;
 
-    draw_dock_space(input);
+    draw_dock_space();
 
     /*
      * The runtime's latest failure, raised on the status bar before the walk
@@ -751,22 +750,6 @@ void workspace::render(const render_input& input) {
     }
 
     /*
-     * The shortcuts bar, after the walk rather than before it, because it is a
-     * dock and has to sit above the windows it docks against. It takes no
-     * space from any of them: it is its own window, anchored to the viewport,
-     * so the tree, the chart strip and the toolbar keep the room they had.
-     *
-     * A request to raise the Instances window is kept for the next frame,
-     * because the window it concerns has already been submitted by now.
-     */
-    shortcut_bar_result bar;
-    draw_shortcut_bar(input, desk_docked_, bar, shortcut_bar_);
-    if (bar.focus_instances)
-        focus_instances_ = true;
-    if (bar.undock_all)
-        next_move_ = dock_move{.all = true};
-
-    /*
      * Last, and after the control that may have just asked for it, so the form
      * is the final window submitted and therefore the one on top of everything
      * the walk drew. See the note where it is opened.
@@ -777,21 +760,21 @@ void workspace::render(const render_input& input) {
     move_ = std::exchange(next_move_, std::nullopt);
 
     /*
-     * Read once per frame, after every window has docked or left, so the dock
-     * space and the bar agree on whether the control is there. A frame behind
+     * Read once per frame, after every window has docked or left, so the menu
+     * and the dock space agree on whether Undock all is live. A frame behind
      * the click that docks the first window, which nobody can see.
      */
     desk_docked_ = holds_windows(ImGui::DockBuilderGetNode(dock_space_));
 }
 
-void workspace::draw_dock_space(const render_input& input) {
+void workspace::draw_dock_space() {
     if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable) == 0)
         return;
 
     /*
-     * ImGui's DockSpaceOverViewport, written out so the space can stop short
-     * of the shortcut bar. The bar is raised over every window, so a tile
-     * docked against the bottom edge would otherwise sit under it.
+     * ImGui's DockSpaceOverViewport, written out for the flags it needs. The
+     * space fills the work area, which the top bar has already inset, so a
+     * tile docked against the bottom edge reaches the edge of the viewport.
      *
      * The centre passes clicks through while nothing is docked there, so the
      * desk behind it, and every window floating over it, are as reachable as
@@ -799,8 +782,7 @@ void workspace::draw_dock_space(const render_input& input) {
      */
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x,
-        std::max(0.0f, viewport->WorkSize.y - shortcut_bar_height(input, desk_docked_))));
+    ImGui::SetNextWindowSize(viewport->WorkSize);
     ImGui::SetNextWindowViewport(viewport->ID);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar
         | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize
