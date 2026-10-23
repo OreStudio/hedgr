@@ -133,6 +133,15 @@ struct mini_plot_state final {
 
     /** @brief Key of the market series this card reads. */
     std::string series_id;
+
+    /**
+     * @brief The span the card shows, in nanoseconds, or zero for all.
+     *
+     * The span the card was opened with. While a chart of the same series is
+     * open the card follows the chart's span instead, and this one is what it
+     * falls back to when the chart closes.
+     */
+    std::int64_t span_ns = std::int64_t{5} * 60 * 1'000'000'000;
 };
 
 /** @brief State of a term-structure window. */

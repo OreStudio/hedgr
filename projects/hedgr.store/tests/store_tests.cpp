@@ -1055,7 +1055,8 @@ TEST_CASE("a mini plot window round-trips through the store", "[store]") {
     spec.id = "mini:inst-1:id-1:s-1";
     spec.kind = window_kind::mini_plot;
     spec.session = session_key{"inst-1", "id-1"};
-    spec.state = mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1"};
+    spec.state = mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1",
+        .span_ns = 3'600'000'000'000};
     REQUIRE(windows.save(spec).has_value());
 
     const auto rows = windows.list();
@@ -1070,6 +1071,7 @@ TEST_CASE("a mini plot window round-trips through the store", "[store]") {
     REQUIRE(card != nullptr);
     CHECK(card->label == "FX GBP/USD");
     CHECK(card->series_id == "s-1");
+    CHECK(card->span_ns == 3'600'000'000'000);
 }
 
 TEST_CASE("a file written before the mini plot kind still loads, and takes one",

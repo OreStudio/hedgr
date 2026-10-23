@@ -321,8 +321,10 @@ struct world final {
     }
 
     void open_mini_plot(const std::string& account_id,
-        const std::string& series) {
+        const std::string& series,
+        std::optional<std::int64_t> span_ns = std::nullopt) {
         command open;
+        open.series_span_ns = span_ns;
         open.kind = command_kind::open_window;
         open.instance_id = instance_id;
         open.account_id = account_id;
@@ -1180,6 +1182,29 @@ TEST_CASE("a mini plot holds its series while open and gives it back on close",
     CHECK(w.manager->market().watchers(series) == 0);
     CHECK(feed.unwatches.size() == 1);
     hedgr::testing::audit_holders(*w.manager);
+}
+
+TEST_CASE("a mini plot opens on the span it was asked for, else the chart default",
+    "[feed][mini_plot]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1"), row("s-2"), row("s-3")});
+
+    const auto span_of = [&](const std::string& series) {
+        const auto id = std::format("mini:{}:a-1:{}", instance_id, series);
+        const auto handle = w.manager->windows().find(id);
+        REQUIRE(handle.has_value());
+        const auto* card = std::get_if<hedgr::model::domain::mini_plot_state>(
+            &w.manager->windows().state(*handle));
+        REQUIRE(card != nullptr);
+        return card->span_ns;
+    };
+    w.open_mini_plot("a-1", "s-1", std::int64_t{15} * 60 * 1'000'000'000);
+    w.open_mini_plot("a-1", "s-2", std::int64_t{0});
+    w.open_mini_plot("a-1", "s-3");
+    CHECK(span_of("s-1") == std::int64_t{15} * 60 * 1'000'000'000);
+    CHECK(span_of("s-2") == 0);
+    CHECK(span_of("s-3") == std::int64_t{5} * 60 * 1'000'000'000);
 }
 
 TEST_CASE("removing the account gives back what its mini plots held",

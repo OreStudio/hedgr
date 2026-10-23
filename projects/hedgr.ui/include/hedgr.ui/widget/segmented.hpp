@@ -22,16 +22,13 @@
 
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
-#include <span>
 
 namespace hedgr::ui::widget {
 
 /**
- * @brief A choice drawn as a rounded group of segments, with the rest in a
- * dropdown at its end.
+ * @brief A choice drawn as a rounded group of segments, one for each option.
  *
- * The options are borrowed, as a foot combo's are. @c shown names the options
- * that get a segment, in order; every other option is listed in the dropdown.
+ * The options are borrowed, as a foot combo's are, and are drawn in order.
  */
 struct segmented_control final {
     /** @brief ImGui id, unique among the controls of one window. */
@@ -40,12 +37,11 @@ struct segmented_control final {
     const char* tooltip;
     const char* const* options;
     int option_count;
-    std::span<const int> shown;
     /** @brief The chosen option, clamped to the options on every draw. */
     int* selected;
 };
 
-/** @brief The width the group takes, the dropdown included. */
+/** @brief The width the group takes. */
 [[nodiscard]] HEDGR_UI_EXPORT float segmented_width(
     const segmented_control& control);
 
@@ -55,8 +51,7 @@ struct segmented_control final {
 /**
  * @brief Draws the group with its top left at @p origin, in screen space.
  *
- * Moves the cursor, so the caller puts it back. Allocates nothing on a frame
- * in which the dropdown stays shut.
+ * Moves the cursor, so the caller puts it back. Allocates nothing.
  *
  * @return whether the choice changed this frame.
  */

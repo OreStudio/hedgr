@@ -150,13 +150,31 @@ rects and a restart through the ini text, and drag a card onto another's middle
 and onto the empty centre. The edge drop's tile size is not tested, only read
 from ImGui's source.
 
+### Follow-up: header strip and tile (done)
+
+Three changes from a live run. The card has no title bar
+(`ImGuiWindowFlags_NoTitleBar`): its body is the handle, so a drag on it moves a
+floating card and docks it, and the right-click Close is the way to close a
+card, floating or docked. The tile is no longer an invisible button, because
+that button took the press the window needed to move; a click is a release over
+the window that never passed ImGui's drag threshold. The card draws its line and
+fill in the chart's colour (`chart_line_colour`) and only the change pill keeps
+the good and bad tones. The period is no longer fixed (D2 changes): the state
+holds `span_ns`, the span the card was opened with, and the card shows the span
+of the open chart of the same series and session when there is one
+(`mini_plot_span`), else its own. The Mini plot icon on a chart opens the card
+on the chart's span, and the browser opens it on the default chart span. The
+label is the chart's ("5m", "1d", "All"). A card does not ask for history, so
+its line is what the series already holds for that span.
+
 ## Decisions
 
 - **D1. A card is a window of its own.** Recommended. The alternative is one
   "Market favorites" window that holds cards inside it, which is a grid by
   construction and gives up docking a single card beside a chart.
-- **D2. Fixed period, 24 hours.** Recommended, so a card has nothing to choose.
-  A per-card period needs a control, which the reference does not have.
+- **D2. The period follows the chart.** Was a fixed 24 hours. A card has no
+  control for it: it takes the span of the open chart of its series, else the
+  span it was opened with.
 - **D3. Contents.** Pair with flags, price, line, period, change. No star, no
   volume, no venue. Recommended.
 - **D4. One card per series.** Making a second for the same series focuses the

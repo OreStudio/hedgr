@@ -283,6 +283,18 @@ std::string identity_text(const identity_bar_state& state) {
     return text;
 }
 
+float series_flags_width(const render_input& input,
+    const hedgr::model::state::session_handle session,
+    std::string_view label) {
+    request_flags(input, session, label);
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    const float pill_h = hedgr::ui::widget::value_pill_size(label).y;
+    return hedgr::ui::widget::flag_pair_width(
+        pill_h * hedgr::ui::theme::flag_height_fraction,
+        image_texture(input, session, pair.base),
+        image_texture(input, session, pair.quote));
+}
+
 void draw_series_flags(const render_input& input,
     const hedgr::model::state::session_handle session,
     std::string_view label, float inset) {

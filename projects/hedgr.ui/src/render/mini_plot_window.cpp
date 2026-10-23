@@ -22,6 +22,7 @@
 #include "hedgr.model/domain/health.hpp"
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/window.hpp"
+#include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/series_text.hpp"
@@ -124,6 +125,35 @@ void dim_line(ImVec2 at, const char* text) {
     ImGui::PopStyleColor();
 }
 
+}
+
+std::int64_t mini_plot_span(const render_input& input, window_handle card) {
+    const auto held = input.windows.series(card);
+    const auto& shape = input.windows.state(card);
+    const auto* own = std::get_if<domain::mini_plot_state>(&shape);
+    const std::int64_t opened_with = own != nullptr
+        ? own->span_ns : chart_span_ns(input.market_view.chart_span);
+    if (held.empty())
+        return opened_with;
+
+    const auto& layout = input.windows.layout();
+    const auto kinds = input.windows.kind_column();
+    const auto open = input.windows.open_column();
+    for (std::size_t index = 0; index < layout.alive.size(); ++index) {
+        if (layout.alive[index] == 0 || open[index] == 0
+            || static_cast<domain::window_kind>(kinds[index])
+                != domain::window_kind::chart)
+            continue;
+        const window_handle chart{static_cast<std::uint32_t>(index),
+            layout.generation[index]};
+        const auto* view = std::get_if<domain::chart_state>(
+            &input.windows.state(chart));
+        const auto plotted = input.windows.series(chart);
+        if (view != nullptr && view->view && !plotted.empty()
+            && plotted.front() == held.front())
+            return view->view->span_ns;
+    }
+    return opened_with;
 }
 
 std::size_t mini_plot_first(const state::series_columns& points,
@@ -245,9 +275,9 @@ void render_mini_plot(window_handle handle, const render_input& input,
     const bool reading = !row
         || (input.market.observed_at_ns(*row) == 0
             && input.market.failure(*row).empty());
+    const std::int64_t span_ns = mini_plot_span(input, handle);
     const state::series_columns points = row
-        ? input.market.columns(*row,
-              domain::market_level_for_span(mini_plot_span_ns))
+        ? input.market.columns(*row, domain::market_level_for_span(span_ns))
         : state::series_columns{};
     const bool has_points = !reading && points.size > 0;
 
@@ -262,18 +292,22 @@ void render_mini_plot(window_handle handle, const render_input& input,
 
     const auto session = signed_in_session(input, handle);
     const std::size_t first = has_points
-        ? mini_plot_first(points, mini_plot_span_ns) : 0;
+        ? mini_plot_first(points, span_ns) : 0;
     const double open = has_points ? points.value[first] : 0.0;
     const double last = has_points ? points.value[points.size - 1] : 0.0;
     const auto health = domain::assess_data_health(
         row ? input.market.newest_at_ns(*row) : 0, input.wall_now_ns,
         domain::fx_health_thresholds);
     const theme::tone tone = change_tone(health, last - open);
-    const theme::tone_colours colours = theme::pill_colours(tone);
 
+    /*
+     * The line and its fill are the chart's, whatever the series did. Only the
+     * change pill carries the verdict.
+     */
     if (has_points)
         draw_sparkline(draw, make_sparkline(points, first), l.line_min,
-            l.line_max, colours.text);
+            l.line_max,
+            ImGui::ColorConvertFloat4ToU32(theme::chart_line_colour()));
 
     draw_header(input, session, label, l.min, l.max.x - l.min.x);
     const float below_header = l.min.y + l.header + l.gap;
@@ -285,7 +319,8 @@ void render_mini_plot(window_handle handle, const render_input& input,
         const auto change = format_number("{:+.2f}%", percent);
         const float foot_top = l.max.y - l.foot;
         ImGui::SetCursorScreenPos(ImVec2(l.min.x, foot_top));
-        widget::caption(mini_plot_span_label);
+        widget::caption(chart_spans[static_cast<std::size_t>(
+            chart_span_index(span_ns))].label);
         if (l.stacked_foot) {
             ImGui::SetCursorScreenPos(ImVec2(l.min.x,
                 foot_top + widget::labelled_value_height()
@@ -310,12 +345,19 @@ void render_mini_plot(window_handle handle, const render_input& input,
 
     ImGui::PopClipRect();
     window->DC.CursorMaxPos = extent;
-    ImGui::SetCursorScreenPos(origin);
-    const bool released = ImGui::InvisibleButton("##card", size);
-    if (ImGui::IsItemHovered())
+    /*
+     * The tile is not a button: a card has no title bar, so a press on its body
+     * has to reach ImGui as a press on the window, which moves a floating card
+     * and drags a docked one out. A click is then a release over the window
+     * that never travelled past the drag threshold.
+     */
+    const bool hovered = ImGui::IsWindowHovered();
+    if (hovered)
         ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    const ImVec2 dragged = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
-    if (released && session && dragged.x == 0.0f && dragged.y == 0.0f) {
+    const bool clicked = hovered
+        && ImGui::IsMouseReleased(ImGuiMouseButton_Left)
+        && !ImGui::IsMouseDragPastThreshold(ImGuiMouseButton_Left);
+    if (clicked && session) {
         request_series_window(input, *session, domain::window_kind::chart,
             card->series_id, card->label);
     }

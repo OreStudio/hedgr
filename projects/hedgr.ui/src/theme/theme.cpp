@@ -130,6 +130,16 @@ const ImVec4 accent = colour(0x729edbff); // Tracked tab underline, x 370 y 87
 const ImVec4 accent_hover = colour(0x8db4e6ff); // derived
 const ImVec4 accent_active = colour(0x5a88c4ff); // derived
 
+/*
+ * The chart reference draws its series in a violet and its last price chip in
+ * a slightly deeper one. Both are sampled from
+ * 3dc3688ce58c780167ddf6310cf6953df12318ce-1600x938.png: the line's most
+ * common saturated pixel and the chip fill of the Price plot (x 470 y 272).
+ * The rest of the palette stays navy, so these two mark data and nothing else.
+ */
+const ImVec4 chart_line = colour(0x8068d6ff); // Price line, x 40 to 430 y 80 to 410
+const ImVec4 chart_tag = colour(0x7c59e9ff); // Price chip, x 470 y 272
+
 /* The glyph in a bookmark chip, brightest eighth of x 22 to 46 y 122 to 146. */
 constexpr ImU32 glow = IM_COL32(197, 224, 252, 255);
 
@@ -345,6 +355,14 @@ ImVec4 dim_text() noexcept {
 
 ImVec4 accent_colour() noexcept {
     return accent;
+}
+
+ImVec4 chart_line_colour() noexcept {
+    return chart_line;
+}
+
+ImVec4 chart_tag_colour() noexcept {
+    return chart_tag;
 }
 
 ImU32 card_title_icon_colour() noexcept {

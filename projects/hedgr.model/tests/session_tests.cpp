@@ -136,7 +136,8 @@ TEST_CASE("every window kind's text parses back to the kind", "[window]") {
 
 TEST_CASE("a mini plot's state survives the stored form", "[window]") {
     const domain::window_state state =
-        domain::mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1"};
+        domain::mini_plot_state{.label = "FX GBP/USD", .series_id = "s-1",
+            .span_ns = std::int64_t{15} * 60 * 1'000'000'000};
     const auto encoded =
         domain::window_state_to_json(domain::window_kind::mini_plot, state);
     REQUIRE(encoded.has_value());
@@ -147,4 +148,22 @@ TEST_CASE("a mini plot's state survives the stored form", "[window]") {
     REQUIRE(card != nullptr);
     CHECK(card->label == "FX GBP/USD");
     CHECK(card->series_id == "s-1");
+    CHECK(card->span_ns == std::int64_t{15} * 60 * 1'000'000'000);
+
+    /* All is zero, which is not the default, so it has to survive too. */
+    const domain::window_state all =
+        domain::mini_plot_state{.label = "x", .series_id = "s", .span_ns = 0};
+    const auto all_back = domain::window_state_from_json(
+        domain::window_kind::mini_plot,
+        *domain::window_state_to_json(domain::window_kind::mini_plot, all));
+    REQUIRE(all_back.has_value());
+    CHECK(std::get<domain::mini_plot_state>(*all_back).span_ns == 0);
+
+    /* A card saved before it had a span reads as the chart default. */
+    const auto old = domain::window_state_from_json(
+        domain::window_kind::mini_plot,
+        R"({"label":"FX GBP/USD","series_id":"s-1"})");
+    REQUIRE(old.has_value());
+    CHECK(std::get<domain::mini_plot_state>(*old).span_ns
+        == std::int64_t{5} * 60 * 1'000'000'000);
 }

@@ -328,10 +328,19 @@ inline constexpr float flag_height_fraction = 0.75f;
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 accent_colour() noexcept;
 
 /**
- * @brief The faint dashed rules across a plot, in the dim text grey at a low
+ * @brief The colour of a plot's line and of the fill under it, which a mini
+ * plot card draws too. The purple of the chart reference's series line.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_line_colour() noexcept;
+
+/** @brief The fill of the last price chip, the reference's chip purple. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 chart_tag_colour() noexcept;
+
+/**
+ * @brief The faint dashed rules across a plot, in a purple grey at a low
  * alpha, so a rule is a guide and never a line of data.
  */
-inline constexpr ImU32 plot_grid_colour = IM_COL32(141, 146, 150, 56);
+inline constexpr ImU32 plot_grid_colour = IM_COL32(150, 140, 180, 48);
 
 /** @brief The crosshair a plot draws under the pointer. */
 inline constexpr ImU32 plot_crosshair_colour = IM_COL32(141, 146, 150, 128);
@@ -387,8 +396,8 @@ inline constexpr float segment_rounding = 6.0f;
 /** @brief The room round the segments inside the group, in pixels. */
 inline constexpr float segment_inset = 2.0f;
 
-/** @brief The fill of the chosen segment: a step above the group behind it. */
-inline constexpr ImU32 segment_selected_fill = IM_COL32(0x2a, 0x31, 0x3b, 255);
+/** @brief The fill of the chosen segment, as the reference's lifted period. */
+inline constexpr ImU32 segment_selected_fill = IM_COL32(0x31, 0x30, 0x40, 255);
 
 /**
  * @brief The colour of a session status.

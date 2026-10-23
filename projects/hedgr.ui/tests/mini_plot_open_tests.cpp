@@ -144,18 +144,24 @@ struct open_desk final {
 };
 
 void require_mini_plot_for(const command& c, const char* series,
-    const char* label) {
+    const char* label, std::int64_t span_ns) {
     CHECK(c.kind == command_kind::open_window);
     CHECK(c.new_window_kind == window_kind::mini_plot);
     CHECK(c.instance_id == "i");
     CHECK(c.account_id == "a");
     CHECK(c.series_id == series);
     CHECK(c.series_label == label);
+    CHECK(c.series_span_ns == span_ns);
 }
 
+constexpr std::int64_t fifteen_minutes_ns = 15LL * 60 * 1'000'000'000;
+constexpr std::int64_t one_hour_ns = 3600LL * 1'000'000'000;
+
+/** @brief A chart whose own view plots 15 minutes. */
 void add_chart(open_desk& d, const char* id, const char* series) {
     static_cast<void>(d.desk.open(window_kind::chart,
-        model::domain::chart_state{.label = "FX GBP/USD", .series_id = series},
+        model::domain::chart_state{.label = "FX GBP/USD", .series_id = series,
+            .view = model::domain::chart_view{.span_ns = fifteen_minutes_ns}},
         id));
     d.place(id, 560.0f, 400.0f);
 }
@@ -179,7 +185,7 @@ TEST_CASE("a floating chart's Mini plot icon opens a card for its series",
     REQUIRE(d.click_chart_icon("###c", "mini", hedgr::ui::icon::dashboard));
     const auto asked = d.take();
     REQUIRE(asked.size() == 1);
-    require_mini_plot_for(asked.front(), "s-7", "FX GBP/USD");
+    require_mini_plot_for(asked.front(), "s-7", "FX GBP/USD", fifteen_minutes_ns);
 }
 
 TEST_CASE("a docked chart's Mini plot icon opens a card for its series",
@@ -195,7 +201,7 @@ TEST_CASE("a docked chart's Mini plot icon opens a card for its series",
     REQUIRE(d.click_chart_icon("###c", "mini", hedgr::ui::icon::dashboard));
     const auto asked = d.take();
     REQUIRE(asked.size() == 1);
-    require_mini_plot_for(asked.front(), "s-7", "FX GBP/USD");
+    require_mini_plot_for(asked.front(), "s-7", "FX GBP/USD", fifteen_minutes_ns);
 }
 
 TEST_CASE("asking twice for a series' card asks for the same window",
@@ -208,8 +214,8 @@ TEST_CASE("asking twice for a series' card asks for the same window",
     REQUIRE(d.click_chart_icon("###c", "mini", hedgr::ui::icon::dashboard));
     const auto asked = d.take();
     REQUIRE(asked.size() == 2);
-    require_mini_plot_for(asked[0], "s-7", "FX GBP/USD");
-    require_mini_plot_for(asked[1], "s-7", "FX GBP/USD");
+    require_mini_plot_for(asked[0], "s-7", "FX GBP/USD", fifteen_minutes_ns);
+    require_mini_plot_for(asked[1], "s-7", "FX GBP/USD", fifteen_minutes_ns);
 }
 
 TEST_CASE("a series browser row's Mini plot icon opens a card for that row",
@@ -224,6 +230,7 @@ TEST_CASE("a series browser row's Mini plot icon opens a card for that row",
     static_cast<void>(d.desk.open(window_kind::series_browser,
         model::domain::series_browser_state{}, "b"));
     d.place("b", 900.0f, 500.0f);
+    d.desk.market_view.chart_span = render::chart_span_index(one_hour_ns);
     d.start();
 
     const ImGuiWindow* w = d.window("###b");
@@ -251,8 +258,8 @@ TEST_CASE("a series browser row's Mini plot icon opens a card for that row",
     }
     /* The browser lists by label, so the EUR row comes first. */
     REQUIRE(asked.size() == 2);
-    require_mini_plot_for(asked[0], "s-1", "FX EUR/USD");
-    require_mini_plot_for(asked[1], "s-0", "FX GBP/USD");
+    require_mini_plot_for(asked[0], "s-1", "FX EUR/USD", one_hour_ns);
+    require_mini_plot_for(asked[1], "s-0", "FX GBP/USD", one_hour_ns);
 }
 
 TEST_CASE("clicking a card opens the chart for its series",
@@ -281,28 +288,75 @@ TEST_CASE("dragging on a card's tile opens no chart", "[mini_plot][open]") {
     const ImGuiWindow* w = d.window("###m");
     REQUIRE(w != nullptr);
     const ImVec2 at(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.6f);
+    const float left = w->Pos.x;
 
     d.drag(at, ImVec2(at.x + 60.0f, at.y + 40.0f));
     CHECK(d.take().empty());
+    CHECK(d.window("###m")->Pos.x > left + 20.0f);
 }
 
-TEST_CASE("a floating card is still moved by its title", "[mini_plot][open]") {
+TEST_CASE("a card has no title bar", "[mini_plot][open]") {
+    open_desk d;
+    add_card(d, "m", "s-3");
+    add_chart(d, "c", "s-3");
+    d.start();
+    const ImGuiWindow* card = d.window("###m");
+    const ImGuiWindow* chart = d.window("###c");
+    REQUIRE(card != nullptr);
+    REQUIRE(chart != nullptr);
+    CHECK((card->Flags & ImGuiWindowFlags_NoTitleBar) != 0);
+    CHECK((chart->Flags & ImGuiWindowFlags_NoTitleBar) == 0);
+    CHECK(card->TitleBarHeight == 0.0f);
+}
+
+TEST_CASE("a floating card is moved by dragging its body", "[mini_plot][open]") {
     open_desk d;
     add_card(d, "m", "s-3");
     d.start();
     const ImGuiWindow* w = d.window("###m");
     REQUIRE(w != nullptr);
     const ImVec2 before = w->Pos;
-    const ImVec2 title(w->Pos.x + w->Size.x * 0.5f,
-        w->Pos.y + ImGui::GetFrameHeight() * 0.5f);
+    const ImVec2 body(w->Pos.x + w->Size.x * 0.5f,
+        w->Pos.y + w->Size.y * 0.5f);
 
-    d.drag(title, ImVec2(title.x + 80.0f, title.y + 60.0f));
+    d.drag(body, ImVec2(body.x + 80.0f, body.y + 60.0f));
     d.settle();
     const ImGuiWindow* after = d.window("###m");
     REQUIRE(after != nullptr);
     CHECK(after->Pos.x > before.x + 40.0f);
     CHECK(after->Pos.y > before.y + 30.0f);
+    CHECK_FALSE(after->DockIsActive);
     CHECK(d.take().empty());
+}
+
+TEST_CASE("a floating card is closed from its context menu",
+    "[mini_plot][open]") {
+    open_desk d;
+    add_card(d, "m", "s-3");
+    d.start();
+    const ImGuiWindow* w = d.window("###m");
+    REQUIRE(w != nullptr);
+    const ImVec2 at(w->Pos.x + w->Size.x * 0.5f, w->Pos.y + w->Size.y * 0.5f);
+
+    d.hover(at);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+    d.frame();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+    d.frame();
+    d.frame();
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    REQUIRE(g.OpenPopupStack.Size == 1);
+    const ImGuiWindow* menu = g.OpenPopupStack[0].Window;
+    REQUIRE(menu != nullptr);
+    d.click(ImVec2(menu->Pos.x + menu->WindowPadding.x + 12.0f,
+        menu->Pos.y + menu->WindowPadding.y + ImGui::GetFontSize() * 0.5f));
+
+    bool closed = false;
+    for (auto& c : d.desk.commands.drain()) {
+        if (c.kind == command_kind::close_window)
+            closed = closed || c.window_id == "m";
+    }
+    CHECK(closed);
 }
 
 TEST_CASE("a docked card is still undocked by dragging its corner triangle",

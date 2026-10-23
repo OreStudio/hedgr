@@ -211,6 +211,11 @@ HEDGR_UI_EXPORT void draw_series_flags(const render_input& input,
     const hedgr::model::state::session_handle session, std::string_view label,
     float inset = 0.0f);
 
+/** @brief The width @c draw_series_flags takes, zero while no flag is loaded. */
+[[nodiscard]] HEDGR_UI_EXPORT float series_flags_width(
+    const render_input& input, hedgr::model::state::session_handle session,
+    std::string_view label);
+
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
 
@@ -244,12 +249,14 @@ HEDGR_UI_EXPORT void request_accounts_window(const render_input& input,
  * Chart and mini plot ids are derived from the series, so a second request for
  * a series already open focuses its window and makes no other. The series
  * browser, a chart's header and a mini plot card all open windows through this,
- * so there is one description of what opening a series means.
+ * so there is one description of what opening a series means. The span is
+ * what a new mini plot shows until a chart of the series sets it.
  */
 HEDGR_UI_EXPORT void request_series_window(const render_input& input,
     hedgr::model::state::session_handle session,
     hedgr::model::domain::window_kind kind, std::string_view series_id,
-    std::string_view label);
+    std::string_view label,
+    std::optional<std::int64_t> span_ns = std::nullopt);
 
 /**
  * @brief Asks for the Instances window.
