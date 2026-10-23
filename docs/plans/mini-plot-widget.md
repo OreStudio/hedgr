@@ -126,13 +126,29 @@ push the same one. The runtime half is `market_feed_tests` (watchers stay at
 one on a second open), which could not build here for the `producer_kind`
 break in the OreStudio tree.
 
-### 5. A grid from docking
+### 5. A grid from docking (done)
 
 Cards dock by dragging like any window. A node of cards hides its tab bar and
 gets a small default size so a first dock lands as a tile. Check: five cards
 docked into a split tree draw without overlap and keep their positions after a
 restart through `imgui.ini`. A "Tidy" action that lays cards out in a grid is
 not in this plan (D5).
+
+What differed. A card's window class sets the node flags HiddenTabBar,
+NoDockingOverMe, NoDockingOverOther and NoDockingOverEmpty. Set by the window
+class, the hidden bar cannot be shown again from its corner triangle. The three
+no-docking flags mean a drop on a card, or a card dropped on anything, splits
+instead of tabbing, and a card dropped on the empty desk centre is refused, so
+it must go to an edge or beside a tile. The class is unclassed, so cards still
+dock beside charts and a chart's node keeps its tabs. The tile size is ImGui's:
+a split takes the size of the dragged window, so a card (240x180) lands as a
+card-sized tile, not half. With no tab, a docked card is undocked by dragging
+its corner triangle and closed from a right-click menu (Close); a floating one
+keeps its title bar. There is no Dock icon on a card, so `dock_target` is
+unchanged. The tests dock five cards by the dock builder and check disjoint
+rects and a restart through the ini text, and drag a card onto another's middle
+and onto the empty centre. The edge drop's tile size is not tested, only read
+from ImGui's source.
 
 ## Decisions
 
