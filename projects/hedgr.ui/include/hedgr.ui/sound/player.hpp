@@ -24,7 +24,9 @@
 #include "hedgr.ui/export.hpp"
 #include <cstddef>
 #include <functional>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -87,6 +89,36 @@ public:
      */
     [[nodiscard]] std::size_t
     submit(std::span<const hedgr::model::signal::signal> signals);
+
+    /**
+     * @brief Decodes @p file ahead of time so starting it later is instant.
+     *
+     * For the one long file whose start has to line up with a picture. Call it
+     * after start(); on a silent host, or for a player with an injected sink,
+     * it does nothing. The file is the name sound_for answers, not a path.
+     */
+    void preload(std::string_view file);
+
+    /**
+     * @brief Starts the sound registered for @p signal_name now, on this thread.
+     *
+     * The queue is for sounds that are not time critical. This is for the one
+     * that is: it hands the file to the sink before returning, and returns the
+     * steady clock reading, in nanoseconds, taken after the sink returned, so
+     * the caller can start a clock that is known to be later than the sound.
+     * Nothing when the player is not started or the name has no registration.
+     */
+    [[nodiscard]] std::optional<std::int64_t>
+    start_now(std::string_view signal_name);
+
+    /**
+     * @brief How long a sample takes to reach the speaker after it is mixed.
+     *
+     * The output buffer's length, which is a floor on the delay between a
+     * sound starting and being heard. Zero for a player with no device of its
+     * own.
+     */
+    [[nodiscard]] std::int64_t output_latency_ns() const;
 
     /**
      * @brief Stops the worker and closes the device, waiting for both.

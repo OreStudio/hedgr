@@ -60,6 +60,9 @@ public:
     [[nodiscard]] ImTextureID svg(std::string_view image_id,
         std::string_view document, int width, int height) override;
 
+    [[nodiscard]] ImTextureID svg_glow(std::string_view image_id,
+        std::string_view document, int size, int inner, float sigma) override;
+
     /** @brief Starts a frame; textures used after this are pinned. */
     void begin_frame();
 

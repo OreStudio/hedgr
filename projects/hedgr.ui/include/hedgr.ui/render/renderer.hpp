@@ -441,6 +441,25 @@ struct image_texture_source {
         static_cast<void>(height);
         return 0;
     }
+
+    /**
+     * @brief The texture of an SVG's blurred silhouette, uploading it if needed.
+     *
+     * The document is rasterised at @p inner pixels square, centred on a
+     * @p size pixel canvas and blurred by @p sigma pixels (see
+     * image::rasterize_svg_glow), and the result is cached under its own key.
+     * It is the soft light of a glow, white with a blurred alpha. A source with
+     * no graphics context, or a document that does not parse, answers 0.
+     */
+    [[nodiscard]] virtual ImTextureID svg_glow(std::string_view image_id,
+        std::string_view document, int size, int inner, float sigma) {
+        static_cast<void>(image_id);
+        static_cast<void>(document);
+        static_cast<void>(size);
+        static_cast<void>(inner);
+        static_cast<void>(sigma);
+        return 0;
+    }
 };
 
 /**

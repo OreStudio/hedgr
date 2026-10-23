@@ -93,11 +93,15 @@ struct recording_sink final {
  * under it.
  */
 TEST_CASE("every registered name maps to its own short sound", "[sound]") {
-    REQUIRE(registrations().size() == 9);
+    REQUIRE(registrations().size() == 10);
 
     const auto started = sound_for(names::application_started);
     REQUIRE(started.has_value());
     CHECK(*started == "bong_001.wav");
+
+    const auto intro = sound_for(names::application_intro);
+    REQUIRE(intro.has_value());
+    CHECK(*intro == "intro_swell.wav");
 
     const auto hovered = sound_for(names::shortcut_hovered);
     REQUIRE(hovered.has_value());
@@ -162,6 +166,31 @@ TEST_CASE("the startup signal raised on the bus reaches the player as a file",
     REQUIRE(recorder->wait_for(1, std::chrono::seconds(5)));
     CHECK(recorder->files.at(0) == "bong_001.wav");
     CHECK(recorder->threads.at(0) != std::this_thread::get_id());
+
+    subject.stop();
+}
+
+TEST_CASE("the intro signal raised on the bus reaches the player as the swell",
+    "[sound][player]") {
+    auto recorder = std::make_shared<recording_sink>();
+    player subject([recorder](std::string_view file) { recorder->push(file); });
+    subject.start();
+    REQUIRE(subject.started());
+
+    (void)hedgr::model::signal::bus().drain();
+
+    signal intro;
+    intro.name = std::string(names::application_intro);
+    intro.detail = "Hedgr intro";
+    intro.at_ns = 1;
+    hedgr::model::signal::bus().raise(std::move(intro));
+
+    const auto drained = hedgr::model::signal::bus().drain();
+    REQUIRE(drained.size() == 1);
+    CHECK(subject.submit(drained) == 1);
+
+    REQUIRE(recorder->wait_for(1, std::chrono::seconds(5)));
+    CHECK(recorder->files.at(0) == "intro_swell.wav");
 
     subject.stop();
 }
@@ -290,4 +319,43 @@ TEST_CASE("a player with no output device stays silent and safe", "[sound][playe
     };
     CHECK_NOTHROW((void)subject.submit(signals));
     subject.stop();
+}
+
+TEST_CASE("start_now hands the sound to the sink on the caller's thread and returns after it",
+    "[sound][now]") {
+    std::vector<std::thread::id> threads;
+    std::vector<std::string> files;
+    std::int64_t sink_returned_ns = 0;
+    const auto steady = [] {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+    player p([&](std::string_view file) {
+        threads.push_back(std::this_thread::get_id());
+        files.emplace_back(file);
+        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        sink_returned_ns = steady();
+    });
+    p.start();
+
+    const auto at = p.start_now(names::application_intro);
+    REQUIRE(at.has_value());
+    /* Synchronous: the sink has already run, here, by the time this returns. */
+    REQUIRE(files.size() == 1);
+    CHECK(files[0] == "intro_swell.wav");
+    CHECK(threads[0] == std::this_thread::get_id());
+    CHECK(*at >= sink_returned_ns);
+}
+
+TEST_CASE("start_now does nothing for an unregistered name or a player that is not started",
+    "[sound][now]") {
+    int calls = 0;
+    player p([&](std::string_view) { ++calls; });
+    CHECK_FALSE(p.start_now(names::application_intro).has_value());
+    p.start();
+    CHECK_FALSE(p.start_now("no.such.name").has_value());
+    CHECK(calls == 0);
+    CHECK(p.output_latency_ns() == 0);
+    p.preload("intro_swell.wav");
+    CHECK(calls == 0);
 }

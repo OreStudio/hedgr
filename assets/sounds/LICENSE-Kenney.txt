@@ -1,4 +1,4 @@
-Sound effects in this directory are from Kenney's UI and interface packs, both
+Sound effects in this directory are from Kenney's UI, interface and sci-fi packs, both
 released under Creative Commons Zero (CC0). Attribution is not required, and
 the credit below is kept because the packs ask for it.
 
@@ -8,7 +8,12 @@ the credit below is kept because the packs ask for it.
   error_001.wav         Interface Sounds (1.0), by Kenney (www.kenney.nl)
   error_002.wav         Interface Sounds (1.0), by Kenney (www.kenney.nl)
   bong_001.wav          Interface Sounds (1.0), by Kenney (www.kenney.nl)
+  intro_swell.wav       Sci-Fi Sounds (1.0), by Kenney (www.kenney.nl), CC0:
+                        spaceEngineLow_000 as the swell and
+                        lowFrequency_explosion_000 as the impact, mixed with
+                        ffmpeg (see tools/make_intro_sound.sh)
 
+Downloaded from https://kenney.nl/assets/sci-fi-sounds (intro_swell.wav).
 Mirrored at:
   https://github.com/Calinou/kenney-ui-audio
   https://github.com/Calinou/kenney-interface-sounds
@@ -42,3 +47,13 @@ Support us by crediting Kenney or www.kenney.nl (this is not mandatory)
 Donate:   http://support.kenney.nl
 Patreon:  http://patreon.com/kenney/
 Follow on Twitter for updates: http://twitter.com/KenneyNL
+
+-------------------------------------------------------------------------------
+Sci-Fi Sounds (1.0), created/distributed by Kenney (www.kenney.nl)
+Creation date: 11-10-2020
+
+License: (Creative Commons Zero, CC0)
+http://creativecommons.org/publicdomain/zero/1.0/
+
+This content is free to use in personal, educational and commercial projects.
+Support us by crediting Kenney or www.kenney.nl (this is not mandatory)

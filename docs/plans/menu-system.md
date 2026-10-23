@@ -35,8 +35,8 @@ rest is plan.
   state dot, optional combos), and `widget/status_bar.hpp` holds a one-line
   message ladder (notice, problem, error) that a window renders itself. A
   bottom bar like the reference's would be new.
-- **The logo.** `render/splash.cpp` draws a splash from
-  `assets/branding/ore-studio-splash.png`. Nothing draws a small logo.
+- **The logo.** `render/intro.cpp` draws the launch intro
+  (the splash and its artwork are gone). Nothing draws a small logo.
 - **Docking and viewports.** `hedgr.imgui/src/app/application.cpp` enables
   docking and viewports. The desk is a full-work-area window with a dock space
   (`###hedgr-desk`), placed from `viewport->WorkPos` and `WorkSize`.
@@ -86,7 +86,7 @@ Each step is one PR, with tests, and leaves the app working.
      `menu_bar_entry` applies it to ImGui). A click on an open entry closes it
      because ImGui closes the popup at the press, which the rule accounts for.
      The logo's SVG is read once from `branding/` beside the library (the cmake
-     copy rule ships it with the splash) and reaches the GL cache through
+     copy rule ships it beside the intro) and reaches the GL cache through
      `image_texture_source::svg`. The black variant is unused, as the theme is
      dark only. Not checked in a real window.
 3. [x] **Traditional menus.** Decision change (user feedback on the reference):

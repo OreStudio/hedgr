@@ -61,7 +61,7 @@ consistency findings, tagged [ores].
 - Size: S
 
 ## UW-8 (med) [ores]. Four hand-rolled /proc/self/exe lookups; two of them break the non-Linux presets
-- File: projects/hedgr.imgui/src/app/application.cpp:444-455; projects/hedgr.ui/src/icon/fonts.cpp:41-61; projects/hedgr.ui/src/sound/player.cpp:61-81; projects/hedgr.ui/src/render/splash.cpp:48 (fourth copy, outside this scope)
+- File: projects/hedgr.imgui/src/app/application.cpp:444-455; projects/hedgr.ui/src/icon/fonts.cpp:41-61; projects/hedgr.ui/src/sound/player.cpp:61-81; projects/hedgr.ui/src/render/menu_bar.cpp (logo_svg_path, since the splash lookup was removed)
 - OreStudio: /home/marco/Development/OreStudio/ores_dev_solid_dirac/projects/ores.platform/include/ores.platform/process/executable.hpp (`ores::platform::process::executable_path()`, implemented for Linux, macOS and Windows in ores.platform/src/process/executable.cpp:41-52)
 - Defect: `executable_directory()` plus `first_existing()` are duplicated verbatim in three files, and application.cpp has a fourth variant. That variant uses the throwing `fs::read_symlink` overload and passes `path.c_str()` to `stbi_load`.
 - Failure: CMakePresets.json ships windows-msvc-* and macos-clang-* presets. On macOS `/proc/self/exe` does not exist, so `read_symlink` throws `filesystem_error` out of `initialise_graphics`, and the app exits before the first frame. On Windows `path::c_str()` is `const wchar_t*` and `stbi_load` does not compile. The asset candidate lists also drift between copies.

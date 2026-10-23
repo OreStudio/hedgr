@@ -24,7 +24,7 @@
 #include "hedgr.imgui/app/gl_texture.hpp"
 #include "hedgr.imgui/app/image_texture_cache.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
-#include "hedgr.ui/render/splash.hpp"
+#include "hedgr.ui/render/intro.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/sound/player.hpp"
 #include <filesystem>
@@ -78,7 +78,9 @@ private:
     void load_background_texture();
     void load_instance_icon_textures();
     void release_instance_icon_textures();
-    void load_splash_texture();
+    void load_intro_logo();
+    /** @brief Warms the intro, starts its sound, then starts its clock. */
+    void launch_intro();
     void render_loop(GLFWwindow* window);
     void toggle_fullscreen(GLFWwindow* window);
     void capture_frame(GLFWwindow* window);
@@ -112,14 +114,15 @@ private:
     ui::render::instance_icon_textures instance_icons_;
     image_texture_cache textures_;
     /*
-     * The splash artwork, decoded and uploaded once like the background. The
-     * timing is a value so the policy lives in hedgr.ui and the application
-     * only says how long the run has been going and whether the store is open.
+     * The launch intro's logo document, read once. The timing is a value so
+     * the policy lives in hedgr.ui and the application only says how long the
+     * run has been going and whether anything has ended the intro.
      */
-    unsigned int splash_texture_ = 0;
-    int splash_width_ = 0;
-    int splash_height_ = 0;
-    ui::render::splash_timing splash_;
+    std::string intro_logo_svg_;
+    ui::render::intro_timing intro_;
+    bool intro_allowed_ = false;
+    bool intro_launched_ = false;
+    bool intro_first_frame_logged_ = false;
     int windowed_x_ = 0;
     int windowed_y_ = 0;
     int windowed_width_ = 1280;
