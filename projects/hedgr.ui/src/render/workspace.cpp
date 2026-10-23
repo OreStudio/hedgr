@@ -621,8 +621,25 @@ void workspace::render(const render_input& input) {
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
         }
+        /*
+         * A window docked in the desk draws no fill of its own: ImGui rounds
+         * it only where it meets the dock space's edge, so the desk paints
+         * its card (paint_dock_cards). Nor a scrollbar track, which ImGui
+         * squares at the same corners and would show over the card's. Read
+         * from last frame, as a window is not docked until it has been begun.
+         */
+        const bool bare = !card
+            && docked_in(ImGui::FindWindowByName(begin_label_.c_str()),
+                dock_space_);
+        if (bare) {
+            ImGui::SetNextWindowBgAlpha(0.0f);
+            ImGui::PushStyleColor(ImGuiCol_ScrollbarBg,
+                ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        }
         const bool begun = ImGui::Begin(begin_label_.c_str(),
             closable ? &keep_open : nullptr, window_flags);
+        if (bare)
+            ImGui::PopStyleColor();
         if (card)
             ImGui::PopStyleVar(3);
         if (!begun) {
@@ -815,12 +832,21 @@ void workspace::draw_dock_space(const render_input& input) {
         ImVec2(hedgr::ui::theme::tab_spacing,
             ImGui::GetStyle().ItemInnerSpacing.y));
     ImGui::PushStyleColor(ImGuiCol_Text, hedgr::ui::theme::tab_label_colour());
-    ImGui::PushStyleColor(ImGuiCol_TitleBg,
-        hedgr::ui::theme::tab_bar_colour());
-    ImGui::PushStyleColor(ImGuiCol_TitleBgActive,
-        hedgr::ui::theme::tab_bar_colour());
+    /*
+     * Clear, because ImGui fills the strip behind the tabs, the whole space
+     * (the Passthru flag) and the splitter gaps in these colours with square
+     * corners, and rules each gap in the border colour. paint_dock_cards
+     * paints the strip and the body rounded instead. A splitter still shows
+     * under the pointer, in the resize grip colours.
+     */
+    ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
         ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::PopStyleColor(2);
+    hedgr::ui::theme::paint_dock_cards(dock_space_);
     /* ImGui paints each tab flat; the fade is laid over its vertices here. */
     hedgr::ui::theme::shade_dock_tabs();
     ImGui::PopStyleColor(3);

@@ -246,6 +246,7 @@ void apply_theme() {
     style.TabBarBorderSize = 1.0f;
     style.TabBarOverlineSize = 0.0f;
     style.ScrollbarRounding = 6.0f;
+    style.DockingSeparatorSize = hedgr::ui::theme::dock_gap;
     style.WindowBorderSize = 1.0f;
     style.FrameBorderSize = 1.0f;
     style.ScrollbarSize = 10.0f;
@@ -696,6 +697,33 @@ void shade_dock_tabs() {
                 ImVec2(left, bar.BarRect.Min.y),
                 ImVec2(left + tab.Width, foot));
         }
+    }
+}
+
+void paint_dock_cards(ImGuiID dock_space) {
+    const ImGuiContext& g = *ImGui::GetCurrentContext();
+    const ImU32 body = ImGui::GetColorU32(ImGuiCol_WindowBg);
+    const ImU32 strip = ImGui::ColorConvertFloat4ToU32(tab_bar);
+    for (const ImGuiStoragePair& pair : g.DockContext.Nodes.Data) {
+        const auto* node = static_cast<const ImGuiDockNode*>(pair.val_p);
+        if (node == nullptr || !node->IsLeafNode() || !node->IsVisible
+            || node->HostWindow == nullptr || node->Windows.empty()
+            || ImGui::DockNodeGetRootNode(const_cast<ImGuiDockNode*>(node))->ID
+                != dock_space)
+            continue;
+        ImDrawList* const draw = node->HostWindow->DrawList;
+        const bool has_strip = node->TabBar != nullptr && !node->IsHiddenTabBar();
+        const ImVec2 end(node->Pos.x + node->Size.x, node->Pos.y + node->Size.y);
+        const float top = has_strip ? node->TabBar->BarRect.Max.y : node->Pos.y;
+        /* A host window keeps channel 0 for backgrounds and 1 for its tabs. */
+        draw->ChannelsSetCurrent(0);
+        if (has_strip)
+            draw->AddRectFilled(node->Pos, ImVec2(end.x, top), strip,
+                dock_rounding, ImDrawFlags_RoundCornersTop);
+        draw->AddRectFilled(ImVec2(node->Pos.x, top), end, body, dock_rounding,
+            has_strip ? ImDrawFlags_RoundCornersBottom
+                      : ImDrawFlags_RoundCornersAll);
+        draw->ChannelsSetCurrent(1);
     }
 }
 

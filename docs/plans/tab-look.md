@@ -53,6 +53,37 @@ are ImGui's. The fade runs between the solid vertices, which sit half a pixel
 inside the shape, so the head stop lands on the top edge and the sampled fill
 on the bottom edge. It adds no vertices and allocates nothing.
 
+## Docked panes as cards
+
+Floating windows round at 8 px through `WindowRounding`; docked ones were square.
+ImGui (v1.92.9b docking) draws a docked window's fill into its dock node's host
+window and rounds it only at the corners it shares with the dock space
+(`CalcRoundingFlagsForRectInRect(bg_rect, host->Rect(), 0)`), so a pane beside
+another stays square. With `PassthruCentralNode` the space also paints its whole
+rect in `WindowBg` behind the panes, rules each splitter in the border colour,
+and fills the tab strip with `TitleBg` at square corners. None of that has a
+style knob, and the vendored sources are not patched.
+
+What the desk does instead:
+
+- `DockingSeparatorSize` is `theme::dock_gap` (6 px), the room between panes.
+- Around `DockSpace` the desk pushes a clear `TitleBg`, `TitleBgActive`,
+  `WindowBg` and `Border`, so ImGui paints no strip, space fill or splitter rule.
+  A splitter still shows under the pointer, in the resize grip colours.
+- `paint_dock_cards` then paints each docked leaf node of the desk's space into
+  its host window's background channel: the strip (`tab_bar`) rounded at the top,
+  the body (`WindowBg`) rounded at the bottom, or at all four corners when the
+  node shows no strip. The radius is `theme::dock_rounding`, the tab's 6 px, so
+  the first tab's corner sits in the strip's.
+- A window docked in the desk is begun with a zero background alpha and a clear
+  `ScrollbarBg` (read from last frame's dock state), so its own square fill and
+  scrollbar track do not show over the card.
+- A window docked in a floating node, and every floating window, is unchanged.
+
+Not verified in a window: how the gap and the 6 px corners read on a monitor, the
+splitter highlight, and a drag over the desk. The body is the flat `WindowBg`, as
+before, not the gradient floating windows get.
+
 ## Where it differs
 
 - The hover fill `#84719F` is derived: the reference shows no hovered tab. It is
