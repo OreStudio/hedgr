@@ -122,7 +122,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     }
 
     ImGui::SetNextItemWidth(320.0f);
-    ImGui::InputTextWithHint("##filter", "filter by series, asset or URI",
+    ImGui::InputTextWithHint("##filter", "filter by series, asset, provider or URI",
         state.filter.data(), state.filter.size());
     ImGui::SameLine();
     if (ImGui::Button(icon::refresh))
@@ -130,10 +130,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             .kind = command_kind::refresh_window,
             .window_id = std::string{input.windows.id(handle)}});
     ImGui::SetItemTooltip("Read the series catalogue again");
-    ImGui::SameLine();
-    ImGui::Checkbox("Synthetic only", &state.market_synthetic_only);
-    ImGui::SetItemTooltip("%s",
-        "Show only series a synthetic feed produced");
     const auto* catalogue = input.market.catalogue(
         input.sessions.instance_id(*session),
         input.sessions.account_id(*session));
@@ -312,8 +308,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         update_series_browser_view(state.series_view,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
-                .party = state.market_party_id,
-                .synthetic_only = state.market_synthetic_only},
+                .party = state.market_party_id},
             rows);
         const auto& curves = state.series_view.rows;
 
@@ -367,7 +362,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("Tenors",
                 ImGuiTableColumnFlags_WidthFixed, 70.0f);
-            ImGui::TableSetupColumn("Source",
+            ImGui::TableSetupColumn("Provider",
                 ImGuiTableColumnFlags_WidthFixed, 110.0f);
             ImGui::TableHeadersRow();
             for (const auto at : curves) {
@@ -397,7 +392,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TableNextColumn();
                 ImGui::TextDisabled("%zu", std::size_t{1});
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", curve.producer_kind.c_str());
+                ImGui::TextDisabled("%s", curve.provider_code.c_str());
             }
             ImGui::EndTable();
         }
@@ -417,8 +412,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     update_series_browser_view(state.series_view,
         {.generation = generation, .filter = filter,
             .asset_class = state.market_asset_class,
-            .party = state.market_party_id,
-            .synthetic_only = state.market_synthetic_only},
+            .party = state.market_party_id},
         rows);
     const auto& visible = state.series_view.rows;
 
@@ -427,7 +421,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TextDisabled("No series match the filters.");
         ImGui::SameLine();
         if (ImGui::SmallButton("Clear filters")) {
-            state.market_synthetic_only = false;
             std::fill(state.filter.begin(), state.filter.end(), '\0');
         }
     }
@@ -487,7 +480,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::TableSetupColumn("Series", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthFixed,
             80.0f);
-        ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed,
+        ImGui::TableSetupColumn("Provider", ImGuiTableColumnFlags_WidthFixed,
             110.0f);
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableHeadersRow();
@@ -521,7 +514,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TableNextColumn();
                 ImGui::TextDisabled("%s", row->asset_class.c_str());
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", row->producer_kind.c_str());
+                ImGui::TextDisabled("%s", row->provider_code.c_str());
             }
         }
         ImGui::EndTable();

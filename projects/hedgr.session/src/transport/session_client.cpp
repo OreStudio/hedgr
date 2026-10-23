@@ -47,6 +47,7 @@
 #include "ores.nats/domain/wire_format.hpp"
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "hedgr.session/market/series_label.hpp"
+#include "hedgr.session/market/series_summary.hpp"
 #include "hedgr.session/transport/observation_page.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "ores.nats/service/request_helpers.hpp"
@@ -1278,21 +1279,12 @@ session_client::market_series(std::uint32_t limit) const {
         std::vector<market_series_summary> rows;
         rows.reserve(answer->market_series.size());
         for (const auto& row : answer->market_series) {
-            rows.push_back(market_series_summary{
-                .id = boost::uuids::to_string(row.id),
-                .oresmd_uri = row.oresmd_uri,
-                .label = market::series_label(row.oresmd_uri),
-                .asset_class = market::series_asset_class(row.oresmd_uri),
-                .producer_kind = row.producer_kind,
-                .party_id = boost::uuids::to_string(row.party_id),
-                .tenor = market::series_term(row.oresmd_uri),
-                .curve_key = market::series_curve_key(row.oresmd_uri),
-                .curve_label = market::series_curve_label(row.oresmd_uri)});
+            rows.push_back(market::summarise_series(row));
         }
         std::sort(rows.begin(), rows.end(),
             [](const market_series_summary& a, const market_series_summary& b) {
-                return std::tie(a.asset_class, a.label)
-                    < std::tie(b.asset_class, b.label);
+                return std::tie(a.asset_class, a.label, a.provider_code)
+                    < std::tie(b.asset_class, b.label, b.provider_code);
             });
 
         BOOST_LOG_SEV(lg(), ores::logging::info)

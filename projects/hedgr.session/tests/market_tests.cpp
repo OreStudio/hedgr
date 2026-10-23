@@ -18,12 +18,14 @@
  *
  */
 #include "hedgr.session/market/series_label.hpp"
+#include "hedgr.session/market/series_summary.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.marketdata.api/datum/market_datum.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.marketdata.core/datum/oresmd_uri_codec.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <boost/uuid/string_generator.hpp>
 #include <chrono>
 
 namespace market = hedgr::session::market;
@@ -195,4 +197,37 @@ TEST_CASE("a tick payload with no number is refused", "[tick]") {
 
     REQUIRE_FALSE(
         hedgr::session::market::decode_tick({}).has_value());
+}
+
+TEST_CASE("a catalogue row carries the series' own id, provider and party",
+    "[market][catalogue]") {
+    const boost::uuids::string_generator uuid;
+    ores::marketdata::domain::market_series series;
+    series.id = uuid("11111111-1111-1111-1111-111111111111");
+    series.party_id = uuid("22222222-2222-2222-2222-222222222222");
+    series.oresmd_uri =
+        "oresmd://ir/GBP?type=series&instrument=ir_swap&quote=rate&fwd_start=0D&tenor=1D";
+    series.provider_code = "ore";
+
+    const auto row = market::summarise_series(series);
+    REQUIRE(row.id == "11111111-1111-1111-1111-111111111111");
+    REQUIRE(row.party_id == "22222222-2222-2222-2222-222222222222");
+    REQUIRE(row.oresmd_uri == series.oresmd_uri);
+    REQUIRE(row.provider_code == "ore");
+    REQUIRE(row.asset_class == "IR");
+    REQUIRE(row.label == "IR GBP 1D");
+    REQUIRE(row.tenor == "1D");
+
+    /*
+     * One item held by one party under two providers is two series, and the
+     * catalogue lists both: the id differs, the URI and the party do not.
+     */
+    auto other = series;
+    other.id = uuid("33333333-3333-3333-3333-333333333333");
+    other.provider_code = "bloomberg";
+    const auto second = market::summarise_series(other);
+    REQUIRE(second.id != row.id);
+    REQUIRE(second.oresmd_uri == row.oresmd_uri);
+    REQUIRE(second.party_id == row.party_id);
+    REQUIRE(second.provider_code == "bloomberg");
 }

@@ -32,20 +32,19 @@ namespace render = hedgr::ui::render;
 
 domain::market_series_row row(std::string id, std::string label,
     std::string asset_class = "FX", std::string tenor = "1Y",
-    std::string party = "p1", std::string producer = "SYNTHETIC") {
+    std::string party = "p1", std::string provider = "ore") {
     return domain::market_series_row{.id = std::move(id),
         .uri = "uri/" + label, .label = std::move(label),
         .asset_class = std::move(asset_class),
-        .producer_kind = std::move(producer), .party_id = std::move(party),
+        .provider_code = std::move(provider), .party_id = std::move(party),
         .tenor = std::move(tenor)};
 }
 
 render::series_browser_query query(std::uint64_t generation,
     std::string_view filter = {}, std::string_view asset_class = {},
-    std::string_view party = {}, bool synthetic_only = false) {
+    std::string_view party = {}) {
     return {.generation = generation, .filter = filter,
-        .asset_class = asset_class, .party = party,
-        .synthetic_only = synthetic_only};
+        .asset_class = asset_class, .party = party};
 }
 
 std::vector<std::string> ids(const render::series_browser_view& view,
@@ -71,10 +70,10 @@ TEST_CASE("the series view orders by tenor and then label", "[browser][view]") {
     CHECK(ids(view, catalogue) == strings{"d", "c", "b", "a"});
 }
 
-TEST_CASE("the series view matches the filter on label, class, uri and source",
+TEST_CASE("the series view matches the filter on label, class, uri and provider",
     "[browser][view]") {
     const std::vector catalogue{row("a", "GBP/USD", "FX"),
-        row("b", "EUR/USD", "RATES", "1Y", "p1", "ORE"),
+        row("b", "EUR/USD", "RATES", "1Y", "p1", "bloomberg"),
         row("c", "SONIA", "IR")};
     render::series_browser_view view;
     render::update_series_browser_view(view, query(1, "gbp"), catalogue);
@@ -83,7 +82,21 @@ TEST_CASE("the series view matches the filter on label, class, uri and source",
     CHECK(ids(view, catalogue) == strings{"b"});
     render::update_series_browser_view(view, query(1, "uri/son"), catalogue);
     CHECK(ids(view, catalogue) == strings{"c"});
-    render::update_series_browser_view(view, query(1, "ore"), catalogue);
+    render::update_series_browser_view(view, query(1, "bloom"), catalogue);
+    CHECK(ids(view, catalogue) == strings{"b"});
+}
+
+TEST_CASE("two providers of one item are two rows of the series view",
+    "[browser][view]") {
+    const std::vector catalogue{row("a", "GBP/USD", "FX", "1Y", "p1", "ore"),
+        row("b", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
+    render::series_browser_view view;
+    render::update_series_browser_view(view, query(1, "gbp"), catalogue);
+    CHECK(ids(view, catalogue) == strings{"a", "b"});
+    render::update_series_browser_view(view, query(1, "gbp", "FX", "p1"),
+        catalogue);
+    CHECK(ids(view, catalogue) == strings{"a", "b"});
+    render::update_series_browser_view(view, query(1, "bloomberg"), catalogue);
     CHECK(ids(view, catalogue) == strings{"b"});
 }
 
@@ -101,7 +114,7 @@ TEST_CASE("the series view is kept while the query is unchanged",
 TEST_CASE("each part of the query rebuilds the series view on its own",
     "[browser][view]") {
     const std::vector catalogue{row("a", "A", "FX", "1Y", "p1"),
-        row("b", "B", "FX", "1Y", "p2", "ORE"),
+        row("b", "B", "FX", "1Y", "p2", "bloomberg"),
         row("c", "C", "RATES", "1Y", "p1")};
     const auto from_base = [&](const render::series_browser_query& changed,
                                const strings& expected) {
@@ -114,7 +127,6 @@ TEST_CASE("each part of the query rebuilds the series view on its own",
     from_base(query(1, "b"), {"b"});
     from_base(query(1, "", "RATES"), {"c"});
     from_base(query(1, "", "", "p2"), {"b"});
-    from_base(query(1, "", "", "", true), {"a", "c"});
     from_base(query(2), {"a", "b", "c"});
 }
 

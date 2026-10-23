@@ -58,7 +58,7 @@ std::size_t texture_asks_over(std::size_t rows) {
         catalogue.push_back(model::domain::market_series_row{
             .id = std::format("s-{}", i),
             .label = std::format("FX GBP/USD {:05}", i),
-            .asset_class = "FX", .producer_kind = "SYNTHETIC"});
+            .asset_class = "FX", .provider_code = "ore"});
     }
     desk.market.apply_catalogue("i", "a", std::move(catalogue));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
@@ -613,7 +613,7 @@ std::vector<model::domain::market_series_row> browser_catalogue(
             .uri = std::format("fx/gbpusd/{}", i),
             .label = std::format("FX GBP/USD {:05}", i),
             .asset_class = i % 7 == 0 ? "RATES" : "FX",
-            .producer_kind = "SYNTHETIC",
+            .provider_code = "ore",
             .party_id = i % 5 == 0 ? "p2" : "p1",
             .tenor = i % 3 == 0 ? "1M" : "1Y"});
     }
@@ -735,7 +735,7 @@ listed_row draw_listed_row(desk& desk, std::string_view asset_class,
     desk.market.apply_catalogue("i", "a",
         {model::domain::market_series_row{.id = "s-0", .uri = "oresmd://s-0",
             .label = std::string{label}, .asset_class = std::string{asset_class},
-            .producer_kind = "SYNTHETIC", .curve_key = "s-0",
+            .provider_code = "ore", .curve_key = "s-0",
             .curve_label = std::string{label}}});
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});

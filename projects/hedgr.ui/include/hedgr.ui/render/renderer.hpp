@@ -324,15 +324,6 @@ struct window_ui_state final {
     command_centre_ui_state command_centre;
 
     /**
-     * @brief Whether the series chooser lists only synthetic series.
-     *
-     * Off by default: a deployment may hold only vendor series, and a chooser
-     * that opens empty because of a filter nobody set reads as a chooser with
-     * no series at all.
-     */
-    bool market_synthetic_only = false;
-
-    /**
      * @brief The party whose series this window lists.
      *
      * Empty until the window resolves it, which it does from the session's own

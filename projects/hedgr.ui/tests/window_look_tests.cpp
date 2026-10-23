@@ -265,7 +265,7 @@ struct browser_fixture final : window_fixture {
                 .uri = std::format("fx/gbpusd/{}", i),
                 .label = std::format("FX GBP/USD {:02}", i),
                 .asset_class = classes[i % 4],
-                .producer_kind = "SYNTHETIC"});
+                .provider_code = "ore"});
         }
         desk.market.apply_catalogue("i", "a", std::move(rows));
         window = desk.open(model::domain::window_kind::series_browser,
