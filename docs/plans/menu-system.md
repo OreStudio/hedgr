@@ -98,7 +98,8 @@ Each step is one PR, with tests, and leaves the app working.
 3. [x] **Traditional menus.** Decision change (user feedback on the reference):
    the logo is a plain brand mark, not a menu, and the top-level menus lead
    instead, as in the reference. The logo keeps an "ORE Studio" hover tooltip.
-   The bar is shaded with a gradient (decision 11) and holds, right of the
+   The bar is a translucent, rounded plate with a left to right gradient
+   (decision 11) and holds, right of the
    logo, FILE, VIEW, TOOLS and HELP, each one `widget::menu_bar_label` call.
    - FILE: Instances, a separator, Lock store, Unlock store or Create store by
      the lock state, a separator, Quit. Instances moves here from the system
@@ -118,8 +119,8 @@ Each step is one PR, with tests, and leaves the app working.
    - Notes. The labels are as tall as the bar, so their popups open flush under
      its edge (`menu_label` takes a height). The cool bar keeps its Instances and
      Undock all entries until step 9. Not checked in a real window. The label
-     face is the proportional sans, as decision 6; the reference's monospace
-     is still to do.
+     face was the proportional sans at first; it is now the bundled monospace
+     (decisions 6 and 11).
 4. **The toolbar.** A floating capsule over the desk, not a fixed strip,
    styled like the reference's schematic toolbar: a rounded capsule with a purple
    outline holding a row of flat icon buttons, a small grip handle at its left
@@ -187,9 +188,11 @@ Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to conf
    (FILE, VIEW, TOOLS, HELP) and Instances under FILE.
 5. **Shortcuts.** Decided: the catalogue shortcuts become a pinned row at the
    top of the Instances panel. The ImCoolBar tile bar is retired in step 9.
-6. **Label font.** Recommend the proportional sans first, with upper case and
-   letter spacing (done in step 1), and a bundled monospace later, as the tab
-   look does.
+6. **Label font.** Decided (user feedback): the menu chrome is set in the
+   reference's monospace, JetBrains Mono (SIL OFL 1.1), bundled under
+   `assets/fonts` with `JetBrainsMono-OFL.txt`. It covers the bar's labels,
+   every menu popup's rows and headings, and the desk's dock tab labels. The
+   body font is unchanged. See decision 11.
 7. **Status bar contents.** Recommend the message ladder at the left and the
    connection state at the right. The reference's licence, build, ping and FPS
    rows are copied only where Hedgr has the data.
@@ -205,10 +208,32 @@ Decided by the user: 1, 4, 5, 9, 10 and 11. The rest are recommendations to conf
     recommendation: open chart, open mini plot, CRM, accounts and undock all as
     momentary buttons, and no mode buttons until the chart has modes to choose
     between.
-11. **The bar's look.** Decided: a gradient, in the reference's dark navy violet.
-    It is two `theme::fill_gradient` fills over the window's own fill, one across
-    (lighter at the left) and one down (a black wash growing toward the
-    hairline), with the colours in `theme.hpp`.
+11. **The bar's look.** Decided from measurements of the reference
+    (`572312177-...png`, 1600 by 900), then revised after the user saw PR #100.
+    - Gradient. Sampled along the bar's row at twenty places, the colour is
+      #3D364C at the far left, falls in a straight line to #1A1A24 at about a
+      quarter of the width (x 400), and stays flat to #1C1C26 at the right edge.
+      Down the bar it does not change at any x, so there is no vertical wash.
+      The three stops are `theme::menu_bar_stops`; `theme::fill_stops` draws
+      them (a triangle fan cannot bend at a stop, so it draws one clipped span
+      per pair of stops, each vertex coloured from `stops_colour`).
+    - Opacity. Every stop and the hairline carry `theme::menu_bar_alpha`
+      (0.85), so the wallpaper shows faintly through the plate. The wallpaper
+      is on `GetBackgroundDrawList`, behind every window, and the bar window
+      sets `NoBackground`, so nothing opaque sits between them.
+    - Shape. The reference's bar is not rounded or inset: it runs edge to edge,
+      about 50 px tall, with no outline. Its rounded pieces are the SCHEMATIC
+      pill and the window-control box at the right. The user asked for rounded
+      corners, so the plate is a rounded rectangle (`menu_bar_rounding`, 10 px)
+      inset by `menu_bar_margin` (6 px) on all four sides. The bar window is
+      `menu_bar_extent` (plate height plus a margin above and below) high, so
+      the work-area inset counts the margin once and the dock space starts at
+      the window's bottom. Setting the margin to 0 gives the reference's
+      flush bar back.
+    - Font. The letterforms of FPS: 127.5, Cursor World and the tab labels
+      read as JetBrains Mono (tall x-height, squared curves, wide even
+      advance), judged by eye from the picture; no other family was compared.
+    - Not checked in a real window.
 
 ## Risks
 

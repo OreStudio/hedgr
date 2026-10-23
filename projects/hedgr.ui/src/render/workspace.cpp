@@ -28,6 +28,7 @@
 #include "hedgr.ui/widget/password_meter.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
@@ -798,8 +799,16 @@ void workspace::draw_dock_space(const render_input& input) {
     dock_space_ = ImGui::GetID("desk");
     if (move_ && move_->into_desk)
         move_->to = dock_target(dock_space_);
+    /*
+     * The dock nodes' tab bars are submitted inside this call and take the
+     * font in force, which is how their labels get the reference's monospace
+     * without a hook per tab. Windows docked here draw their bodies later, in
+     * their own Begin, so their text keeps the base face.
+     */
+    ImGui::PushFont(icon::mono_font());
     ImGui::DockSpace(dock_space_, ImVec2(0.0f, 0.0f),
         ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::PopFont();
     ImGui::End();
 }
 

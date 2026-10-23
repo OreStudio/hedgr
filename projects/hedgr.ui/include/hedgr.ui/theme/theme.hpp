@@ -29,6 +29,7 @@
 #include "imgui.h"
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace hedgr::ui::theme {
 
@@ -175,6 +176,12 @@ struct gradient final {
     ImU32 to = 0;
 };
 
+/** @brief A colour in a left to right run, @c at being its share of the width. */
+struct gradient_stop final {
+    float at = 0.0f;
+    ImU32 colour = 0;
+};
+
 /** @brief The direction a gradient runs: top to bottom, or left to right. */
 enum class axis : std::uint8_t { vertical, horizontal };
 
@@ -218,6 +225,28 @@ inline constexpr unsigned int band_fade_faint_alpha = 0x05;
 HEDGR_UI_EXPORT void fill_gradient(ImDrawList* draw, ImVec2 min, ImVec2 max,
     gradient colours, axis direction, float rounding,
     ImDrawFlags flags = ImDrawFlags_None);
+
+/**
+ * @brief The colour of a left to right run of @p stops at @p t, from 0 to 1.
+ *
+ * Straight lines between neighbouring stops, the first colour before the first
+ * stop and the last after the last.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT ImU32 stops_colour(
+    std::span<const gradient_stop> stops, float t) noexcept;
+
+/**
+ * @brief Fills the rounded rectangle @p min to @p max with @p stops running
+ * from left to right.
+ *
+ * A fan of triangles cannot bend at a stop, so the rectangle is drawn once per
+ * span between stops, each time clipped to its span, and every vertex takes
+ * its colour from @c stops_colour at its own place. A span's rectangle runs a
+ * little past its clip so the antialiased fringe of a seam is cut away rather
+ * than drawn twice.
+ */
+HEDGR_UI_EXPORT void fill_stops(ImDrawList* draw, ImVec2 min, ImVec2 max,
+    std::span<const gradient_stop> stops, float rounding);
 
 /**
  * @brief Where the parent's draw list ended before a child was begun.
@@ -411,28 +440,54 @@ inline constexpr float menu_label_spacing_share = 0.08f;
 inline constexpr float menu_label_padding_x = 10.0f;
 
 /**
- * @brief The window fill under the top bar's gradient, and the colour it
- * shows if the gradient is not drawn. A hairline of @c menu_border runs along
- * the bar's bottom edge.
+ * @brief How much of the desk behind the top bar is hidden by it, from 0 to 1.
+ *
+ * The bar is a very dark tint laid over the wallpaper, not a wall in front of
+ * it, so the data wall shows through faintly. Every stop of the gradient and the
+ * outline carry this alpha.
  */
-[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_bar_surface() noexcept;
+inline constexpr float menu_bar_alpha = 0.85f;
 
-/*
- * The bar's tint is a navy violet that is lighter at the left, where the
- * reference's logo sits, and deeper to the right, with a black wash that
- * thickens toward the hairline.
+/** @brief An opaque bar colour at the bar's alpha. */
+[[nodiscard]] constexpr ImU32 menu_bar_tint(
+    unsigned int r, unsigned int g, unsigned int b) noexcept {
+    return IM_COL32(r, g, b,
+        static_cast<unsigned int>(menu_bar_alpha * 255.0f + 0.5f));
+}
+
+/**
+ * @brief The reference's bar: a violet grey at the far left (#3D364C) that fades
+ * in a straight line to the page colour (#1A1A24) a quarter of the way across
+ * and then stays flat to the right edge (#1C1C26). Sampled along the bar's
+ * row at twenty places; the reference has no wash from top to bottom.
  */
-inline constexpr ImU32 menu_bar_gradient_left = IM_COL32(0x1d, 0x1a, 0x3a, 255);
-inline constexpr ImU32 menu_bar_gradient_right = IM_COL32(0x10, 0x12, 0x20, 255);
-inline constexpr ImU32 menu_bar_shade_top = IM_COL32(0, 0, 0, 0);
-inline constexpr ImU32 menu_bar_shade_bottom = IM_COL32(0, 0, 0, 0x58);
-inline constexpr gradient menu_bar_across{
-    .from = menu_bar_gradient_left, .to = menu_bar_gradient_right};
-inline constexpr gradient menu_bar_down{
-    .from = menu_bar_shade_top, .to = menu_bar_shade_bottom};
+inline constexpr gradient_stop menu_bar_stops[] = {
+    {0.00f, menu_bar_tint(0x3d, 0x36, 0x4c)},
+    {0.25f, menu_bar_tint(0x1a, 0x1a, 0x24)},
+    {1.00f, menu_bar_tint(0x1c, 0x1c, 0x26)},
+};
 
-/** @brief The height of the top bar, which is also the side of the logo button. */
+/** @brief The hairline round the bar's plate: @c menu_border at the bar's alpha. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 menu_bar_edge() noexcept;
+
+/** @brief The height of the bar's plate, which is also the side of the logo button. */
 inline constexpr float menu_bar_height = 40.0f;
+
+/** @brief The corner radius of the bar's plate. */
+inline constexpr float menu_bar_rounding = 10.0f;
+
+/**
+ * @brief The gap between the plate and the viewport's top, left and right
+ * edges, and below it. The reference's bar runs edge to edge, so this is the
+ * operator's request; zero gives the reference back.
+ */
+inline constexpr float menu_bar_margin = 6.0f;
+
+/**
+ * @brief The height the bar takes from the work area: the plate and its margin
+ * above and below, counted once. The dock space starts this far down.
+ */
+inline constexpr float menu_bar_extent = menu_bar_height + 2.0f * menu_bar_margin;
 
 /** @brief The room between the logo button's edge and the swirl drawn in it. */
 inline constexpr float menu_bar_logo_padding = 9.0f;

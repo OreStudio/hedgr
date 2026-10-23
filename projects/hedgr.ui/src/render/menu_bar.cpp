@@ -244,24 +244,28 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
     bool desk_docked, widget::menu_bar_state& state, menu_bar_result& result) {
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration
         | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse
-        | ImGuiWindowFlags_NoBringToFrontOnFocus;
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        | ImGuiWindowFlags_NoBringToFrontOnFocus
+        | ImGuiWindowFlags_NoBackground;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
+        ImVec2(theme::menu_bar_margin, theme::menu_bar_margin));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, theme::menu_bar_surface());
     const bool visible = ImGui::BeginViewportSideBar("###hedgr-menu-bar",
-        ImGui::GetMainViewport(), ImGuiDir_Up, theme::menu_bar_height, flags);
-    ImGui::PopStyleColor();
+        ImGui::GetMainViewport(), ImGuiDir_Up, theme::menu_bar_extent, flags);
     ImGui::PopStyleVar(2);
     if (visible) {
+        /*
+         * The window has no fill of its own: the plate is drawn here, translucent,
+         * over the wallpaper that the workspace put on the background list.
+         */
         const ImVec2 at = ImGui::GetWindowPos();
         const ImVec2 size = ImGui::GetWindowSize();
-        const ImVec2 end(at.x + size.x, at.y + size.y);
-        /* Across first, then a wash down, both over the window's own fill. */
+        const ImVec2 plate_min(at.x + theme::menu_bar_margin,
+            at.y + theme::menu_bar_margin);
+        const ImVec2 plate_max(at.x + size.x - theme::menu_bar_margin,
+            at.y + size.y - theme::menu_bar_margin);
         ImDrawList* const draw = ImGui::GetWindowDrawList();
-        theme::fill_gradient(draw, at, end, theme::menu_bar_across,
-            theme::axis::horizontal, 0.0f);
-        theme::fill_gradient(draw, at, end, theme::menu_bar_down,
-            theme::axis::vertical, 0.0f);
+        theme::fill_stops(draw, plate_min, plate_max, theme::menu_bar_stops,
+            theme::menu_bar_rounding);
 
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
         draw_logo(input, logo_svg);
@@ -284,9 +288,10 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
             }, height);
         }
 
-        /* The hairline along the bottom edge, drawn over the fill. */
-        draw->AddLine(ImVec2(at.x, end.y - 0.5f), ImVec2(end.x, end.y - 0.5f),
-            u32(theme::menu_border()));
+        /* The hairline round the plate, drawn over the fill. */
+        draw->AddRect(ImVec2(plate_min.x + 0.5f, plate_min.y + 0.5f),
+            ImVec2(plate_max.x - 0.5f, plate_max.y - 0.5f),
+            u32(theme::menu_bar_edge()), theme::menu_bar_rounding);
         ImGui::PopStyleVar();
     }
     ImGui::End();
