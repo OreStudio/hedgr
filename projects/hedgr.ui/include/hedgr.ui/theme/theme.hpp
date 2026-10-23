@@ -27,6 +27,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
+#include <cstddef>
 #include <cstdint>
 
 namespace hedgr::ui::theme {
@@ -355,6 +356,30 @@ inline constexpr float plot_label_padding_y = 8.0f;
 
 /** @brief How many labels the bottom axis shows. */
 inline constexpr int plot_x_label_count = 4;
+
+/** @brief The corner radius of a mini plot card. */
+inline constexpr float mini_plot_rounding = 8.0f;
+
+/** @brief A card's padding as a share of its shorter side, and the bounds. */
+inline constexpr float mini_plot_padding_share = 0.07f;
+inline constexpr float mini_plot_padding_min = 6.0f;
+inline constexpr float mini_plot_padding_max = 14.0f;
+
+/** @brief The gap between a card's rows, as a share of the font size. */
+inline constexpr float mini_plot_gap_share = 0.25f;
+
+/**
+ * @brief The least height the line gets, as a share of the card.
+ *
+ * A card too short for it draws the line behind its text instead.
+ */
+inline constexpr float mini_plot_line_share = 0.2f;
+
+/** @brief The points a card's line is reduced to, whatever the series holds. */
+inline constexpr std::size_t mini_plot_point_budget = 96;
+
+/** @brief The alpha of the fill under the line at the curve. */
+inline constexpr float mini_plot_fill_alpha = 0.32f;
 
 /** @brief The corner radius of a segmented control and of its chosen segment. */
 inline constexpr float segment_rounding = 6.0f;

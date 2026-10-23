@@ -327,6 +327,10 @@ void caption(std::string_view text, std::string_view help) {
     help_tooltip(help);
 }
 
+float headline_height() {
+    return std::ceil(bold_at(headline_scale).size);
+}
+
 void headline_value(std::string_view text) {
     const face f = bold_at(headline_scale);
     const ImVec2 size(headline_width(f, text), std::ceil(f.size));
