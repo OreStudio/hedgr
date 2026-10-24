@@ -1,7 +1,7 @@
 {
     "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
     "name": "hedgr",
-    "version-semver": "0.3.0",
+    "version-semver": "0.3.1",
     "description": "Multi-instance ImGui/ImPlot client for OreStudio.",
     "dependencies": [
         {

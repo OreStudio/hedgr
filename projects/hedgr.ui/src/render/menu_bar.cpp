@@ -125,13 +125,17 @@ void draw_file_menu(const render_input& input, menu_bar_result& result) {
 }
 
 /**
- * @brief VIEW: Undock all, live only while something is docked, and the
- * Toolbar row, lit while the floating toolbar is shown.
+ * @brief VIEW: Undock all, live only while something is docked, the Toolbar
+ * row, lit while the floating toolbar is shown, and the Full screen row, lit
+ * while the window is full screen.
  */
 void draw_view_menu(const render_input& input, bool desk_docked,
     menu_bar_result& result) {
     if (widget::menu_item_row({.label = "Undock all", .enabled = desk_docked}))
         result.undock_all = true;
+    if (widget::menu_item_row({.label = "Full screen", .shortcut = "F11",
+            .selected = input.fullscreen}))
+        result.fullscreen_toggled = true;
     auto& visible = input.market_view.toolbar_visible;
     if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
         visible = !visible;

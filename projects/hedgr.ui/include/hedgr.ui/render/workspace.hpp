@@ -31,6 +31,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace hedgr::ui::render {
@@ -96,6 +97,16 @@ public:
      */
     [[nodiscard]] bool exit_requested() const noexcept {
         return exit_requested_;
+    }
+
+    /**
+     * @brief Whether the operator chose Full screen since the last call.
+     *
+     * Cleared by the read, because the frame loop acts on it once and a
+     * toggle left set would flip the window back on the next frame.
+     */
+    [[nodiscard]] bool take_fullscreen_toggle() noexcept {
+        return std::exchange(fullscreen_toggled_, false);
     }
 
     /**
@@ -220,6 +231,9 @@ private:
 
     /** @brief Set by the top bar's Quit row. */
     bool exit_requested_ = false;
+
+    /** @brief Whether Full screen was chosen and the loop has not acted yet. */
+    bool fullscreen_toggled_ = false;
 
     /** @brief The move asked for this frame, and the one to do this frame. */
     std::optional<dock_move> next_move_;

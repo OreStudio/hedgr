@@ -614,11 +614,21 @@ TEST_CASE("VIEW: Toolbar flips whether the floating toolbar is shown",
     bar_harness h;
     REQUIRE(h.desk.market_view.toolbar_visible);
     h.open_menu("View");
-    h.click(bar_harness::row_centre(1));
+    h.click(bar_harness::row_centre(2));
     CHECK_FALSE(h.desk.market_view.toolbar_visible);
     h.open_menu("View");
-    h.click(bar_harness::row_centre(1));
+    h.click(bar_harness::row_centre(2));
     CHECK(h.desk.market_view.toolbar_visible);
+}
+
+TEST_CASE("VIEW: Full screen asks the application to switch full screen",
+    "[menu_bar][view]") {
+    bar_harness h;
+    h.open_menu("View");
+    REQUIRE(bar_harness::popup_open("View"));
+    h.click(bar_harness::row_centre(1));
+    CHECK(h.result.fullscreen_toggled);
+    CHECK_FALSE(h.result.undock_all);
 }
 
 TEST_CASE("TOOLS: Series browser opens the browser of the signed-in session",
