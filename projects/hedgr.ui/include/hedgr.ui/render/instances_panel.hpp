@@ -34,10 +34,10 @@ namespace hedgr::ui::render {
  * the shown and total counts, and a scrolling grid with one tile per instance:
  * its photo, or a glyph when it has none, its name, and a dot in the colour of
  * its probe state. A pick on a shortcut does what the removed shortcut bar did.
- * A pick on an instance opens or raises the Instances window, which has no
- * selection to drive from here. Either closes the popup unless Ctrl is held,
- * so several can be picked. A store with no instances, and a filter that
- * matches none, draw the no data mark with the words in its tooltip.
+ * A pick on an instance raises the Instances window and selects that instance
+ * in it. Either closes the popup unless Ctrl is held, so several can be picked.
+ * A store with no instances, and a filter that matches none, draw the no data
+ * mark with the words in its tooltip.
  *
  * Call it only while the popup is open. The filter is cleared and focused each
  * time the panel opens, which it knows from @c state.shown.

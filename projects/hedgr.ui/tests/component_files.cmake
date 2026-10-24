@@ -8,6 +8,7 @@
 # version.
 #
 set(files
+    "accounts_panel_tests.cpp"
     "capture_tests.cpp"
     "cells_tests.cpp"
     "chart_history_tests.cpp"

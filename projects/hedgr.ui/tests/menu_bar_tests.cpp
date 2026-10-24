@@ -19,15 +19,19 @@
  */
 #include "headless_desk.hpp"
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/domain/account.hpp"
 #include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/render/menu_bar.hpp"
+#include "hedgr.ui/render/status_bar.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "hedgr.ui/widget/menu_bar.hpp"
+#include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "software_raster.hpp"
@@ -130,7 +134,7 @@ struct bar_harness final {
             for (float x = 2.0f; x < 800.0f; x += 2.0f) {
                 hover(ImVec2(x, theme::menu_bar_extent * 0.5f));
                 for (const char* n :
-                    {"File", "View", "Instances", "Tools", "Help"}) {
+                    {"File", "View", "Instances", "Accounts", "Tools", "Help"}) {
                     const ImGuiID id = ImHashStr("##label", 0,
                         ImHashStr(n, 0, bar->ID));
                     if (GImGui->HoveredId != id)
@@ -489,19 +493,22 @@ TEST_CASE("clicking away closes the open menu", "[menu_bar]") {
     CHECK(h.state.open == menu_bar_state::none);
 }
 
-TEST_CASE("the bar leads with File, View, Instances, Tools and Help in that order",
+TEST_CASE("the bar leads with File, View, Instances, Accounts, Tools and Help in "
+          "that order",
     "[menu_bar]") {
     bar_harness h;
     const auto file = h.label("File");
     const auto view = h.label("View");
     const auto instances = h.label("Instances");
+    const auto accounts = h.label("Accounts");
     const auto tools = h.label("Tools");
     const auto help = h.label("Help");
-    REQUIRE((file && view && instances && tools && help));
+    REQUIRE((file && view && instances && accounts && tools && help));
     CHECK(file->x > theme::menu_bar_height);
     CHECK(file->x < view->x);
     CHECK(view->x < instances->x);
-    CHECK(instances->x < tools->x);
+    CHECK(instances->x < accounts->x);
+    CHECK(accounts->x < tools->x);
     CHECK(tools->x < help->x);
 }
 
@@ -511,7 +518,7 @@ TEST_CASE("hovering across the real labels moves the open menu", "[menu_bar]") {
     REQUIRE(bar_harness::popup_open("File"));
     h.hover(*h.label("Tools"));
     h.settle();
-    CHECK(h.state.open == 3);
+    CHECK(h.state.open == 4);
     CHECK(bar_harness::popup_open("Tools"));
     CHECK_FALSE(bar_harness::popup_open("File"));
     h.hover(*h.label("Help"));
@@ -653,14 +660,6 @@ void add_instance(bar_harness& h, const char* id, const char* name) {
     static_cast<void>(h.desk.instances.upsert(row));
 }
 
-void pin_accounts(bar_harness& h, const char* instance_id) {
-    model::domain::shortcut row;
-    row.id = std::string("accounts-") + instance_id;
-    row.target_kind = model::domain::window_kind::accounts;
-    row.target_id = instance_id;
-    h.desk.shortcuts.upsert(row);
-}
-
 /** @brief The signals raised since the last call. */
 std::vector<model::signal::signal> drained_signals() {
     return model::signal::bus().drain();
@@ -668,119 +667,17 @@ std::vector<model::signal::signal> drained_signals() {
 
 }
 
-TEST_CASE("TOOLS: Accounts is a submenu row with the session's instance first",
-    "[menu_bar][tools]") {
-    bar_harness h;
-    add_instance(h, "i", "inst");
-    h.open_menu("Tools");
-    h.click(bar_harness::row_centre(1));
-    h.settle();
-    /* The child panel is the top of the popup stack, beside the TOOLS panel. */
-    REQUIRE(GImGui->OpenPopupStack.Size == 2);
-    h.click(bar_harness::row_centre(0));
-    const auto commands = h.commands();
-    REQUIRE(commands.size() == 1);
-    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
-    CHECK(commands[0].instance_id == "i");
-}
-
-TEST_CASE("TOOLS > Accounts lists one row per accounts shortcut, once each",
-    "[menu_bar][tools]") {
-    bar_harness h;
-    add_instance(h, "i", "inst");
-    add_instance(h, "j", "other");
-    add_instance(h, "k", "third");
-    pin_accounts(h, "j");
-    pin_accounts(h, "i");
-    pin_accounts(h, "k");
-    /* A second shortcut to the same instance adds no second row. */
-    model::domain::shortcut twin;
-    twin.id = "accounts-j-again";
-    twin.target_kind = model::domain::window_kind::accounts;
-    twin.target_id = "j";
-    h.desk.shortcuts.upsert(twin);
-    model::domain::shortcut surface;
-    surface.id = "instances";
-    surface.target_kind = model::domain::window_kind::instance_manager;
-    h.desk.shortcuts.upsert(surface);
-    h.open_menu("Tools");
-    h.click(bar_harness::row_centre(1));
-    h.settle();
-    REQUIRE(GImGui->OpenPopupStack.Size == 2);
-    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
-    const float row = ImGui::GetTextLineHeight()
-        + 2.0f * theme::menu_row_padding_y;
-    /* i (the session's), j, k: three rows tall and no more. */
-    CHECK(panel->Size.y == Catch::Approx(2.0f * theme::menu_padding
-        + 3.0f * row + 2.0f * theme::menu_row_gap).margin(1.0f));
-    /* Beside the Accounts row, not under it. */
-    const ImGuiWindow* tools = GImGui->OpenPopupStack[0].Window;
-    CHECK(panel->Pos.x >= tools->Pos.x + tools->Size.x
-        - theme::menu_padding - 0.5f);
-
-    h.click(bar_harness::row_centre(2));
-    const auto commands = h.commands();
-    REQUIRE(commands.size() == 1);
-    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
-    CHECK(commands[0].instance_id == "k");
-}
-
-TEST_CASE("TOOLS > Accounts: a pick raises the activation signal and closes the "
-          "menu",
-    "[menu_bar][tools]") {
-    bar_harness h;
-    add_instance(h, "i", "inst");
-    h.open_menu("Tools");
-    h.click(bar_harness::row_centre(1));
-    h.settle();
-    static_cast<void>(drained_signals());
-    h.click(bar_harness::row_centre(0));
-    const auto raised = drained_signals();
-    REQUIRE(raised.size() == 1);
-    CHECK(raised[0].name == model::signal::names::shortcut_activated);
-    CHECK(raised[0].detail == "Open the accounts of inst");
-    CHECK(GImGui->OpenPopupStack.Size == 0);
-}
-
-TEST_CASE("TOOLS > Accounts is disabled with no session and no shortcut",
-    "[menu_bar][tools]") {
-    bar_harness h;
-    h.desk.sessions.set_status(h.desk.session,
-        model::domain::session_status::disconnected);
-    h.open_menu("Tools");
-    h.click(bar_harness::row_centre(1));
-    h.settle();
-    CHECK(GImGui->OpenPopupStack.Size == 1);
-    CHECK(h.commands().empty());
-}
-
-TEST_CASE("TOOLS > Accounts still lists the shortcuts of a signed-out store",
-    "[menu_bar][tools]") {
-    bar_harness h;
-    h.desk.sessions.set_status(h.desk.session,
-        model::domain::session_status::disconnected);
-    add_instance(h, "j", "other");
-    pin_accounts(h, "j");
-    h.open_menu("Tools");
-    h.click(bar_harness::row_centre(1));
-    h.settle();
-    h.click(bar_harness::row_centre(0));
-    const auto commands = h.commands();
-    REQUIRE(commands.size() == 1);
-    CHECK(commands[0].instance_id == "j");
-}
-
 TEST_CASE("TOOLS: Command centre is there for an administrator's session only",
     "[menu_bar][tools]") {
     bar_harness h;
     h.open_menu("Tools");
-    h.click(bar_harness::row_centre(2));
+    h.click(bar_harness::row_centre(1));
     CHECK(h.commands().empty());
 
     h.desk.sessions.set_mode(h.desk.session,
         model::domain::session_mode::system_administration);
     h.open_menu("Tools");
-    h.click(bar_harness::row_centre(2));
+    h.click(bar_harness::row_centre(1));
     const auto commands = h.commands();
     REQUIRE(commands.size() == 1);
     CHECK(commands[0].new_window_kind
@@ -794,7 +691,6 @@ TEST_CASE("TOOLS: with no signed-in session its rows are disabled",
         model::domain::session_status::disconnected);
     h.open_menu("Tools");
     h.click(bar_harness::row_centre(0));
-    h.click(bar_harness::row_centre(1));
     CHECK(h.commands().empty());
 }
 
@@ -915,9 +811,9 @@ TEST_CASE("a menu's rows are drawn only while it is open", "[menu_bar]") {
     CHECK(bar.rows_a == 0);
 }
 
-TEST_CASE("the work area is inset by the bar exactly once, and the desk starts "
-          "at its bottom",
-    "[menu_bar][workspace]") {
+TEST_CASE("the work area is inset by the top and bottom bars exactly once, and "
+          "the desk fills what is left",
+    "[menu_bar][workspace][status_bar]") {
     headless_imgui imgui;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     desk desk;
@@ -930,23 +826,25 @@ TEST_CASE("the work area is inset by the bar exactly once, and the desk starts "
     }
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const ImGuiWindow* bar = ImGui::FindWindowByName(bar_window);
+    const ImGuiWindow* strip = ImGui::FindWindowByName("###hedgr-status-bar");
     const ImGuiWindow* space = ImGui::FindWindowByName("###hedgr-desk");
     REQUIRE(bar != nullptr);
+    REQUIRE(strip != nullptr);
     REQUIRE(space != nullptr);
     const float bar_bottom = bar->Pos.y + bar->Size.y;
+    const float strip_top = strip->Pos.y;
     CHECK(bar_bottom == Catch::Approx(theme::menu_bar_height
         + 2.0f * theme::menu_bar_margin));
+    CHECK(strip_top == Catch::Approx(viewport->Size.y
+        - theme::status_bar_height));
     CHECK(viewport->WorkPos.y == Catch::Approx(bar_bottom));
     CHECK(space->Pos.y == Catch::Approx(bar_bottom));
-    CHECK(viewport->WorkSize.y
-        == Catch::Approx(viewport->Size.y - theme::menu_bar_extent));
-    /* Nothing is inset at the foot: the desk ends at the viewport's edge. */
-    CHECK(viewport->WorkSize.y + viewport->WorkPos.y
-        == Catch::Approx(viewport->Size.y));
-    CHECK(space->Pos.y + space->Size.y == Catch::Approx(viewport->Size.y));
+    CHECK(viewport->WorkSize.y == Catch::Approx(viewport->Size.y
+        - theme::menu_bar_extent - theme::status_bar_height));
+    CHECK(space->Pos.y + space->Size.y == Catch::Approx(strip_top));
 }
 
-TEST_CASE("pinned shortcuts draw nothing at the foot and inset nothing",
+TEST_CASE("pinned shortcuts add no foot of their own and no second inset",
     "[menu_bar][workspace]") {
     headless_imgui imgui;
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -963,10 +861,11 @@ TEST_CASE("pinned shortcuts draw nothing at the foot and inset nothing",
         workspace.render(input);
         ImGui::Render();
     }
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiWindow* strip = ImGui::FindWindowByName("###hedgr-status-bar");
     const ImGuiWindow* space = ImGui::FindWindowByName("###hedgr-desk");
+    REQUIRE(strip != nullptr);
     REQUIRE(space != nullptr);
-    CHECK(space->Pos.y + space->Size.y == Catch::Approx(viewport->Size.y));
+    CHECK(space->Pos.y + space->Size.y == Catch::Approx(strip->Pos.y));
     CHECK(ImGui::FindWindowByName("##hedgr-shortcuts") == nullptr);
 }
 
@@ -1423,6 +1322,31 @@ TEST_CASE("a tile click raises the Instances window, says so, and closes the pan
     CHECK(raised[0].name == model::signal::names::shortcut_activated);
     CHECK(raised[0].detail == "Open the Instances window on Beta");
     CHECK(GImGui->OpenPopupStack.Size == 0);
+
+    /* The raised window shows the picked instance's pane. */
+    auto input = h.desk.input();
+    render::window_ui_state ui;
+    widget::status_bar status;
+    render::lock_control lock;
+    const auto window = h.desk.open(model::domain::window_kind::instance_manager,
+        model::domain::notice_state{}, "instance-manager");
+    hedgr::testing::frame([&] {
+        render::render_instances_window(window, input, ui, status, lock);
+    });
+    CHECK(ui.browser.selected_leaf == "b-2");
+}
+
+TEST_CASE("tiles are drawn in name order, not the table's", "[menu_bar][instances_panel]") {
+    bar_harness h;
+    add_instance(h, "z-1", "Zeta");
+    add_instance(h, "a-1", "Alpha");
+    h.open_menu("Instances");
+    const auto alpha = h.desk.instances.find("a-1");
+    const auto zeta = h.desk.instances.find("z-1");
+    REQUIRE((alpha && zeta));
+    REQUIRE(h.state.instances.matches.size() == 2);
+    CHECK(h.state.instances.matches[0] == alpha->index);
+    CHECK(h.state.instances.matches[1] == zeta->index);
 }
 
 TEST_CASE("a Ctrl-click on tiles picks each and leaves the panel open",
@@ -1533,4 +1457,377 @@ TEST_CASE("no instances and no filter match both draw the no data mark and no ti
         CHECK(h.state.instances.total == 2);
         CHECK(vertices_of(quiet) > 0);
     }
+}
+
+namespace {
+
+void add_account(bar_harness& h, const char* id, const char* instance_id,
+    const char* name, const char* principal) {
+    model::domain::account row;
+    row.id = id;
+    row.instance_id = instance_id;
+    row.name = name;
+    row.principal = principal;
+    static_cast<void>(h.desk.accounts.upsert(row));
+}
+
+/** @brief Records the tenant IAM answered for an account's last sign-in. */
+void give_tenant(bar_harness& h, const char* instance_id, const char* account_id,
+    const char* tenant) {
+    const auto found = h.desk.sessions.find(instance_id, account_id);
+    const auto session = found ? *found
+                               : h.desk.sessions.insert(instance_id, account_id);
+    h.desk.sessions.set_account_result(session, tenant, "Party", "pid",
+        model::domain::secret_string{"token"});
+}
+
+}
+
+TEST_CASE("the ACCOUNTS panel is the themed large size, capped to the work area",
+    "[menu_bar][accounts_panel]") {
+    {
+        bar_harness h;
+        h.open_menu("Accounts");
+        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+        CHECK(panel->Size.x == Catch::Approx(theme::accounts_panel_width));
+        CHECK(panel->Size.y == Catch::Approx(theme::accounts_panel_height));
+    }
+    {
+        bar_harness h;
+        ImGui::GetIO().DisplaySize = ImVec2(500.0f, 400.0f);
+        h.open_menu("Accounts");
+        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+        CHECK(panel->Size.x < theme::accounts_panel_width);
+        CHECK(panel->Size.y < theme::accounts_panel_height);
+        CHECK(panel->Pos.x >= 0.0f);
+        CHECK(panel->Pos.y >= 0.0f);
+        CHECK(panel->Pos.x + panel->Size.x <= 500.0f + 0.5f);
+        CHECK(panel->Pos.y + panel->Size.y <= 400.0f + 0.5f);
+    }
+}
+
+TEST_CASE("the ACCOUNTS panel groups accounts by the tenant of their last "
+          "sign-in, no tenant last",
+    "[menu_bar][accounts_panel]") {
+    bar_harness h;
+    add_instance(h, "i", "Inst");
+    add_instance(h, "j", "Other");
+    add_account(h, "a-ops", "i", "Ops", "ops@acme");
+    give_tenant(h, "i", "a-ops", "Acme");
+    add_account(h, "a-admin", "i", "Admin", "admin@acme");
+    give_tenant(h, "i", "a-admin", "Acme");
+    add_account(h, "a-other", "j", "Other", "other@beta");
+
+    h.open_menu("Accounts");
+    REQUIRE(h.state.accounts.entries.size() == 3);
+    CHECK(h.state.accounts.total == 3);
+    CHECK(h.state.accounts.entries[0].name == "Admin");
+    CHECK(h.state.accounts.entries[0].tenant == "Acme");
+    CHECK(h.state.accounts.entries[0].instance == "Inst");
+    CHECK(h.state.accounts.entries[1].name == "Ops");
+    CHECK(h.state.accounts.entries[1].tenant == "Acme");
+    CHECK(h.state.accounts.entries[2].name == "Other");
+    CHECK(h.state.accounts.entries[2].tenant.empty());
+}
+
+TEST_CASE("typing in the ACCOUNTS filter narrows by name, principal, instance "
+          "or tenant",
+    "[menu_bar][accounts_panel]") {
+    bar_harness h;
+    add_instance(h, "i", "Inst");
+    add_account(h, "a-ops", "i", "Ops", "ops@acme");
+    give_tenant(h, "i", "a-ops", "Acme");
+
+    h.open_menu("Accounts");
+    REQUIRE(h.state.accounts.entries.size() == 1);
+
+    ImGui::GetIO().AddInputCharactersUTF8("acme");
+    h.settle();
+    CHECK(h.state.accounts.entries.size() == 1);
+
+    ImGui::GetIO().AddInputCharactersUTF8("-zzz");
+    h.settle();
+    CHECK(h.state.accounts.entries.empty());
+    CHECK(h.state.accounts.total == 1);
+}
+
+TEST_CASE("the ACCOUNTS panel opens with an empty filter each time",
+    "[menu_bar][accounts_panel]") {
+    bar_harness h;
+    add_instance(h, "i", "Inst");
+    add_account(h, "a-ops", "i", "Ops", "ops@acme");
+
+    h.open_menu("Accounts");
+    ImGui::GetIO().AddInputCharactersUTF8("zzz");
+    h.settle();
+    REQUIRE(h.state.accounts.entries.empty());
+
+    h.state.open = menu_bar_state::none;
+    h.settle();
+    h.open_menu("Accounts");
+    CHECK(std::string(h.state.accounts.filter.text).empty());
+    CHECK(h.state.accounts.entries.size() == 1);
+}
+
+TEST_CASE("an ACCOUNTS pick opens that instance's window, selects the account "
+          "and closes the panel",
+    "[menu_bar][accounts_panel]") {
+    bar_harness h;
+    add_instance(h, "i", "Inst");
+    add_account(h, "a-admin", "i", "Admin", "admin@acme");
+    give_tenant(h, "i", "a-admin", "Acme");
+
+    h.open_menu("Accounts");
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    /*
+     * The row sits in the list child, so its id is the row id seeded by the
+     * child's own id. Take that id from the child window ImGui made rather than
+     * reconstruct it, then sweep the panel for the row.
+     */
+    const ImGuiWindow* child = nullptr;
+    for (ImGuiWindow* window : GImGui->Windows)
+        if (window->ParentWindow == panel) {
+            child = window;
+            break;
+        }
+    REQUIRE(child != nullptr);
+    const ImGuiID target =
+        ImHashStr("##account", 0, ImHashStr("a-admin", 0, child->ID));
+    std::optional<ImVec2> at;
+    for (float y = panel->Pos.y + theme::menu_padding;
+         y < panel->Pos.y + panel->Size.y; y += 2.0f) {
+        h.hover(ImVec2(panel->Pos.x + 30.0f, y));
+        if (GImGui->HoveredId == target) {
+            at = ImVec2(panel->Pos.x + 30.0f, y);
+            break;
+        }
+    }
+    REQUIRE(at.has_value());
+    h.click(*at);
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].kind == model::command::command_kind::open_window);
+    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
+    CHECK(commands[0].instance_id == "i");
+
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].name == model::signal::names::shortcut_activated);
+    CHECK(raised[0].detail == "Open the accounts of Inst");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+
+    /* The window the request opens shows the picked account's cards. */
+    auto input = h.desk.input();
+    render::window_ui_state ui;
+    widget::status_bar status;
+    render::lock_control lock;
+    const auto window = h.desk.open(model::domain::window_kind::accounts,
+        model::domain::accounts_state{"i"}, "accounts-i");
+    hedgr::testing::frame([&] {
+        render::render_accounts_window(window, input, ui, status, lock);
+    });
+    CHECK(ui.browser.selected_leaf == "a-admin");
+}
+
+TEST_CASE("no accounts and a filter that matches none both draw the no data mark",
+    "[menu_bar][accounts_panel]") {
+    const ImU32 quiet = theme::view_quiet_colour;
+    {
+        bar_harness h;
+        h.open_menu("Accounts");
+        CHECK(h.state.accounts.entries.empty());
+        CHECK(vertices_of(quiet) > 0);
+    }
+    {
+        bar_harness h;
+        add_instance(h, "i", "Inst");
+        add_account(h, "a-ops", "i", "Ops", "ops@acme");
+        h.open_menu("Accounts");
+        CHECK(vertices_of(quiet) == 0);
+        ImGui::GetIO().AddInputCharactersUTF8("zzz");
+        h.settle();
+        CHECK(h.state.accounts.entries.empty());
+        CHECK(h.state.accounts.total == 1);
+        CHECK(vertices_of(quiet) > 0);
+    }
+}
+
+namespace {
+
+/** @brief The child window the open popup made, which holds its rows. */
+const ImGuiWindow* popup_child() {
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    for (ImGuiWindow* window : GImGui->Windows)
+        if (window->ParentWindow == panel)
+            return window;
+    return nullptr;
+}
+
+/** @brief Sweeps @p x down the open popup for @p target, and returns its y. */
+std::optional<float> find_popup_row(bar_harness& h, float x, ImGuiID target) {
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    for (float y = panel->Pos.y; y < panel->Pos.y + panel->Size.y; y += 2.0f) {
+        h.hover(ImVec2(x, y));
+        if (GImGui->HoveredId == target)
+            return y;
+    }
+    return std::nullopt;
+}
+
+void open_windows_list(bar_harness& h) {
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(3));
+    h.settle();
+}
+
+}
+
+TEST_CASE("VIEW: Windows is disabled while no window is open",
+    "[menu_bar][view][windows]") {
+    bar_harness h;
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(3));
+    h.settle();
+    CHECK(GImGui->OpenPopupStack.Size == 1);
+}
+
+TEST_CASE("VIEW > Windows raises the window its row names",
+    "[menu_bar][view][windows]") {
+    bar_harness h;
+    static_cast<void>(h.desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "One", .series_id = "s1"},
+        "w-one"));
+    static_cast<void>(h.desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "Two", .series_id = "s2"},
+        "w-two"));
+    open_windows_list(h);
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const ImGuiWindow* child = popup_child();
+    REQUIRE(child != nullptr);
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    const ImGuiID target =
+        ImHashStr("##raise", 0, ImHashStr("w-two", 0, child->ID));
+    const auto y = find_popup_row(h, panel->Pos.x + 30.0f, target);
+    REQUIRE(y.has_value());
+    h.click(ImVec2(panel->Pos.x + 30.0f, *y));
+    CHECK(h.result.focus_window == "w-two");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("VIEW > Windows closes a window through its x",
+    "[menu_bar][view][windows]") {
+    bar_harness h;
+    static_cast<void>(h.desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "One", .series_id = "s1"},
+        "w-one"));
+    open_windows_list(h);
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const ImGuiWindow* child = popup_child();
+    REQUIRE(child != nullptr);
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    const ImGuiID target = ImHashStr("x", 0, ImHashStr("w-one", 0, child->ID));
+    const float x = panel->Pos.x + panel->Size.x - theme::menu_padding
+        - ImGui::GetFrameHeight() * 0.5f;
+    const auto y = find_popup_row(h, x, target);
+    REQUIRE(y.has_value());
+    static_cast<void>(h.commands());
+    h.click(ImVec2(x, *y));
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].kind == model::command::command_kind::close_window);
+    CHECK(commands[0].window_id == "w-one");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("the status strip reads the connection state of the sessions",
+    "[menu_bar][status_bar]") {
+    headless_imgui imgui;
+    theme::apply_theme();
+    desk desk;
+    auto input = desk.input();
+    widget::status_bar status;
+    const auto draw = [&] {
+        ImGui::NewFrame();
+        render::draw_status_bar(input, status);
+        ImGui::Render();
+    };
+    draw();
+    draw();
+    const ImGuiWindow* strip = ImGui::FindWindowByName("###hedgr-status-bar");
+    REQUIRE(strip != nullptr);
+    CHECK(strip->Size.y == Catch::Approx(theme::status_bar_height));
+    CHECK(strip->Pos.y + strip->Size.y
+        == Catch::Approx(ImGui::GetMainViewport()->Size.y));
+    CHECK(vertices_of(theme::status_colour(
+              model::domain::session_status::authenticated)) > 0);
+
+    desk.sessions.set_status(desk.session,
+        model::domain::session_status::failed);
+    draw();
+    draw();
+    CHECK(vertices_of(theme::failure_colour) > 0);
+
+    /* A wall with no session at all says so in the quiet colour. */
+    desk.sessions.clear();
+    draw();
+    draw();
+    CHECK(vertices_of(u32(theme::dim_text())) > 0);
+}
+
+TEST_CASE("the status strip carries the message ladder in its severity's colour",
+    "[menu_bar][status_bar]") {
+    headless_imgui imgui;
+    theme::apply_theme();
+    desk desk;
+    desk.sessions.set_status(desk.session,
+        model::domain::session_status::disconnected);
+    auto input = desk.input();
+    input.now_ns = 1000;
+    widget::status_bar status;
+    const auto draw = [&] {
+        ImGui::NewFrame();
+        render::draw_status_bar(input, status);
+        ImGui::Render();
+    };
+
+    status.show_error("the store refused the write", 1000);
+    draw();
+    CHECK(vertices_of(theme::failure_colour) > 0);
+
+    status.clear_error();
+    status.show_condition("still reading the deployment", 2000,
+        widget::status_severity::problem);
+    input.now_ns = 2000;
+    draw();
+    CHECK(vertices_of(theme::warning_colour) > 0);
+}
+
+TEST_CASE("VIEW > Windows closes every mini plot at once",
+    "[menu_bar][view][windows]") {
+    bar_harness h;
+    static_cast<void>(h.desk.open(model::domain::window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "One", .series_id = "s1"},
+        "m-one"));
+    static_cast<void>(h.desk.open(model::domain::window_kind::mini_plot,
+        model::domain::mini_plot_state{.label = "Two", .series_id = "s2"},
+        "m-two"));
+    open_windows_list(h);
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const ImGuiWindow* child = popup_child();
+    REQUIRE(child != nullptr);
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    const ImGuiID target = ImHashStr("##row", 0,
+        ImHashStr("Close all mini plots", 0, child->ID));
+    const auto y = find_popup_row(h, panel->Pos.x + 30.0f, target);
+    REQUIRE(y.has_value());
+    static_cast<void>(h.commands());
+    h.click(ImVec2(panel->Pos.x + 30.0f, *y));
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 2);
+    CHECK(commands[0].kind == model::command::command_kind::close_window);
+    CHECK(commands[0].window_id == "m-one");
+    CHECK(commands[1].window_id == "m-two");
 }

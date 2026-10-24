@@ -56,6 +56,17 @@ struct instance_filter final {
     std::string_view name, std::string_view id) noexcept;
 
 /**
+ * @brief Whether one instance is drawn before another in the panel's grid.
+ *
+ * The name decides, case-insensitively, then the id breaks a tie. The table's
+ * own order is the order rows happened to be written, which is no order a
+ * reader can use to find one instance among forty.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool instance_less(std::string_view lhs_name,
+    std::string_view lhs_id, std::string_view rhs_name,
+    std::string_view rhs_id) noexcept;
+
+/**
  * @brief How many tiles of @p tile_width fit a row @p width wide, at least one.
  *
  * Tiles are @p gap apart, with none after the last, so a row holds

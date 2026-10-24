@@ -63,6 +63,17 @@ HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 HEDGR_UI_EXPORT void select_instance_for_capture(std::string_view instance_id);
 
 /**
+ * @brief Selects an instance in the Instances window, on the next frame it
+ *        draws.
+ *
+ * The Instances panel picks a tile and expects the window it raises to show
+ * that instance's pane, but the selection lives in the window's own state,
+ * which the panel does not hold. The request is kept until the window draws,
+ * then written as the click would have written it.
+ */
+HEDGR_UI_EXPORT void request_instance_selection(std::string_view instance_id);
+
+/**
  * @brief Selects an account in the Accounts window, on the next frame it draws.
  *
  * The account pane is reached by selecting a row, and a capture that wants to
@@ -71,6 +82,19 @@ HEDGR_UI_EXPORT void select_instance_for_capture(std::string_view instance_id);
  * have seen.
  */
 HEDGR_UI_EXPORT void select_account_for_capture(std::string_view account_id);
+
+/**
+ * @brief Selects an account in the Accounts window that shows @p instance_id.
+ *
+ * The Accounts panel picks a row and expects the window it opens to show that
+ * row's cards, but the window's selection lives in the window's own state,
+ * which the panel does not hold. The request is kept until the named instance's
+ * window draws, then written as the click would have written it. An empty
+ * @p instance_id asks whichever Accounts window draws next, which is what a
+ * capture with no deployment in mind needs.
+ */
+HEDGR_UI_EXPORT void request_account_selection(std::string_view instance_id,
+    std::string_view account_id);
 
 /**
  * @brief Puts the Instances pane into edit mode on one row, for a capture.

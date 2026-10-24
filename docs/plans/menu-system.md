@@ -2,8 +2,8 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Steps 1 to 5 and 9 are done; the
-rest is plan.
+the ImCoolBar shortcut bar over several small PRs. All nine steps are done; the
+notes after each record what the implementation found.
 
 ## The reference
 
@@ -23,18 +23,19 @@ rest is plan.
 - **Shortcut bar (retired).** `render/shortcut_bar.cpp` drew an ImCoolBar window
   at the bottom centre, one tile per catalogue shortcut plus Undock all, and the
   dock space stopped short of it. Step 9 deleted it, with the vendored ImCoolBar.
-  The catalogue (`input.shortcuts`) stays: the TOOLS menu's Accounts submenu
+  The catalogue (`input.shortcuts`) stays: the Instances panel's pinned row
   lists it. The tile photos and the hover tick went with the bar.
 - **Mini plots actions.** There are none on the bar in this checkout. The mini
   plot is opened from a chart or from the series browser. The Windows menu below
   is where "tidy mini plots" and "close all mini plots" would live if wanted.
 - **Menu bars.** Only the command centre and the workspace window use
   `ImGui::BeginMenuBar`, inside their own windows. There is no main menu bar.
-- **Status.** There is no application-wide status bar. Each window draws its own
-  foot with `widget::draw_status_foot` (`widget/status_foot.hpp`: identity,
-  state dot, optional combos), and `widget/status_bar.hpp` holds a one-line
-  message ladder (notice, problem, error) that a window renders itself. A
-  bottom bar like the reference's would be new.
+- **Status.** There is an application-wide status strip along the bottom
+  (step 8). Each window still draws its own foot with
+  `widget::draw_status_foot` (`widget/status_foot.hpp`: identity, state dot,
+  optional combos), and `widget/status_bar.hpp` holds a one-line message
+  ladder (notice, problem, error) that the strip and the window foots both
+  read.
 - **The logo.** `render/intro.cpp` draws the launch intro
   (the splash and its artwork are gone). Nothing draws a small logo.
 - **Docking and viewports.** `hedgr.imgui/src/app/application.cpp` enables
@@ -99,7 +100,7 @@ Each step is one PR, with tests, and leaves the app working.
      the lock state, a separator, Quit. Instances moves here from the system
      menu.
    - VIEW: Undock all, a disabled row until something is docked. The Windows
-     submenu is step 7's.
+     submenu is step 7's, and was added there.
    - TOOLS: Series browser, Accounts (a submenu, see step 9) and, for a system
      administration session, Command centre. They act on the first signed-in session and are disabled
      when there is none. The CRM matrix has no row: it needs a party and a
@@ -180,20 +181,70 @@ Each step is one PR, with tests, and leaves the app working.
      window and the same signal; there is no selection to drive, so the window
      does not move to that instance yet. Ctrl keeps the panel open for several
      picks. An empty store and a filter that matches nothing both draw the no
-     data mark, the words in its tooltip. TOOLS > Accounts stays until step 6.
+     data mark, the words in its tooltip. TOOLS > Accounts stayed until step 6
+     deleted it.
      Not checked in a real window.
-6. **Accounts.** An Accounts menu opens a panel with tenant headings and the
+6. [x] **Accounts.** An ACCOUNTS menu opens a panel with tenant headings and the
    accounts under each, from `tenant_row` and the accounts table. A click opens
    the accounts window for that instance and account.
-7. **The Windows list.** A Windows menu lists open windows from `input.windows`
-   grouped by `window_kind`. Click raises (reusing the `focus_instances`
-   mechanism, which is a request read before the walk), the x closes through the
-   close command, as the window's own close control does. Mini plot actions go
-   here. It comes before the status bar (decision 9).
-8. **The status bar.** One viewport-wide bottom strip in the reference's look,
-   carrying the message ladder from `status_bar.hpp` and the connection state
-   once PR 94 lands. It is a bottom side bar like the top bar, so the work
-   area is inset by the bars alone (the dock space already fills the work area).
+   - Notes. ACCOUNTS is the fourth label, after INSTANCES and before TOOLS, and
+     it is drawn only while the store is unlocked. The panel
+     (`render/accounts_panel.cpp`, `widget/accounts_panel.hpp`) is the Instances
+     panel's size (720 by 520, capped to the work area) with a filter box, the
+     shown/total count and a scrolling list. Each row carries the account's
+     name, its principal and the instance it belongs to, because one tenant can
+     exist on more than one deployment. A pick opens that instance's Accounts
+     window, selects the account through `request_account_selection` (the
+     window's selection is its own scratch), raises the shortcut signal and
+     closes the panel unless Ctrl is held. TOOLS > Accounts is deleted, and the
+     shortcut `pin_accounts` tests with it.
+   - Where the heading comes from. There is no tenant table on the render input
+     and `domain::account` has no tenant field: IAM answers the tenant at
+     sign-in and `session_table` keeps the last answer. The panel groups by
+     that answer, and an account that has not signed in is listed last under
+     "No tenant yet". A future change that stores a tenant on the account would
+     change the source, not the panel.
+   - The list is rebuilt every frame into a vector kept across frames: the
+     session table has no version to cache against. Both lookups are slab walks
+     rather than `find`, whose key joins a string and would allocate once per
+     account per frame. A steady frame allocates nothing, pinned by a frame-cost
+     test. Tenant and instance names are folded for ordering, not for display.
+   - Not checked in a real window.
+7. [x] **The Windows list.** A Windows menu lists open windows from
+   `input.windows` grouped by `window_kind`. Click raises (reusing the
+   `focus_instances` mechanism, which is a request read before the walk), the x
+   closes through the close command, as the window's own close control does.
+   Mini plot actions go here. It comes before the status bar (decision 9).
+   - Notes. Windows is the fourth row of VIEW, a chevron row with an anchored
+     panel beside it (`theme::windows_panel_width` and `_height`, 380 by 420).
+     The panel walks the kinds in enum order and draws a heading only for a kind
+     that has an open window, then one row per window. A row is two items: a
+     selectable title that sets `menu_bar_result::focus_window`, and a small x
+     that pushes `close_window` for that id. `workspace::render` folds the id
+     into the focus request it already takes from the window table before the
+     walk, so the raise happens where a window can still be focused. A pick
+     closes the panel and VIEW with `ClosePopupToLevel(0, true)`. The last row,
+     "Close all mini plots", pushes one close per open mini plot and is left out
+     when there is none. Tidy has no action to call, so it is not there.
+   - Not checked in a real window.
+8. [x] **The status bar.** One viewport-wide bottom strip in the reference's look,
+   carrying the message ladder from `status_bar.hpp` and the connection state.
+   It is a bottom side bar like the top bar, so the work area is inset by the
+   bars alone (the dock space already fills the work area).
+   - Notes. `render/status_bar.cpp` submits `###hedgr-status-bar` through
+     `BeginViewportSideBar(ImGuiDir_Down)` at `theme::status_bar_height` (24 px),
+     so the dock space and every window read the smaller work area without
+     knowing about it. The left end is `status_bar::message()` in the severity's
+     colour, dimming on the event's tail; the right end is a dot and one word
+     from the sessions: failed, connecting, connected, partly connected,
+     disconnected, or "no session". Failure outranks a connection in flight,
+     which outranks quiet connectivity. The strip advances the message clock
+     itself, so an event ages out even with no window open.
+   - Kept: the window foots (decision 8). A consequence is that a runtime error
+     is currently drawn both in the strip and in the foot of each open window,
+     because the workspace's one `status_bar` is passed to them too. Folding the
+     foot's message line into the strip is follow-up work, not this step.
+   - Not checked in a real window.
 9. [x] **Retire the cool bar.** Brought forward. Deleted `shortcut_bar.cpp`,
    `shortcut_bar_result`, `shortcut_bar_height`, `shortcut_bar_tests.cpp` and the
    vendored ImCoolBar (nothing else used it). The dock space now spans the whole

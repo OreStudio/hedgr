@@ -34,6 +34,9 @@ struct menu_bar_result final {
     /** @brief The Instances window was opened and belongs on top. */
     bool focus_instances = false;
 
+    /** @brief The stable id of a window the VIEW > Windows list raised. */
+    std::string focus_window;
+
     /** @brief The open store should be locked. */
     bool lock_requested = false;
 

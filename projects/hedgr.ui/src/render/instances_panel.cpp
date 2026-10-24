@@ -24,6 +24,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "hedgr.ui/widget/view_state.hpp"
@@ -238,6 +239,11 @@ void refresh_matches(const render_input& input,
                 rows[index].id))
             state.matches.push_back(index);
     }
+    std::sort(state.matches.begin(), state.matches.end(),
+        [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return widget::instance_less(rows[lhs].name, rows[lhs].id,
+                rows[rhs].name, rows[rhs].id);
+        });
     std::memcpy(state.applied.text, state.filter.text,
         sizeof state.applied.text);
     state.version = table.version();
@@ -354,6 +360,7 @@ bool draw_grid(const render_input& input, menu_bar_result& result,
                     draw_instance_tooltip(row, status);
                 if (clicked) {
                     request_instances_window(input);
+                    request_instance_selection(row.id);
                     result.focus_instances = true;
                     raise_shortcut_activated(input,
                         "Open the Instances window on " + row.name);

@@ -73,11 +73,16 @@ using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_leaf;
 
 /*
- * The row a capture asked to see selected, held until the frame that can show
- * it. File-scope rather than a parameter because the environment is read once,
- * before any window is drawn, and empty in an ordinary run.
+ * The row a window should select next, held until that window draws. The
+ * instance scopes the request: several Accounts windows can be open, and a
+ * selection meant for one must not land in the first one drawn.
  */
-std::string pending_capture_selected_account;
+struct pending_account_selection final {
+    std::string instance;
+    std::string account;
+};
+
+pending_account_selection pending_selection;
 
 /** @brief Every live account of one instance, as the browser wants it. */
 [[nodiscard]] std::vector<tree_leaf> account_tree_leaves(const render_input& input,
@@ -707,8 +712,14 @@ command account_save_command(const render_input& input,
     return request;
 }
 
+void request_account_selection(std::string_view instance_id,
+    std::string_view account_id) {
+    pending_selection.instance = std::string{instance_id};
+    pending_selection.account = std::string{account_id};
+}
+
 void select_account_for_capture(std::string_view account_id) {
-    pending_capture_selected_account = std::string{account_id};
+    request_account_selection({}, account_id);
 }
 
 /**
@@ -844,13 +855,16 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     state.browser.form_owner = instance_id;
 
     /*
-     * A capture's selection is the scratch a click writes and nothing more, so
-     * the pane that follows is the one an operator would have reached by hand.
+     * The panel's pick, or a capture's request, is the scratch a click writes
+     * and nothing more, so the pane that follows is the one an operator would
+     * have reached by hand.
      */
-    if (!pending_capture_selected_account.empty()) {
-        state.browser.selected_leaf = pending_capture_selected_account;
+    if (!pending_selection.account.empty()
+        && (pending_selection.instance.empty()
+            || pending_selection.instance == instance_id)) {
+        state.browser.selected_leaf = pending_selection.account;
         state.browser.selected_folder.clear();
-        pending_capture_selected_account.clear();
+        pending_selection = {};
     }
 
     ImGui::PushID("accounts");

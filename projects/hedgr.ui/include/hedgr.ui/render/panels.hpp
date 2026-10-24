@@ -246,9 +246,9 @@ shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
  * rather than making another.
  *
  * The action lives here rather than at either of its callers because the
- * Instances window's own toolbar and the TOOLS menu both open an instance's
- * accounts, and one description of what that means is what stops the two from
- * drifting.
+ * Instances window's own toolbar, the Instances panel's pinned row and the
+ * Accounts panel all open an instance's accounts, and one description of what
+ * that means is what stops them from drifting.
  *
  * An instance the table does not hold is refused here rather than sent. The
  * runtime would have nothing to bind the window to, and a window bound to
@@ -305,8 +305,8 @@ HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
  * @brief Raises the signal that says a shortcut was used, for the sound pack.
  *
  * The menu plays nothing itself: it raises a name and the player decides
- * whether the name has a sound (ADR 0008). The TOOLS > Accounts submenu and the
- * Instances panel both raise it through here.
+ * whether the name has a sound (ADR 0008). The Instances panel and the Accounts
+ * panel both raise it through here.
  */
 HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
     std::string detail);
@@ -318,7 +318,7 @@ HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
  * An instance typed by hand carries no illustration key, and a key whose asset
  * is not installed has no texture either; both are ordinary states and the
  * caller draws its own fallback for them. The keys are resolved here because
- * both the TOOLS menu's Accounts list and the details pane ask the same question of the same
+ * both the Instances panel's pinned tiles and the details pane ask the same question of the same
  * row.
  */
 [[nodiscard]] HEDGR_UI_EXPORT std::uint64_t instance_icon_texture(

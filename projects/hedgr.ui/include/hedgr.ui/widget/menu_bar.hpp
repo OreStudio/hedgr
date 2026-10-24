@@ -21,6 +21,7 @@
 #define HEDGR_UI_WIDGET_MENU_BAR_HPP
 
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/widget/accounts_panel.hpp"
 #include "hedgr.ui/widget/instances_panel.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "imgui.h"
@@ -45,6 +46,9 @@ struct menu_bar_state final {
 
     /** @brief The Instances panel's filter and filtered list. */
     instances_panel_state instances;
+
+    /** @brief The Accounts panel's filter and grouped list. */
+    accounts_panel_state accounts;
 };
 
 /**

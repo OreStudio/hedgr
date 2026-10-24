@@ -21,11 +21,11 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/domain/session.hpp"
-#include "hedgr.model/domain/shortcut.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/accounts_panel.hpp"
 #include "hedgr.ui/render/instances_panel.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -35,6 +35,8 @@
 #include "ores.platform/process/executable.hpp"
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cmath>
 #include <fstream>
 #include <iterator>
@@ -50,17 +52,19 @@ namespace {
 
 namespace theme = hedgr::ui::theme;
 namespace widget = hedgr::ui::widget;
+namespace domain = hedgr::model::domain;
 using hedgr::model::domain::store_lock;
 
 /** @brief The top-level menus' places in the bar, which stay fixed. */
 constexpr int file_entry = 0;
 constexpr int view_entry = 1;
 constexpr int instances_entry = 2;
-constexpr int tools_entry = 3;
-constexpr int help_entry = 4;
+constexpr int accounts_entry = 3;
+constexpr int tools_entry = 4;
+constexpr int help_entry = 5;
 
-constexpr const char* accounts_submenu_id = "##tools-accounts";
 constexpr const char* logo_texture_id = "ore-logo-white";
+constexpr const char* windows_submenu_id = "##view-windows";
 constexpr const char* about_title = "About ORE Studio###hedgr-about";
 constexpr float about_logo_side = 72.0f;
 
@@ -124,10 +128,162 @@ void draw_file_menu(const render_input& input, menu_bar_result& result) {
         result.quit_requested = true;
 }
 
+/** @brief Whether any window is open, so the Windows row has something to list. */
+[[nodiscard]] bool any_window_open(const render_input& input) {
+    const auto open = input.windows.open_column();
+    for (std::size_t index = 0; index < open.size(); ++index)
+        if (open[index] != 0)
+            return true;
+    return false;
+}
+
 /**
- * @brief VIEW: Undock all, live only while something is docked, the Toolbar
- * row, lit while the floating toolbar is shown, and the Full screen row, lit
- * while the window is full screen.
+ * @brief Draws one open window's row: the title raises it, the x closes it.
+ *
+ * The row is two items so that raising and closing are separate targets: a
+ * click anywhere on the title raises, and the small x at the right closes
+ * through the command a window's own close control pushes. Returns whether
+ * either happened, so the panel closes on the click.
+ */
+bool draw_window_row(const render_input& input, menu_bar_result& result,
+    std::string_view id, std::string_view title) {
+    const float height = ImGui::GetTextLineHeight()
+        + 2.0f * theme::menu_row_padding_y;
+    const float close_width = ImGui::GetFrameHeight();
+    const float gap = theme::menu_row_gap;
+    const float room = ImGui::GetContentRegionAvail().x;
+    const float title_width = room - close_width - gap;
+
+    ImGui::PushID(id.data(), id.data() + id.size());
+    const bool raised = ImGui::Selectable("##raise", false,
+        ImGuiSelectableFlags_None, ImVec2(std::max(1.0f, title_width), height));
+    const ImVec2 min = ImGui::GetItemRectMin();
+    const ImVec2 max = ImGui::GetItemRectMax();
+    ImDrawList* const draw = ImGui::GetWindowDrawList();
+    draw->PushClipRect(ImVec2(min.x + theme::menu_row_padding_x, min.y),
+        ImVec2(max.x - theme::menu_row_padding_x, max.y), true);
+    draw->AddText(
+        ImVec2(min.x + theme::menu_row_padding_x,
+            min.y + theme::menu_row_padding_y),
+        ImGui::GetColorU32(ImGuiCol_Text), title.data(),
+        title.data() + title.size());
+    draw->PopClipRect();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Bring the window to the front");
+    if (raised)
+        result.focus_window = std::string{id};
+
+    ImGui::SameLine(0.0f, gap);
+    const bool closed = ImGui::Button("x", ImVec2(close_width, height));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Close the window");
+    ImGui::PopID();
+
+    if (closed) {
+        hedgr::model::command::command request;
+        request.kind = hedgr::model::command::command_kind::close_window;
+        request.window_id = std::string{id};
+        input.commands.push(std::move(request));
+    }
+    return raised || closed;
+}
+
+/**
+ * @brief The VIEW > Windows panel: every open window under its kind's heading.
+ *
+ * The kinds are walked in the enum's order, so the grouping is stable and the
+ * frame allocates nothing for a list. A heading is drawn only for a kind that
+ * has an open window. The last row closes every mini plot, which is the one
+ * action those cards have as a set, and it is left out when there is none.
+ */
+void draw_windows_panel(const render_input& input, menu_bar_result& result) {
+    const ImVec2 anchor(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y);
+    const ImGuiViewport* const viewport = ImGui::GetMainViewport();
+    const float width = theme::windows_panel_width;
+    const float margin = theme::menu_padding;
+    const float max_x = viewport->WorkPos.x + viewport->WorkSize.x - margin;
+    const float left = std::min(anchor.x, max_x - width);
+    ImGui::SetNextWindowPos(
+        ImVec2(std::max(left, viewport->WorkPos.x), anchor.y));
+    const widget::menu_popup panel(windows_submenu_id, width, std::nullopt,
+        theme::windows_panel_height);
+    if (!panel)
+        return;
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    bool acted = false;
+    if (ImGui::BeginChild("##windows-list", ImVec2(0.0f, 0.0f))) {
+        const auto& layout = input.windows.layout();
+        const auto kinds = input.windows.kind_column();
+        const auto open = input.windows.open_column();
+        std::string title;
+        std::size_t mini_plots = 0;
+        for (std::size_t kind = 0; kind < domain::window_kind_count; ++kind) {
+            bool heading = false;
+            for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+                if (!layout.is_alive(index) || open[index] == 0
+                    || kinds[index] != kind)
+                    continue;
+                const hedgr::model::state::window_handle handle{index,
+                    layout.generation[index]};
+                title.clear();
+                const auto kind_value = static_cast<domain::window_kind>(kind);
+                append_window_title(title, kind_value,
+                    input.windows.state(handle), input);
+                if (!heading) {
+                    const auto kind_text = domain::to_string(kind_value);
+                    char text[32];
+                    std::snprintf(text, sizeof text, "%.*s",
+                        static_cast<int>(kind_text.size()), kind_text.data());
+                    widget::menu_heading(text);
+                    heading = true;
+                }
+                acted = draw_window_row(input, result,
+                            input.windows.id(handle), title)
+                    || acted;
+                if (kind == static_cast<std::size_t>(
+                        domain::window_kind::mini_plot))
+                    ++mini_plots;
+            }
+        }
+
+        if (mini_plots > 0) {
+            widget::menu_separator();
+            if (widget::menu_item_row({.label = "Close all mini plots"})) {
+                for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+                    if (!layout.is_alive(index) || open[index] == 0
+                        || kinds[index] != static_cast<std::uint8_t>(
+                            domain::window_kind::mini_plot))
+                        continue;
+                    const hedgr::model::state::window_handle handle{index,
+                        layout.generation[index]};
+                    hedgr::model::command::command request;
+                    request.kind =
+                        hedgr::model::command::command_kind::close_window;
+                    request.window_id = std::string{input.windows.id(handle)};
+                    input.commands.push(std::move(request));
+                }
+                acted = true;
+            }
+        }
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+    if (acted) {
+        /*
+         * A pick closes the panel and the menu it hangs off, as a menu row
+         * does. CloseCurrentPopup would only close this panel, leaving VIEW
+         * open over an empty desk, so the whole popup stack goes.
+         */
+        ImGui::ClosePopupToLevel(0, true);
+    }
+}
+
+/**
+ * @brief VIEW: Undock all, live only while something is docked, Full screen,
+ * the Toolbar row, lit while the floating toolbar is shown, and Windows.
  */
 void draw_view_menu(const render_input& input, bool desk_docked,
     menu_bar_result& result) {
@@ -139,98 +295,19 @@ void draw_view_menu(const render_input& input, bool desk_docked,
     auto& visible = input.market_view.toolbar_visible;
     if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
         visible = !visible;
-}
 
-/**
- * @brief Calls @p visit with each instance id the Accounts submenu lists, in
- * the order drawn.
- *
- * The signed-in session's instance leads, so it stays reachable without a
- * pinned shortcut, then one id per catalogue shortcut that targets an
- * instance's accounts, in the catalogue's order. An instance is visited once.
- * It is a walk rather than a built list so that drawing the menu allocates
- * nothing.
- */
-template <typename visitor>
-void for_each_accounts_target(const render_input& input,
-    std::optional<hedgr::model::state::session_handle> session,
-    visitor&& visit) {
-    using hedgr::model::domain::window_kind;
-    std::string_view lead;
-    if (session) {
-        lead = input.sessions.instance_id(*session);
-        visit(lead);
-    }
-    const auto& rows = input.shortcuts.rows();
-    for (std::size_t i = 0; i < rows.size(); ++i) {
-        const auto& row = rows[i];
-        if (row.target_kind != window_kind::accounts
-            || (session && row.target_id == lead))
-            continue;
-        const bool repeated = std::any_of(rows.begin(),
-            rows.begin() + static_cast<std::ptrdiff_t>(i),
-            [&](const auto& earlier) {
-                return earlier.target_kind == window_kind::accounts
-                    && earlier.target_id == row.target_id;
-            });
-        if (!repeated)
-            visit(std::string_view{row.target_id});
-    }
-}
-
-/**
- * @brief The Accounts row and the panel that opens beside it.
- *
- * The panel opens on a click or on hover and stays until the menu closes. A
- * pick opens that instance's accounts window and closes both panels. A row is
- * labelled with the instance's name, or its id when the store no longer holds
- * the row, as an entry nobody expects is still better drawn than dropped.
- */
-void draw_accounts_submenu(const render_input& input,
-    std::optional<hedgr::model::state::session_handle> session) {
-    bool any = false;
-    for_each_accounts_target(input, session,
-        [&](std::string_view) { any = true; });
-    const bool pressed = widget::menu_item_row({.label = "Accounts",
+    const bool any = any_window_open(input);
+    const bool pressed = widget::menu_item_row({.label = "Windows",
         .submenu = true, .enabled = any});
     if (!any)
         return;
-    const ImVec2 anchor(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y);
     if ((pressed || ImGui::IsItemHovered())
-        && !ImGui::IsPopupOpen(accounts_submenu_id))
-        ImGui::OpenPopup(accounts_submenu_id);
-    ImGui::SetNextWindowPos(anchor);
-    bool picked = false;
-    {
-        const widget::menu_popup panel(accounts_submenu_id);
-        if (panel) {
-            for_each_accounts_target(input, session, [&](std::string_view id) {
-                const auto handle = input.instances.find(id);
-                char fallback[96];
-                const char* label = nullptr;
-                if (handle) {
-                    label = input.instances.get(*handle)->name.c_str();
-                } else {
-                    ImFormatString(fallback, sizeof fallback, "%.*s",
-                        static_cast<int>(id.size()), id.data());
-                    label = fallback;
-                }
-                ImGui::PushID(id.data(), id.data() + id.size());
-                if (widget::menu_item_row({.label = label})) {
-                    request_accounts_window(input, id);
-                    raise_shortcut_activated(input,
-                        std::string("Open the accounts of ") + label);
-                    picked = true;
-                }
-                ImGui::PopID();
-            });
-        }
-    }
-    if (picked)
-        ImGui::CloseCurrentPopup();
+        && !ImGui::IsPopupOpen(windows_submenu_id))
+        ImGui::OpenPopup(windows_submenu_id);
+    draw_windows_panel(input, result);
 }
 
-/** @brief TOOLS: the windows that belong to a signed-in session, and Accounts. */
+/** @brief TOOLS: the windows that belong to a signed-in session. */
 void draw_tools_menu(const render_input& input) {
     namespace domain = hedgr::model::domain;
     const auto session = current_session(input);
@@ -238,7 +315,6 @@ void draw_tools_menu(const render_input& input) {
             .enabled = session.has_value()}))
         request_session_window(input, *session,
             domain::window_kind::series_browser);
-    draw_accounts_submenu(input, session);
     const bool admin = session
         && input.sessions.mode(*session)
             == domain::session_mode::system_administration;
@@ -358,6 +434,13 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
                     theme::instances_panel_height));
             if (state.open != instances_entry)
                 state.instances.shown = false;
+            ImGui::SameLine();
+            widget::menu_bar_label(state, accounts_entry, "Accounts",
+                [&] { draw_accounts_panel(input, state.accounts); }, height,
+                ImVec2(theme::accounts_panel_width,
+                    theme::accounts_panel_height));
+            if (state.open != accounts_entry)
+                state.accounts.shown = false;
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);
