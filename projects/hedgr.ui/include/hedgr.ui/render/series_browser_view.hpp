@@ -37,6 +37,8 @@ struct series_browser_query final {
     std::string_view filter;
     std::string_view asset_class;
     std::string_view party;
+    /** @brief The provider to list, or empty for every provider. */
+    std::string_view provider;
 };
 
 /**
@@ -59,20 +61,34 @@ struct series_browser_view final {
      */
     std::vector<std::uint32_t> classes;
 
+    /**
+     * @brief For each provider of the catalogue, the position of one row.
+     *
+     * Ordered by provider code, so the combo lists a provider once.
+     */
+    std::vector<std::uint32_t> providers;
+
     /** @brief How many times @c rows has been rebuilt. */
     std::size_t builds = 0;
 
     /** @brief How many times @c classes has been rebuilt. */
     std::size_t class_builds = 0;
 
+    /** @brief How many times @c providers has been rebuilt. */
+    std::size_t provider_builds = 0;
+
     /** @brief The query @c rows answers, valid once @c builds is above zero. */
     std::uint64_t generation = 0;
     std::string filter;
     std::string asset_class;
     std::string party;
+    std::string provider;
 
     /** @brief The generation @c classes was taken at, valid once @c class_builds is above zero. */
     std::uint64_t classes_generation = 0;
+
+    /** @brief The generation @c providers was taken at, valid once @c provider_builds is above zero. */
+    std::uint64_t providers_generation = 0;
 };
 
 /**
@@ -93,6 +109,14 @@ HEDGR_UI_EXPORT bool update_series_browser_view(series_browser_view& view,
  * @return whether it rebuilt.
  */
 HEDGR_UI_EXPORT bool update_asset_classes(series_browser_view& view,
+    std::uint64_t generation,
+    const std::vector<hedgr::model::domain::market_series_row>& catalogue);
+
+/**
+ * @brief Rebuilds the provider list when the catalogue's generation moved.
+ * @return whether it rebuilt.
+ */
+HEDGR_UI_EXPORT bool update_providers(series_browser_view& view,
     std::uint64_t generation,
     const std::vector<hedgr::model::domain::market_series_row>& catalogue);
 

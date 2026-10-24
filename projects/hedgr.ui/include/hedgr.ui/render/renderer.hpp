@@ -353,6 +353,14 @@ struct window_ui_state final {
     std::string market_asset_class;
 
     /**
+     * @brief The provider the chooser lists, or empty for every provider.
+     *
+     * One FX spot can be listed by several providers, only some of which tick,
+     * so the chooser can narrow the list to one.
+     */
+    std::string market_provider;
+
+    /**
      * @brief This window's market-data choices.
      *
      * A window keeps its own choices. They are seeded from the frame's

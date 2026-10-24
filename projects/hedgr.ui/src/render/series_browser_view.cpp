@@ -54,6 +54,7 @@ namespace domain = hedgr::model::domain;
     const series_browser_query& query) {
     return row.asset_class == "IR"
         && (query.party.empty() || row.party_id == query.party)
+        && (query.provider.empty() || row.provider_code == query.provider)
         && (contains_ci(row.label, query.filter)
             || contains_ci(row.uri, query.filter));
 }
@@ -62,6 +63,7 @@ namespace domain = hedgr::model::domain;
     const series_browser_query& query) {
     return (query.asset_class.empty() || row.asset_class == query.asset_class)
         && (query.party.empty() || row.party_id == query.party)
+        && (query.provider.empty() || row.provider_code == query.provider)
         && (contains_ci(row.label, query.filter)
             || contains_ci(row.asset_class, query.filter)
             || contains_ci(row.uri, query.filter)
@@ -76,13 +78,15 @@ bool update_series_browser_view(series_browser_view& view,
     if (view.builds != 0 && view.generation == query.generation
         && view.filter == query.filter
         && view.asset_class == query.asset_class
-        && view.party == query.party)
+        && view.party == query.party
+        && view.provider == query.provider)
         return false;
     ++view.builds;
     view.generation = query.generation;
     view.filter = query.filter;
     view.asset_class = query.asset_class;
     view.party = query.party;
+    view.provider = query.provider;
 
     const bool curves = query.asset_class == "IR";
     view.rows.clear();
@@ -125,6 +129,29 @@ bool update_asset_classes(series_browser_view& view, std::uint64_t generation,
         [&](std::uint32_t a, std::uint32_t b) {
             return catalogue[a].asset_class == catalogue[b].asset_class;
         }), view.classes.end());
+    return true;
+}
+
+bool update_providers(series_browser_view& view, std::uint64_t generation,
+    const std::vector<domain::market_series_row>& catalogue) {
+    if (view.provider_builds != 0 && view.providers_generation == generation)
+        return false;
+    ++view.provider_builds;
+    view.providers_generation = generation;
+    view.providers.clear();
+    for (std::size_t i = 0; i < catalogue.size(); ++i) {
+        if (catalogue[i].provider_code.empty())
+            continue;
+        view.providers.push_back(static_cast<std::uint32_t>(i));
+    }
+    std::sort(view.providers.begin(), view.providers.end(),
+        [&](std::uint32_t a, std::uint32_t b) {
+            return catalogue[a].provider_code < catalogue[b].provider_code;
+        });
+    view.providers.erase(std::unique(view.providers.begin(),
+        view.providers.end(), [&](std::uint32_t a, std::uint32_t b) {
+            return catalogue[a].provider_code == catalogue[b].provider_code;
+        }), view.providers.end());
     return true;
 }
 
