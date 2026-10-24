@@ -637,7 +637,11 @@ void render_chart(window_handle handle, const render_input& input,
                 at, ImVec2(at.x + room.x, at.y + room.y),
                 theme::plot_state_glyph_size, true, series.failure(*row));
         } else if (no_points) {
-            ImGui::TextDisabled("No observations for this series yet.");
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 room = ImGui::GetContentRegionAvail();
+            widget::draw_plot_state(widget::plot_state::no_data, at,
+                ImVec2(at.x + room.x, at.y + room.y),
+                theme::plot_state_glyph_size, true);
         } else {
             const auto& candle_points = plot.candles;
             const bool use_candles = !candle_points.empty();

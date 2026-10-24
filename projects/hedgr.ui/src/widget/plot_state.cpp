@@ -39,6 +39,8 @@ using hedgr::model::domain::session_status;
         return "Reading the series...";
     case plot_state::history_unavailable:
         return "History unavailable";
+    case plot_state::no_data:
+        return "No data";
     default:
         return "Not connected";
     }
@@ -65,6 +67,26 @@ void draw_exclamation_mark(ImDrawList* draw, ImVec2 centre, float size,
         ImVec2(centre.x + bar, centre.y + half * 0.10f), colour, bar);
     draw->AddCircleFilled(ImVec2(centre.x, centre.y + half * 0.45f),
         size * 0.06f, colour, 16);
+}
+
+/** @brief Empty chart axes with a dashed flat line, for a series with no points. */
+void draw_no_data_mark(ImDrawList* draw, ImVec2 centre, float size,
+    ImU32 colour) {
+    const float half = size * 0.5f;
+    const float stroke = size * watermark_stroke;
+    const float left = centre.x - half * 0.9f;
+    const float right = centre.x + half * 0.9f;
+    const float top = centre.y - half * 0.8f;
+    const float bottom = centre.y + half * 0.8f;
+    draw->AddLine(ImVec2(left, top), ImVec2(left, bottom), colour, stroke);
+    draw->AddLine(ImVec2(left, bottom), ImVec2(right, bottom), colour, stroke);
+    constexpr int dashes = 4;
+    const float run = (right - left - half * 0.2f) / (dashes * 2 - 1);
+    const float y = centre.y;
+    for (int i = 0; i < dashes; ++i) {
+        const float x = left + half * 0.2f + run * static_cast<float>(i * 2);
+        draw->AddLine(ImVec2(x, y), ImVec2(x + run, y), colour, stroke * 0.8f);
+    }
 }
 }
 
@@ -108,9 +130,14 @@ void draw_plot_state(plot_state state, ImVec2 min, ImVec2 max,
     const float size = std::max(glyph_size,
         std::clamp(extent * theme::plot_watermark_share,
             theme::plot_watermark_min, theme::plot_watermark_max));
-    draw_exclamation_mark(draw, centre, size,
-        state == plot_state::disconnected ? theme::plot_disconnected_colour
-                                          : theme::plot_failed_colour);
+    if (state == plot_state::no_data) {
+        draw_no_data_mark(draw, centre, size, theme::plot_disconnected_colour);
+    } else {
+        draw_exclamation_mark(draw, centre, size,
+            state == plot_state::disconnected
+                ? theme::plot_disconnected_colour
+                : theme::plot_failed_colour);
+    }
 
     if (captioned && ImGui::IsWindowHovered()
         && ImGui::IsMouseHoveringRect(min, max)) {

@@ -40,6 +40,8 @@ enum class plot_state : std::uint8_t {
     reading,
     /** @brief The session is fine and the series' history read failed. */
     history_unavailable,
+    /** @brief The series was read and holds no points. */
+    no_data,
 };
 
 /**

@@ -302,6 +302,31 @@ TEST_CASE("a plot state draws no words, they are in a tooltip over it",
     CHECK(history.says("History unavailable"));
     CHECK(history.says("no answer"));
     CHECK_FALSE(history.says("Not connected"));
+    const auto empty = hovered_frame(plot_state::no_data);
+    CHECK(empty.says("No data"));
+    CHECK_FALSE(empty.says("Not connected"));
+}
+
+TEST_CASE("a series with no points shows the no-data mark, large and faint",
+    "[plot_state]") {
+    hedgr::testing::headless_imgui imgui;
+
+    const auto frame = widget_frame(plot_state::no_data, false);
+    const auto marks = marks_of(frame);
+    CHECK(marks.disconnected > 0);
+    CHECK(marks.failed == 0);
+    CHECK(marks.spinner == 0);
+    CHECK(frame.text.find_first_not_of(" \n") == std::string::npos);
+
+    const auto at = frame.of(theme::plot_disconnected_colour);
+    float lo = 1e9f;
+    float hi = -1e9f;
+    for (const auto p : at) {
+        lo = std::min(lo, p.x);
+        hi = std::max(hi, p.x);
+    }
+    CHECK(hi - lo > std::min(area_max.x - area_min.x,
+                          area_max.y - area_min.y) * 0.25f);
 }
 
 TEST_CASE("the disconnected and error marks are drawn large, in the background",
@@ -463,16 +488,18 @@ TEST_CASE("plot state capture", "[.gallery]") {
     const char* out = std::getenv("HEDGR_PLOT_STATE_PPM");
     REQUIRE(out != nullptr);
     hedgr::testing::headless_imgui imgui;
-    hedgr::testing::software_raster raster(900, 400);
+    hedgr::testing::software_raster raster(1350, 400);
     for (int pass = 0; pass < 3; ++pass) {
         ImGui::NewFrame();
         ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-        ImGui::SetNextWindowSize(ImVec2(900.0f, 400.0f));
+        ImGui::SetNextWindowSize(ImVec2(1350.0f, 400.0f));
         ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoDecoration);
         widget::draw_plot_state(plot_state::disconnected, ImVec2(0, 0),
             ImVec2(450, 400), theme::plot_state_glyph_size, false);
         widget::draw_plot_state(plot_state::failed, ImVec2(450, 0),
             ImVec2(900, 400), theme::plot_state_glyph_size, false);
+        widget::draw_plot_state(plot_state::no_data, ImVec2(900, 0),
+            ImVec2(1350, 400), theme::plot_state_glyph_size, false);
         ImGui::End();
         ImGui::Render();
         raster.update_textures();
