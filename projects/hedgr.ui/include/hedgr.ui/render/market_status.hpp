@@ -84,7 +84,7 @@ inline void set_history_unavailable_foot(
     hedgr::ui::widget::foot_state& foot, std::string_view failure) {
     if (failure.empty())
         return;
-    foot.word = "history unavailable";
+    foot.word = "ERROR";
     foot.colour = theme::failure_colour;
     foot.detail = std::string{failure};
 }

@@ -178,19 +178,20 @@ TEST_CASE("a plot state follows the session, then whether the series is read",
         == plot_state::none);
 }
 
-TEST_CASE("the disconnected mark is cooler than the failed one and both are"
-          " faint",
+TEST_CASE("the disconnected and failed marks are faint neutral greys, the"
+          " failed one a step brighter",
     "[plot_state]") {
     const auto red = [](ImU32 c) { return static_cast<int>(c & 0xFF); };
+    const auto green = [](ImU32 c) { return static_cast<int>((c >> 8) & 0xFF); };
     const auto blue = [](ImU32 c) { return static_cast<int>((c >> 16) & 0xFF); };
-    CHECK(blue(theme::plot_disconnected_colour)
-        > blue(theme::plot_failed_colour));
     CHECK(red(theme::plot_failed_colour)
         > red(theme::plot_disconnected_colour));
     for (const ImU32 c : {theme::plot_disconnected_colour,
              theme::plot_failed_colour}) {
         CHECK(red(c) < 90);
         CHECK(blue(c) < 90);
+        CHECK(std::abs(red(c) - green(c)) <= 6);
+        CHECK(std::abs(blue(c) - green(c)) <= 12);
     }
 }
 

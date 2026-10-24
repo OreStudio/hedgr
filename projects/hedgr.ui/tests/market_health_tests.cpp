@@ -130,8 +130,7 @@ TEST_CASE("every other data window says the same thing when its session is lost"
 
         const auto text = drawn_text(desk, handle, state);
         INFO("window kind " << static_cast<int>(kind) << " drew: " << text);
-        CHECK(says(text, "This window is not signed in. Sign in from the "
-                         "Accounts window to read its data."));
+        CHECK_FALSE(says(text, "not signed in"));
         CHECK(says(text, "NO DATA"));
     }
 }
@@ -231,11 +230,11 @@ TEST_CASE("a chart whose history read failed says so in its foot",
         {.at_ns = now - second, .value = 1.26}, 1);
 
     render::window_ui_state state;
-    CHECK_FALSE(says(drawn_text(desk, handle, state), "history unavailable"));
+    CHECK_FALSE(says(drawn_text(desk, handle, state), "ERROR"));
 
     desk.market.fail(series, "the observation answer could not be decoded", 2);
     const auto text = drawn_text(desk, handle, state);
-    CHECK(says(text, "history unavailable"));
+    CHECK(says(text, "ERROR"));
     CHECK_FALSE(says(text, "the observation answer could not be decoded"));
 
     hedgr::ui::widget::foot_state foot;
@@ -256,6 +255,6 @@ TEST_CASE("the history note takes the failure colour and only on a failure",
     CHECK(foot.word == live);
 
     render::set_history_unavailable_foot(foot, "refused");
-    CHECK(foot.word == "history unavailable");
+    CHECK(foot.word == "ERROR");
     CHECK(foot.colour == hedgr::ui::theme::failure_colour);
 }

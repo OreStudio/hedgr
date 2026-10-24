@@ -48,30 +48,14 @@ using hedgr::model::domain::session_status;
 constexpr float watermark_stroke = 0.07f;
 
 /**
- * @brief A broadcast mark with a slash through it, for a plot with no session.
+ * @brief A ring with an exclamation mark, for a plot that has nothing to show.
  *
- * Three arcs and a dot, struck through. Built from draw primitives, like the
- * shut store's padlock, because an icon is a bitmap cell at the base text size
- * and asked for at several times that draws the atlas's missing-glyph mark.
+ * The one mark for both a plot with no session and one whose read failed, in
+ * two greys. Built from draw primitives, like the shut store's padlock, because
+ * an icon is a bitmap cell at the base text size and asked for at several times
+ * that draws the atlas's missing-glyph mark.
  */
-void draw_disconnected_mark(ImDrawList* draw, ImVec2 centre, float size,
-    ImU32 colour) {
-    const float half = size * 0.5f;
-    const ImVec2 base(centre.x, centre.y + half * 0.55f);
-    const float stroke = size * watermark_stroke;
-    constexpr float pi = 3.14159265f;
-    for (const float radius : {0.42f, 0.80f, 1.18f}) {
-        draw->PathArcTo(base, half * radius, -pi * 0.75f, -pi * 0.25f, 24);
-        draw->PathStroke(colour, ImDrawFlags_None, stroke);
-    }
-    draw->AddCircleFilled(base, size * 0.055f, colour, 16);
-    draw->AddLine(ImVec2(centre.x - half * 0.78f, centre.y - half * 0.80f),
-        ImVec2(centre.x + half * 0.78f, centre.y + half * 0.80f), colour,
-        stroke * 1.25f);
-}
-
-/** @brief A ring with an exclamation mark, for a plot whose read failed. */
-void draw_error_mark(ImDrawList* draw, ImVec2 centre, float size,
+void draw_exclamation_mark(ImDrawList* draw, ImVec2 centre, float size,
     ImU32 colour) {
     const float half = size * 0.5f;
     const float stroke = size * watermark_stroke;
@@ -124,11 +108,9 @@ void draw_plot_state(plot_state state, ImVec2 min, ImVec2 max,
     const float size = std::max(glyph_size,
         std::clamp(extent * theme::plot_watermark_share,
             theme::plot_watermark_min, theme::plot_watermark_max));
-    if (state == plot_state::disconnected)
-        draw_disconnected_mark(draw, centre, size,
-            theme::plot_disconnected_colour);
-    else
-        draw_error_mark(draw, centre, size, theme::plot_failed_colour);
+    draw_exclamation_mark(draw, centre, size,
+        state == plot_state::disconnected ? theme::plot_disconnected_colour
+                                          : theme::plot_failed_colour);
 
     if (captioned && ImGui::IsWindowHovered()
         && ImGui::IsMouseHoveringRect(min, max)) {

@@ -25,8 +25,10 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
+#include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "imgui.h"
+#include <algorithm>
 
 #include <cstdint>
 #include <format>
@@ -180,10 +182,16 @@ std::optional<hedgr::model::state::session_handle> signed_in_session(
 void draw_signed_out(const render_input& input,
     hedgr::ui::widget::status_bar& status,
     hedgr::ui::widget::foot_state& foot) {
-    ImGui::TextWrapped("%s",
-        "This window is not signed in. Sign in from the Accounts window to "
-        "read its data.");
     set_health_foot(foot, domain::data_health::unavailable, 0, 0, false);
+    const float foot_height = hedgr::ui::widget::status_foot_height(status, foot)
+        + ImGui::GetStyle().ItemSpacing.y;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const ImVec2 room = ImGui::GetContentRegionAvail();
+    hedgr::ui::widget::draw_plot_state(
+        hedgr::ui::widget::plot_state::disconnected, at,
+        ImVec2(at.x + room.x, at.y + std::max(room.y - foot_height, 80.0f)),
+        hedgr::ui::theme::plot_state_glyph_size, true,
+        "Not signed in. Sign in from the Accounts window to read its data.");
     hedgr::ui::widget::draw_status_foot(status, input.now_ns, foot);
 }
 
