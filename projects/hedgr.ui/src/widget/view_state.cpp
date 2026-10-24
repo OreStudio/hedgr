@@ -71,23 +71,27 @@ void draw_error_mark(ImDrawList* draw, ImVec2 centre, float size,
         size * 0.06f, colour, 16);
 }
 
-/** @brief Empty chart axes with a dashed flat line, for nothing to show. */
+/**
+ * @brief An empty table, for nothing to show: a rounded square cut into cells.
+ *
+ * The shape of the Fluent "table" icon (a frame with a header rule and a grid of
+ * two rules each way), drawn from primitives so it scales with the plot like
+ * the other marks.
+ */
 void draw_no_data_mark(ImDrawList* draw, ImVec2 centre, float size,
     ImU32 colour) {
-    const float half = size * 0.5f;
+    const float half = size * 0.5f * 0.88f;
     const float stroke = size * watermark_stroke;
-    const float left = centre.x - half * 0.9f;
-    const float right = centre.x + half * 0.9f;
-    const float top = centre.y - half * 0.8f;
-    const float bottom = centre.y + half * 0.8f;
-    draw->AddLine(ImVec2(left, top), ImVec2(left, bottom), colour, stroke);
-    draw->AddLine(ImVec2(left, bottom), ImVec2(right, bottom), colour, stroke);
-    constexpr int dashes = 4;
-    const float run = (right - left - half * 0.2f) / (dashes * 2 - 1);
-    const float y = centre.y;
-    for (int i = 0; i < dashes; ++i) {
-        const float x = left + half * 0.2f + run * static_cast<float>(i * 2);
-        draw->AddLine(ImVec2(x, y), ImVec2(x + run, y), colour, stroke * 0.8f);
+    const ImVec2 lo(centre.x - half, centre.y - half);
+    const ImVec2 hi(centre.x + half, centre.y + half);
+    draw->AddRect(lo, hi, colour, half * 0.28f, ImDrawFlags_RoundCornersAll,
+        stroke);
+    const float third = half * 2.0f / 3.0f;
+    for (int i = 1; i < 3; ++i) {
+        const float x = lo.x + third * static_cast<float>(i);
+        const float y = lo.y + third * static_cast<float>(i);
+        draw->AddLine(ImVec2(x, lo.y), ImVec2(x, hi.y), colour, stroke);
+        draw->AddLine(ImVec2(lo.x, y), ImVec2(hi.x, y), colour, stroke);
     }
 }
 

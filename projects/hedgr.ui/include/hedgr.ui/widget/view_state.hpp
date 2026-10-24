@@ -51,8 +51,8 @@ namespace hedgr::ui::widget {
  * |               | failed: a failed connection, a refused or | mark, one grey step     |          |
  * |               | undecodable read, history unavailable,    | brighter, no red        |          |
  * |               | a series not in the catalogue, no answer  |                         |          |
- * | no_data       | connected, no errors, and what was read   | empty chart axes with a | NO DATA  |
- * |               | is empty: no points, no rates, nothing    | dashed flat line, dim   |          |
+ * | no_data       | connected, no errors, and what was read   | an empty table (a framed| NO DATA  |
+ * |               | is empty: no points, no rates, nothing    | grid), dim              |          |
  * |               | installed, no match for a filter          |                         |          |
  *
  * The states are exclusive and ordered by what an operator can do about them.

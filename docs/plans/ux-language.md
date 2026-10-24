@@ -13,7 +13,7 @@ same table for readers outside the code.
 | reading | A connection or a read is in flight. | A spinner. No words. | The updating note. |
 | not_connected | There is no usable session: never signed in, no session bound, disconnected, the login session ended, or signed in with no token. | Three broadcast arcs and a dot with a slash through them. The dimmest grey. | OFFLINE |
 | error | The session is up or tried, and something failed: a failed connection attempt, a refused or undecodable read, history unavailable, a series not in the catalogue, a call nobody answered. | A ring with an exclamation mark. One grey step brighter than the others. No red. | ERROR |
-| no_data | Connected, no errors, and what was read is empty: a series with no points, a CRM with no rates, a curve with no points, an empty list, no match for a filter, nothing installed. | Empty chart axes with a dashed flat line. The dimmest grey. | NO DATA |
+| no_data | Connected, no errors, and what was read is empty: a series with no points, a CRM with no rates, a curve with no points, an empty list, no match for a filter, nothing installed. | An empty table: a rounded frame cut into a grid of cells, the shape of the Fluent `table` icon. The dimmest grey. | NO DATA |
 
 The marks differ in shape, not in colour alone. Not connected and no data share
 the dim grey, and the error mark is the only one in the brighter grey.
