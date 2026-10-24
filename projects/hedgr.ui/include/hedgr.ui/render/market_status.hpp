@@ -77,8 +77,8 @@ inline void set_health_foot(hedgr::ui::widget::foot_state& foot,
  * @brief Says in the foot that the series' history could not be read.
  *
  * A read that failed leaves the chart showing only what arrived live, which the
- * foot's health word would otherwise report as a healthy feed. The reason stays
- * in the failure line above the plot, so the foot carries the short note only.
+ * foot's health word would otherwise report as a healthy feed. The foot carries
+ * the short note, and the reason is in a tooltip over it.
  */
 inline void set_history_unavailable_foot(
     hedgr::ui::widget::foot_state& foot, std::string_view failure) {
@@ -86,6 +86,7 @@ inline void set_history_unavailable_foot(
         return;
     foot.word = "history unavailable";
     foot.colour = theme::failure_colour;
+    foot.detail = std::string{failure};
 }
 
 }

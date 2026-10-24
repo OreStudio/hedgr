@@ -236,7 +236,12 @@ TEST_CASE("a chart whose history read failed says so in its foot",
     desk.market.fail(series, "the observation answer could not be decoded", 2);
     const auto text = drawn_text(desk, handle, state);
     CHECK(says(text, "history unavailable"));
-    CHECK(says(text, "the observation answer could not be decoded"));
+    CHECK_FALSE(says(text, "the observation answer could not be decoded"));
+
+    hedgr::ui::widget::foot_state foot;
+    render::set_history_unavailable_foot(foot,
+        "the observation answer could not be decoded");
+    CHECK(foot.detail == "the observation answer could not be decoded");
 }
 
 TEST_CASE("the history note takes the failure colour and only on a failure",

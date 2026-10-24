@@ -75,6 +75,9 @@ struct foot_state final {
     /** @brief The state's colour, for the word and for the dot. */
     ImU32 colour = 0;
 
+    /** @brief What the word means, shown in a tooltip over it, or empty. */
+    std::string detail;
+
     /**
      * @brief Who the window's session is and where it is, or empty.
      *

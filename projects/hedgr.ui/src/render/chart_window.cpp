@@ -378,9 +378,9 @@ struct header_icons_drawn final {
 /**
  * @brief The body and foot of a chart whose session is not open.
  *
- * The plot area says so with the shared glyph and caption, where the other data
- * windows use a sentence, because a chart is the window an operator watches
- * for liveness and a glyph reads at a glance.
+ * The plot area says so with a grey watermark, where the other data windows use
+ * a sentence, because a chart is the window an operator watches for liveness
+ * and a shape reads at a glance. The words are in a tooltip over it.
  */
 void draw_connection_state(const render_input& input,
     widget::status_bar& status, widget::foot_state& foot,
@@ -609,13 +609,6 @@ void render_chart(window_handle handle, const render_input& input,
     if (icons.view_changed)
         chart_view_changed(handle, input, state, view_before);
 
-    if (row && !series.failure(*row).empty()) {
-        const auto failure = series.failure(*row);
-        ImGui::TextColored(
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
-            "%.*s", static_cast<int>(failure.size()), failure.data());
-    }
-
     std::optional<widget::foot_state> foot;
     float foot_height = 0.0f;
     {
@@ -642,7 +635,7 @@ void render_chart(window_handle handle, const render_input& input,
             const ImVec2 room = ImGui::GetContentRegionAvail();
             widget::draw_plot_state(widget::plot_state::history_unavailable,
                 at, ImVec2(at.x + room.x, at.y + room.y),
-                theme::plot_state_glyph_size, true);
+                theme::plot_state_glyph_size, true, series.failure(*row));
         } else if (no_points) {
             ImGui::TextDisabled("No observations for this series yet.");
         } else {

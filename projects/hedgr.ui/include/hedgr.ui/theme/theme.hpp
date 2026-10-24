@@ -622,14 +622,20 @@ inline constexpr float plot_label_padding_y = 8.0f;
 inline constexpr int plot_x_label_count = 4;
 
 /**
- * @brief The greys of the glyph a plot draws when it has no connection.
+ * @brief The tints of the watermark a plot draws when it has no connection.
  *
- * A session that was never opened is the dimmer of the two, since nothing went
- * wrong; one that failed is a step brighter so it draws the eye without a
- * colour that shouts.
+ * Both sit one small step above the plot's background, as the shut store's
+ * padlock does, so the state is noticed without a word or a colour that shouts.
+ * A session that was never opened is a cool grey, since nothing went wrong; a
+ * failure is a grey with a trace of red.
  */
-inline constexpr ImU32 plot_disconnected_colour = IM_COL32(88, 92, 104, 255);
-inline constexpr ImU32 plot_failed_colour = IM_COL32(140, 144, 156, 255);
+inline constexpr ImU32 plot_disconnected_colour = IM_COL32(34, 40, 54, 255);
+inline constexpr ImU32 plot_failed_colour = IM_COL32(58, 38, 46, 255);
+
+/** @brief A plot watermark is this share of the plot's shorter side, within the bounds. */
+inline constexpr float plot_watermark_share = 0.42f;
+inline constexpr float plot_watermark_min = 28.0f;
+inline constexpr float plot_watermark_max = 220.0f;
 
 /** @brief The colour of the arc a plot spins while it waits. */
 inline constexpr ImU32 plot_spinner_colour = IM_COL32(150, 140, 180, 255);

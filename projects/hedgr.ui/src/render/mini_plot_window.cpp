@@ -411,11 +411,11 @@ void render_mini_plot(window_handle handle, const render_input& input,
             l.max.x - l.min.x, l.max.y - below_header});
         widget::draw_plot_state(card_state, area_min, l.max, glyph, false);
     } else if (!input.market.failure(*row).empty()) {
-        const auto failure = input.market.failure(*row);
-        ImGui::SetCursorScreenPos(ImVec2(l.min.x, below_header));
-        ImGui::TextColored(
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour), "%.*s",
-            static_cast<int>(failure.size()), failure.data());
+        const ImVec2 area_min(l.min.x, below_header);
+        const float glyph = std::min({theme::plot_state_card_glyph_size,
+            l.max.x - l.min.x, l.max.y - below_header});
+        widget::draw_plot_state(widget::plot_state::history_unavailable,
+            area_min, l.max, glyph, true, input.market.failure(*row));
     } else {
         dim_line(ImVec2(l.min.x, below_header), "No points yet");
     }

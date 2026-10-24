@@ -24,10 +24,13 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/plot_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
+#include "software_raster.hpp"
 #include <algorithm>
 #include <catch2/catch_all.hpp>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
@@ -175,13 +178,20 @@ TEST_CASE("a plot state follows the session, then whether the series is read",
         == plot_state::none);
 }
 
-TEST_CASE("the disconnected glyph is dimmer than the failed one",
+TEST_CASE("the disconnected mark is cooler than the failed one and both are"
+          " faint",
     "[plot_state]") {
-    const auto luma = [](ImU32 c) {
-        return (c & 0xFF) + ((c >> 8) & 0xFF) + ((c >> 16) & 0xFF);
-    };
-    CHECK(luma(theme::plot_disconnected_colour)
-        < luma(theme::plot_failed_colour));
+    const auto red = [](ImU32 c) { return static_cast<int>(c & 0xFF); };
+    const auto blue = [](ImU32 c) { return static_cast<int>((c >> 16) & 0xFF); };
+    CHECK(blue(theme::plot_disconnected_colour)
+        > blue(theme::plot_failed_colour));
+    CHECK(red(theme::plot_failed_colour)
+        > red(theme::plot_disconnected_colour));
+    for (const ImU32 c : {theme::plot_disconnected_colour,
+             theme::plot_failed_colour}) {
+        CHECK(red(c) < 90);
+        CHECK(blue(c) < 90);
+    }
 }
 
 TEST_CASE("a plot state draws its own glyph and no other", "[plot_state]") {
@@ -262,34 +272,60 @@ TEST_CASE("the spinner turns with the clock", "[plot_state]") {
     }
 }
 
-TEST_CASE("a captioned state says its words and an uncaptioned one says none",
+/** @brief The widget drawn with the pointer over the plot area. */
+drawn hovered_frame(plot_state state, std::string_view reason = {}) {
+    ImGui::GetIO().MousePos = area_centre;
+    static_cast<void>(widget_frame(state, true, reason));
+    auto result = widget_frame(state, true, reason);
+    ImGui::GetIO().MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+    return result;
+}
+
+TEST_CASE("a plot state draws no words, they are in a tooltip over it",
     "[plot_state]") {
     hedgr::testing::headless_imgui imgui;
 
-    CHECK(widget_frame(plot_state::disconnected, true).says("Not connected"));
-    CHECK(widget_frame(plot_state::reading, true).says("Reading the series..."));
-    CHECK_FALSE(widget_frame(plot_state::reading, true).says("Not connected"));
+    for (const auto state : {plot_state::disconnected, plot_state::failed,
+             plot_state::history_unavailable, plot_state::reading}) {
+        const auto resting = widget_frame(state, true, "bad password");
+        CHECK(resting.text.find_first_not_of(" \n") == std::string::npos);
+    }
 
-    const auto history = widget_frame(plot_state::history_unavailable, true,
+    const auto off = hovered_frame(plot_state::disconnected);
+    CHECK(off.says("Not connected"));
+    const auto failed = hovered_frame(plot_state::failed, "bad password");
+    CHECK(failed.says("Not connected"));
+    CHECK(failed.says("bad password"));
+    const auto history = hovered_frame(plot_state::history_unavailable,
         "no answer");
     CHECK(history.says("History unavailable"));
     CHECK(history.says("no answer"));
     CHECK_FALSE(history.says("Not connected"));
+}
 
-    const auto failed = widget_frame(plot_state::failed, true, "bad password");
-    CHECK(failed.says("Not connected"));
-    CHECK(failed.says("bad password"));
+TEST_CASE("the disconnected and error marks are drawn large, in the background",
+    "[plot_state]") {
+    hedgr::testing::headless_imgui imgui;
 
-    for (const auto state : {plot_state::disconnected, plot_state::failed,
-             plot_state::reading}) {
-        const auto bare = widget_frame(state, false, "bad password");
-        CHECK_FALSE(bare.says("Not connected"));
-        CHECK_FALSE(bare.says("Reading"));
-        CHECK_FALSE(bare.says("bad password"));
+    for (const auto& [state, colour] : {
+             std::pair{plot_state::disconnected,
+                 theme::plot_disconnected_colour},
+             std::pair{plot_state::failed, theme::plot_failed_colour}}) {
+        const auto at = widget_frame(state, false).of(colour);
+        REQUIRE_FALSE(at.empty());
+        float lo = 1e9f;
+        float hi = -1e9f;
+        for (const auto p : at) {
+            lo = std::min(lo, p.y);
+            hi = std::max(hi, p.y);
+        }
+        const float shorter = std::min(area_max.x - area_min.x,
+            area_max.y - area_min.y);
+        CHECK(hi - lo > shorter * 0.25f);
     }
 }
 
-TEST_CASE("a chart with no open session says it is not connected, not reading",
+TEST_CASE("a chart with no open session shows the not-connected mark, not a spinner",
     "[plot_state][chart]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -299,7 +335,7 @@ TEST_CASE("a chart with no open session says it is not connected, not reading",
 
     desk.sessions.set_status(desk.session, session_status::disconnected);
     const auto off = window_frame(desk, handle, state);
-    CHECK(off.says("Not connected"));
+    CHECK_FALSE(off.says("Not connected"));
     CHECK(off.says("NO DATA"));
     CHECK_FALSE(off.says("Reading the series"));
     CHECK(marks_of(off).disconnected > 0);
@@ -308,14 +344,14 @@ TEST_CASE("a chart with no open session says it is not connected, not reading",
     desk.sessions.set_status(desk.session, session_status::failed);
     desk.sessions.set_last_error(desk.session, "certificate rejected");
     const auto failed = window_frame(desk, handle, state);
-    CHECK(failed.says("Not connected"));
-    CHECK(failed.says("certificate rejected"));
+    CHECK_FALSE(failed.says("Not connected"));
+    CHECK_FALSE(failed.says("certificate rejected"));
     CHECK_FALSE(failed.says("Reading the series"));
     CHECK(marks_of(failed).failed > 0);
     CHECK(marks_of(failed).disconnected == 0);
 }
 
-TEST_CASE("a chart whose session is connecting spins and says it is reading",
+TEST_CASE("a chart whose session is connecting spins",
     "[plot_state][chart]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -325,7 +361,7 @@ TEST_CASE("a chart whose session is connecting spins and says it is reading",
 
     desk.sessions.set_status(desk.session, session_status::connecting);
     const auto connecting = window_frame(desk, handle, state);
-    CHECK(connecting.says("Reading the series..."));
+    CHECK_FALSE(connecting.says("Reading the series"));
     CHECK_FALSE(connecting.says("Not connected"));
     CHECK(marks_of(connecting).spinner > 0);
     CHECK(marks_of(connecting).disconnected + marks_of(connecting).failed == 0);
@@ -341,15 +377,15 @@ TEST_CASE("a connected chart still reading its series spins, and one whose"
     render::window_ui_state state;
 
     const auto reading = window_frame(desk, handle, state);
-    CHECK(reading.says("Reading the series..."));
+    CHECK_FALSE(reading.says("Reading the series"));
     CHECK(marks_of(reading).spinner > 0);
     CHECK_FALSE(reading.says("Not connected"));
 
     const auto series = desk.windows.series(handle).front();
     desk.market.fail(series, "no such series", 1);
     const auto empty = window_frame(desk, handle, state);
-    CHECK(empty.says("History unavailable"));
-    CHECK(empty.says("no such series"));
+    CHECK_FALSE(empty.says("History unavailable"));
+    CHECK_FALSE(empty.says("no such series"));
     CHECK_FALSE(empty.says("Reading the series"));
     CHECK_FALSE(empty.says("No observations for this series yet."));
     CHECK(marks_of(empty).spinner == 0);
@@ -415,4 +451,31 @@ TEST_CASE("a card's glyph is centred below its header, inside the card",
     CHECK(std::abs(at.x - 120.0f) < 8.0f);
     CHECK(at.y > 90.0f);
     CHECK(at.y < 170.0f);
+}
+
+/**
+ * Not a test: with HEDGR_PLOT_STATE_PPM set, writes the disconnected and error
+ * watermarks side by side over the plot background to a PPM, so the shapes can
+ * be looked at without opening a window.
+ */
+TEST_CASE("plot state capture", "[.gallery]") {
+    const char* out = std::getenv("HEDGR_PLOT_STATE_PPM");
+    REQUIRE(out != nullptr);
+    hedgr::testing::headless_imgui imgui;
+    hedgr::testing::software_raster raster(900, 400);
+    for (int pass = 0; pass < 3; ++pass) {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(900.0f, 400.0f));
+        ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoDecoration);
+        widget::draw_plot_state(plot_state::disconnected, ImVec2(0, 0),
+            ImVec2(450, 400), theme::plot_state_glyph_size, false);
+        widget::draw_plot_state(plot_state::failed, ImVec2(450, 0),
+            ImVec2(900, 400), theme::plot_state_glyph_size, false);
+        ImGui::End();
+        ImGui::Render();
+        raster.update_textures();
+    }
+    raster.draw(*ImGui::GetDrawData(), IM_COL32(15, 20, 32, 255));
+    CHECK(raster.write_ppm(std::filesystem::path(out) / "plot-state.ppm"));
 }

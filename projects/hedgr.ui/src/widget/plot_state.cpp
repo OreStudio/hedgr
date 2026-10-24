@@ -44,19 +44,44 @@ using hedgr::model::domain::session_status;
     }
 }
 
-/** @brief Writes @p text dim and centred on @p x, wrapped within @p wrap. */
-void dim_caption(float x, float y, float wrap, std::string_view text) {
-    const char* const end = text.data() + text.size();
-    const ImVec2 size = ImGui::CalcTextSize(text.data(), end, false, wrap);
-    const float left = x - size.x * 0.5f;
-    ImGui::SetCursorScreenPos(ImVec2(left, y));
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::dim_text());
-    ImGui::PushTextWrapPos(left + wrap);
-    ImGui::TextUnformatted(text.data(), end);
-    ImGui::PopTextWrapPos();
-    ImGui::PopStyleColor();
+/** @brief The stroke weight of a watermark's line work, as a share of its size. */
+constexpr float watermark_stroke = 0.07f;
+
+/**
+ * @brief A broadcast mark with a slash through it, for a plot with no session.
+ *
+ * Three arcs and a dot, struck through. Built from draw primitives, like the
+ * shut store's padlock, because an icon is a bitmap cell at the base text size
+ * and asked for at several times that draws the atlas's missing-glyph mark.
+ */
+void draw_disconnected_mark(ImDrawList* draw, ImVec2 centre, float size,
+    ImU32 colour) {
+    const float half = size * 0.5f;
+    const ImVec2 base(centre.x, centre.y + half * 0.55f);
+    const float stroke = size * watermark_stroke;
+    constexpr float pi = 3.14159265f;
+    for (const float radius : {0.42f, 0.80f, 1.18f}) {
+        draw->PathArcTo(base, half * radius, -pi * 0.75f, -pi * 0.25f, 24);
+        draw->PathStroke(colour, ImDrawFlags_None, stroke);
+    }
+    draw->AddCircleFilled(base, size * 0.055f, colour, 16);
+    draw->AddLine(ImVec2(centre.x - half * 0.78f, centre.y - half * 0.80f),
+        ImVec2(centre.x + half * 0.78f, centre.y + half * 0.80f), colour,
+        stroke * 1.25f);
 }
 
+/** @brief A ring with an exclamation mark, for a plot whose read failed. */
+void draw_error_mark(ImDrawList* draw, ImVec2 centre, float size,
+    ImU32 colour) {
+    const float half = size * 0.5f;
+    const float stroke = size * watermark_stroke;
+    draw->AddCircle(centre, half * 0.96f, colour, 64, stroke);
+    const float bar = size * 0.045f;
+    draw->AddRectFilled(ImVec2(centre.x - bar, centre.y - half * 0.52f),
+        ImVec2(centre.x + bar, centre.y + half * 0.10f), colour, bar);
+    draw->AddCircleFilled(ImVec2(centre.x, centre.y + half * 0.45f),
+        size * 0.06f, colour, 16);
+}
 }
 
 plot_state plot_state_for(session_status status, bool reading) noexcept {
@@ -92,29 +117,31 @@ void draw_plot_state(plot_state state, ImVec2 min, ImVec2 max,
     const ImVec2 centre((min.x + max.x) * 0.5f, (min.y + max.y) * 0.5f);
     if (state == plot_state::reading) {
         draw_spinner(draw, centre, glyph_size * 0.5f);
-    } else {
-        const char* const plug = icon::session_failed;
-        const ImVec2 size = ImGui::GetFont()->CalcTextSizeA(
-            glyph_size, FLT_MAX, 0.0f, plug);
-        draw->AddText(ImGui::GetFont(), glyph_size,
-            ImVec2(std::floor(centre.x - size.x * 0.5f),
-                std::floor(centre.y - size.y * 0.5f)),
-            state == plot_state::failed
-                    || state == plot_state::history_unavailable
-                ? theme::plot_failed_colour
-                                        : theme::plot_disconnected_colour,
-            plug);
-    }
-    if (!captioned)
         return;
+    }
 
-    const float wrap = (max.x - min.x) * theme::plot_state_caption_share;
-    const float gap = ImGui::GetStyle().ItemSpacing.y;
-    float y = centre.y + glyph_size * 0.5f + gap;
-    dim_caption(centre.x, y, wrap, caption_of(state));
-    if (!reason.empty()) {
-        y += ImGui::GetTextLineHeightWithSpacing();
-        dim_caption(centre.x, y, wrap, reason);
+    const float extent = std::min(max.x - min.x, max.y - min.y);
+    const float size = std::max(glyph_size,
+        std::clamp(extent * theme::plot_watermark_share,
+            theme::plot_watermark_min, theme::plot_watermark_max));
+    if (state == plot_state::disconnected)
+        draw_disconnected_mark(draw, centre, size,
+            theme::plot_disconnected_colour);
+    else
+        draw_error_mark(draw, centre, size, theme::plot_failed_colour);
+
+    if (captioned && ImGui::IsWindowHovered()
+        && ImGui::IsMouseHoveringRect(min, max)) {
+        ImGui::BeginTooltip();
+        ImGui::TextUnformatted(caption_of(state));
+        if (!reason.empty()) {
+            ImGui::PushStyleColor(ImGuiCol_Text, theme::dim_text());
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+            ImGui::TextUnformatted(reason.data(), reason.data() + reason.size());
+            ImGui::PopTextWrapPos();
+            ImGui::PopStyleColor();
+        }
+        ImGui::EndTooltip();
     }
 }
 

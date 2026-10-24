@@ -366,6 +366,8 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
         ImGui::TextColored(
             ImGui::ColorConvertU32ToFloat4(state.colour), "%s",
             text.word.c_str());
+        if (!state.detail.empty())
+            ImGui::SetItemTooltip("%s", state.detail.c_str());
     }
 
     ImGui::EndChild();
