@@ -17,6 +17,7 @@ set(files
     "hermetic_environment.cpp"
     "market_feed_tests.cpp"
     "market_stream_tests.cpp"
+    "probe_backoff_tests.cpp"
     "read_service_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"

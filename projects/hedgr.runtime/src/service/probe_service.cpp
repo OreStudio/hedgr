@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.runtime/service/probe_backoff.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
@@ -45,25 +46,6 @@ namespace transport = hedgr::session::transport;
 using condition_source = model_state::condition_source;
 using support::lg;
 using support::steady_now_ns;
-
-/**
- * @brief How often an instance is probed when the last probe answered.
- *
- * A few seconds is a glance rather than a gate: often enough that the chart the
- * Instance Manager draws has a shape to show and a status is never stale when
- * somebody looks at it, rare enough that polling every instance costs the
- * deployment nothing worth measuring.
- */
-constexpr std::chrono::milliseconds probe_cadence{5000};
-
-/**
- * @brief The longest an unreachable instance waits between attempts.
- *
- * A deployment that is down is not brought back by being asked faster, and a
- * fixed retry against twenty unreachable instances is the retry storm the
- * backoff exists to prevent.
- */
-constexpr std::chrono::milliseconds probe_cadence_max{60000};
 
 }
 
@@ -277,19 +259,23 @@ void probe_service::apply_probe_result(const event::event& ev) {
     }
 
     /*
-     * A probe that got no answer backs the next attempt off; a probe that got
-     * an answer -- whatever that answer was -- returns to the cadence. A
-     * deployment that is up but not bootstrapped is up, and polling it every
-     * five seconds is how the operator finds out the moment it is set up.
+     * A probe that got no answer backs the next attempt off, and so does one
+     * whose broker answered but whose IAM did not: that deployment is not
+     * coming up on its own in five seconds, and each probe is a connection
+     * made and torn down. A probe that got a real answer -- ready, or up but
+     * not bootstrapped -- returns to the cadence. A deployment that is up but
+     * not bootstrapped is polled every five seconds because that is how the
+     * operator finds out the moment it is set up.
      */
     auto& interval = probe_intervals_[ev.instance_id];
-    if (ev.reach == domain::reachability::reachable)
-        interval = probe_cadence;
-    else
-        interval = std::min(interval.count() == 0
-                ? probe_cadence * 2
-                : interval * 2,
-            probe_cadence_max);
+    const bool answered = probe_answered(ev.reach, ev.ready);
+    interval = next_probe_interval(interval, answered);
+    if (!answered) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Probe of '" << ev.instance_id << "' got no answer; next probe "
+            << "in " << interval.count() / 1000 << " s (backing off, at most "
+            << probe_cadence_max.count() / 1000 << " s)";
+    }
 
     probes_.set_next_probe_ns(*handle,
         steady_now_ns() +
