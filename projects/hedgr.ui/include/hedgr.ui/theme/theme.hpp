@@ -612,16 +612,6 @@ inline constexpr float instances_tile_gap = 8.0f;
 inline constexpr float instances_pin_photo = 40.0f;
 
 /**
- * @brief The Accounts panel: a large popup with a filter box and a list
- * grouped under tenant headings.
- *
- * The same size as the Instances panel, and capped the same way: a small window
- * gets a smaller panel rather than one that runs off the screen.
- */
-inline constexpr float accounts_panel_width = 720.0f;
-inline constexpr float accounts_panel_height = 520.0f;
-
-/**
  * @brief The VIEW > Windows panel: the open windows grouped by kind.
  *
  * Narrower than the catalogue panels because each row is one title, and short

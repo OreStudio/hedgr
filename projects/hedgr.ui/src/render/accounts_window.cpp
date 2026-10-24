@@ -73,16 +73,11 @@ using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_leaf;
 
 /*
- * The row a window should select next, held until that window draws. The
- * instance scopes the request: several Accounts windows can be open, and a
- * selection meant for one must not land in the first one drawn.
+ * The row a capture asked to see selected, held until the frame that can show
+ * it. File-scope rather than a parameter because the environment is read once,
+ * before any window is drawn, and empty in an ordinary run.
  */
-struct pending_account_selection final {
-    std::string instance;
-    std::string account;
-};
-
-pending_account_selection pending_selection;
+std::string pending_capture_selected_account;
 
 /** @brief Every live account of one instance, as the browser wants it. */
 [[nodiscard]] std::vector<tree_leaf> account_tree_leaves(const render_input& input,
@@ -378,16 +373,9 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
     ImGui::SetItemTooltip("%s", "Do not sign in");
 
     if (signed_in && complete) {
-        command request;
-        request.kind = command_kind::connect_session;
-        request.instance_id = row->instance_id;
-        request.account_id = row->id;
-        request.principal = row->principal;
-        request.password =
-            hedgr::model::domain::secret_string{
-                std::string{browser.credential.data()}};
-        request.remember = browser.remember;
-        input.commands.push(std::move(request));
+        input.commands.push(hedgr::ui::render::account_sign_in_command(
+            row->instance_id, row->id, row->principal,
+            browser.credential.data(), browser.remember));
 
         std::fill(browser.credential.begin(), browser.credential.end(), '\0');
         browser.password_visible = false;
@@ -712,14 +700,30 @@ command account_save_command(const render_input& input,
     return request;
 }
 
-void request_account_selection(std::string_view instance_id,
-    std::string_view account_id) {
-    pending_selection.instance = std::string{instance_id};
-    pending_selection.account = std::string{account_id};
+command account_sign_in_command(std::string_view instance_id,
+    std::string_view account_id, std::string_view principal,
+    std::string_view password, bool remember) {
+    command request;
+    request.kind = command_kind::connect_session;
+    request.instance_id = std::string{instance_id};
+    request.account_id = std::string{account_id};
+    request.principal = std::string{principal};
+    /*
+     * No password means "use the one the store holds". A typed password is
+     * handed over for this attempt only, and remember is set only when there is
+     * one: a command with an empty password and remember set would ask the
+     * runtime to seal nothing.
+     */
+    if (!password.empty()) {
+        request.password = hedgr::model::domain::secret_string{
+            std::string{password}};
+        request.remember = remember;
+    }
+    return request;
 }
 
 void select_account_for_capture(std::string_view account_id) {
-    request_account_selection({}, account_id);
+    pending_capture_selected_account = std::string{account_id};
 }
 
 /**
@@ -820,12 +824,8 @@ void accounts_window_actions(const render_input& input,
         << "Signing in '" << row->principal << "' on '" << row->instance_id
         << "' with the stored credential";
 
-    command request;
-    request.kind = command_kind::connect_session;
-    request.instance_id = row->instance_id;
-    request.account_id = row->id;
-    request.principal = row->principal;
-    input.commands.push(std::move(request));
+    input.commands.push(hedgr::ui::render::account_sign_in_command(
+        row->instance_id, row->id, row->principal));
 
     /*
      * The landing window is not asked for here. Whether this account's session
@@ -855,16 +855,13 @@ void render_accounts_window(hedgr::model::state::window_handle handle,
     state.browser.form_owner = instance_id;
 
     /*
-     * The panel's pick, or a capture's request, is the scratch a click writes
-     * and nothing more, so the pane that follows is the one an operator would
-     * have reached by hand.
+     * A capture's selection is the scratch a click writes and nothing more, so
+     * the pane that follows is the one an operator would have reached by hand.
      */
-    if (!pending_selection.account.empty()
-        && (pending_selection.instance.empty()
-            || pending_selection.instance == instance_id)) {
-        state.browser.selected_leaf = pending_selection.account;
+    if (!pending_capture_selected_account.empty()) {
+        state.browser.selected_leaf = pending_capture_selected_account;
         state.browser.selected_folder.clear();
-        pending_selection = {};
+        pending_capture_selected_account.clear();
     }
 
     ImGui::PushID("accounts");

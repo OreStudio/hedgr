@@ -1462,197 +1462,40 @@ TEST_CASE("no instances and no filter match both draw the no data mark and no ti
 namespace {
 
 void add_account(bar_harness& h, const char* id, const char* instance_id,
-    const char* name, const char* principal) {
+    const char* name, const char* principal, std::string_view folder_id = {},
+    bool has_credential = false) {
     model::domain::account row;
     row.id = id;
     row.instance_id = instance_id;
     row.name = name;
     row.principal = principal;
+    row.folder_id = std::string{folder_id};
+    row.has_credential = has_credential;
     static_cast<void>(h.desk.accounts.upsert(row));
 }
 
-/** @brief Records the tenant IAM answered for an account's last sign-in. */
-void give_tenant(bar_harness& h, const char* instance_id, const char* account_id,
-    const char* tenant) {
-    const auto found = h.desk.sessions.find(instance_id, account_id);
-    const auto session = found ? *found
-                               : h.desk.sessions.insert(instance_id, account_id);
-    h.desk.sessions.set_account_result(session, tenant, "Party", "pid",
-        model::domain::secret_string{"token"});
+/** @brief Adds one folder to an instance's accounts tree and returns its id. */
+std::string add_accounts_folder(bar_harness& h, std::string id,
+    std::string instance_id, std::string parent_id, std::string name) {
+    model::domain::folder row;
+    row.id = std::move(id);
+    row.parent_id = std::move(parent_id);
+    row.owner_id = std::move(instance_id);
+    row.name = std::move(name);
+    row.tree = model::domain::folder_tree::accounts;
+    REQUIRE(h.desk.folders.upsert(row).has_value());
+    return row.id;
 }
 
+/** @brief Gives one instance an accounts tree with a Privileged folder. */
+std::string privileged_folder(bar_harness& h, const char* instance_id) {
+    const std::string root = add_accounts_folder(h,
+        model::domain::accounts_root_id_for(instance_id), instance_id, "",
+        "Accounts");
+    return add_accounts_folder(h, std::string("privileged-") + instance_id,
+        instance_id, root, "Privileged");
 }
 
-TEST_CASE("the ACCOUNTS panel is the themed large size, capped to the work area",
-    "[menu_bar][accounts_panel]") {
-    {
-        bar_harness h;
-        h.open_menu("Accounts");
-        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
-        CHECK(panel->Size.x == Catch::Approx(theme::accounts_panel_width));
-        CHECK(panel->Size.y == Catch::Approx(theme::accounts_panel_height));
-    }
-    {
-        bar_harness h;
-        ImGui::GetIO().DisplaySize = ImVec2(500.0f, 400.0f);
-        h.open_menu("Accounts");
-        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
-        CHECK(panel->Size.x < theme::accounts_panel_width);
-        CHECK(panel->Size.y < theme::accounts_panel_height);
-        CHECK(panel->Pos.x >= 0.0f);
-        CHECK(panel->Pos.y >= 0.0f);
-        CHECK(panel->Pos.x + panel->Size.x <= 500.0f + 0.5f);
-        CHECK(panel->Pos.y + panel->Size.y <= 400.0f + 0.5f);
-    }
-}
-
-TEST_CASE("the ACCOUNTS panel groups accounts by the tenant of their last "
-          "sign-in, no tenant last",
-    "[menu_bar][accounts_panel]") {
-    bar_harness h;
-    add_instance(h, "i", "Inst");
-    add_instance(h, "j", "Other");
-    add_account(h, "a-ops", "i", "Ops", "ops@acme");
-    give_tenant(h, "i", "a-ops", "Acme");
-    add_account(h, "a-admin", "i", "Admin", "admin@acme");
-    give_tenant(h, "i", "a-admin", "Acme");
-    add_account(h, "a-other", "j", "Other", "other@beta");
-
-    h.open_menu("Accounts");
-    REQUIRE(h.state.accounts.entries.size() == 3);
-    CHECK(h.state.accounts.total == 3);
-    CHECK(h.state.accounts.entries[0].name == "Admin");
-    CHECK(h.state.accounts.entries[0].tenant == "Acme");
-    CHECK(h.state.accounts.entries[0].instance == "Inst");
-    CHECK(h.state.accounts.entries[1].name == "Ops");
-    CHECK(h.state.accounts.entries[1].tenant == "Acme");
-    CHECK(h.state.accounts.entries[2].name == "Other");
-    CHECK(h.state.accounts.entries[2].tenant.empty());
-}
-
-TEST_CASE("typing in the ACCOUNTS filter narrows by name, principal, instance "
-          "or tenant",
-    "[menu_bar][accounts_panel]") {
-    bar_harness h;
-    add_instance(h, "i", "Inst");
-    add_account(h, "a-ops", "i", "Ops", "ops@acme");
-    give_tenant(h, "i", "a-ops", "Acme");
-
-    h.open_menu("Accounts");
-    REQUIRE(h.state.accounts.entries.size() == 1);
-
-    ImGui::GetIO().AddInputCharactersUTF8("acme");
-    h.settle();
-    CHECK(h.state.accounts.entries.size() == 1);
-
-    ImGui::GetIO().AddInputCharactersUTF8("-zzz");
-    h.settle();
-    CHECK(h.state.accounts.entries.empty());
-    CHECK(h.state.accounts.total == 1);
-}
-
-TEST_CASE("the ACCOUNTS panel opens with an empty filter each time",
-    "[menu_bar][accounts_panel]") {
-    bar_harness h;
-    add_instance(h, "i", "Inst");
-    add_account(h, "a-ops", "i", "Ops", "ops@acme");
-
-    h.open_menu("Accounts");
-    ImGui::GetIO().AddInputCharactersUTF8("zzz");
-    h.settle();
-    REQUIRE(h.state.accounts.entries.empty());
-
-    h.state.open = menu_bar_state::none;
-    h.settle();
-    h.open_menu("Accounts");
-    CHECK(std::string(h.state.accounts.filter.text).empty());
-    CHECK(h.state.accounts.entries.size() == 1);
-}
-
-TEST_CASE("an ACCOUNTS pick opens that instance's window, selects the account "
-          "and closes the panel",
-    "[menu_bar][accounts_panel]") {
-    bar_harness h;
-    add_instance(h, "i", "Inst");
-    add_account(h, "a-admin", "i", "Admin", "admin@acme");
-    give_tenant(h, "i", "a-admin", "Acme");
-
-    h.open_menu("Accounts");
-    static_cast<void>(h.commands());
-    static_cast<void>(drained_signals());
-
-    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
-    /*
-     * The row sits in the list child, so its id is the row id seeded by the
-     * child's own id. Take that id from the child window ImGui made rather than
-     * reconstruct it, then sweep the panel for the row.
-     */
-    const ImGuiWindow* child = nullptr;
-    for (ImGuiWindow* window : GImGui->Windows)
-        if (window->ParentWindow == panel) {
-            child = window;
-            break;
-        }
-    REQUIRE(child != nullptr);
-    const ImGuiID target =
-        ImHashStr("##account", 0, ImHashStr("a-admin", 0, child->ID));
-    std::optional<ImVec2> at;
-    for (float y = panel->Pos.y + theme::menu_padding;
-         y < panel->Pos.y + panel->Size.y; y += 2.0f) {
-        h.hover(ImVec2(panel->Pos.x + 30.0f, y));
-        if (GImGui->HoveredId == target) {
-            at = ImVec2(panel->Pos.x + 30.0f, y);
-            break;
-        }
-    }
-    REQUIRE(at.has_value());
-    h.click(*at);
-    const auto commands = h.commands();
-    REQUIRE(commands.size() == 1);
-    CHECK(commands[0].kind == model::command::command_kind::open_window);
-    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
-    CHECK(commands[0].instance_id == "i");
-
-    const auto raised = drained_signals();
-    REQUIRE(raised.size() == 1);
-    CHECK(raised[0].name == model::signal::names::shortcut_activated);
-    CHECK(raised[0].detail == "Open the accounts of Inst");
-    CHECK(GImGui->OpenPopupStack.Size == 0);
-
-    /* The window the request opens shows the picked account's cards. */
-    auto input = h.desk.input();
-    render::window_ui_state ui;
-    widget::status_bar status;
-    render::lock_control lock;
-    const auto window = h.desk.open(model::domain::window_kind::accounts,
-        model::domain::accounts_state{"i"}, "accounts-i");
-    hedgr::testing::frame([&] {
-        render::render_accounts_window(window, input, ui, status, lock);
-    });
-    CHECK(ui.browser.selected_leaf == "a-admin");
-}
-
-TEST_CASE("no accounts and a filter that matches none both draw the no data mark",
-    "[menu_bar][accounts_panel]") {
-    const ImU32 quiet = theme::view_quiet_colour;
-    {
-        bar_harness h;
-        h.open_menu("Accounts");
-        CHECK(h.state.accounts.entries.empty());
-        CHECK(vertices_of(quiet) > 0);
-    }
-    {
-        bar_harness h;
-        add_instance(h, "i", "Inst");
-        add_account(h, "a-ops", "i", "Ops", "ops@acme");
-        h.open_menu("Accounts");
-        CHECK(vertices_of(quiet) == 0);
-        ImGui::GetIO().AddInputCharactersUTF8("zzz");
-        h.settle();
-        CHECK(h.state.accounts.entries.empty());
-        CHECK(h.state.accounts.total == 1);
-        CHECK(vertices_of(quiet) > 0);
-    }
 }
 
 namespace {
@@ -1683,6 +1526,146 @@ void open_windows_list(bar_harness& h) {
     h.settle();
 }
 
+/** @brief Opens one environment's submenu from the ACCOUNTS menu. */
+void open_environment(bar_harness& h, int row = 0) {
+    h.open_menu("Accounts");
+    h.click(bar_harness::row_centre(row));
+    h.settle();
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+}
+
+/** @brief The y of a menu row whose label seeds @p id in the open popup. */
+std::optional<float> find_account_row(bar_harness& h, const char* id) {
+    const ImGuiWindow* popup = GImGui->OpenPopupStack.back().Window;
+    const ImGuiID target =
+        ImHashStr("##row", 0, ImHashStr(id, 0, popup->ID));
+    return find_popup_row(h, popup->Pos.x + 30.0f, target);
+}
+
+}
+
+TEST_CASE("ACCOUNTS lists the environments that have accounts, by name",
+    "[menu_bar][accounts]") {
+    bar_harness h;
+    add_instance(h, "z", "Zeta");
+    add_instance(h, "a", "Alpha");
+    add_instance(h, "e", "Empty");
+    add_account(h, "z-1", "z", "Zed", "zed@example", {}, true);
+    add_account(h, "a-1", "a", "Abe", "abe@example", {}, true);
+
+    h.open_menu("Accounts");
+    const ImGuiWindow* menu = GImGui->OpenPopupStack.back().Window;
+    const float row = ImGui::GetTextLineHeight()
+        + 2.0f * theme::menu_row_padding_y;
+    /* Alpha and Zeta, and no row for the environment with no login. */
+    CHECK(menu->Size.y == Catch::Approx(2.0f * theme::menu_padding
+        + 2.0f * row + theme::menu_row_gap).margin(1.0f));
+
+    h.click(bar_harness::row_centre(0));
+    h.settle();
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const auto y = find_account_row(h, "Abe");
+    REQUIRE(y.has_value());
+    static_cast<void>(h.commands());
+    h.click(ImVec2(GImGui->OpenPopupStack.back().Window->Pos.x + 30.0f, *y));
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].kind == model::command::command_kind::connect_session);
+    CHECK(commands[0].instance_id == "a");
+}
+
+TEST_CASE("an ACCOUNTS account signs in at once with the memorised password",
+    "[menu_bar][accounts]") {
+    bar_harness h;
+    add_instance(h, "i", "Brave Hopper");
+    const std::string folder = privileged_folder(h, "i");
+    add_account(h, "a-super", "i", "super_admin", "super@acme", folder, true);
+    add_account(h, "a-tenant", "i", "tenant_admin", "tenant@acme", folder, true);
+
+    open_environment(h);
+    const ImGuiWindow* menu = GImGui->OpenPopupStack.back().Window;
+    const float row = ImGui::GetTextLineHeight()
+        + 2.0f * theme::menu_row_padding_y;
+    /* One folder heading and two accounts. */
+    CHECK(menu->Size.y == Catch::Approx(2.0f * theme::menu_padding
+        + 3.0f * row + 2.0f * theme::menu_row_gap).margin(1.0f));
+
+    const auto y = find_account_row(h, "super_admin");
+    REQUIRE(y.has_value());
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+    h.click(ImVec2(menu->Pos.x + 30.0f, *y));
+
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].kind == model::command::command_kind::connect_session);
+    CHECK(commands[0].instance_id == "i");
+    CHECK(commands[0].account_id == "a-super");
+    CHECK(commands[0].principal == "super@acme");
+    CHECK(commands[0].password.view().empty());
+    CHECK_FALSE(commands[0].remember);
+
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].detail == "Sign in to Brave Hopper as super@acme");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("an ACCOUNTS account with no memorised password asks for one",
+    "[menu_bar][accounts]") {
+    bar_harness h;
+    add_instance(h, "i", "Brave Hopper");
+    const std::string folder = privileged_folder(h, "i");
+    add_account(h, "a-super", "i", "super_admin", "super@acme", folder, false);
+
+    open_environment(h);
+    const auto y = find_account_row(h, "super_admin");
+    REQUIRE(y.has_value());
+    static_cast<void>(h.commands());
+    h.click(ImVec2(GImGui->OpenPopupStack.back().Window->Pos.x + 30.0f, *y));
+
+    /* No sign-in yet: the form is up, and it owns who and where. */
+    CHECK(h.commands().empty());
+    CHECK(h.state.sign_in.open);
+    CHECK(h.state.sign_in.instance_id == "i");
+    CHECK(h.state.sign_in.account_id == "a-super");
+    CHECK(h.state.sign_in.principal == "super@acme");
+    REQUIRE(GImGui->OpenPopupStack.Size == 1);
+    h.settle();
+
+    ImGui::GetIO().AddInputCharactersUTF8("s3cret");
+    h.settle();
+    const ImGuiWindow* form =
+        ImGui::FindWindowByName("Sign in###hedgr-menu-sign-in");
+    REQUIRE(form != nullptr);
+    const ImGuiID target = ImHashStr("Sign in", 0, form->ID);
+    const auto submit = find_popup_row(h, form->Pos.x + 40.0f, target);
+    REQUIRE(submit.has_value());
+    static_cast<void>(h.commands());
+    h.click(ImVec2(form->Pos.x + 40.0f, *submit));
+
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].kind == model::command::command_kind::connect_session);
+    CHECK(commands[0].instance_id == "i");
+    CHECK(commands[0].account_id == "a-super");
+    CHECK(commands[0].password.view() == "s3cret");
+    CHECK_FALSE(h.state.sign_in.open);
+}
+
+TEST_CASE("ACCOUNTS with no accounts at all says so in a disabled row",
+    "[menu_bar][accounts]") {
+    bar_harness h;
+    h.open_menu("Accounts");
+    const ImGuiWindow* menu = GImGui->OpenPopupStack.back().Window;
+    const float row = ImGui::GetTextLineHeight()
+        + 2.0f * theme::menu_row_padding_y;
+    CHECK(menu->Size.y == Catch::Approx(2.0f * theme::menu_padding + row)
+        .margin(1.0f));
+    h.click(bar_harness::row_centre(0));
+    h.settle();
+    CHECK(GImGui->OpenPopupStack.Size == 1);
+    CHECK(h.commands().empty());
 }
 
 TEST_CASE("VIEW: Windows is disabled while no window is open",

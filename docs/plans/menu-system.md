@@ -68,10 +68,10 @@ Each step is one PR, with tests, and leaves the app working.
    - Notes. A submenu row only draws the chevron. It does not use
      `ImGui::BeginMenu`, whose arrow and hover logic cannot be restyled; the
      caller opens the child panel beside `GetItemRectMax` on hover or press,
-     which is what the large Instances and Accounts panels do anyway
-     (decision 2). Closing a submenu when the pointer moves to another row is
-     step 2's to build and check in a real window. The popup is wired to
-     nothing yet; the hidden `component gallery` test draws one for a look.
+     which is what the large Instances panel does anyway (decision 2). Closing a
+     submenu when the pointer moves to another row is step 2's to build and
+     check in a real window. The popup is wired to nothing yet; the hidden
+     `component gallery` test draws one for a look.
 2. [x] **The top bar and the system menu.** A fixed-height menu bar window
    (`render/menu_bar.cpp`), our own window (decision 1), drawn by `workspace`
    before the dock space. The ORE swirl at the left
@@ -184,31 +184,34 @@ Each step is one PR, with tests, and leaves the app working.
      data mark, the words in its tooltip. TOOLS > Accounts stayed until step 6
      deleted it.
      Not checked in a real window.
-6. [x] **Accounts.** An ACCOUNTS menu opens a panel with tenant headings and the
-   accounts under each, from `tenant_row` and the accounts table. A click opens
-   the accounts window for that instance and account.
+6. [x] **Accounts.** An ACCOUNTS menu lists the environments, and under each the
+   accounts, as submenus. A click signs in to that account; an account with no
+   memorised password opens a password form.
    - Notes. ACCOUNTS is the fourth label, after INSTANCES and before TOOLS, and
-     it is drawn only while the store is unlocked. The panel
-     (`render/accounts_panel.cpp`, `widget/accounts_panel.hpp`) is the Instances
-     panel's size (720 by 520, capped to the work area) with a filter box, the
-     shown/total count and a scrolling list. Each row carries the account's
-     name, its principal and the instance it belongs to, because one tenant can
-     exist on more than one deployment. A pick opens that instance's Accounts
-     window, selects the account through `request_account_selection` (the
-     window's selection is its own scratch), raises the shortcut signal and
-     closes the panel unless Ctrl is held. TOOLS > Accounts is deleted, and the
-     shortcut `pin_accounts` tests with it.
-   - Where the heading comes from. There is no tenant table on the render input
-     and `domain::account` has no tenant field: IAM answers the tenant at
-     sign-in and `session_table` keeps the last answer. The panel groups by
-     that answer, and an account that has not signed in is listed last under
-     "No tenant yet". A future change that stores a tenant on the account would
-     change the source, not the panel.
-   - The list is rebuilt every frame into a vector kept across frames: the
-     session table has no version to cache against. Both lookups are slab walks
-     rather than `find`, whose key joins a string and would allocate once per
-     account per frame. A steady frame allocates nothing, pinned by a frame-cost
-     test. Tenant and instance names are folded for ordering, not for display.
+     it is drawn only while the store is unlocked. Its popup lists the
+     environments that hold at least one account, sorted by name and carrying
+     each one's account count. Hovering or clicking an environment opens its
+     accounts beside it. The accounts are grouped by their folder in the
+     instance's accounts tree: a folder is a `menu_heading` (for the seeded
+     data, "PRIVILEGED"), not a row, and the accounts under it sort by name. An
+     account whose folder has gone is listed last under "No folder" rather than
+     dropped. TOOLS > Accounts is deleted.
+   - The pick signs in. With a stored credential and the store unlocked, the
+     click pushes `connect_session` straight away, carrying no password so the
+     runtime reads the sealed one. With nothing memorised it opens a password
+     form owned by the menu bar (not the Accounts window): the principal, the
+     deployment, a password field, and "Remember this password". The password is
+     wiped as soon as the form closes, and the command is built by
+     `account_sign_in_command`, which the Accounts window's own form and stored
+     sign-in now share.
+   - This replaced an earlier large panel with a filter and tenant headings. The
+     operator asked for a shortcut organised by environment that logs in
+     directly, so the panel, its widget helpers and its tests were deleted
+     rather than kept beside the menu.
+   - The environment list is rebuilt every frame into vectors kept across
+     frames, and the open submenu's folders and accounts likewise; the sort is
+     allocation-free, pinned by a frame-cost test. Folders are walked depth
+     first in the order the folders table holds them.
    - Not checked in a real window.
 7. [x] **The Windows list.** A Windows menu lists open windows from
    `input.windows` grouped by `window_kind`. Click raises (reusing the

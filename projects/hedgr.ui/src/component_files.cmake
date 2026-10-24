@@ -9,7 +9,6 @@
 #
 set(files
     "icon/fonts.cpp"
-    "render/accounts_panel.cpp"
     "render/accounts_window.cpp"
     "render/chart_plot.cpp"
     "render/chart_window.cpp"
@@ -39,7 +38,6 @@ set(files
     "sound/player.cpp"
     "theme/theme.cpp"
     "widget/browser.cpp"
-    "widget/accounts_panel.cpp"
     "widget/capture.cpp"
     "image/svg_raster.cpp"
     "widget/cards.cpp"
@@ -77,7 +75,6 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/market_view.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/panels.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/renderer.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/accounts_panel.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/instances_panel.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/menu_bar.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/render/status_bar.hpp"
@@ -91,7 +88,6 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/theme/theme.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/browser.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/image/svg_raster.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/accounts_panel.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/browser_state.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/flags.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.ui/widget/capture.hpp"

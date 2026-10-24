@@ -13,7 +13,7 @@ them. "Blocked" names what must land elsewhere first.
   language (`docs/plans/ux-language.md`), fast failure of unanswered reads, probe
   backoff, the cool bar's retirement, VIEW > Full screen.
 - Nothing recent has been seen in a real window by the agent that built it. The
-  operator has seen the menu bar, tabs, mini plots and marks. The Accounts panel,
+  operator has seen the menu bar, tabs, mini plots and marks. The Accounts menu,
   the VIEW > Windows panel and the bottom status strip are new and have only
   headless frame tests and frame-cost tests behind them.
 
@@ -24,13 +24,13 @@ Plan: `docs/plans/menu-system.md`. All six are done.
 1. Done: CRM Mini plots button (confirms above 30 cards).
 2. Done: floating toolbar.
 3. Done: Instances panel.
-4. Done: **Accounts panel.** A top-level ACCOUNTS menu, after INSTANCES, opens a
-   large panel with a filter and the accounts grouped under the tenant their last
-   sign-in reached. A pick opens that instance's accounts window, selects the
-   account and closes the panel. TOOLS > Accounts is gone. There is no tenant
-   table: the heading is the session table's last answer, and an account that
-   has never signed in sits under "No tenant yet" (`render/accounts_panel.cpp`,
-   `widget/accounts_panel.hpp`).
+4. Done: **Accounts menu.** A top-level ACCOUNTS menu, after INSTANCES, lists
+   each environment that holds an account, sorted, and opens that environment's
+   accounts beside it. The accounts are grouped under their folder (a heading,
+   not a row) and sorted by name. A click signs in at once when the store holds
+   the password, and otherwise opens a password form with "Remember this
+   password", owned by the menu bar. TOOLS > Accounts is gone.
+   `account_sign_in_command` is shared with the Accounts window.
 5. Done: **Windows list.** VIEW > Windows lists the open windows under a heading
    per kind. The title raises through the focus request; the x closes through
    the close command. "Close all mini plots" sits at its foot

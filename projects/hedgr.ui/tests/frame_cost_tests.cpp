@@ -1213,29 +1213,45 @@ TEST_CASE("the Instances panel costs a steady frame no allocation, with tiles, "
     CHECK(steady_allocations(draw) == 0);
 }
 
-TEST_CASE("the Accounts panel costs a steady frame no allocation, with tenants, "
-          "a filter and an empty match",
-    "[frame][menu_bar][accounts_panel]") {
+TEST_CASE("the ACCOUNTS menu costs a steady frame no allocation, with its "
+          "environment submenu open",
+    "[frame][menu_bar][accounts]") {
     headless_imgui imgui;
     hedgr::ui::theme::apply_theme();
     desk desk;
-    hedgr::model::domain::instance instance;
-    instance.id = "i";
-    instance.name = "Instance";
-    static_cast<void>(desk.instances.upsert(instance));
-    for (int i = 0; i < 40; ++i) {
-        hedgr::model::domain::account row;
-        row.id = std::format("account-with-a-long-identifier-{}", i);
-        row.instance_id = "i";
-        row.name = std::format("Account {}", i);
-        row.principal = std::format("user{}@example", i);
-        static_cast<void>(desk.accounts.upsert(row));
-        /* Every third account has never signed in, so it has no tenant. */
-        if (i % 3 == 0)
-            continue;
-        const auto session = desk.sessions.insert("i", row.id);
-        desk.sessions.set_account_result(session, i % 2 == 0 ? "Acme" : "Beta",
-            "Party", "pid", hedgr::model::domain::secret_string{"token"});
+    for (int environment = 0; environment < 3; ++environment) {
+        const std::string instance_id = std::format("environment-{}",
+            environment);
+        hedgr::model::domain::instance instance;
+        instance.id = instance_id;
+        instance.name = std::format("Environment {}", environment);
+        static_cast<void>(desk.instances.upsert(instance));
+
+        hedgr::model::domain::folder root;
+        root.id = hedgr::model::domain::accounts_root_id_for(instance_id);
+        root.owner_id = instance_id;
+        root.name = "Accounts";
+        root.tree = hedgr::model::domain::folder_tree::accounts;
+        REQUIRE(desk.folders.upsert(root).has_value());
+
+        hedgr::model::domain::folder privileged;
+        privileged.id = std::format("privileged-{}", environment);
+        privileged.parent_id = root.id;
+        privileged.owner_id = instance_id;
+        privileged.name = "Privileged";
+        privileged.tree = hedgr::model::domain::folder_tree::accounts;
+        REQUIRE(desk.folders.upsert(privileged).has_value());
+
+        for (int i = 0; i < 10; ++i) {
+            hedgr::model::domain::account row;
+            row.id = std::format("account-{}-{}", environment, i);
+            row.instance_id = instance_id;
+            row.name = std::format("Account {}", i);
+            row.principal = std::format("user{}@example", i);
+            row.folder_id = privileged.id;
+            row.has_credential = true;
+            static_cast<void>(desk.accounts.upsert(row));
+        }
     }
     auto input = desk.input();
     hedgr::ui::widget::menu_bar_state state;
@@ -1265,19 +1281,21 @@ TEST_CASE("the Accounts panel costs a steady frame no allocation, with tenants, 
     for (int i = 0; i < 4; ++i)
         draw();
     REQUIRE(GImGui->OpenPopupStack.Size == 1);
-    CHECK(state.accounts.entries.size() == 40);
-    CHECK(steady_allocations(draw) == 0);
+    CHECK(state.accounts.environments.size() == 3);
 
-    /* A filter that keeps a few, then one that keeps none. */
-    ImGui::GetIO().AddInputCharactersUTF8("ACME");
+    /* Open the first environment's submenu. */
+    const ImGuiWindow* menu = GImGui->OpenPopupStack.back().Window;
+    const float row = ImGui::GetTextLineHeight()
+        + 2.0f * hedgr::ui::theme::menu_row_padding_y;
+    ImGui::GetIO().AddMousePosEvent(menu->Pos.x + 30.0f,
+        menu->Pos.y + hedgr::ui::theme::menu_padding + row * 0.5f);
     draw();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
     draw();
-    CHECK(state.accounts.entries.size() == 13);
-    CHECK(steady_allocations(draw) == 0);
-    ImGui::GetIO().AddInputCharactersUTF8("zz");
-    draw();
-    draw();
-    CHECK(state.accounts.entries.empty());
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    for (int i = 0; i < 4; ++i)
+        draw();
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
     CHECK(steady_allocations(draw) == 0);
 }
 

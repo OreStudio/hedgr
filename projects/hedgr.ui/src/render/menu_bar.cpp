@@ -25,7 +25,6 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/tables.hpp"
-#include "hedgr.ui/render/accounts_panel.hpp"
 #include "hedgr.ui/render/instances_panel.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -38,6 +37,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cmath>
+#include <format>
 #include <fstream>
 #include <iterator>
 #include <optional>
@@ -65,6 +65,8 @@ constexpr int help_entry = 5;
 
 constexpr const char* logo_texture_id = "ore-logo-white";
 constexpr const char* windows_submenu_id = "##view-windows";
+constexpr const char* accounts_of_id = "##accounts-of";
+constexpr const char* sign_in_popup_id = "Sign in###hedgr-menu-sign-in";
 constexpr const char* about_title = "About ORE Studio###hedgr-about";
 constexpr float about_logo_side = 72.0f;
 
@@ -307,6 +309,341 @@ void draw_view_menu(const render_input& input, bool desk_docked,
     draw_windows_panel(input, result);
 }
 
+namespace {
+
+/** @brief Whether @p lhs sorts before @p rhs, folding ASCII case. */
+[[nodiscard]] bool folded_less(std::string_view lhs,
+    std::string_view rhs) noexcept {
+    const std::size_t shared = lhs.size() < rhs.size() ? lhs.size() : rhs.size();
+    for (std::size_t i = 0; i < shared; ++i) {
+        const char a = lhs[i] >= 'A' && lhs[i] <= 'Z'
+            ? static_cast<char>(lhs[i] - 'A' + 'a') : lhs[i];
+        const char b = rhs[i] >= 'A' && rhs[i] <= 'Z'
+            ? static_cast<char>(rhs[i] - 'A' + 'a') : rhs[i];
+        if (a != b)
+            return a < b;
+    }
+    return lhs.size() < rhs.size();
+}
+
+/** @brief The name an account is read by in the menu: its name, or principal. */
+[[nodiscard]] std::string_view account_label(const domain::account& row) {
+    return row.name.empty() ? std::string_view{row.principal}
+                            : std::string_view{row.name};
+}
+
+/**
+ * @brief Fills @p menu with the instances that have at least one account.
+ *
+ * A walk over both slabs, because an environment with no login is not a place
+ * this menu can take the operator and listing it would be a row that asks to be
+ * clicked and has nothing under it. The vector is kept across frames, so a
+ * steady frame reuses its room.
+ */
+void collect_environments(const render_input& input,
+    widget::accounts_menu_state& menu) {
+    menu.environments.clear();
+    const auto& layout = input.instances.layout();
+    const auto rows = input.instances.rows();
+    const auto& accounts_layout = input.accounts.layout();
+    const auto account_rows = input.accounts.rows();
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index) {
+        if (!layout.is_alive(index))
+            continue;
+        for (std::uint32_t account = 0;
+             account < accounts_layout.capacity(); ++account) {
+            if (accounts_layout.is_alive(account)
+                && account_rows[account].instance_id == rows[index].id) {
+                menu.environments.push_back(index);
+                break;
+            }
+        }
+    }
+    std::sort(menu.environments.begin(), menu.environments.end(),
+        [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return widget::instance_less(rows[lhs].name, rows[lhs].id,
+                rows[rhs].name, rows[rhs].id);
+        });
+}
+
+/** @brief How many accounts one instance has, for the row's trailing count. */
+[[nodiscard]] std::size_t account_count(const render_input& input,
+    std::string_view instance_id) {
+    const auto& layout = input.accounts.layout();
+    const auto rows = input.accounts.rows();
+    std::size_t count = 0;
+    for (std::uint32_t index = 0; index < layout.capacity(); ++index)
+        if (layout.is_alive(index) && rows[index].instance_id == instance_id)
+            ++count;
+    return count;
+}
+
+/**
+ * @brief Signs in as @p row, or asks for its password when none is memorised.
+ *
+ * The credential is the store's when it holds one and the store is open; then
+ * the command carries no password and the runtime reads the stored secret. A
+ * typed password travels with the command and never enters a table.
+ */
+void sign_in_to(const render_input& input, widget::menu_bar_state& state,
+    const domain::account& row, std::string_view environment) {
+    if (sign_in_needs_password(input.store_lock, row.has_credential)) {
+        auto& form = state.sign_in;
+        form.instance_id = row.instance_id;
+        form.instance_name = std::string{environment};
+        form.account_id = row.id;
+        form.principal = row.principal;
+        form.password.fill('\0');
+        form.remember = false;
+        form.focus = true;
+        form.open = true;
+        return;
+    }
+
+    input.commands.push(account_sign_in_command(row.instance_id, row.id,
+        row.principal));
+    raise_shortcut_activated(input, std::format("Sign in to {} as {}",
+        environment, row.principal));
+}
+
+/** @brief One account's row; returns whether it started a sign-in. */
+bool draw_account_row(const render_input& input, widget::menu_bar_state& state,
+    const domain::account& row, std::string_view environment) {
+    const char* label = row.name.empty() ? row.principal.c_str()
+                                         : row.name.c_str();
+    if (widget::menu_item_row({.label = label})) {
+        sign_in_to(input, state, row, environment);
+        return true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%.*s%s", static_cast<int>(row.principal.size()),
+            row.principal.data(),
+            row.has_credential ? "\nSigns in with the saved password"
+                               : "\nAsks for the password");
+    }
+    return false;
+}
+
+/** @brief Draws every account of one environment, under its folders' names. */
+bool draw_environment_accounts(const render_input& input,
+    widget::menu_bar_state& state, std::string_view instance_id,
+    std::string_view environment) {
+    auto& menu = state.accounts;
+    menu.folders.clear();
+    menu.accounts.clear();
+
+    const auto& folders_layout = input.folders.layout();
+    const auto folder_rows = input.folders.rows();
+    const auto& accounts_layout = input.accounts.layout();
+    const auto account_rows = input.accounts.rows();
+
+    const auto root = input.folders.root(domain::folder_tree::accounts,
+        instance_id);
+    if (root) {
+        menu.folders.push_back(root->index);
+        const auto walk = [&](auto&& self, std::string_view parent) -> void {
+            for (std::uint32_t index = 0; index < folders_layout.capacity();
+                 ++index) {
+                if (!folders_layout.is_alive(index))
+                    continue;
+                const auto& folder = folder_rows[index];
+                if (folder.tree != domain::folder_tree::accounts
+                    || folder.owner_id != instance_id
+                    || folder.parent_id != parent)
+                    continue;
+                menu.folders.push_back(index);
+                self(self, folder.id);
+            }
+        };
+        walk(walk, input.folders.get(*root)->id);
+    }
+
+    bool acted = false;
+    for (const std::uint32_t slot : menu.folders) {
+        const auto& folder = folder_rows[slot];
+        const bool is_root = root && slot == root->index;
+        const std::size_t first = menu.accounts.size();
+        for (std::uint32_t index = 0; index < accounts_layout.capacity();
+             ++index) {
+            if (accounts_layout.is_alive(index)
+                && account_rows[index].instance_id == instance_id
+                && account_rows[index].folder_id == folder.id)
+                menu.accounts.push_back(index);
+        }
+        std::sort(menu.accounts.begin()
+                + static_cast<std::ptrdiff_t>(first),
+            menu.accounts.end(), [&](std::uint32_t lhs, std::uint32_t rhs) {
+                return folded_less(account_label(account_rows[lhs]),
+                    account_label(account_rows[rhs]));
+            });
+        if (first == menu.accounts.size())
+            continue;
+        if (!is_root)
+            widget::menu_heading(folder.name.c_str());
+        for (std::size_t i = first; i < menu.accounts.size(); ++i) {
+            const auto& row = account_rows[menu.accounts[i]];
+            if (draw_account_row(input, state, row, environment)) {
+                acted = true;
+                break;
+            }
+        }
+        if (acted)
+            return true;
+    }
+
+    /*
+     * An account whose folder no longer exists would otherwise vanish from the
+     * menu. It is still a login, so it is listed last under the words that say
+     * why it is not under a heading.
+     */
+    const std::size_t first = menu.accounts.size();
+    for (std::uint32_t index = 0; index < accounts_layout.capacity(); ++index) {
+        if (!accounts_layout.is_alive(index))
+            continue;
+        const auto& row = account_rows[index];
+        if (row.instance_id != instance_id)
+            continue;
+        const bool known = std::any_of(menu.folders.begin(),
+            menu.folders.end(), [&](std::uint32_t slot) {
+                return folder_rows[slot].id == row.folder_id;
+            });
+        if (!known)
+            menu.accounts.push_back(index);
+    }
+    std::sort(menu.accounts.begin() + static_cast<std::ptrdiff_t>(first),
+        menu.accounts.end(), [&](std::uint32_t lhs, std::uint32_t rhs) {
+            return folded_less(account_label(account_rows[lhs]),
+                account_label(account_rows[rhs]));
+        });
+    if (first != menu.accounts.size()) {
+        widget::menu_heading("No folder");
+        for (std::size_t i = first; i < menu.accounts.size(); ++i) {
+            if (draw_account_row(input, state,
+                    account_rows[menu.accounts[i]], environment))
+                return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * @brief ACCOUNTS: one submenu per environment, then its accounts by folder.
+ *
+ * The environment rows are the instances that hold a login. Hovering or
+ * clicking one opens its accounts beside it; a folder is a heading rather than
+ * a row, and every account under it signs in with one click.
+ */
+void draw_accounts_menu(const render_input& input,
+    widget::menu_bar_state& state) {
+    auto& menu = state.accounts;
+    collect_environments(input, menu);
+    if (menu.environments.empty()) {
+        widget::menu_item_row({.label = "No accounts yet", .enabled = false});
+        return;
+    }
+
+    const auto rows = input.instances.rows();
+    for (const std::uint32_t slot : menu.environments) {
+        const auto& environment = rows[slot];
+        char count[24];
+        std::snprintf(count, sizeof count, "%zu",
+            account_count(input, environment.id));
+        ImGui::PushID(environment.id.c_str());
+        const bool pressed = widget::menu_item_row({.label = environment.name.c_str(),
+            .shortcut = count, .submenu = true});
+        const ImVec2 anchor(ImGui::GetItemRectMax().x,
+            ImGui::GetItemRectMin().y);
+        if ((pressed || ImGui::IsItemHovered())
+            && !ImGui::IsPopupOpen(accounts_of_id))
+            ImGui::OpenPopup(accounts_of_id);
+        ImGui::SetNextWindowPos(anchor);
+        bool acted = false;
+        {
+            const widget::menu_popup panel(accounts_of_id);
+            if (panel)
+                acted = draw_environment_accounts(input, state,
+                    environment.id, environment.name);
+        }
+        ImGui::PopID();
+        if (acted) {
+            /*
+             * A pick closes the submenu and the ACCOUNTS menu with it, so the
+             * sign-in, or its password form, is what the operator is left with.
+             */
+            ImGui::ClosePopupToLevel(0, true);
+            return;
+        }
+    }
+}
+
+/** @brief The password form for an account the store holds no password for. */
+void draw_sign_in_form(const render_input& input,
+    widget::menu_bar_state& state) {
+    auto& form = state.sign_in;
+    if (!form.open)
+        return;
+    ImGui::OpenPopup(sign_in_popup_id);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),
+        ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize
+        | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+    if (!ImGui::BeginPopupModal(sign_in_popup_id, nullptr, flags))
+        return;
+
+    ImGui::Text("Sign in to %s as %s", form.instance_name.c_str(),
+        form.principal.c_str());
+    const bool store_open = input.store_lock == store_lock::unlocked;
+    if (!store_open) {
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+        ImGui::TextWrapped("The store is locked, so this password cannot be "
+                           "remembered.");
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::SetNextItemWidth(360.0f);
+    if (form.focus) {
+        ImGui::SetKeyboardFocusHere();
+        form.focus = false;
+    }
+    ImGui::InputTextWithHint("##menu-sign-in-password", "password",
+        form.password.data(), form.password.size(),
+        ImGuiInputTextFlags_Password);
+
+    if (!store_open)
+        ImGui::BeginDisabled();
+    ImGui::Checkbox("Remember this password", &form.remember);
+    if (!store_open)
+        ImGui::EndDisabled();
+
+    const bool complete = form.password[0] != '\0';
+    if (!complete)
+        ImGui::BeginDisabled();
+    const bool submit = ImGui::Button("Sign in");
+    if (!complete)
+        ImGui::EndDisabled();
+    ImGui::SameLine();
+    const bool cancel = ImGui::Button("Cancel");
+
+    if (submit && complete) {
+        input.commands.push(account_sign_in_command(form.instance_id,
+            form.account_id, form.principal, form.password.data(),
+            form.remember && store_open));
+        raise_shortcut_activated(input, std::format("Sign in to {} as {}",
+            form.instance_name, form.principal));
+    }
+    if ((submit && complete) || cancel) {
+        std::fill(form.password.begin(), form.password.end(), '\0');
+        form.remember = false;
+        form.open = false;
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+}
+
 /** @brief TOOLS: the windows that belong to a signed-in session. */
 void draw_tools_menu(const render_input& input) {
     namespace domain = hedgr::model::domain;
@@ -436,11 +773,7 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
                 state.instances.shown = false;
             ImGui::SameLine();
             widget::menu_bar_label(state, accounts_entry, "Accounts",
-                [&] { draw_accounts_panel(input, state.accounts); }, height,
-                ImVec2(theme::accounts_panel_width,
-                    theme::accounts_panel_height));
-            if (state.open != accounts_entry)
-                state.accounts.shown = false;
+                [&] { draw_accounts_menu(input, state); }, height);
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);
@@ -455,7 +788,16 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
         draw->AddRect(ImVec2(plate_min.x + 0.5f, plate_min.y + 0.5f),
             ImVec2(plate_max.x - 0.5f, plate_max.y - 0.5f),
             u32(theme::menu_bar_edge()), theme::menu_bar_rounding);
+
+        /*
+         * The password form is opened from this window, so it is drawn here
+         * rather than beside the About window: a popup belongs to the window
+         * that opened it, and the menu bar is what the ACCOUNTS rows are. It
+         * comes after the item spacing is popped, so the form lays out with
+         * the ordinary spacing.
+         */
         ImGui::PopStyleVar();
+        draw_sign_in_form(input, state);
     }
     ImGui::End();
     draw_about(input, logo_svg, state);

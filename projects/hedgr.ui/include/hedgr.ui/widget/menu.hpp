@@ -105,7 +105,7 @@ struct menu_row final {
  * arrow keys and a gamepad all reach it, and a click or Enter returns true.
  * A submenu row only draws the chevron: the caller opens its panel beside
  * the row (anchor at ImGui::GetItemRectMax) when this returns true or the row
- * is hovered, as the large Instances and Accounts panels do.
+ * is hovered, as the large Instances panel and the ACCOUNTS menu do.
  */
 HEDGR_UI_EXPORT bool menu_item_row(const menu_row& row);
 

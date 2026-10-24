@@ -84,19 +84,6 @@ HEDGR_UI_EXPORT void request_instance_selection(std::string_view instance_id);
 HEDGR_UI_EXPORT void select_account_for_capture(std::string_view account_id);
 
 /**
- * @brief Selects an account in the Accounts window that shows @p instance_id.
- *
- * The Accounts panel picks a row and expects the window it opens to show that
- * row's cards, but the window's selection lives in the window's own state,
- * which the panel does not hold. The request is kept until the named instance's
- * window draws, then written as the click would have written it. An empty
- * @p instance_id asks whichever Accounts window draws next, which is what a
- * capture with no deployment in mind needs.
- */
-HEDGR_UI_EXPORT void request_account_selection(std::string_view instance_id,
-    std::string_view account_id);
-
-/**
  * @brief Puts the Instances pane into edit mode on one row, for a capture.
  *
  * Edit mode is otherwise reached by clicking the row's edit icon, and a capture
