@@ -1302,6 +1302,48 @@ session_client::market_series(std::uint32_t limit) const {
     }
 }
 
+namespace {
+
+/**
+ * @brief The typed identity the service lists for one series.
+ *
+ * Asks for every series identity the session can see and picks the entry whose
+ * key is @p series_id. A series the list does not carry cannot be read for
+ * ticks by identity, and the failure says so, naming a truncated list as a
+ * possible reason.
+ */
+[[nodiscard]] result<ores::marketdata::messaging::resolve_series_identity_request>
+series_identity(ores::nats::service::nats_client& nats,
+    std::string_view series_id, std::chrono::milliseconds timeout) {
+    using ores::marketdata::messaging::list_series_identities_request;
+    using ores::marketdata::messaging::list_series_identities_response;
+
+    const auto reply = ores::nats::service::authenticated_request_and_decode<
+        list_series_identities_response>(nats,
+        list_series_identities_request::nats_subject,
+        list_series_identities_request{}, timeout);
+    if (!reply) {
+        return fail(session_errc::protocol_error,
+            "the series identities could not be decoded");
+    }
+    if (!reply->success) {
+        return fail(session_errc::read_refused,
+            reply->message.empty()
+                ? std::string{"the series identities were refused"}
+                : reply->message);
+    }
+    for (const auto& listed : reply->series) {
+        if (listed.series_id == series_id)
+            return listed.identity;
+    }
+    return fail(session_errc::read_refused,
+        std::format("series '{}' is not among the {} identities the service "
+                    "lists{}", series_id, reply->series.size(),
+            reply->truncated ? " (the list was truncated)" : ""));
+}
+
+}
+
 result<market_series_read>
 session_client::market_series_ticks(std::string_view series_id,
     std::int64_t from_ns, std::int64_t to_ns) const {
@@ -1314,14 +1356,6 @@ session_client::market_series_ticks(std::string_view series_id,
             "a tick read needs a signed-in session");
     }
 
-    boost::uuids::uuid id{};
-    try {
-        id = boost::lexical_cast<boost::uuids::uuid>(series_id);
-    } catch (const std::exception&) {
-        return fail(session_errc::protocol_error,
-            std::format("'{}' is not a series key", series_id));
-    }
-
     using ores::marketdata::messaging::get_series_ticks_request;
     using ores::marketdata::messaging::get_series_ticks_response;
 
@@ -1331,12 +1365,22 @@ session_client::market_series_ticks(std::string_view series_id,
                 std::chrono::nanoseconds(ns))};
     };
     get_series_ticks_request request;
-    request.series_id = id;
     request.from_instant = instant(from_ns);
     if (to_ns != 0)
         request.to_instant = instant(to_ns);
 
     try {
+        /*
+         * The call names a series by its typed identity, not by its key, and
+         * the service is the one that knows each series' identity, so it is
+         * asked for the list and the series' own entry is sent back as it came.
+         */
+        auto identity = series_identity(client(), series_id,
+            options_.request_timeout);
+        if (!identity)
+            return std::unexpected(std::move(identity.error()));
+        request.identity = std::move(*identity);
+
         const auto reply = ores::nats::service::authenticated_request_and_decode<
             get_series_ticks_response>(client(),
             get_series_ticks_request::nats_subject, request,
