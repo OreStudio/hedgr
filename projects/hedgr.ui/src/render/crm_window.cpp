@@ -26,6 +26,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include <algorithm>
 #include <array>
@@ -73,14 +74,16 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     const auto& shape = input.windows.state(handle);
     const auto* crm = std::get_if<model::domain::crm_matrix_state>(&shape);
     if (crm == nullptr) {
-        ImGui::TextWrapped("%s", "This window is not a CRM.");
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::error, widget::view_words::read_failed,
+                "This window does not hold a CRM."});
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
     const auto session = signed_in_session(input, handle);
     if (!session) {
-        draw_signed_out(input, status, foot);
+        draw_session_state(input, handle, status, foot);
         ImGui::PopID();
         return;
     }
@@ -97,9 +100,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
 
     if (state.crm_name.empty()) {
-        ImGui::TextDisabled("No CRM selected.");
-        set_health_foot(foot, model::domain::data_health::unavailable, 0, 0,
-            false);
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::no_data, widget::view_words::empty,
+                "No CRM is selected."});
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -148,17 +151,21 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     if (ImGui::Button("Refresh"))
         request_refresh();
 
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (snapshot == nullptr || snapshot->cells.empty()) {
-        if (snapshot != nullptr && !snapshot->error.empty())
-            ImGui::TextColored(
-                ImGui::ColorConvertU32ToFloat4(theme::failure_colour), "%s",
-                snapshot->error.c_str());
-        else if (snapshot != nullptr)
-            ImGui::TextDisabled("No rates configured for this party.");
-        else
-            ImGui::TextDisabled("Reading the CRM...");
-    } else {
+        auto facts = session_view_facts(input, handle);
+        facts.reading = snapshot == nullptr || snapshot->reading;
+        facts.read_failure = snapshot != nullptr
+            ? std::string_view{snapshot->error} : std::string_view{};
+        facts.has_data = false;
+        facts.empty_what = "No rates are configured for this party.";
+        widget::draw_view_state_body(status, foot, widget::view_state_of(facts));
+        widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+        return;
+    }
+
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    {
         if (state.crm_view.version != snapshot->version)
             state.crm_view = build_crm_grid(*snapshot, state.crm_name,
                 state.crm_currencies);
@@ -188,16 +195,12 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         }
     }
 
-    if (snapshot == nullptr || snapshot->cells.empty()) {
-        widget::draw_status_foot(status, input.now_ns, foot);
-        ImGui::PopID();
-        return;
-    }
-
     const auto& grid = state.crm_view;
     const auto& currencies = grid.currencies;
     if (currencies.size() < 2) {
-        ImGui::TextDisabled("No pairs for this CRM.");
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::no_data, widget::view_words::empty,
+                "This CRM has no pairs."});
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;

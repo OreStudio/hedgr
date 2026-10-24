@@ -51,7 +51,7 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
 
-project(Hedgr VERSION 0.2.0 LANGUAGES CXX
+project(Hedgr VERSION 0.3.0 LANGUAGES CXX
     DESCRIPTION "Multi-instance ImGui/ImPlot client for OreStudio.")
 
 # Copy all binaries into the publish directory.

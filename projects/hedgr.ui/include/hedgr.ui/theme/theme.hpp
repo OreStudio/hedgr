@@ -622,14 +622,21 @@ inline constexpr float plot_label_padding_y = 8.0f;
 inline constexpr int plot_x_label_count = 4;
 
 /**
- * @brief The greys of the glyph a plot draws when it has no connection.
+ * @brief The tints of the marks a window draws for a view state.
  *
- * A session that was never opened is the dimmer of the two, since nothing went
- * wrong; one that failed is a step brighter so it draws the eye without a
- * colour that shouts.
+ * Both sit one small step above the background, as the shut store's padlock
+ * does, so the state is noticed without a word or a colour that shouts. Both
+ * are neutral greys. Not connected and no data are the dimmer, since nothing
+ * went wrong; an error is one step brighter, with no tint. The marks' shapes
+ * tell the three states apart, not the colour.
  */
-inline constexpr ImU32 plot_disconnected_colour = IM_COL32(88, 92, 104, 255);
-inline constexpr ImU32 plot_failed_colour = IM_COL32(140, 144, 156, 255);
+inline constexpr ImU32 view_quiet_colour = IM_COL32(36, 39, 46, 255);
+inline constexpr ImU32 view_error_colour = IM_COL32(46, 49, 56, 255);
+
+/** @brief A plot watermark is this share of the plot's shorter side, within the bounds. */
+inline constexpr float plot_watermark_share = 0.42f;
+inline constexpr float plot_watermark_min = 28.0f;
+inline constexpr float plot_watermark_max = 220.0f;
 
 /** @brief The colour of the arc a plot spins while it waits. */
 inline constexpr ImU32 plot_spinner_colour = IM_COL32(150, 140, 180, 255);
@@ -646,12 +653,12 @@ inline constexpr float plot_spinner_arc = 4.712389f;
 /** @brief The segments the spinner's arc is cut into. */
 inline constexpr int plot_spinner_segments = 24;
 
-/** @brief The size of a plot's state glyph on a chart, and on a card. */
-inline constexpr float plot_state_glyph_size = 44.0f;
-inline constexpr float plot_state_card_glyph_size = 28.0f;
+/** @brief The size of a view state's glyph in a window, and on a card. */
+inline constexpr float view_state_glyph_size = 44.0f;
+inline constexpr float view_state_card_glyph_size = 28.0f;
 
-/** @brief The share of a plot's width a state caption may wrap within. */
-inline constexpr float plot_state_caption_share = 0.8f;
+/** @brief The room a view state's mark keeps clear at the foot of a body, at least. */
+inline constexpr float view_state_body_min_height = 80.0f;
 
 /** @brief The corner radius of a mini plot card. */
 inline constexpr float mini_plot_rounding = 8.0f;

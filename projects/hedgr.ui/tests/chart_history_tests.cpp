@@ -190,7 +190,8 @@ TEST_CASE("a chart does not ask again after a read that failed",
     c.desk.market.fail(c.series, "the instance did not answer", 2);
     const auto text = c.frame();
 
-    CHECK(says(text, "the instance did not answer"));
+    CHECK(says(text, "ERROR"));
+    CHECK_FALSE(says(text, "the instance did not answer"));
     CHECK(c.asked().empty());
     static_cast<void>(c.frame());
     CHECK(c.asked().empty());

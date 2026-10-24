@@ -17,12 +17,14 @@ set(files
     "hermetic_environment.cpp"
     "market_feed_tests.cpp"
     "market_stream_tests.cpp"
+    "probe_backoff_tests.cpp"
     "read_service_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
     "store_lock_tests.cpp"
     "term_curve_tests.cpp"
+    "tick_silence_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

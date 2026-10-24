@@ -28,7 +28,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "hedgr.ui/widget/menu_bar.hpp"
-#include "hedgr.ui/widget/plot_state.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -944,19 +944,27 @@ constexpr model::domain::session_status states[] = {
 
 }
 
-TEST_CASE("a plot state costs a steady frame no allocation, each of its states",
-    "[frame][plot_state]") {
+TEST_CASE("a view state costs a steady frame no allocation, each of its states",
+    "[frame][view_state]") {
     headless_imgui imgui;
-    using hedgr::ui::widget::plot_state;
-    for (const auto state : {plot_state::disconnected, plot_state::failed,
-             plot_state::reading}) {
+    using hedgr::ui::widget::view_state;
+    using hedgr::ui::widget::view_verdict;
+    using hedgr::ui::widget::view_words;
+    const std::string_view reason = "certificate rejected";
+    for (const auto verdict : {
+             view_verdict{view_state::not_connected, view_words::not_connected,
+                 {}},
+             view_verdict{view_state::error, view_words::connection_failed,
+                 reason},
+             view_verdict{view_state::no_data, view_words::empty, reason},
+             view_verdict{view_state::reading, view_words::none, {}}}) {
         const auto allocations = steady_allocations([&] {
             ImGui::NewFrame();
             ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
             ImGui::SetNextWindowSize(ImVec2(600.0f, 400.0f));
             ImGui::Begin("w", nullptr, ImGuiWindowFlags_NoDecoration);
-            hedgr::ui::widget::draw_plot_state(state, ImVec2(0.0f, 0.0f),
-                ImVec2(600.0f, 400.0f), 44.0f, true, "certificate rejected");
+            hedgr::ui::widget::draw_view_state(verdict, ImVec2(0.0f, 0.0f),
+                ImVec2(600.0f, 400.0f), 44.0f);
             ImGui::End();
             ImGui::Render();
         });
@@ -965,7 +973,7 @@ TEST_CASE("a plot state costs a steady frame no allocation, each of its states",
 }
 
 TEST_CASE("a steady mini plot card frame allocates nothing in each connection state",
-    "[frame][mini_plot][plot_state]") {
+    "[frame][mini_plot][view_state]") {
     for (const auto status : states) {
         headless_imgui imgui;
         desk desk;
@@ -994,7 +1002,7 @@ TEST_CASE("a steady mini plot card frame allocates nothing in each connection st
 }
 
 TEST_CASE("a chart in each connection state allocates no more than a chart with data",
-    "[frame][chart][plot_state]") {
+    "[frame][chart][view_state]") {
     const auto with_data = allocations_with_charts(1);
     for (const auto status : states) {
         headless_imgui imgui;

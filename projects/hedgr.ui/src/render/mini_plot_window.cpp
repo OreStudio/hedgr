@@ -31,7 +31,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
-#include "hedgr.ui/widget/plot_state.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <algorithm>
@@ -119,13 +119,6 @@ void draw_header(const render_input& input,
     }
     ImGui::SetCursorScreenPos(ImVec2(chip_x, at.y));
     widget::value_pill(label);
-}
-
-void dim_line(ImVec2 at, const char* text) {
-    ImGui::SetCursorScreenPos(at);
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::dim_text());
-    ImGui::TextUnformatted(text);
-    ImGui::PopStyleColor();
 }
 
 }
@@ -359,11 +352,14 @@ void render_mini_plot(window_handle handle, const render_input& input,
         ImVec2(corner.x - 1.0f, corner.y - 1.0f), true);
 
     const auto session = signed_in_session(input, handle);
-    const auto bound = input.windows.session_of(handle);
-    const widget::plot_state card_state = widget::plot_state_for(
-        bound ? input.sessions.status(*bound)
-              : domain::session_status::disconnected,
-        reading);
+    auto facts = session_view_facts(input, handle);
+    facts.reading = is_held && reading;
+    facts.read_failure = !is_held
+        ? std::string_view{"This series is not in the catalogue."}
+        : has_row ? input.market.failure(*row) : std::string_view{};
+    facts.has_data = points.size > 0;
+    facts.empty_what = "This series holds no points.";
+    const auto verdict = widget::view_state_of(facts);
     const std::size_t first = has_points
         ? mini_plot_first(points, span_ns) : 0;
     const double open = has_points ? points.value[first] : 0.0;
@@ -402,22 +398,12 @@ void render_mini_plot(window_handle handle, const render_input& input,
             ImGui::SameLine();
         }
         widget::value_pill(change.view(), tone);
-    } else if (!is_held) {
-        dim_line(ImVec2(l.min.x, below_header), "Series not held");
-    } else if (card_state != widget::plot_state::none) {
-        /* A card is too small for words, so the glyph alone says it. */
-        const ImVec2 area_min(l.min.x, below_header);
-        const float glyph = std::min({theme::plot_state_card_glyph_size,
-            l.max.x - l.min.x, l.max.y - below_header});
-        widget::draw_plot_state(card_state, area_min, l.max, glyph, false);
-    } else if (!input.market.failure(*row).empty()) {
-        const auto failure = input.market.failure(*row);
-        ImGui::SetCursorScreenPos(ImVec2(l.min.x, below_header));
-        ImGui::TextColored(
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour), "%.*s",
-            static_cast<int>(failure.size()), failure.data());
     } else {
-        dim_line(ImVec2(l.min.x, below_header), "No points yet");
+        /* A card is too small for words, so the mark alone says it. */
+        const ImVec2 area_min(l.min.x, below_header);
+        const float glyph = std::min({theme::view_state_card_glyph_size,
+            l.max.x - l.min.x, l.max.y - below_header});
+        widget::draw_view_state(verdict, area_min, l.max, glyph);
     }
 
     ImGui::PopClipRect();

@@ -25,6 +25,7 @@
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -138,13 +139,26 @@ signed_in_session(const render_input& input,
     hedgr::model::state::window_handle handle);
 
 /**
- * @brief Draws the one statement every data window makes for a lost session.
+ * @brief The session half of a window's view facts.
  *
- * The sentence in the body and NO DATA on the foot, the same in every window,
- * so an operator whose session dropped is told so rather than shown a window
- * that looks as if it is still loading. The caller returns after it.
+ * What the window's binding says: no session bound, a session that has gone, or
+ * one with a status, a token and a last error. The window adds what it reads.
+ * The text is borrowed from the session table for the frame.
  */
-HEDGR_UI_EXPORT void draw_signed_out(const render_input& input,
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::ui::widget::view_facts
+session_view_facts(const render_input& input,
+    hedgr::model::state::window_handle handle);
+
+/**
+ * @brief Draws the one statement every data window makes for an unusable session.
+ *
+ * The mark in the body and its word on the foot, the same in every window, so
+ * an operator whose session dropped is told so rather than shown a window that
+ * looks as if it is still loading. Draws the foot too. The caller returns after
+ * it.
+ */
+HEDGR_UI_EXPORT void draw_session_state(const render_input& input,
+    hedgr::model::state::window_handle handle,
     hedgr::ui::widget::status_bar& status, hedgr::ui::widget::foot_state& foot);
 
 /** @brief Resolves the bar for one window, from its session or its state. */

@@ -67,3 +67,10 @@ periods at the top right, and a plot with no frame.
 The period selector is for a chart. The term structure window's only control is
 how many curves to overlay, which is not a period, and the CRM has none. Neither
 changes.
+
+## When a chart has nothing to plot
+
+The plot area says so with a mark, not a sentence: a spinner while it reads, a
+slashed broadcast mark when there is no session, a ringed exclamation mark on a
+failure, and empty axes when the series holds no points. The meaning of each is
+in [ux-language.md](ux-language.md).

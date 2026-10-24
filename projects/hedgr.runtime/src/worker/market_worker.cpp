@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/worker/market_worker.hpp"
+#include "hedgr.runtime/worker/tick_silence.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -30,6 +31,8 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <chrono>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -48,6 +51,18 @@ using hedgr::model::command::event_queue;
     using namespace ores::logging;
     static auto instance = make_logger("hedgr.runtime.worker.market_worker");
     return instance;
+}
+
+[[nodiscard]] tick_silence& silence() {
+    static tick_silence instance;
+    return instance;
+}
+
+/** @brief What an unanswered tick read says, for the chart's foot and plot. */
+[[nodiscard]] std::string unanswered_text(const std::string& detail) {
+    return "The marketdata service did not answer the tick history call "
+        "(get_series_ticks). It may need a restart to load it"
+        + (detail.empty() ? std::string{} : " (" + detail + ")") + ".";
 }
 
 [[nodiscard]] std::string describe(const transport::session_error& error) {
@@ -77,6 +92,23 @@ boost::asio::awaitable<void> run_market(market_job job,
     fact.instance_id = key.instance_id;
     fact.account_id = key.account_id;
     fact.series_id = job.series_id;
+
+    const bool tick_read = !job.catalogue;
+    if (tick_read) {
+        job.options.request_timeout = std::min(job.options.request_timeout,
+            tick_read_timeout);
+    }
+    if (tick_read && silence().silent(key.instance_id, now_ns())) {
+        fact.message = unanswered_text("not asked again for a few seconds");
+        fact.observed_at_ns = now_ns();
+        std::fill(job.token.begin(), job.token.end(), '\0');
+        job.token.clear();
+        job.principal.clear();
+        const auto report = report_market_read(job, fact);
+        BOOST_LOG_SEV(lg(), ores::logging::warn) << report.text;
+        events.push(std::move(fact));
+        co_return;
+    }
 
     transport::session_client client(job.options);
     if (const auto connected = client.connect(); !connected) {
@@ -121,8 +153,13 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .value = point.value});
             }
         } else {
-            fact.message = describe(read.error());
+            const bool unanswered = is_unanswered(read.error().code);
+            silence().note(key.instance_id, unanswered, now_ns());
+            fact.message = unanswered ? unanswered_text(describe(read.error()))
+                                      : describe(read.error());
         }
+        if (read)
+            silence().note(key.instance_id, false, now_ns());
     }
     fact.observed_at_ns = now_ns();
 
@@ -157,8 +194,20 @@ market_read_report report_market_read(const market_job& job,
             return {true, std::format("Market catalogue read for '{}' "
                                       "failed: {}", instance, fact.message)};
         }
-        return {false, std::format("Market catalogue for '{}' holds {} series",
-            instance, fact.series.size())};
+        std::map<std::string, std::size_t> by_provider;
+        std::set<std::string> parties;
+        for (const auto& row : fact.series) {
+            ++by_provider[row.provider_code];
+            parties.insert(row.party_id);
+        }
+        std::string providers;
+        for (const auto& [code, count] : by_provider) {
+            providers += std::format("{}{} '{}'", providers.empty() ? "" : ", ",
+                count, code);
+        }
+        return {false, std::format("Market catalogue for '{}' holds {} series "
+                                   "of {} parties; by provider: {}",
+            instance, fact.series.size(), parties.size(), providers)};
     }
 
     const auto kind = job.history ? "history" : "first load";

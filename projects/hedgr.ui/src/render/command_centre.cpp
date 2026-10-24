@@ -32,9 +32,11 @@
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "hedgr.ui/widget/tabs.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <format>
 #include <limits>
@@ -52,6 +54,7 @@ namespace theme = hedgr::ui::theme;
 
 using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
+using hedgr::model::state::window_handle;
 using hedgr::ui::render::age_text;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
@@ -200,47 +203,60 @@ void draw_bootstrap_card(const render_input& input,
 }
 
 /**
+ * @brief Draws the body's view state when the snapshot has nothing to show.
+ *
+ * The failure state is drawn instead of the counts rather than beside them,
+ * because a zero beside a failure reads as a measurement. The way out stays a
+ * button above the mark.
+ *
+ * @return Whether it drew a state, in which case the screen draws no more.
+ */
+bool draw_deployment_state(const render_input& input,
+    const domain::deployment_snapshot& snapshot, std::string_view window_id,
+    widget::status_bar& status, widget::foot_state& foot,
+    window_handle handle) {
+    const bool failed = !snapshot.failure.empty();
+    if (!failed && snapshot.is_read())
+        return false;
+
+    if (failed && ImGui::Button("Read again")) {
+        command request;
+        request.kind = command_kind::refresh_window;
+        request.window_id = std::string{window_id};
+        input.commands.push(std::move(request));
+    }
+
+    /* On the stack, so a failure frame allocates nothing. */
+    std::array<char, 512> reason{};
+    auto facts = hedgr::ui::render::session_view_facts(input, handle);
+    facts.reading = !failed;
+    if (failed) {
+        const auto written = std::format_to_n(reason.data(),
+            static_cast<std::ptrdiff_t>(reason.size() - 1),
+            "While reading {}: {}", snapshot.failing_read, snapshot.failure);
+        facts.read_failure = std::string_view{reason.data(),
+            static_cast<std::size_t>(written.out - reason.data())};
+    }
+    widget::draw_view_state_body(status, foot, widget::view_state_of(facts));
+    return true;
+}
+
+/**
  * @brief The Overview: the counts the dashboard reports, as a wall of cards.
  *
- * The counts come from one snapshot, so they are all about the same moment. The
- * failure state is drawn instead of the counts rather than beside them, because
- * a zero beside a failure reads as a measurement.
+ * The counts come from one snapshot, so they are all about the same moment.
  */
 void draw_overview(const render_input& input, const domain::deployment_snapshot& snapshot,
-    std::string_view window_id, std::string_view instance_name) {
+    std::string_view window_id, std::string_view instance_name,
+    widget::status_bar& status, widget::foot_state& foot,
+    window_handle handle) {
+    if (draw_deployment_state(input, snapshot, window_id, status, foot, handle))
+        return;
+
     const float pane_width = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
     const int columns = widget::card_columns(pane_width);
     const float width = widget::card_width(pane_width, columns);
     const float height = widget::card_height();
-
-    if (!snapshot.failure.empty()) {
-        std::vector<widget::topic_spec> topics;
-        widget::topic_spec failure;
-        failure.title = "Deployment";
-        failure.cards.push_back(widget::card_spec{.id = "cc-failure",
-            .glyph = icon::error,
-            .title = "The deployment could not be read",
-            .value = snapshot.failure,
-            .caption = std::format("while reading {}", snapshot.failing_read),
-            .colour = theme::failure_colour,
-            .full_width = true,
-            .wrap = true});
-        topics.push_back(std::move(failure));
-        widget::draw_topics(topics, pane_width, width, height, columns);
-
-        if (ImGui::Button("Read again")) {
-            command request;
-            request.kind = command_kind::refresh_window;
-            request.window_id = std::string{window_id};
-            input.commands.push(std::move(request));
-        }
-        return;
-    }
-
-    if (!snapshot.is_read()) {
-        ImGui::TextDisabled("%s", "Reading the deployment...");
-        return;
-    }
 
     std::vector<widget::topic_spec> topics;
 
@@ -295,13 +311,16 @@ void draw_overview(const render_input& input, const domain::deployment_snapshot&
 }
 
 /** @brief The Tenants screen: the roster the overview counts. */
-void draw_tenants(const domain::deployment_snapshot& snapshot) {
-    if (!snapshot.failure.empty()) {
-        ImGui::TextWrapped("%s", snapshot.failure.c_str());
+void draw_tenants(const render_input& input,
+    const domain::deployment_snapshot& snapshot, std::string_view window_id,
+    widget::status_bar& status, widget::foot_state& foot,
+    window_handle handle) {
+    if (draw_deployment_state(input, snapshot, window_id, status, foot, handle))
         return;
-    }
-    if (!snapshot.is_read()) {
-        ImGui::TextDisabled("%s", "Reading the deployment...");
+    if (snapshot.tenants.empty()) {
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::no_data, widget::view_words::empty,
+                "This deployment lists no tenants."});
         return;
     }
 
@@ -413,7 +432,7 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
                 << "' has no signed-in session";
             scratch.session_loss_reported = true;
         }
-        hedgr::ui::render::draw_signed_out(input, status, foot);
+        hedgr::ui::render::draw_session_state(input, handle, status, foot);
         ImGui::PopID();
         return;
     }
@@ -531,10 +550,12 @@ void render_command_centre_window(hedgr::model::state::window_handle handle,
             if (selected) {
                 widget::underline_selected_tab();
                 if (screen == "tenants")
-                    draw_tenants(snapshot);
+                    draw_tenants(input, snapshot, input.windows.id(handle),
+                        status, foot, handle);
                 else
                     draw_overview(input, snapshot,
-                        input.windows.id(handle), instance_name);
+                        input.windows.id(handle), instance_name, status, foot,
+                        handle);
                 ImGui::EndTabItem();
             }
             if (!open)

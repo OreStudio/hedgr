@@ -34,6 +34,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include "window_forms.hpp"
@@ -1197,7 +1198,11 @@ void draw_picture_gallery(const render_input& input, window_ui_state& state) {
 
     const auto handle = input.instances.find(browser.picture_target);
     if (!handle) {
-        ImGui::TextDisabled("This instance is no longer in the store.");
+        hedgr::ui::widget::draw_view_state_inline(
+            {hedgr::ui::widget::view_state::no_data,
+                hedgr::ui::widget::view_words::empty,
+                "This instance is no longer in the store."},
+            ImVec2(220.0f, 90.0f));
         ImGui::EndPopup();
         return;
     }
@@ -1205,7 +1210,11 @@ void draw_picture_gallery(const render_input& input, window_ui_state& state) {
 
     if (input.instance_icons == nullptr
         || input.instance_icons->entries.empty()) {
-        ImGui::TextDisabled("No pictures are installed.");
+        hedgr::ui::widget::draw_view_state_inline(
+            {hedgr::ui::widget::view_state::no_data,
+                hedgr::ui::widget::view_words::empty,
+                "No pictures are installed."},
+            ImVec2(220.0f, 90.0f));
         ImGui::EndPopup();
         return;
     }
@@ -1947,7 +1956,10 @@ void instance_details(const tree_leaf& leaf, const render_input& input,
     window_ui_state& window) {
     const auto handle = input.instances.find(leaf.id);
     if (!handle) {
-        ImGui::TextDisabled("This instance is no longer in the store.");
+        hedgr::ui::widget::draw_view_state_pane(
+            {hedgr::ui::widget::view_state::no_data,
+                hedgr::ui::widget::view_words::empty,
+                "This instance is no longer in the store."});
         return;
     }
     const auto& row = *input.instances.get(*handle);
