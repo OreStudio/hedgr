@@ -852,12 +852,15 @@ void application::render_loop(GLFWwindow* window) {
             .instance_icons = &instance_icons_,
             .market_view = workspace_.market_view(),
             .wall_now_ns = wall_now_ns(),
+            .fullscreen = fullscreen_,
         };
         textures_.begin_frame();
         workspace_.render(input);
         textures_.end_frame();
         if (workspace_.exit_requested())
             exit_requested_ = true;
+        if (workspace_.take_fullscreen_toggle())
+            toggle_fullscreen(window);
 
         /*
          * After the workspace, so the intro is the last thing submitted. It is

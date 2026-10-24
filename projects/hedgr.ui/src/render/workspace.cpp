@@ -305,6 +305,7 @@ void workspace::render(const render_input& input) {
     if (top_bar.undock_all)
         next_move_ = dock_move{.all = true};
     exit_requested_ |= top_bar.quit_requested;
+    fullscreen_toggled_ |= top_bar.fullscreen_toggled;
 
     draw_dock_space();
 

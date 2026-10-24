@@ -667,6 +667,9 @@ struct render_input final {
      * on the market's own clock.
      */
     std::int64_t wall_now_ns = 0;
+
+    /** @brief Whether the application window is full screen now. */
+    bool fullscreen = false;
 };
 
 /**

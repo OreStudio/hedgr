@@ -45,6 +45,9 @@ struct menu_bar_result final {
 
     /** @brief The operator asked to leave the application. */
     bool quit_requested = false;
+
+    /** @brief The operator asked to switch full screen on or off. */
+    bool fullscreen_toggled = false;
 };
 
 /** @brief The project version this build was configured with. */
