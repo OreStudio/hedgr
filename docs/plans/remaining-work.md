@@ -43,13 +43,14 @@ Follow-ups noticed while building the Instances panel:
 ## Blocked on OreStudio (Brave Hopper session)
 
 - **Tick history by identity.** `get_series_ticks` takes a typed identity (PR 3711), and
-  the identity has no provider, so 65 identities in the test tenant match two series of
-  one party (an `ore` and a `bloomberg` series). The server answers `series_ambiguous`
-  and no history loads. Brave Hopper will add an optional `provider_code` to
-  `resolve_series_identity_request`. When their header carries it, Hedgr's change is in
-  `session_client.cpp` (`series_identity`, around the tick call): copy the series' own
-  provider (it is on the catalogue row, `market_series_row.provider_code`) into the
-  identity before sending. Build against their merged main.
+  the identity had no provider, so 65 identities in the test tenant matched two series of
+  one party (an `ore` and a `bloomberg` series) and the server answered
+  `series_ambiguous`. Brave Hopper has added `provider_code` to
+  `resolve_series_identity_request`, and `list_series_identities` fills it from each
+  series. Hedgr forwards the listed identity whole (`series_identity` in
+  `session_client.cpp`), so it already sends the provider; the tick-read log line now
+  prints it. Not yet built or run against their rebuilt environment: do that first, then
+  check a Bloomberg series loads history.
 - **Reference providers in the catalogue.** Every FX spot is listed twice, `ore`
   (reference, never ticks) and `bloomberg` (data vendor, ticks). The operator was asked
   to choose between: Hedgr filters (done in part: the Provider combo), the server hides

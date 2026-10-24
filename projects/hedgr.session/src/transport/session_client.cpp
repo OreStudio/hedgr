@@ -1386,7 +1386,8 @@ session_client::market_series_ticks(std::string_view series_id,
             << request.identity.scope << "' instrument '"
             << request.identity.instrument_type << "' quote '"
             << request.identity.quote_type << "' party '"
-            << request.identity.party_id << "' with "
+            << request.identity.party_id << "' provider '"
+            << request.identity.provider_code << "' with "
             << request.identity.fields.size() << " fields (from_ns " << from_ns
             << ", to_ns " << to_ns << ")";
 
