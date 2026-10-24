@@ -108,7 +108,13 @@ bool series_table::refresh(row& r, const series_catalogue& catalogue) {
         return moved || !listed_before;
     }
     r.info.listed = false;
-    return listed_before;
+    /*
+     * A catalogue that has landed and does not name the row is news even to a
+     * row that was unlisted before it: the feed is waiting on this answer to
+     * learn that the series is not coming, and a row that reported no change
+     * would never be looked at again.
+     */
+    return true;
 }
 
 void series_table::apply_catalogue(std::string_view instance_id,
