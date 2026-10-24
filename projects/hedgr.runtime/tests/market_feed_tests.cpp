@@ -497,6 +497,21 @@ TEST_CASE("a chart whose series is not in the catalogue is not watched",
     CHECK(w.feeds.at(0)->watches.empty());
 }
 
+TEST_CASE("a chart whose series the catalogue does not name says so, not spins",
+    "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-unknown");
+
+    const auto handle = w.handle_of("a-1", "s-unknown");
+    CHECK_FALSE(w.manager->market().failure(handle).empty());
+    CHECK(w.manager->market().failure(handle).find("catalogue")
+        != std::string_view::npos);
+    CHECK(w.manager->market().observed_at_ns(handle) != 0);
+    CHECK(w.feeds.at(0)->watches.empty());
+}
+
 TEST_CASE("a chart opened before the catalogue is read it, then is watched",
     "[feed]") {
     world w;

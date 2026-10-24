@@ -28,6 +28,7 @@
 #include <boost/log/sources/severity_feature.hpp>
 #include <string>
 #include <utility>
+#include <string_view>
 #include <vector>
 
 namespace hedgr::runtime::service {
@@ -41,6 +42,12 @@ using manager::connection_options_for;
 using support::lg;
 using support::running_key;
 using support::steady_now_ns;
+
+/** @brief Why a plot waits on a series the catalogue does not name. */
+constexpr std::string_view unlisted_series_message =
+    "This series is not in the instance's catalogue (the instance may have "
+    "been re-provisioned). Close this window and open the series again from "
+    "the series browser.";
 
 }
 
@@ -148,8 +155,24 @@ bool market_feed::wanted(const market_stream_entry& entry,
     }
 
     const auto* info = series_.info(series);
-    if (info == nullptr || !info->listed)
+    if (info == nullptr || !info->listed) {
+        /*
+         * A catalogue that has been read and does not name the series is an
+         * answer, not a pending read. A window restored from a layout that
+         * outlived the series (an instance re-provisioned with new keys) would
+         * otherwise wait for a backfill nothing will ever start, and its plot
+         * would spin for good. The failure is recorded once, and a catalogue
+         * that lists the series later puts it back on the change list.
+         */
+        const auto* catalogue =
+            series_.catalogue(entry.instance_id, entry.account_id);
+        if (catalogue->state == model::state::catalogue_state::ready
+            && series_.failure(series).empty()) {
+            series_.fail(series, std::string{unlisted_series_message},
+                steady_now_ns());
+        }
         return false;
+    }
 
     /*
      * The tick subject is party scoped and the token is for the session's
