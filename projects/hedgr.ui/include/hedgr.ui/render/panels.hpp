@@ -302,6 +302,16 @@ HEDGR_UI_EXPORT void request_series_window(const render_input& input,
 HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
 
 /**
+ * @brief Raises the signal that says a shortcut was used, for the sound pack.
+ *
+ * The menu plays nothing itself: it raises a name and the player decides
+ * whether the name has a sound (ADR 0008). The TOOLS > Accounts submenu and the
+ * Instances panel both raise it through here.
+ */
+HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
+    std::string detail);
+
+/**
  * @brief The decoded picture of one instance, as a backend texture, or zero.
  *
  * Zero means the instance has no picture rather than that the drawing failed.

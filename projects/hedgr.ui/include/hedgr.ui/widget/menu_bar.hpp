@@ -21,6 +21,7 @@
 #define HEDGR_UI_WIDGET_MENU_BAR_HPP
 
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/widget/instances_panel.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "imgui.h"
 
@@ -41,7 +42,35 @@ struct menu_bar_state final {
 
     /** @brief Whether the About window is showing. */
     bool about_open = false;
+
+    /** @brief The Instances panel's filter and filtered list. */
+    instances_panel_state instances;
 };
+
+/**
+ * @brief Where a panel @p width wide goes, given its label's left edge.
+ *
+ * Flush with the label unless that runs past @p max_x, when it slides left to
+ * end there, and never left of @p min_x.
+ */
+[[nodiscard]] constexpr float menu_panel_left(float label_left, float width,
+    float min_x, float max_x) noexcept {
+    const float right_fit = max_x - width;
+    const float left = label_left < right_fit ? label_left : right_fit;
+    return left > min_x ? left : min_x;
+}
+
+/**
+ * @brief Sizes and places a large panel under the label @p min to @p max, and
+ * returns its size.
+ *
+ * The @p preferred size is capped to what is left of the main viewport's work
+ * area below the label, less a margin, so a small window gets a smaller panel
+ * rather than one that runs off the screen. The position is set for the next
+ * window, sliding left if the panel would pass the work area's right edge.
+ */
+HEDGR_UI_EXPORT ImVec2 place_menu_panel(ImVec2 min, ImVec2 max,
+    ImVec2 preferred);
 
 /**
  * @brief The open menu after one entry has been looked at, as a pure rule.
@@ -84,16 +113,20 @@ HEDGR_UI_EXPORT bool menu_bar_entry(menu_bar_state& state, int entry,
  * @brief A top-level label and its menu: the one call a bar needs per menu.
  *
  * @p rows draws the menu's rows and runs only while the menu is open.
- * @p height is the label's height, as for @c menu_label.
+ * @p height is the label's height, as for @c menu_label. A @p panel with a
+ * positive width asks for a large fixed-size panel of about that size, capped
+ * by @c place_menu_panel, instead of one as wide as its rows.
  */
 template<class Rows>
 void menu_bar_label(menu_bar_state& state, int entry, const char* text,
-    Rows&& rows, float height = 0.0f) {
+    Rows&& rows, float height = 0.0f, ImVec2 panel = ImVec2(0.0f, 0.0f)) {
     const bool pressed = menu_label(text, state.open == entry, height);
     if (menu_bar_entry(state, entry, text, pressed)) {
         const ImVec2 min = ImGui::GetItemRectMin();
         const ImVec2 max = ImGui::GetItemRectMax();
-        const menu_popup popup(text, 0.0f, (min.x + max.x) * 0.5f);
+        const ImVec2 size = panel.x > 0.0f ? place_menu_panel(min, max, panel)
+                                           : ImVec2(0.0f, 0.0f);
+        const menu_popup popup(text, size.x, (min.x + max.x) * 0.5f, size.y);
         if (popup)
             rows();
     }

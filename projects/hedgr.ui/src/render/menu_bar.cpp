@@ -26,6 +26,7 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/instances_panel.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
@@ -54,8 +55,9 @@ using hedgr::model::domain::store_lock;
 /** @brief The top-level menus' places in the bar, which stay fixed. */
 constexpr int file_entry = 0;
 constexpr int view_entry = 1;
-constexpr int tools_entry = 2;
-constexpr int help_entry = 3;
+constexpr int instances_entry = 2;
+constexpr int tools_entry = 3;
+constexpr int help_entry = 4;
 
 constexpr const char* accounts_submenu_id = "##tools-accounts";
 constexpr const char* logo_texture_id = "ore-logo-white";
@@ -173,20 +175,6 @@ void for_each_accounts_target(const render_input& input,
 }
 
 /**
- * @brief Raises the signal that says a shortcut was used, for the sound pack.
- *
- * The menu plays nothing itself: it raises a name and the player decides
- * whether the name has a sound (ADR 0008).
- */
-void raise_activation(const render_input& input, std::string detail) {
-    hedgr::model::signal::signal value;
-    value.name = std::string(hedgr::model::signal::names::shortcut_activated);
-    value.detail = std::move(detail);
-    value.at_ns = input.now_ns;
-    hedgr::model::signal::bus().raise(std::move(value));
-}
-
-/**
  * @brief The Accounts row and the panel that opens beside it.
  *
  * The panel opens on a click or on hover and stays until the menu closes. A
@@ -226,7 +214,7 @@ void draw_accounts_submenu(const render_input& input,
                 ImGui::PushID(id.data(), id.data() + id.size());
                 if (widget::menu_item_row({.label = label})) {
                     request_accounts_window(input, id);
-                    raise_activation(input,
+                    raise_shortcut_activated(input,
                         std::string("Open the accounts of ") + label);
                     picked = true;
                 }
@@ -358,6 +346,14 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
             ImGui::SameLine();
             widget::menu_bar_label(state, view_entry, "View",
                 [&] { draw_view_menu(input, desk_docked, result); }, height);
+            ImGui::SameLine();
+            widget::menu_bar_label(state, instances_entry, "Instances",
+                [&] { draw_instances_panel(input, state.instances, result); },
+                height,
+                ImVec2(theme::instances_panel_width,
+                    theme::instances_panel_height));
+            if (state.open != instances_entry)
+                state.instances.shown = false;
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);

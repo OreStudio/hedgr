@@ -21,6 +21,7 @@
 
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
+#include <algorithm>
 
 namespace hedgr::ui::widget {
 
@@ -46,6 +47,21 @@ bool menu_bar_entry(menu_bar_state& state, int entry, const char* popup_id,
      * a popup that was not submitted for a frame, so there is nothing to close.
      */
     return now_open;
+}
+
+ImVec2 place_menu_panel(ImVec2 min, ImVec2 max, ImVec2 preferred) {
+    const ImGuiViewport* const viewport = ImGui::GetMainViewport();
+    const float top = max.y + theme::menu_popup_gap;
+    const float margin = theme::menu_bar_margin;
+    const float room_x = viewport->WorkSize.x - 2.0f * margin;
+    const float room_y = viewport->WorkPos.y + viewport->WorkSize.y - top - margin;
+    const ImVec2 size(std::max(0.0f, std::min(preferred.x, room_x)),
+        std::max(0.0f, std::min(preferred.y, room_y)));
+    const float left = menu_panel_left(min.x, size.x,
+        viewport->WorkPos.x + margin,
+        viewport->WorkPos.x + viewport->WorkSize.x - margin);
+    ImGui::SetNextWindowPos(ImVec2(left, top));
+    return size;
 }
 
 }

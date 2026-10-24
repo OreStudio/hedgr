@@ -20,6 +20,8 @@
 #include "hedgr.ui/render/panels.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -424,6 +426,14 @@ void request_instances_window(const render_input& input) {
     request.kind = hedgr::model::command::command_kind::open_window;
     request.new_window_kind = domain::window_kind::instance_manager;
     input.commands.push(std::move(request));
+}
+
+void raise_shortcut_activated(const render_input& input, std::string detail) {
+    hedgr::model::signal::signal value;
+    value.name = std::string(hedgr::model::signal::names::shortcut_activated);
+    value.detail = std::move(detail);
+    value.at_ns = input.now_ns;
+    hedgr::model::signal::bus().raise(std::move(value));
 }
 
 std::uint64_t instance_icon_texture(const render_input& input,

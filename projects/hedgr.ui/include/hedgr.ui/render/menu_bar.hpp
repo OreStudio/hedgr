@@ -72,7 +72,8 @@ struct menu_bar_result final {
  *
  * The bar is shaded with a gradient, drawn into ImGui's own window fill. It
  * holds the logo, a plain brand mark that opens nothing, then the menus FILE,
- * VIEW, TOOLS and HELP, one @c widget::menu_bar_label call each. While the
+ * VIEW, INSTANCES, TOOLS and HELP, one @c widget::menu_bar_label call each.
+ * INSTANCES opens the large panel of @c draw_instances_panel. While the
  * store is shut only FILE is there. @p logo_svg is the logo's document and may
  * be empty, which leaves the mark blank. @p desk_docked says whether anything
  * is docked, which is what lets Undock all be chosen.

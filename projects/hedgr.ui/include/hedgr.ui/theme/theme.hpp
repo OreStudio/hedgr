@@ -592,6 +592,29 @@ inline constexpr float menu_bar_logo_padding = 9.0f;
 inline constexpr float menu_bar_plate_inset = 4.0f;
 
 /**
+ * @brief The Instances panel: a large popup with a pinned row of shortcut
+ * tiles, a filter box and a scrolling grid of instance tiles.
+ *
+ * The size is a preference. The panel is capped to the work area, so a small
+ * window gets a smaller panel, never one that runs off the screen.
+ */
+inline constexpr float instances_panel_width = 720.0f;
+inline constexpr float instances_panel_height = 520.0f;
+
+/** @brief The photo of a grid tile, a square, with the name and status under it. */
+inline constexpr float instances_tile_photo = 96.0f;
+
+/** @brief The room round a tile's contents, and between two tiles. */
+inline constexpr float instances_tile_pad = 6.0f;
+inline constexpr float instances_tile_gap = 8.0f;
+
+/** @brief The photo of a pinned shortcut tile, which is smaller than a grid tile's. */
+inline constexpr float instances_pin_photo = 40.0f;
+
+/** @brief The radius of the status dot on a tile. */
+inline constexpr float instances_status_dot = 4.0f;
+
+/**
  * @brief The floating toolbar: a pill with a purple outline over the desk, a
  * grip at its left and a row of square icon buttons.
  *

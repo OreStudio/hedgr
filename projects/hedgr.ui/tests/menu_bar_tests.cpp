@@ -40,7 +40,9 @@
 #include <set>
 #include <span>
 #include <optional>
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -125,9 +127,10 @@ struct bar_harness final {
             settle();
             std::map<std::string, std::pair<float, float>> spans;
             const ImGuiWindow* bar = bar_harness::bar();
-            for (float x = 2.0f; x < 600.0f; x += 2.0f) {
+            for (float x = 2.0f; x < 800.0f; x += 2.0f) {
                 hover(ImVec2(x, theme::menu_bar_extent * 0.5f));
-                for (const char* n : {"File", "View", "Tools", "Help"}) {
+                for (const char* n :
+                    {"File", "View", "Instances", "Tools", "Help"}) {
                     const ImGuiID id = ImHashStr("##label", 0,
                         ImHashStr(n, 0, bar->ID));
                     if (GImGui->HoveredId != id)
@@ -313,8 +316,8 @@ TEST_CASE("the bar is translucent: the desk behind shows through its plate",
     raster.draw(*ImGui::GetDrawData(), wall);
     const int y = static_cast<int>(bar->Pos.y + bar->Size.y * 0.5f);
     const float a = theme::menu_bar_alpha;
-    const auto expect = [&](float x, ImU32 stop) {
-        const ImVec4 got = raster.pixel(static_cast<int>(x), y);
+    const auto expect = [&](float x, ImU32 stop, int row) {
+        const ImVec4 got = raster.pixel(static_cast<int>(x), row);
         const auto blended = [&](unsigned int shift, float wall_c) {
             return (static_cast<float>((stop >> shift) & 0xffu) / 255.0f) * a
                 + wall_c * (1.0f - a);
@@ -330,10 +333,16 @@ TEST_CASE("the bar is translucent: the desk behind shows through its plate",
     const std::span<const theme::gradient_stop> run(theme::menu_bar_stops);
     /* Away from the logo and the labels, where only the plate is drawn. */
     for (const float t : {0.60f, 0.75f, 0.9f, 0.97f})
-        expect(left + t * width, theme::stops_colour(run, t));
-    /* Across the knee there is no seam, dark or light. */
+        expect(left + t * width, theme::stops_colour(run, t), y);
+    /*
+     * Across the knee there is no seam, dark or light. The labels reach the
+     * knee now, so it is read on a row just under the plate's top edge, above
+     * their text.
+     */
+    const int top_row = static_cast<int>(bar->Pos.y + theme::menu_bar_margin)
+        + 3;
     for (const float t : {0.24f, 0.25f, 0.26f})
-        expect(left + t * width, theme::stops_colour(run, t));
+        expect(left + t * width, theme::stops_colour(run, t), top_row);
 }
 
 TEST_CASE("the plate is rounded and inset: its corner and its margin show the desk",
@@ -480,17 +489,19 @@ TEST_CASE("clicking away closes the open menu", "[menu_bar]") {
     CHECK(h.state.open == menu_bar_state::none);
 }
 
-TEST_CASE("the bar leads with File, View, Tools and Help in that order",
+TEST_CASE("the bar leads with File, View, Instances, Tools and Help in that order",
     "[menu_bar]") {
     bar_harness h;
     const auto file = h.label("File");
     const auto view = h.label("View");
+    const auto instances = h.label("Instances");
     const auto tools = h.label("Tools");
     const auto help = h.label("Help");
-    REQUIRE((file && view && tools && help));
+    REQUIRE((file && view && instances && tools && help));
     CHECK(file->x > theme::menu_bar_height);
     CHECK(file->x < view->x);
-    CHECK(view->x < tools->x);
+    CHECK(view->x < instances->x);
+    CHECK(instances->x < tools->x);
     CHECK(tools->x < help->x);
 }
 
@@ -500,7 +511,7 @@ TEST_CASE("hovering across the real labels moves the open menu", "[menu_bar]") {
     REQUIRE(bar_harness::popup_open("File"));
     h.hover(*h.label("Tools"));
     h.settle();
-    CHECK(h.state.open == 2);
+    CHECK(h.state.open == 3);
     CHECK(bar_harness::popup_open("Tools"));
     CHECK_FALSE(bar_harness::popup_open("File"));
     h.hover(*h.label("Help"));
@@ -558,6 +569,7 @@ TEST_CASE("a locked store shows File alone, with the way in and Quit",
     h.settle();
     CHECK(h.label("File").has_value());
     CHECK_FALSE(h.label("View").has_value());
+    CHECK_FALSE(h.label("Instances").has_value());
     CHECK_FALSE(h.label("Tools").has_value());
     CHECK_FALSE(h.label("Help").has_value());
     h.open_menu("File");
@@ -1213,4 +1225,302 @@ TEST_CASE("a menu popup's rows are set in the monospace and the font is put back
     CHECK(inside == hedgr::ui::icon::mono_font());
     CHECK(inside != base);
     CHECK(after == base);
+}
+
+namespace {
+
+/** @brief The scrolling grid's window, or null while the panel is closed. */
+const ImGuiWindow* grid_window() {
+    for (const ImGuiWindow* window : GImGui->Windows) {
+        if (std::string_view(window->Name).find("instances-grid")
+            != std::string_view::npos)
+            return window;
+    }
+    return nullptr;
+}
+
+/** @brief The centre of the n-th tile of the grid's first row. */
+ImVec2 tile_centre(int n) {
+    const ImGuiWindow* grid = grid_window();
+    REQUIRE(grid != nullptr);
+    const float width = theme::instances_tile_photo
+        + 2.0f * theme::instances_tile_pad;
+    return ImVec2(grid->InnerRect.Min.x
+            + static_cast<float>(n) * (width + theme::instances_tile_gap)
+            + width * 0.5f,
+        grid->InnerRect.Min.y + theme::instances_tile_pad
+            + theme::instances_tile_photo * 0.5f);
+}
+
+/** @brief The centre of the first pinned tile, at the panel's top left. */
+ImVec2 first_pin_centre() {
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    return ImVec2(panel->Pos.x + theme::menu_padding + 24.0f,
+        panel->Pos.y + theme::menu_padding + theme::instances_tile_pad
+            + theme::instances_pin_photo * 0.5f);
+}
+
+void pin(bar_harness& h, model::domain::window_kind kind, const char* target) {
+    model::domain::shortcut row;
+    row.id = std::string("pin-") + std::string(model::domain::to_string(kind))
+        + target;
+    row.target_kind = kind;
+    row.target_id = target;
+    h.desk.shortcuts.upsert(row);
+}
+
+/** @brief How many vertices of @p colour the frame drew, in every window. */
+std::size_t vertices_of(ImU32 colour) {
+    std::size_t count = 0;
+    for (const ImGuiWindow* window : GImGui->Windows) {
+        for (const ImDrawVert& v : window->DrawList->VtxBuffer)
+            count += v.col == colour ? 1 : 0;
+    }
+    return count;
+}
+
+std::size_t open_commands(bar_harness& h, model::domain::window_kind kind) {
+    std::size_t count = 0;
+    for (const auto& c : h.commands()) {
+        if (c.kind == model::command::command_kind::open_window
+            && c.new_window_kind == kind)
+            ++count;
+    }
+    return count;
+}
+
+void two_instances(bar_harness& h) {
+    add_instance(h, "a-1", "Alpha");
+    add_instance(h, "b-2", "Beta");
+}
+
+}
+
+TEST_CASE("the Instances panel opens on a click and the pointer on a label "
+          "switches menus both ways",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    h.open_menu("Instances");
+    CHECK(bar_harness::popup_open("Instances"));
+    CHECK(h.state.open == 2);
+    h.hover(*h.label("Tools"));
+    h.settle();
+    CHECK(bar_harness::popup_open("Tools"));
+    CHECK_FALSE(bar_harness::popup_open("Instances"));
+    h.hover(*h.label("Instances"));
+    h.settle();
+    CHECK(bar_harness::popup_open("Instances"));
+    CHECK_FALSE(bar_harness::popup_open("Tools"));
+}
+
+TEST_CASE("the Instances panel is the themed large size, and a small window "
+          "caps it to the work area",
+    "[menu_bar][instances_panel]") {
+    {
+        bar_harness h;
+        h.open_menu("Instances");
+        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+        CHECK(panel->Size.x == Catch::Approx(theme::instances_panel_width));
+        CHECK(panel->Size.y == Catch::Approx(theme::instances_panel_height));
+    }
+    {
+        bar_harness h;
+        ImGui::GetIO().DisplaySize = ImVec2(500.0f, 400.0f);
+        h.open_menu("Instances");
+        const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+        CHECK(panel->Size.x < theme::instances_panel_width);
+        CHECK(panel->Size.y < theme::instances_panel_height);
+        CHECK(panel->Pos.x >= 0.0f);
+        CHECK(panel->Pos.y >= 0.0f);
+        CHECK(panel->Pos.x + panel->Size.x <= 500.0f + 0.5f);
+        CHECK(panel->Pos.y + panel->Size.y <= 400.0f + 0.5f);
+    }
+}
+
+TEST_CASE("typing in the panel's filter narrows the tiles by name or id, in any case",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    add_instance(h, "a-1", "Alpha");
+    add_instance(h, "b-2", "Beta");
+    add_instance(h, "alp-3", "Gamma");
+    h.open_menu("Instances");
+    CHECK(h.state.instances.matches.size() == 3);
+    CHECK(h.state.instances.total == 3);
+
+    ImGui::GetIO().AddInputCharactersUTF8("ALP");
+    h.settle();
+    CHECK(std::string(h.state.instances.filter.text) == "ALP");
+    /* Alpha by name, Gamma by its id alp-3. */
+    CHECK(h.state.instances.matches.size() == 2);
+    CHECK(h.state.instances.total == 3);
+
+    ImGui::GetIO().AddInputCharactersUTF8("-3");
+    h.settle();
+    CHECK(h.state.instances.matches.size() == 1);
+}
+
+TEST_CASE("the panel opens with an empty, focused filter each time",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    h.open_menu("Instances");
+    ImGui::GetIO().AddInputCharactersUTF8("bet");
+    h.settle();
+    REQUIRE(h.state.instances.matches.size() == 1);
+    CHECK(GImGui->ActiveId != 0);
+
+    h.state.open = menu_bar_state::none;
+    h.settle();
+    h.open_menu("Instances");
+    CHECK(std::string(h.state.instances.filter.text).empty());
+    CHECK(h.state.instances.matches.size() == 2);
+    CHECK(GImGui->ActiveId != 0);
+}
+
+TEST_CASE("the filtered list is rebuilt when the table changes and not otherwise",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    h.open_menu("Instances");
+    REQUIRE(h.state.instances.matches.size() == 2);
+
+    /* Nothing changed: a planted repeat survives, so nothing was rebuilt. */
+    h.state.instances.matches.push_back(1);
+    h.settle();
+    CHECK(h.state.instances.matches.size() == 3);
+    CHECK(h.state.instances.matches[2] == 1);
+
+    add_instance(h, "c-3", "Charlie");
+    h.settle();
+    REQUIRE(h.state.instances.matches.size() == 3);
+    CHECK(h.state.instances.matches[2] == 2);
+    CHECK(h.state.instances.total == 3);
+}
+
+TEST_CASE("a tile click raises the Instances window, says so, and closes the panel",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    h.open_menu("Instances");
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+
+    h.click(tile_centre(1));
+    CHECK(h.result.focus_instances);
+    CHECK(open_commands(h, model::domain::window_kind::instance_manager) == 1);
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].name == model::signal::names::shortcut_activated);
+    CHECK(raised[0].detail == "Open the Instances window on Beta");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("a Ctrl-click on tiles picks each and leaves the panel open",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    h.open_menu("Instances");
+    static_cast<void>(h.commands());
+
+    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+    h.click(tile_centre(0));
+    h.click(tile_centre(1));
+    ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+    h.frame();
+    CHECK(open_commands(h, model::domain::window_kind::instance_manager) == 2);
+    CHECK(GImGui->OpenPopupStack.Size == 1);
+    CHECK(bar_harness::popup_open("Instances"));
+}
+
+TEST_CASE("a pinned instances shortcut raises the window like the old bar",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    pin(h, model::domain::window_kind::instance_manager, "");
+    h.open_menu("Instances");
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+
+    h.click(first_pin_centre());
+    CHECK(h.result.focus_instances);
+    CHECK(open_commands(h, model::domain::window_kind::instance_manager) == 1);
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].name == model::signal::names::shortcut_activated);
+    CHECK(raised[0].detail == "Bring the Instances window to the front");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("a pinned accounts shortcut opens that instance's accounts",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    pin(h, model::domain::window_kind::accounts, "b-2");
+    h.open_menu("Instances");
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+
+    h.click(first_pin_centre());
+    const auto commands = h.commands();
+    REQUIRE(commands.size() == 1);
+    CHECK(commands[0].new_window_kind == model::domain::window_kind::accounts);
+    CHECK(commands[0].instance_id == "b-2");
+    CHECK_FALSE(h.result.focus_instances);
+    const auto raised = drained_signals();
+    REQUIRE(raised.size() == 1);
+    CHECK(raised[0].detail == "Open the accounts of Beta");
+    CHECK(GImGui->OpenPopupStack.Size == 0);
+}
+
+TEST_CASE("a pinned shortcut of a kind that cannot open does nothing and stays",
+    "[menu_bar][instances_panel]") {
+    bar_harness h;
+    pin(h, model::domain::window_kind::chart, "x");
+    h.open_menu("Instances");
+    static_cast<void>(h.commands());
+    static_cast<void>(drained_signals());
+
+    h.click(first_pin_centre());
+    CHECK(h.commands().empty());
+    CHECK(drained_signals().empty());
+    CHECK(GImGui->OpenPopupStack.Size == 1);
+}
+
+TEST_CASE("a tile carries the probe's colour as a status dot", "[menu_bar][instances_panel]") {
+    bar_harness h;
+    two_instances(h);
+    h.open_menu("Instances");
+    CHECK(vertices_of(theme::failure_colour) == 0);
+
+    model::domain::probe_result down;
+    down.reach = model::domain::reachability::unreachable;
+    h.desk.probes.set(*h.desk.instances.find("a-1"), down);
+    h.settle();
+    CHECK(vertices_of(theme::failure_colour) > 0);
+}
+
+TEST_CASE("no instances and no filter match both draw the no data mark and no tile",
+    "[menu_bar][instances_panel]") {
+    const ImU32 quiet = theme::view_quiet_colour;
+    {
+        bar_harness h;
+        two_instances(h);
+        h.open_menu("Instances");
+        CHECK(vertices_of(quiet) == 0);
+    }
+    {
+        bar_harness h;
+        h.open_menu("Instances");
+        CHECK(h.state.instances.matches.empty());
+        CHECK(vertices_of(quiet) > 0);
+    }
+    {
+        bar_harness h;
+        two_instances(h);
+        h.open_menu("Instances");
+        ImGui::GetIO().AddInputCharactersUTF8("zzz");
+        h.settle();
+        CHECK(h.state.instances.matches.empty());
+        CHECK(h.state.instances.total == 2);
+        CHECK(vertices_of(quiet) > 0);
+    }
 }

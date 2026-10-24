@@ -43,11 +43,14 @@ namespace hedgr::ui::widget {
  * the corners), so the panel reads as hanging off its label. The caret is drawn
  * on the foreground list of the popup's viewport, as it lies outside the window;
  * a popup that is its own OS window gets none.
+ *
+ * A positive @p height fixes the panel's height too, for a large panel that
+ * scrolls its own contents. Zero fits it to its rows.
  */
 class HEDGR_UI_EXPORT menu_popup final {
 public:
     explicit menu_popup(const char* id, float width = 0.0f,
-        std::optional<float> caret_x = std::nullopt);
+        std::optional<float> caret_x = std::nullopt, float height = 0.0f);
     ~menu_popup();
     menu_popup(const menu_popup&) = delete;
     menu_popup& operator=(const menu_popup&) = delete;

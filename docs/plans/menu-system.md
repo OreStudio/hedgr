@@ -2,7 +2,7 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Steps 1 to 3 and 9 are done; the
+the ImCoolBar shortcut bar over several small PRs. Steps 1 to 5 and 9 are done; the
 rest is plan.
 
 ## The reference
@@ -152,11 +152,36 @@ Each step is one PR, with tests, and leaves the app working.
      which only the series browser's picker can supply (see step 3). Mini plot of
      the focused chart is omitted, as nothing here tracks which chart has focus.
      No button is a mode, so none is drawn as the selected purple fill.
-5. **The Instances panel.** An Instances menu opens a large panel: a filter box
+5. [x] **The Instances panel.** An Instances menu opens a large panel: a filter box
    and a tile grid of instances with their photos from the image cache. A click
    opens or raises the Instances window on that instance. The catalogue
    shortcuts become a pinned row at the top of the panel (decision 5). Reuses
    the `entry_tooltip` text for hover.
+   - Notes. INSTANCES is the third label, after FILE and VIEW and before TOOLS,
+     drawn only while the store is unlocked. Its popup is `menu_popup` at a fixed
+     size (`theme::instances_panel_width` and `_height`, 720 by 520), capped to
+     the work area below the label and slid left to stay inside it
+     (`widget::place_menu_panel`, `menu_panel_left`), with the usual fill and
+     caret. `render/instances_panel.cpp` draws the body: a pinned row of small
+     tiles, a filter box (hint "Filter instances", cleared and focused each time
+     the panel opens) with a right-aligned shown/total count, and a scrolling
+     grid with one tile per instance (photo from `instance_icons`, or the
+     instance glyph on the surface colour; the name under it; a dot in the
+     probe's colour; the name, id, address and status word in the tooltip).
+     Layout is pure in `widget/instances_panel.{hpp,cpp}` (`instance_matches`,
+     `tile_columns`, `tile_position`, `tile_grid_height`). The filter is a fixed
+     64 byte buffer in `menu_bar_state`; the filtered slot list is rebuilt only
+     when the text or `instance_table::version()` (new, bumped by every write)
+     differs, and the grid draws only the rows in view, so a steady frame
+     allocates nothing. A pin does what the removed bar did (the Instances
+     window through `request_instances_window` and `focus_instances`, or
+     `request_accounts_window`, then `raise_shortcut_activated`, which moved to
+     `panels` so TOOLS > Accounts shares it). A tile click raises the Instances
+     window and the same signal; there is no selection to drive, so the window
+     does not move to that instance yet. Ctrl keeps the panel open for several
+     picks. An empty store and a filter that matches nothing both draw the no
+     data mark, the words in its tooltip. TOOLS > Accounts stays until step 6.
+     Not checked in a real window.
 6. **Accounts.** An Accounts menu opens a panel with tenant headings and the
    accounts under each, from `tenant_row` and the accounts table. A click opens
    the accounts window for that instance and account.
