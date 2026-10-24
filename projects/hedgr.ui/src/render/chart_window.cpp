@@ -30,7 +30,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
-#include "hedgr.ui/widget/plot_state.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "hedgr.ui/widget/segmented.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "ores.logging/make_logger.hpp"
@@ -375,35 +375,6 @@ struct header_icons_drawn final {
     return drawn;
 }
 
-/**
- * @brief The body and foot of a chart whose session is not open.
- *
- * The plot area says so with a grey watermark, where the other data windows use
- * a sentence, because a chart is the window an operator watches for liveness
- * and a shape reads at a glance. The words are in a tooltip over it.
- */
-void draw_connection_state(const render_input& input,
-    widget::status_bar& status, widget::foot_state& foot,
-    widget::plot_state state, std::string_view reason) {
-    set_health_foot(foot, domain::data_health::unavailable, 0, 0, false);
-    const float foot_height = widget::status_foot_height(status, foot)
-        + ImGui::GetStyle().ItemSpacing.y;
-    const ImVec2 available = ImGui::GetContentRegionAvail();
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    if (ImGui::BeginChild("##plot-area",
-            ImVec2(available.x, std::max(available.y - foot_height, 80.0f)),
-            ImGuiChildFlags_None)) {
-        const ImVec2 at = ImGui::GetCursorScreenPos();
-        const ImVec2 room = ImGui::GetContentRegionAvail();
-        widget::draw_plot_state(state, at,
-            ImVec2(at.x + room.x, at.y + room.y), theme::plot_state_glyph_size,
-            true, state == widget::plot_state::failed ? reason
-                                                      : std::string_view{});
-    }
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-    widget::draw_status_foot(status, input.now_ns, foot);
-}
 }
 
 /** @brief The colour a value takes for the plot's data health. */
@@ -436,8 +407,11 @@ void render_chart(window_handle handle, const render_input& input,
     const auto& shape = input.windows.state(handle);
     const auto* chart = std::get_if<chart_state>(&shape);
     if (chart == nullptr) {
-        ImGui::TextWrapped("%s", "This window is not a chart.");
-        widget::draw_status_foot(status, input.now_ns, make_foot());
+        auto foot = make_foot();
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::error, widget::view_words::read_failed,
+                "This window does not hold a chart."});
+        widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
     }
@@ -454,16 +428,7 @@ void render_chart(window_handle handle, const render_input& input,
     const auto session = signed_in_session(input, handle);
     if (!session) {
         auto foot = make_foot();
-        const auto bound = input.windows.session_of(handle);
-        const auto state_now = bound
-            ? widget::plot_state_for(input.sessions.status(*bound), false)
-            : widget::plot_state::none;
-        if (state_now == widget::plot_state::none) {
-            draw_signed_out(input, status, foot);
-        } else {
-            draw_connection_state(input, status, foot, state_now,
-                input.sessions.last_error(*bound));
-        }
+        draw_session_state(input, handle, status, foot);
         ImGui::PopID();
         return;
     }
@@ -609,13 +574,27 @@ void render_chart(window_handle handle, const render_input& input,
     if (icons.view_changed)
         chart_view_changed(handle, input, state, view_before);
 
+    /*
+     * A failed history read leaves live points on the plot, so the verdict can
+     * be an error while there is still a line to draw. The foot says ERROR
+     * either way, and the mark takes the plot's place only when there is no
+     * line.
+     */
+    auto facts = session_view_facts(input, handle);
+    facts.reading = reading;
+    facts.read_failure = row ? series.failure(*row) : std::string_view{};
+    facts.has_data = !no_points;
+    facts.empty_what = "This series holds no points.";
+    const auto verdict = widget::view_state_of(facts);
+    const bool show_mark = verdict.state == widget::view_state::reading
+        || (verdict.state != widget::view_state::none && no_points);
+
     std::optional<widget::foot_state> foot;
     float foot_height = 0.0f;
     {
         foot = make_foot();
         set_health_foot(*foot, health, as_of_ns, input.wall_now_ns, reading);
-        if (row)
-            set_history_unavailable_foot(*foot, series.failure(*row));
+        widget::set_view_foot(*foot, verdict);
         foot_height = widget::status_foot_height(status, *foot)
             + ImGui::GetStyle().ItemSpacing.y;
     }
@@ -624,24 +603,12 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##plot-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (reading) {
+        if (show_mark) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
             const ImVec2 room = ImGui::GetContentRegionAvail();
-            widget::draw_plot_state(widget::plot_state::reading, at,
+            widget::draw_view_state(verdict, at,
                 ImVec2(at.x + room.x, at.y + room.y),
-                theme::plot_state_glyph_size, true);
-        } else if (no_points && row && !series.failure(*row).empty()) {
-            const ImVec2 at = ImGui::GetCursorScreenPos();
-            const ImVec2 room = ImGui::GetContentRegionAvail();
-            widget::draw_plot_state(widget::plot_state::history_unavailable,
-                at, ImVec2(at.x + room.x, at.y + room.y),
-                theme::plot_state_glyph_size, true, series.failure(*row));
-        } else if (no_points) {
-            const ImVec2 at = ImGui::GetCursorScreenPos();
-            const ImVec2 room = ImGui::GetContentRegionAvail();
-            widget::draw_plot_state(widget::plot_state::no_data, at,
-                ImVec2(at.x + room.x, at.y + room.y),
-                theme::plot_state_glyph_size, true);
+                theme::view_state_glyph_size);
         } else {
             const auto& candle_points = plot.candles;
             const bool use_candles = !candle_points.empty();

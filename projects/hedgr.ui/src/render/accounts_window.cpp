@@ -33,6 +33,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "ores.logging/make_logger.hpp"
 #include "imgui.h"
 #include <algorithm>
@@ -565,7 +566,10 @@ void account_details(const tree_leaf& leaf, const render_input& input,
     static_cast<void>(window);
     const auto handle = input.accounts.find(leaf.id);
     if (!handle) {
-        ImGui::TextDisabled("This account is no longer in the store.");
+        hedgr::ui::widget::draw_view_state_pane(
+            {hedgr::ui::widget::view_state::no_data,
+                hedgr::ui::widget::view_words::empty,
+                "This account is no longer in the store."});
         return;
     }
 

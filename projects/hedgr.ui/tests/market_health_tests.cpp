@@ -23,6 +23,7 @@
 #include "hedgr.ui/render/time_text.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <catch2/catch_all.hpp>
@@ -102,10 +103,10 @@ TEST_CASE("a chart on a one-day period is live while its feed ticks",
 }
 
 /*
- * A chart is the exception: it says so in its plot area, with a glyph, and
- * plot_state_tests.cpp covers it.
+ * Every data window says it with the not-connected mark and the OFFLINE word;
+ * view_state_tests.cpp covers the mark, this covers the foot word.
  */
-TEST_CASE("every other data window says the same thing when its session is lost",
+TEST_CASE("every data window says the same thing when its session is lost",
     "[health][session]") {
     const std::vector<std::pair<window_kind, model::domain::window_state>>
         windows{
@@ -131,7 +132,10 @@ TEST_CASE("every other data window says the same thing when its session is lost"
         const auto text = drawn_text(desk, handle, state);
         INFO("window kind " << static_cast<int>(kind) << " drew: " << text);
         CHECK_FALSE(says(text, "not signed in"));
-        CHECK(says(text, "NO DATA"));
+        CHECK_FALSE(says(text, "Not connected"));
+        CHECK_FALSE(says(text, "Sign in"));
+        CHECK(says(text, "OFFLINE"));
+        CHECK_FALSE(says(text, "NO DATA"));
     }
 }
 
@@ -238,8 +242,10 @@ TEST_CASE("a chart whose history read failed says so in its foot",
     CHECK_FALSE(says(text, "the observation answer could not be decoded"));
 
     hedgr::ui::widget::foot_state foot;
-    render::set_history_unavailable_foot(foot,
-        "the observation answer could not be decoded");
+    hedgr::ui::widget::set_view_foot(foot,
+        {hedgr::ui::widget::view_state::error,
+            hedgr::ui::widget::view_words::read_failed,
+            "the observation answer could not be decoded"});
     CHECK(foot.detail == "the observation answer could not be decoded");
 }
 
@@ -251,10 +257,12 @@ TEST_CASE("the history note takes the failure colour and only on a failure",
     render::set_health_foot(foot, data_health::live, now - second, now, false);
     const auto live = foot.word;
 
-    render::set_history_unavailable_foot(foot, "");
+    hedgr::ui::widget::set_view_foot(foot, {});
     CHECK(foot.word == live);
 
-    render::set_history_unavailable_foot(foot, "refused");
+    hedgr::ui::widget::set_view_foot(foot,
+        {hedgr::ui::widget::view_state::error,
+            hedgr::ui::widget::view_words::read_failed, "refused"});
     CHECK(foot.word == "ERROR");
     CHECK(foot.colour == hedgr::ui::theme::failure_colour);
 }

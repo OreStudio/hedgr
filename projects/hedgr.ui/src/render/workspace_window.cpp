@@ -29,6 +29,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/panels.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include <cstdint>
 #include <format>
@@ -139,20 +140,15 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
      * would take with it the only surface that could say what went wrong.
      */
     if (!session || !facts.found) {
-        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(
-                theme::status_colour(session_status::disconnected)));
-        ImGui::TextUnformatted(icon::session_failed);
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-        ImGui::TextUnformatted("This session has ended. Sign in again from the "
-                               "Accounts window.");
-
         if (widget::icon_button("close", icon::cancel, "Close this workspace")) {
             command request;
             request.kind = command_kind::close_window;
             request.window_id = std::string{input.windows.id(handle)};
             input.commands.push(std::move(request));
         }
+        /* A workspace is always bound, so no session here means it ended. */
+        widget::draw_view_state_body(status, foot,
+            widget::view_state_of({.ended = true}));
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;

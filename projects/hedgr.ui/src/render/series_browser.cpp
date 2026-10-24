@@ -28,6 +28,7 @@
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -132,7 +133,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     const auto session = signed_in_session(input, handle);
     if (!session) {
-        draw_signed_out(input, status, foot);
+        draw_session_state(input, handle, status, foot);
         ImGui::PopID();
         return;
     }
@@ -158,19 +159,24 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     const auto catalogue_state = catalogue != nullptr
         ? catalogue->state
         : hedgr::model::state::catalogue_state::unread;
-    if (catalogue_state == hedgr::model::state::catalogue_state::failed) {
-        ImGui::TextColored(
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
-            "%s", catalogue->error.c_str());
-    } else if (catalogue_state
-            == hedgr::model::state::catalogue_state::reading
-        && rows.empty()) {
-        ImGui::TextDisabled("Reading the market series...");
-    } else if (catalogue_state == hedgr::model::state::catalogue_state::ready
-        && rows.empty()) {
-        ImGui::TextDisabled(
-            "This deployment holds no market series for this session.");
-    }
+    /*
+     * The catalogue's state is the whole body's state while it holds no rows.
+     * A failed refresh over rows already held keeps the list and says ERROR on
+     * the foot.
+     */
+    namespace cat = hedgr::model::state;
+    auto catalogue_facts = session_view_facts(input, handle);
+    catalogue_facts.reading = rows.empty()
+        && (catalogue_state == cat::catalogue_state::reading
+            || catalogue_state == cat::catalogue_state::unread);
+    catalogue_facts.read_failure =
+        catalogue_state == cat::catalogue_state::failed
+        ? std::string_view{catalogue->error} : std::string_view{};
+    catalogue_facts.has_data = !rows.empty();
+    catalogue_facts.empty_what =
+        "This deployment holds no market series for this session.";
+    const auto catalogue_verdict = widget::view_state_of(catalogue_facts);
+    widget::set_view_foot(foot, catalogue_verdict);
 
     const auto session_party = input.sessions.party_id(*session);
     const std::string_view filter{state.filter.data()};
@@ -253,6 +259,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         "Open a cross-rates matrix for this session's party.");
 
     if (state.crm_picker_open) {
+        /* The popup sizes itself to what it holds, so its mark has a box. */
+        constexpr ImVec2 popup_mark(220.0f, 90.0f);
         ImGui::OpenPopup("Choose CRM");
         if (ImGui::BeginPopup("Choose CRM")) {
             ImGui::TextUnformatted("Choose a CRM");
@@ -262,7 +270,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 input.sessions.account_id(*session),
                 state.market_party_id);
             if (names == nullptr) {
-                ImGui::TextDisabled("Reading configured CRMs...");
+                widget::draw_view_state_inline(
+                    {.state = widget::view_state::reading}, popup_mark);
                 if (!state.crm_picker_requested) {
                     model::command::command request;
                     request.kind
@@ -276,7 +285,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     state.crm_picker_requested = true;
                 }
             } else if (names->empty()) {
-                ImGui::TextDisabled("No CRMs configured for this party.");
+                widget::draw_view_state_inline(
+                    {widget::view_state::no_data, widget::view_words::empty,
+                        "No CRMs are configured for this party."},
+                    popup_mark);
                 if (ImGui::Button("Retry")) {
                     model::command::command request;
                     request.kind
@@ -320,6 +332,28 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
     }
 
+    if (catalogue_verdict.state != widget::view_state::none && rows.empty()) {
+        widget::draw_view_state_body(status, foot, catalogue_verdict);
+        widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+        return;
+    }
+
+    /*
+     * Filters that match nothing leave the whole body empty. The way out stays
+     * a button, and the mark says nothing matched. The caller returns after
+     * it, like every other whole-body state here.
+     */
+    const auto draw_no_match = [&](std::string_view what) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Clear filters"))
+            std::fill(state.filter.begin(), state.filter.end(), '\0');
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::no_data, widget::view_words::empty, what});
+        widget::draw_status_foot(status, input.now_ns, foot);
+        ImGui::PopID();
+    };
+
     if (state.market_asset_class == "IR") {
         update_series_browser_view(state.series_view,
             {.generation = generation, .filter = filter,
@@ -327,6 +361,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 .party = state.market_party_id},
             rows);
         const auto& curves = state.series_view.rows;
+        if (curves.empty()) {
+            draw_no_match("No curves match the filters.");
+            return;
+        }
 
         ImGui::AlignTextToFramePadding();
         widget::caption("Curve");
@@ -360,8 +398,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     ImGui::SetItemDefaultFocus();
                 ImGui::PopID();
             }
-            if (curves.empty())
-                ImGui::TextDisabled("No curves match the filters.");
             ImGui::EndCombo();
         }
 
@@ -432,13 +468,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         rows);
     const auto& visible = state.series_view.rows;
 
-    if (visible.empty() && !rows.empty()) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("No series match the filters.");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Clear filters")) {
-            std::fill(state.filter.begin(), state.filter.end(), '\0');
-        }
+    if (visible.empty()) {
+        draw_no_match("No series match the filters.");
+        return;
     }
 
     ImGui::AlignTextToFramePadding();
@@ -480,8 +512,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::PopID();
             }
         }
-        if (visible.empty())
-            ImGui::TextDisabled("No series matches the filter.");
         ImGui::EndCombo();
     }
 

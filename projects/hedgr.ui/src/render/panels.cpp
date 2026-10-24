@@ -21,11 +21,10 @@
 
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.ui/icon/icons.hpp"
-#include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/flags.hpp"
-#include "hedgr.ui/widget/plot_state.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "imgui.h"
 #include <algorithm>
@@ -172,26 +171,34 @@ std::optional<hedgr::model::state::session_handle> signed_in_session(
     const render_input& input, hedgr::model::state::window_handle handle) {
     const auto session = input.windows.session_of(handle);
     if (session.has_value()
-        && input.sessions.status(*session)
-            == domain::session_status::authenticated
-        && !input.sessions.token(*session).empty())
+        && hedgr::ui::widget::view_state_of(session_view_facts(input, handle))
+                .state == hedgr::ui::widget::view_state::none)
         return session;
     return std::nullopt;
 }
 
-void draw_signed_out(const render_input& input,
+hedgr::ui::widget::view_facts session_view_facts(const render_input& input,
+    hedgr::model::state::window_handle handle) {
+    hedgr::ui::widget::view_facts facts;
+    const auto session = input.windows.session_of(handle);
+    if (!session)
+        return facts;
+    if (!input.sessions.contains(*session)) {
+        facts.ended = true;
+        return facts;
+    }
+    facts.session = input.sessions.status(*session);
+    facts.has_token = !input.sessions.token(*session).empty();
+    facts.session_error = input.sessions.last_error(*session);
+    return facts;
+}
+
+void draw_session_state(const render_input& input,
+    hedgr::model::state::window_handle handle,
     hedgr::ui::widget::status_bar& status,
     hedgr::ui::widget::foot_state& foot) {
-    set_health_foot(foot, domain::data_health::unavailable, 0, 0, false);
-    const float foot_height = hedgr::ui::widget::status_foot_height(status, foot)
-        + ImGui::GetStyle().ItemSpacing.y;
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const ImVec2 room = ImGui::GetContentRegionAvail();
-    hedgr::ui::widget::draw_plot_state(
-        hedgr::ui::widget::plot_state::disconnected, at,
-        ImVec2(at.x + room.x, at.y + std::max(room.y - foot_height, 80.0f)),
-        hedgr::ui::theme::plot_state_glyph_size, true,
-        "Not signed in. Sign in from the Accounts window to read its data.");
+    hedgr::ui::widget::draw_view_state_body(status, foot,
+        hedgr::ui::widget::view_state_of(session_view_facts(input, handle)));
     hedgr::ui::widget::draw_status_foot(status, input.now_ns, foot);
 }
 
@@ -199,7 +206,8 @@ identity_bar_state identity_of(const render_input& input,
     hedgr::model::state::window_handle handle) {
     identity_bar_state result;
 
-    if (const auto session = input.windows.session_of(handle)) {
+    if (const auto session = input.windows.session_of(handle);
+        session && input.sessions.contains(*session)) {
         result.signed_in = signed_in_session(input, handle).has_value();
         result.tenant = std::string{input.sessions.tenant_name(*session)};
         result.party = std::string{input.sessions.party_name(*session)};

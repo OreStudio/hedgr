@@ -28,6 +28,7 @@
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
@@ -61,7 +62,9 @@ void render_term_structure(window_handle handle, const render_input& input,
     const auto& shape = input.windows.state(handle);
     const auto* terms = std::get_if<term_structure_state>(&shape);
     if (terms == nullptr) {
-        ImGui::TextWrapped("%s", "This window is not a term structure.");
+        widget::draw_view_state_body(status, foot,
+            {widget::view_state::error, widget::view_words::read_failed,
+                "This window does not hold a term structure."});
         widget::draw_status_foot(status, input.now_ns, foot);
         ImGui::PopID();
         return;
@@ -69,7 +72,7 @@ void render_term_structure(window_handle handle, const render_input& input,
 
     const auto session = signed_in_session(input, handle);
     if (!session) {
-        draw_signed_out(input, status, foot);
+        draw_session_state(input, handle, status, foot);
         ImGui::PopID();
         return;
     }
@@ -102,10 +105,24 @@ void render_term_structure(window_handle handle, const render_input& input,
             newest_at_ns = curve->curves[static_cast<std::size_t>(primary)].at_ns;
     }
 
+    /*
+     * A failed read that leaves older curves still draws them, and the foot
+     * says ERROR over them. The mark takes the plot's place only when there is
+     * no curve to draw.
+     */
+    auto facts = session_view_facts(input, handle);
+    facts.reading = curve == nullptr || curve->reading;
+    facts.read_failure = curve != nullptr ? std::string_view{curve->error}
+                                          : std::string_view{};
+    facts.has_data = curve != nullptr && !curve->curves.empty();
+    facts.empty_what = "This curve holds no points.";
+    const auto verdict = widget::view_state_of(facts);
+
     set_health_foot(foot,
         hedgr::model::domain::assess_data_health(newest_at_ns,
             input.wall_now_ns, hedgr::model::domain::ir_health_thresholds),
         newest_at_ns, input.wall_now_ns, curve != nullptr && curve->reading);
+    widget::set_view_foot(foot, verdict);
     foot.controls.push_back(widget::foot_combo{
         .id = "history",
         .tooltip = "How many recent curves to overlay",
@@ -126,12 +143,6 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::SameLine();
     draw_series_flags(input, *session, terms->label);
 
-    if (curve != nullptr && !curve->error.empty()) {
-        ImGui::TextColored(
-            ImGui::ColorConvertU32ToFloat4(theme::failure_colour),
-            "%s", curve->error.c_str());
-    }
-
     const float foot_height = widget::status_foot_height(status, foot);
     const ImVec2 available = ImGui::GetContentRegionAvail();
     const float plot_height = std::max(
@@ -139,11 +150,12 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (curve == nullptr
-            || (curve->curves.empty() && curve->error.empty())) {
-            ImGui::TextDisabled("Reading the curve...");
-        } else if (curve->curves.empty()) {
-            ImGui::TextWrapped("%s", curve->error.c_str());
+        if (!facts.has_data) {
+            const ImVec2 at = ImGui::GetCursorScreenPos();
+            const ImVec2 room = ImGui::GetContentRegionAvail();
+            widget::draw_view_state(verdict, at,
+                ImVec2(at.x + room.x, at.y + room.y),
+                theme::view_state_glyph_size);
         } else {
             const auto& all_curves = curve->curves;
             const int end = primary + 1;

@@ -181,7 +181,8 @@ TEST_CASE("a mini plot card names its pair and, once held, stops reading",
     CHECK(text.find("Reading the series") == std::string::npos);
 }
 
-TEST_CASE("a mini plot card for a series not held says so",
+TEST_CASE("a mini plot card for a series not held keeps its name and writes"
+          " no sentence; view_state_tests.cpp covers the mark",
     "[mini_plot]") {
     hedgr::testing::headless_imgui imgui;
     hedgr::testing::desk desk;
@@ -189,7 +190,8 @@ TEST_CASE("a mini plot card for a series not held says so",
         model::domain::mini_plot_state{.label = "FX GBP/USD", .series_id = "s"});
 
     const auto text = drawn_text(desk, handle);
-    CHECK(text.find("Series not held") != std::string::npos);
+    CHECK(text.find("FX GBP/USD") != std::string::npos);
+    CHECK(text.find("Series not held") == std::string::npos);
 }
 
 TEST_CASE("a card's line and fill are the chart's colour whatever the series did",
@@ -313,7 +315,8 @@ TEST_CASE("a card with no points yet or no held series draws no line",
             CHECK(drawn.fill_vertices == 0);
         }
     }
-    CHECK(drawn_text(desk, unheld).find("Series not held") != std::string::npos);
+    CHECK(drawn_text(desk, unheld).find("Series not held")
+        == std::string::npos);
 }
 
 TEST_CASE("a card scales from tiny to large and keeps its line inside its tile",
