@@ -31,6 +31,8 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <chrono>
+#include <map>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -192,8 +194,20 @@ market_read_report report_market_read(const market_job& job,
             return {true, std::format("Market catalogue read for '{}' "
                                       "failed: {}", instance, fact.message)};
         }
-        return {false, std::format("Market catalogue for '{}' holds {} series",
-            instance, fact.series.size())};
+        std::map<std::string, std::size_t> by_provider;
+        std::set<std::string> parties;
+        for (const auto& row : fact.series) {
+            ++by_provider[row.provider_code];
+            parties.insert(row.party_id);
+        }
+        std::string providers;
+        for (const auto& [code, count] : by_provider) {
+            providers += std::format("{}{} '{}'", providers.empty() ? "" : ", ",
+                count, code);
+        }
+        return {false, std::format("Market catalogue for '{}' holds {} series "
+                                   "of {} parties; by provider: {}",
+            instance, fact.series.size(), parties.size(), providers)};
     }
 
     const auto kind = job.history ? "history" : "first load";
