@@ -1380,6 +1380,15 @@ session_client::market_series_ticks(std::string_view series_id,
         if (!identity)
             return std::unexpected(std::move(identity.error()));
         request.identity = std::move(*identity);
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Tick read of series '" << series_id << "' names identity "
+            << "asset '" << request.identity.asset << "' scope '"
+            << request.identity.scope << "' instrument '"
+            << request.identity.instrument_type << "' quote '"
+            << request.identity.quote_type << "' party '"
+            << request.identity.party_id << "' with "
+            << request.identity.fields.size() << " fields (from_ns " << from_ns
+            << ", to_ns " << to_ns << ")";
 
         const auto reply = ores::nats::service::authenticated_request_and_decode<
             get_series_ticks_response>(client(),

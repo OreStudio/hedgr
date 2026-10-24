@@ -213,7 +213,7 @@ void market_feed::reconcile(market_stream_entry& entry,
             series_.info(series)->uri)) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Watching series '" << key.series_id << "' as '" << *canonical
-            << "'";
+            << "' in party '" << series_.info(series)->party_id << "'";
         entry.stream->watch(series, std::move(*canonical));
     } else {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
