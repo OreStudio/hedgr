@@ -91,6 +91,11 @@ void parse_market_view(std::string_view text, market_view_state& state) {
                 state.chart_ema = 1;
             else if (value == "off")
                 state.chart_ema = 0;
+        } else if (key == "toolbar") {
+            if (value == "on")
+                state.toolbar_visible = true;
+            else if (value == "off")
+                state.toolbar_visible = false;
         } else if (key == "history") {
             int history = 0;
             if (read_int(value, history))
@@ -121,6 +126,8 @@ std::string serialize_market_view(const market_view_state& state) {
     text += state.chart_ema == 0 ? "off" : "on";
     text += "\nhistory=";
     text += std::to_string(history);
+    text += "\ntoolbar=";
+    text += state.toolbar_visible ? "on" : "off";
     text += '\n';
     return text;
 }

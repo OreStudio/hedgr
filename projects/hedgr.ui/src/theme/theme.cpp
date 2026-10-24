@@ -424,6 +424,14 @@ ImVec4 menu_surface() noexcept {
         menu_fill.w * menu_popup_alpha);
 }
 
+ImVec4 toolbar_fill() noexcept {
+    return menu_surface();
+}
+
+ImVec4 toolbar_outline() noexcept {
+    return chart_tag;
+}
+
 ImVec4 menu_bar_edge() noexcept {
     return ImVec4(menu_edge.x, menu_edge.y, menu_edge.z,
         menu_edge.w * menu_bar_alpha);

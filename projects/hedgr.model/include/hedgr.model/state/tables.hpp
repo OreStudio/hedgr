@@ -106,12 +106,22 @@ public:
         return rows_;
     }
 
+    /**
+     * @brief A number that changes whenever a row may have.
+     *
+     * Bumped by every write, the mutable @c get included since it hands out
+     * the row to edit. A reader that derived something from the rows, such as
+     * a filtered list, keeps the number it saw and rebuilds when it differs.
+     */
+    [[nodiscard]] std::uint64_t version() const noexcept { return version_; }
+
     void clear() noexcept;
 
 private:
     slab layout_;
     std::vector<domain::instance> rows_;
     std::unordered_map<std::string, instance_handle> by_id_;
+    std::uint64_t version_ = 0;
 };
 
 /**

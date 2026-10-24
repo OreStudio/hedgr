@@ -125,7 +125,7 @@ float menu_caret_centre(float panel_min_x, float panel_max_x,
 }
 
 menu_popup::menu_popup(const char* id, float width,
-    std::optional<float> caret_x)
+    std::optional<float> caret_x, float height)
     : caret_x_(caret_x) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,
         ImVec2(theme::menu_padding, theme::menu_padding));
@@ -139,7 +139,7 @@ menu_popup::menu_popup(const char* id, float width,
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, theme::menu_hover_colour());
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, theme::menu_active_colour());
     if (width > 0.0f)
-        ImGui::SetNextWindowSize(ImVec2(width, 0.0f));
+        ImGui::SetNextWindowSize(ImVec2(width, height));
     else
         ImGui::SetNextWindowSizeConstraints(
             ImVec2(theme::menu_min_width, 0.0f), ImVec2(FLT_MAX, FLT_MAX));

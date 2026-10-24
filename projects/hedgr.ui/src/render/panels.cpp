@@ -20,6 +20,8 @@
 #include "hedgr.ui/render/panels.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/signal/names.hpp"
+#include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -393,11 +395,45 @@ void request_accounts_window(const render_input& input,
     input.commands.push(std::move(request));
 }
 
+std::optional<hedgr::model::state::session_handle>
+current_session(const render_input& input) {
+    const auto& layout = input.sessions.layout();
+    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
+        if (layout.alive[index] == 0)
+            continue;
+        const hedgr::model::state::session_handle session{index,
+            layout.generation[index]};
+        if (input.sessions.status(session)
+            == hedgr::model::domain::session_status::authenticated)
+            return session;
+    }
+    return std::nullopt;
+}
+
+void request_session_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    hedgr::model::domain::window_kind kind) {
+    hedgr::model::command::command request;
+    request.kind = hedgr::model::command::command_kind::open_window;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.new_window_kind = kind;
+    input.commands.push(std::move(request));
+}
+
 void request_instances_window(const render_input& input) {
     hedgr::model::command::command request;
     request.kind = hedgr::model::command::command_kind::open_window;
     request.new_window_kind = domain::window_kind::instance_manager;
     input.commands.push(std::move(request));
+}
+
+void raise_shortcut_activated(const render_input& input, std::string detail) {
+    hedgr::model::signal::signal value;
+    value.name = std::string(hedgr::model::signal::names::shortcut_activated);
+    value.detail = std::move(detail);
+    value.at_ns = input.now_ns;
+    hedgr::model::signal::bus().raise(std::move(value));
 }
 
 std::uint64_t instance_icon_texture(const render_input& input,

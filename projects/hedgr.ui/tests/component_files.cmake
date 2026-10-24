@@ -31,11 +31,13 @@ set(files
     "view_state_tests.cpp"
     "render_tests.cpp"
     "sound_tests.cpp"
+    "instances_panel_tests.cpp"
     "intro_tests.cpp"
     "status_bar_tests.cpp"
     "series_browser_view_tests.cpp"
     "tab_look_tests.cpp"
     "term_ladder_tests.cpp"
+    "toolbar_tests.cpp"
 )
 
 # The headers are listed for the install and IDE targets.

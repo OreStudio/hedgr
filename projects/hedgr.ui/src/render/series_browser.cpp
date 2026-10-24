@@ -210,7 +210,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::AlignTextToFramePadding();
         widget::caption("Party");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(300.0f);
+        ImGui::SetNextItemWidth(240.0f);
         if (ImGui::BeginCombo("##party", current)) {
             for (std::size_t i = 0; i < parties.size(); ++i) {
                 const bool chosen = state.market_party_id == parties.id(i);
@@ -249,6 +249,30 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
         ImGui::EndCombo();
     }
+
+    /*
+     * The provider cut. The same instrument is listed once per provider and
+     * only a data vendor's series tick, so this narrows the list to one.
+     */
+    update_providers(state.series_view, generation, rows);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(130.0f);
+    const char* provider_preview = state.market_provider.empty()
+        ? "All providers" : state.market_provider.c_str();
+    if (ImGui::BeginCombo("##provider", provider_preview)) {
+        if (ImGui::Selectable("All providers", state.market_provider.empty()))
+            state.market_provider.clear();
+        for (const auto at : state.series_view.providers) {
+            const auto& provider = rows[at].provider_code;
+            const bool chosen = provider == state.market_provider;
+            if (ImGui::Selectable(provider.c_str(), chosen))
+                state.market_provider = provider;
+            if (chosen)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::SetItemTooltip("The provider whose series this window lists.");
 
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (ImGui::Button("Cross rates")) {
@@ -358,7 +382,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         update_series_browser_view(state.series_view,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
-                .party = state.market_party_id},
+                .party = state.market_party_id,
+                .provider = state.market_provider},
             rows);
         const auto& curves = state.series_view.rows;
         if (curves.empty()) {
@@ -464,7 +489,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     update_series_browser_view(state.series_view,
         {.generation = generation, .filter = filter,
             .asset_class = state.market_asset_class,
-            .party = state.market_party_id},
+            .party = state.market_party_id,
+            .provider = state.market_provider},
         rows);
     const auto& visible = state.series_view.rows;
 

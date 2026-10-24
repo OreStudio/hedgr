@@ -23,6 +23,7 @@
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/render/toolbar.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/render/workspace.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -1112,18 +1113,18 @@ TEST_CASE("the top bar costs a steady frame no allocation, closed and with each 
     /* Sweep the pointer along the bar, to learn where each label is. */
     const ImGuiWindow* bar = ImGui::FindWindowByName("###hedgr-menu-bar");
     REQUIRE(bar != nullptr);
-    const char* const names[] = {"File", "View", "Tools", "Help"};
-    float at[4] = {};
-    for (float x = 2.0f; x < 600.0f; x += 2.0f) {
+    const char* const names[] = {"File", "View", "Instances", "Tools", "Help"};
+    float at[5] = {};
+    for (float x = 2.0f; x < 800.0f; x += 2.0f) {
         ImGui::GetIO().AddMousePosEvent(x, 20.0f);
         draw();
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 5; ++i) {
             if (GImGui->HoveredId == ImHashStr("##label", 0,
                     ImHashStr(names[i], 0, bar->ID)))
                 at[i] = x;
         }
     }
-    for (int entry = 0; entry < 4; ++entry) {
+    for (int entry = 0; entry < 5; ++entry) {
         REQUIRE(at[entry] > 0.0f);
         ImGui::GetIO().AddMousePosEvent(at[entry], 20.0f);
         draw();
@@ -1141,6 +1142,96 @@ TEST_CASE("the top bar costs a steady frame no allocation, closed and with each 
 
     state.open = hedgr::ui::widget::menu_bar_state::none;
     state.about_open = true;
+    draw();
+    draw();
+    CHECK(steady_allocations(draw) == 0);
+}
+
+TEST_CASE("the Instances panel costs a steady frame no allocation, with tiles, "
+          "pins, a filter and an empty match",
+    "[frame][menu_bar][instances_panel]") {
+    headless_imgui imgui;
+    hedgr::ui::theme::apply_theme();
+    desk desk;
+    for (int i = 0; i < 40; ++i) {
+        hedgr::model::domain::instance row;
+        row.id = std::format("instance-with-a-long-identifier-{}", i);
+        row.name = std::format("Instance {}", i);
+        static_cast<void>(desk.instances.upsert(row));
+    }
+    hedgr::model::domain::shortcut pin;
+    pin.id = "pin-instances";
+    pin.target_kind = hedgr::model::domain::window_kind::instance_manager;
+    desk.shortcuts.upsert(pin);
+    pin.id = "pin-accounts";
+    pin.target_kind = hedgr::model::domain::window_kind::accounts;
+    pin.target_id = "instance-with-a-long-identifier-3";
+    desk.shortcuts.upsert(pin);
+    auto input = desk.input();
+    hedgr::ui::widget::menu_bar_state state;
+    const std::string svg = "<svg xmlns='http://www.w3.org/2000/svg'/>";
+    const auto draw = [&] {
+        hedgr::ui::render::menu_bar_result result;
+        ImGui::NewFrame();
+        hedgr::ui::render::draw_menu_bar(input, svg, true, state, result);
+        ImGui::Render();
+    };
+    for (int i = 0; i < 3; ++i)
+        draw();
+    const ImGuiWindow* bar = ImGui::FindWindowByName("###hedgr-menu-bar");
+    REQUIRE(bar != nullptr);
+    float label_x = 0.0f;
+    for (float x = 2.0f; x < 800.0f && label_x == 0.0f; x += 2.0f) {
+        ImGui::GetIO().AddMousePosEvent(x, 20.0f);
+        draw();
+        if (GImGui->HoveredId == ImHashStr("##label", 0,
+                ImHashStr("Instances", 0, bar->ID)))
+            label_x = x;
+    }
+    REQUIRE(label_x > 0.0f);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    draw();
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    for (int i = 0; i < 4; ++i)
+        draw();
+    REQUIRE(GImGui->OpenPopupStack.Size == 1);
+    CHECK(state.instances.matches.size() == 40);
+    CHECK(steady_allocations(draw) == 0);
+
+    /* A filter that keeps a few, then one that keeps none. */
+    ImGui::GetIO().AddInputCharactersUTF8("INSTANCE 3");
+    draw();
+    draw();
+    CHECK(state.instances.matches.size() == 11);
+    CHECK(steady_allocations(draw) == 0);
+    ImGui::GetIO().AddInputCharactersUTF8("zz");
+    draw();
+    draw();
+    CHECK(state.instances.matches.empty());
+    CHECK(steady_allocations(draw) == 0);
+}
+
+TEST_CASE("the floating toolbar costs a steady frame no allocation",
+    "[frame][toolbar]") {
+    headless_imgui imgui;
+    hedgr::ui::theme::apply_theme();
+    desk desk;
+    auto input = desk.input();
+    const auto draw = [&] {
+        hedgr::ui::render::toolbar_result result;
+        ImGui::NewFrame();
+        hedgr::ui::render::draw_toolbar(input, true, result);
+        ImGui::Render();
+    };
+    draw();
+    draw();
+    REQUIRE(ImGui::FindWindowByName("###hedgr-toolbar") != nullptr);
+    CHECK(steady_allocations(draw) == 0);
+
+    /* With the pointer over a button, for its hover fill and tooltip. */
+    ImGui::GetIO().AddMousePosEvent(
+        ImGui::FindWindowByName("###hedgr-toolbar")->Pos.x + 80.0f,
+        ImGui::FindWindowByName("###hedgr-toolbar")->Pos.y + 20.0f);
     draw();
     draw();
     CHECK(steady_allocations(draw) == 0);

@@ -26,6 +26,7 @@
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.ui/render/instances_panel.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/menu.hpp"
@@ -54,8 +55,9 @@ using hedgr::model::domain::store_lock;
 /** @brief The top-level menus' places in the bar, which stay fixed. */
 constexpr int file_entry = 0;
 constexpr int view_entry = 1;
-constexpr int tools_entry = 2;
-constexpr int help_entry = 3;
+constexpr int instances_entry = 2;
+constexpr int tools_entry = 3;
+constexpr int help_entry = 4;
 
 constexpr const char* accounts_submenu_id = "##tools-accounts";
 constexpr const char* logo_texture_id = "ore-logo-white";
@@ -86,39 +88,6 @@ void draw_logo(const render_input& input, std::string_view logo_svg) {
             ImVec2(min.x + pad, min.y + pad), ImVec2(max.x - pad, max.y - pad),
             ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f),
             ImGui::GetColorU32(ImGuiCol_Text));
-}
-
-/**
- * @brief The session the TOOLS rows act on: the first one signed in, or none.
- *
- * Series browsers and the command centre belong to a session, and the bar has
- * no notion of a chosen one yet.
- */
-[[nodiscard]] std::optional<hedgr::model::state::session_handle>
-current_session(const render_input& input) {
-    const auto& layout = input.sessions.layout();
-    for (std::uint32_t index = 0; index < layout.alive.size(); ++index) {
-        if (layout.alive[index] == 0)
-            continue;
-        const hedgr::model::state::session_handle session{index,
-            layout.generation[index]};
-        if (input.sessions.status(session)
-            == hedgr::model::domain::session_status::authenticated)
-            return session;
-    }
-    return std::nullopt;
-}
-
-/** @brief Asks the runtime for a window of @p kind bound to @p session. */
-void request_session_window(const render_input& input,
-    hedgr::model::state::session_handle session,
-    hedgr::model::domain::window_kind kind) {
-    hedgr::model::command::command request;
-    request.kind = hedgr::model::command::command_kind::open_window;
-    request.instance_id = std::string{input.sessions.instance_id(session)};
-    request.account_id = std::string{input.sessions.account_id(session)};
-    request.new_window_kind = kind;
-    input.commands.push(std::move(request));
 }
 
 /**
@@ -155,10 +124,17 @@ void draw_file_menu(const render_input& input, menu_bar_result& result) {
         result.quit_requested = true;
 }
 
-/** @brief VIEW: Undock all, live only while something is docked. */
-void draw_view_menu(bool desk_docked, menu_bar_result& result) {
+/**
+ * @brief VIEW: Undock all, live only while something is docked, and the
+ * Toolbar row, lit while the floating toolbar is shown.
+ */
+void draw_view_menu(const render_input& input, bool desk_docked,
+    menu_bar_result& result) {
     if (widget::menu_item_row({.label = "Undock all", .enabled = desk_docked}))
         result.undock_all = true;
+    auto& visible = input.market_view.toolbar_visible;
+    if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
+        visible = !visible;
 }
 
 /**
@@ -196,20 +172,6 @@ void for_each_accounts_target(const render_input& input,
         if (!repeated)
             visit(std::string_view{row.target_id});
     }
-}
-
-/**
- * @brief Raises the signal that says a shortcut was used, for the sound pack.
- *
- * The menu plays nothing itself: it raises a name and the player decides
- * whether the name has a sound (ADR 0008).
- */
-void raise_activation(const render_input& input, std::string detail) {
-    hedgr::model::signal::signal value;
-    value.name = std::string(hedgr::model::signal::names::shortcut_activated);
-    value.detail = std::move(detail);
-    value.at_ns = input.now_ns;
-    hedgr::model::signal::bus().raise(std::move(value));
 }
 
 /**
@@ -252,7 +214,7 @@ void draw_accounts_submenu(const render_input& input,
                 ImGui::PushID(id.data(), id.data() + id.size());
                 if (widget::menu_item_row({.label = label})) {
                     request_accounts_window(input, id);
-                    raise_activation(input,
+                    raise_shortcut_activated(input,
                         std::string("Open the accounts of ") + label);
                     picked = true;
                 }
@@ -383,7 +345,15 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
         if (shows_instances(input)) {
             ImGui::SameLine();
             widget::menu_bar_label(state, view_entry, "View",
-                [&] { draw_view_menu(desk_docked, result); }, height);
+                [&] { draw_view_menu(input, desk_docked, result); }, height);
+            ImGui::SameLine();
+            widget::menu_bar_label(state, instances_entry, "Instances",
+                [&] { draw_instances_panel(input, state.instances, result); },
+                height,
+                ImVec2(theme::instances_panel_width,
+                    theme::instances_panel_height));
+            if (state.open != instances_entry)
+                state.instances.shown = false;
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);

@@ -23,6 +23,7 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/toolbar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/password_meter.hpp"
 
@@ -731,6 +732,15 @@ void workspace::render(const render_input& input) {
 
         ImGui::End();
     }
+
+    /*
+     * The toolbar floats above the windows the walk just drew, so it is
+     * submitted after them.
+     */
+    toolbar_result toolbar;
+    draw_toolbar(input, desk_docked_, toolbar);
+    if (toolbar.undock_all)
+        next_move_ = dock_move{.all = true};
 
     /*
      * The lock control's answer, read after the walk that drew it. One control

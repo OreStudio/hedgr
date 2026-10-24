@@ -258,6 +258,21 @@ HEDGR_UI_EXPORT void request_accounts_window(const render_input& input,
     std::string_view instance_id);
 
 /**
+ * @brief The session the TOOLS menu and the toolbar act on: the first one
+ * signed in, or none.
+ *
+ * Series browsers and the command centre belong to a session, and the
+ * interface has no notion of a chosen one yet.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::optional<hedgr::model::state::session_handle>
+current_session(const render_input& input);
+
+/** @brief Asks the runtime for a window of @p kind bound to @p session. */
+HEDGR_UI_EXPORT void request_session_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    hedgr::model::domain::window_kind kind);
+
+/**
  * @brief Asks for the window of @p kind that shows one series of @p session.
  *
  * Chart and mini plot ids are derived from the series, so a second request for
@@ -285,6 +300,16 @@ HEDGR_UI_EXPORT void request_series_window(const render_input& input,
  * how a window is made.
  */
 HEDGR_UI_EXPORT void request_instances_window(const render_input& input);
+
+/**
+ * @brief Raises the signal that says a shortcut was used, for the sound pack.
+ *
+ * The menu plays nothing itself: it raises a name and the player decides
+ * whether the name has a sound (ADR 0008). The TOOLS > Accounts submenu and the
+ * Instances panel both raise it through here.
+ */
+HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
+    std::string detail);
 
 /**
  * @brief The decoded picture of one instance, as a backend texture, or zero.

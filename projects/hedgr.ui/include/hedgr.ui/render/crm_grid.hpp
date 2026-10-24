@@ -21,9 +21,11 @@
 #define HEDGR_UI_RENDER_CRM_GRID_HPP
 
 #include "hedgr.model/domain/health.hpp"
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.ui/export.hpp"
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <set>
 #include <string>
@@ -87,6 +89,48 @@ struct crm_grid final {
 [[nodiscard]] HEDGR_UI_EXPORT crm_grid build_crm_grid(
     const model::state::crm_snapshot& batch, std::string_view crm_name,
     std::set<std::string>& seen);
+
+/**
+ * @brief The catalogue series that carries the pair @p base / @p quote.
+ *
+ * An FX series of @p party_id whose URI names the base as its path and the
+ * quote as its @c ccy field. A pair the CRM derives by reciprocal has no series
+ * of its own and finds none here. Returns nullptr when nothing matches.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT const model::domain::market_series_row*
+crm_series_for_pair(
+    const std::vector<model::domain::market_series_row>& series,
+    std::string_view party_id, std::string_view base, std::string_view quote);
+
+/** @brief One series the matrix's pairs open as a card. */
+struct crm_card final {
+    /** @brief The series' key. */
+    std::string id;
+
+    /** @brief The series' label, for the window's title. */
+    std::string label;
+};
+
+/**
+ * @brief The series behind every pair of the matrix, each once.
+ *
+ * Walks each unordered pair of the matrix once, in row-major order, and takes
+ * the series of either direction, so a pair quoted both ways gives two cards.
+ * A pair with no series in either direction is skipped and counted in
+ * @p unmatched, and a series is returned once.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::vector<crm_card> crm_pair_cards(
+    const std::vector<model::domain::market_series_row>& series,
+    std::string_view party_id, const std::vector<std::string>& currencies,
+    std::size_t& unmatched);
+
+/**
+ * @brief The most cards "Mini plots" opens without asking first.
+ *
+ * Thirty floating tiles at the card size fill a desk, so a larger set waits for
+ * a confirmation.
+ */
+inline constexpr std::size_t crm_mini_plot_confirm_above = 30;
 
 }
 

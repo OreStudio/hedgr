@@ -24,6 +24,7 @@
 namespace hedgr::model::state {
 
 instance_handle instance_table::upsert(domain::instance row) {
+    ++version_;
     if (const auto found = by_id_.find(row.id); found != by_id_.end()) {
         rows_[found->second.index] = std::move(row);
         return found->second;
@@ -42,12 +43,14 @@ instance_handle instance_table::upsert(domain::instance row) {
 void instance_table::set_folder(instance_handle h, std::string folder_id) {
     if (!contains(h))
         return;
+    ++version_;
     rows_[h.index].folder_id = std::move(folder_id);
 }
 
 void instance_table::remove(instance_handle h) {
     if (!contains(h))
         return;
+    ++version_;
     by_id_.erase(rows_[h.index].id);
 
     // The value goes with the slot: a hole holds nothing a caller could reach.
@@ -81,10 +84,12 @@ instance_table::get(instance_handle h) const noexcept {
 domain::instance* instance_table::get(instance_handle h) noexcept {
     if (!contains(h))
         return nullptr;
+    ++version_;
     return std::addressof(rows_[h.index]);
 }
 
 void instance_table::clear() noexcept {
+    ++version_;
     layout_ = {};
     rows_.clear();
     by_id_.clear();

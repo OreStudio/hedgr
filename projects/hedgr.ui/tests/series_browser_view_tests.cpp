@@ -42,9 +42,9 @@ domain::market_series_row row(std::string id, std::string label,
 
 render::series_browser_query query(std::uint64_t generation,
     std::string_view filter = {}, std::string_view asset_class = {},
-    std::string_view party = {}) {
+    std::string_view party = {}, std::string_view provider = {}) {
     return {.generation = generation, .filter = filter,
-        .asset_class = asset_class, .party = party};
+        .asset_class = asset_class, .party = party, .provider = provider};
 }
 
 std::vector<std::string> ids(const render::series_browser_view& view,
@@ -190,6 +190,44 @@ TEST_CASE("the asset classes are listed once, in order, and kept per generation"
     CHECK_FALSE(render::update_asset_classes(view, 3, catalogue));
     CHECK(render::update_asset_classes(view, 4, catalogue));
     CHECK(view.class_builds == 2);
+}
+
+TEST_CASE("the series view lists one provider when asked, and all when not",
+    "[browser][view][provider]") {
+    const std::vector catalogue{
+        row("a", "EUR/USD", "FX", "1Y", "p1", "ore"),
+        row("b", "EUR/USD", "FX", "1Y", "p1", "bloomberg"),
+        row("c", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
+    render::series_browser_view view;
+    render::update_series_browser_view(view, query(1), catalogue);
+    CHECK(ids(view, catalogue).size() == 3);
+
+    CHECK(render::update_series_browser_view(view,
+        query(1, {}, {}, {}, "bloomberg"), catalogue));
+    CHECK(ids(view, catalogue) == strings{"b", "c"});
+
+    CHECK(render::update_series_browser_view(view,
+        query(1, {}, {}, {}, "ore"), catalogue));
+    CHECK(ids(view, catalogue) == strings{"a"});
+
+    CHECK_FALSE(render::update_series_browser_view(view,
+        query(1, {}, {}, {}, "ore"), catalogue));
+}
+
+TEST_CASE("the providers are listed once, in order, and kept per generation",
+    "[browser][provider]") {
+    const std::vector catalogue{
+        row("a", "A", "FX", "1Y", "p1", "ore"),
+        row("b", "B", "FX", "1Y", "p1", "bloomberg"),
+        row("c", "C", "FX", "1Y", "p2", "bloomberg"),
+        row("d", "D", "FX", "1Y", "p1", "")};
+    render::series_browser_view view;
+    CHECK(render::update_providers(view, 1, catalogue));
+    REQUIRE(view.providers.size() == 2);
+    CHECK(catalogue[view.providers[0]].provider_code == "bloomberg");
+    CHECK(catalogue[view.providers[1]].provider_code == "ore");
+    CHECK_FALSE(render::update_providers(view, 1, catalogue));
+    CHECK(render::update_providers(view, 2, catalogue));
 }
 
 TEST_CASE("the party list parses the session's column once", "[browser][parties]") {

@@ -23,6 +23,7 @@
 #include <format>
 #include <map>
 #include <optional>
+#include <set>
 #include <utility>
 
 namespace hedgr::ui::render {
@@ -122,6 +123,50 @@ crm_grid build_crm_grid(const model::state::crm_snapshot& batch,
         }
     }
     return grid;
+}
+
+
+const model::domain::market_series_row* crm_series_for_pair(
+    const std::vector<model::domain::market_series_row>& series,
+    const std::string_view party_id, const std::string_view base,
+    const std::string_view quote) {
+    const std::string path = std::format("/fx/{}?", base);
+    const std::string field = std::format("ccy={}", quote);
+    for (const auto& row : series) {
+        if (row.asset_class != "FX" || row.party_id != party_id)
+            continue;
+        if (row.uri.find(path) == std::string::npos
+            || row.uri.find(field) == std::string::npos)
+            continue;
+        return &row;
+    }
+    return nullptr;
+}
+
+std::vector<crm_card> crm_pair_cards(
+    const std::vector<model::domain::market_series_row>& series,
+    const std::string_view party_id, const std::vector<std::string>& currencies,
+    std::size_t& unmatched) {
+    std::vector<crm_card> cards;
+    std::set<std::string_view> taken;
+    unmatched = 0;
+    for (std::size_t i = 0; i < currencies.size(); ++i) {
+        for (std::size_t j = i + 1; j < currencies.size(); ++j) {
+            const auto* forward = crm_series_for_pair(series, party_id,
+                currencies[i], currencies[j]);
+            const auto* reverse = crm_series_for_pair(series, party_id,
+                currencies[j], currencies[i]);
+            if (forward == nullptr && reverse == nullptr) {
+                ++unmatched;
+                continue;
+            }
+            for (const auto* row : {forward, reverse}) {
+                if (row != nullptr && taken.insert(row->id).second)
+                    cards.push_back({row->id, row->label});
+            }
+        }
+    }
+    return cards;
 }
 
 }

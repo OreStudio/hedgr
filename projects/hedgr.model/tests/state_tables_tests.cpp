@@ -186,6 +186,33 @@ TEST_CASE("a removed instance leaves a hole no handle reaches", "[instance]") {
     REQUIRE_FALSE(second == first);
 }
 
+TEST_CASE("the instance table's version moves on every write and on no read",
+    "[instance]") {
+    instance_table instances;
+    auto seen = instances.version();
+
+    const auto handle = instances.upsert(make_instance("inst-1", "Local"));
+    REQUIRE(instances.version() != seen);
+    seen = instances.version();
+
+    const auto& view = instances;
+    static_cast<void>(view.get(handle));
+    static_cast<void>(view.find("inst-1"));
+    static_cast<void>(view.rows());
+    REQUIRE(instances.version() == seen);
+
+    static_cast<void>(instances.upsert(make_instance("inst-1", "Renamed")));
+    REQUIRE(instances.version() != seen);
+    seen = instances.version();
+
+    instances.set_folder(handle, "folder");
+    REQUIRE(instances.version() != seen);
+    seen = instances.version();
+
+    instances.remove(handle);
+    REQUIRE(instances.version() != seen);
+}
+
 TEST_CASE("an account table reports the children of an instance", "[account]") {
     account_table accounts;
     const auto first = accounts.upsert(make_account("acc-1", "inst-1"));

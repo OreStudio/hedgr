@@ -37,6 +37,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace hedgr::ui::render {
 
@@ -59,6 +60,40 @@ void count_pill(std::string_view verdict, std::size_t count,
             static_cast<std::size_t>(written.out - text.data())),
         count > 0 ? tone : theme::tone::quiet);
     ImGui::SetItemTooltip("%s", help);
+}
+
+/** @brief Opens a mini plot card for each series held in the window's state. */
+void open_pending_cards(const render_input& input,
+    const hedgr::model::state::session_handle session, window_ui_state& state) {
+    for (const auto& card : state.crm_pending_cards)
+        request_series_window(input, session,
+            model::domain::window_kind::mini_plot, card.id, card.label);
+    state.crm_pending_cards.clear();
+}
+
+/** @brief The confirmation a set above the limit waits behind. */
+void draw_mini_plot_confirmation(const render_input& input,
+    const hedgr::model::state::session_handle session, window_ui_state& state) {
+    const ImVec2 centre = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(centre, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Open mini plots?", nullptr,
+            ImGuiWindowFlags_AlwaysAutoResize))
+        return;
+    ImGui::Text("This opens %zu mini plot cards.",
+        state.crm_pending_cards.size());
+    if (state.crm_unmatched_pairs > 0)
+        ImGui::TextDisabled("%zu pairs have no series and are skipped.",
+            state.crm_unmatched_pairs);
+    if (ImGui::Button("Open")) {
+        open_pending_cards(input, session, state);
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+        state.crm_pending_cards.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 }
@@ -150,6 +185,23 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     ImGui::SameLine();
     if (ImGui::Button("Refresh"))
         request_refresh();
+    ImGui::SameLine();
+    if (ImGui::Button("Mini plots")) {
+        const auto* catalogue = input.market.catalogue(instance_id,
+            account_id);
+        state.crm_pending_cards = catalogue == nullptr
+            ? std::vector<crm_card>{}
+            : crm_pair_cards(catalogue->series, state.crm_party_id,
+                  state.crm_view.currencies, state.crm_unmatched_pairs);
+        if (state.crm_pending_cards.size() > crm_mini_plot_confirm_above)
+            ImGui::OpenPopup("Open mini plots?");
+        else
+            open_pending_cards(input, *session, state);
+    }
+    ImGui::SetItemTooltip(
+        "Open a mini plot card for every pair in this matrix. Pairs with no "
+        "series are skipped.");
+    draw_mini_plot_confirmation(input, *session, state);
 
     if (snapshot == nullptr || snapshot->cells.empty()) {
         auto facts = session_view_facts(input, handle);
@@ -326,17 +378,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         const auto* catalogue = input.market.catalogue(
                             instance_id, account_id);
                         if (catalogue != nullptr) {
-                            for (const auto& row : catalogue->series) {
-                                if (row.asset_class != "FX"
-                                    || row.party_id != state.crm_party_id)
-                                    continue;
-                                const auto base_at
-                                    = row.uri.find("/fx/" + base + "?");
-                                const auto quote_at
-                                    = row.uri.find("ccy=" + quote);
-                                if (base_at == std::string::npos
-                                    || quote_at == std::string::npos)
-                                    continue;
+                            if (const auto* row = crm_series_for_pair(
+                                    catalogue->series, state.crm_party_id,
+                                    base, quote)) {
                                 model::command::command chart;
                                 chart.kind
                                     = model::command::command_kind::open_window;
@@ -344,10 +388,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                                 chart.account_id = std::string{account_id};
                                 chart.new_window_kind
                                     = model::domain::window_kind::chart;
-                                chart.series_id = row.id;
-                                chart.series_label = row.label;
+                                chart.series_id = row->id;
+                                chart.series_label = row->label;
                                 input.commands.push(std::move(chart));
-                                break;
                             }
                         }
                     }
