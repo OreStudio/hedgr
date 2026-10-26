@@ -23,6 +23,7 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/status_bar.hpp"
 #include "hedgr.ui/render/toolbar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/widget/password_meter.hpp"
@@ -307,6 +308,13 @@ void workspace::render(const render_input& input) {
     exit_requested_ |= top_bar.quit_requested;
     fullscreen_toggled_ |= top_bar.fullscreen_toggled;
 
+    /*
+     * The bottom strip is submitted before the dock space, so it is the other
+     * bar the work area gives up: the dock space below reads WorkPos and
+     * WorkSize and needs no knowledge of either.
+     */
+    draw_status_bar(input, status_);
+
     draw_dock_space();
 
     /*
@@ -396,7 +404,14 @@ void workspace::render(const render_input& input) {
      */
     const auto kind_column = input.windows.kind_column();
     const auto open_column = input.windows.open_column();
-    const std::string focus_request = input.windows.take_focus_request();
+    std::string focus_request = input.windows.take_focus_request();
+    /*
+     * The VIEW > Windows list names the window it raised, and the bar is drawn
+     * before this walk, so its request joins the capture's here rather than
+     * raising the window where the click was read.
+     */
+    if (!top_bar.focus_window.empty())
+        focus_request = top_bar.focus_window;
     const auto refresh_column = input.windows.next_refresh_column();
 
     int undocked = 0;

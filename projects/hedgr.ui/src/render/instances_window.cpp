@@ -118,8 +118,8 @@ std::string pending_capture_folder;
 /** @brief The row a capture asked to see being edited. */
 std::string pending_capture_edit_instance;
 
-/** @brief The row a capture asked to see selected, without editing it. */
-std::string pending_capture_selected_instance;
+/** @brief The row a window should select next, held until it draws. */
+std::string pending_instance_selection;
 
 /** @brief The field a capture asked a changed value to be written into. */
 std::string pending_capture_field;
@@ -2047,8 +2047,12 @@ void select_folder_for_capture(std::string_view folder_id) {
     pending_capture_folder = std::string{folder_id};
 }
 
+void request_instance_selection(std::string_view instance_id) {
+    pending_instance_selection = std::string{instance_id};
+}
+
 void select_instance_for_capture(std::string_view instance_id) {
-    pending_capture_selected_instance = std::string{instance_id};
+    request_instance_selection(instance_id);
 }
 
 void open_instance_edit_for_capture(std::string_view instance_id) {
@@ -2093,10 +2097,10 @@ void render_instances_window(hedgr::model::state::window_handle handle,
         state.browser.selected_leaf.clear();
         pending_capture_folder.clear();
     }
-    if (!pending_capture_selected_instance.empty()) {
-        state.browser.selected_leaf = pending_capture_selected_instance;
+    if (!pending_instance_selection.empty()) {
+        state.browser.selected_leaf = pending_instance_selection;
         state.browser.selected_folder.clear();
-        pending_capture_selected_instance.clear();
+        pending_instance_selection.clear();
     }
     if (!pending_capture_edit_instance.empty()) {
         /*

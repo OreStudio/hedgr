@@ -13,32 +13,40 @@ them. "Blocked" names what must land elsewhere first.
   language (`docs/plans/ux-language.md`), fast failure of unanswered reads, probe
   backoff, the cool bar's retirement, VIEW > Full screen.
 - Nothing recent has been seen in a real window by the agent that built it. The
-  operator has seen the menu bar, tabs, mini plots and marks.
+  operator has seen the menu bar, tabs, mini plots and marks. The Accounts menu,
+  the VIEW > Windows panel and the bottom status strip are new and have only
+  headless frame tests and frame-cost tests behind them.
 
-## Six-item list (menu system), items still open
+## Six-item list (menu system)
 
-Plan: `docs/plans/menu-system.md`. Items 1 to 3 below are done.
+Plan: `docs/plans/menu-system.md`. All six are done.
 
 1. Done: CRM Mini plots button (confirms above 30 cards).
 2. Done: floating toolbar.
 3. Done: Instances panel.
-4. **Accounts panel.** An ACCOUNTS menu with a large panel: tenant headings with the
-   accounts under each, from the tenant and accounts tables. A click opens the accounts
-   window for that instance and account. It replaces the TOOLS > Accounts submenu that
-   stands in for it. Use `view_state_of` for empty states, no sentences. Same panel
-   look as the Instances panel (`render/instances_panel.cpp`).
-5. **Windows list.** A WINDOWS menu listing open windows from `input.windows`, grouped
-   by kind. A click raises the window (the `focus_instances` request mechanism), an X
-   closes it through the close command. Mini plot actions go here.
-6. **Status bar.** A bottom strip as a side bar like the top bar: the message ladder
-   from `widget/status_bar.hpp` on the left, the connection state on the right. The
-   work area is then inset by the two bars.
+4. Done: **Accounts menu.** A top-level ACCOUNTS menu, after INSTANCES, lists
+   each environment that holds an account, sorted, and opens that environment's
+   accounts beside it. The accounts are grouped under their folder (a heading,
+   not a row) and sorted by name. A click signs in at once when the store holds
+   the password, and otherwise opens a password form with "Remember this
+   password", owned by the menu bar. TOOLS > Accounts is gone.
+   `account_sign_in_command` is shared with the Accounts window.
+5. Done: **Windows list.** VIEW > Windows lists the open windows under a heading
+   per kind. The title raises through the focus request; the x closes through
+   the close command. "Close all mini plots" sits at its foot
+   (`render/menu_bar.cpp`).
+6. Done: **Status bar.** A 24 px bottom strip through
+   `BeginViewportSideBar(ImGuiDir_Down)`: the message ladder at the left, the
+   connection state of the sessions at the right. The work area is now inset by
+   both bars (`render/status_bar.cpp`).
 
-Follow-ups noticed while building the Instances panel:
+Follow-ups noticed while building the Instances panel, both done:
 
-- A tile click raises the Instances window but does not select that instance in it. It
-  needs a request command, because the window's selection is private.
-- Tiles are in table order. Sort by name.
+- Done: a tile click raises the Instances window and selects that instance; the
+  selection goes through `request_instance_selection`, because the window's
+  selection is private.
+- Done: tiles sort by name, folded, with the id breaking a tie
+  (`widget::instance_less`).
 
 ## Blocked on OreStudio (Brave Hopper session)
 
@@ -84,6 +92,10 @@ Follow-ups noticed while building the Instances panel:
 
 ## Small items
 
+- The bottom strip and every open window's foot both draw the message ladder,
+  because the workspace hands one `status_bar` to both. Let the strip own the
+  message and leave the foots the identity and the state.
+- The VIEW > Windows panel has no filter; a wall of forty charts is a scroll.
 - The CRM "Mini plots" button and the CRM double-click take the first catalogue row that
   matches a pair, whatever its provider. It lands on `bloomberg` only because that
   sorts before `ore`. Prefer data-vendor providers once the kind is known.

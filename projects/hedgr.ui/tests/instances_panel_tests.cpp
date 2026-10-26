@@ -78,3 +78,18 @@ TEST_CASE("a panel is flush with its label until it would pass the right edge",
     CHECK(widget::menu_panel_left(5.0f, 300.0f, 10.0f, 1000.0f) == 10.0f);
     CHECK(widget::menu_panel_left(100.0f, 2000.0f, 10.0f, 1000.0f) == 10.0f);
 }
+
+TEST_CASE("instances sort by name and then id, folding case", "[instances_panel]") {
+    CHECK(widget::instance_less("Alpha", "a-1", "Beta", "b-2"));
+    CHECK_FALSE(widget::instance_less("Beta", "b-2", "Alpha", "a-1"));
+    CHECK(widget::instance_less("alpha", "a-1", "Beta", "b-2"));
+    CHECK_FALSE(widget::instance_less("Alpha", "a-1", "alpha", "a-1"));
+
+    /* The same name is broken by the id, so one order is always drawn. */
+    CHECK(widget::instance_less("Alpha", "a-1", "Alpha", "a-2"));
+    CHECK_FALSE(widget::instance_less("Alpha", "a-2", "Alpha", "a-1"));
+    CHECK_FALSE(widget::instance_less("Alpha", "a-1", "Alpha", "a-1"));
+
+    /* A prefix comes before the longer name, as a reader expects. */
+    CHECK(widget::instance_less("Brit", "a-1", "Britain", "a-2"));
+}

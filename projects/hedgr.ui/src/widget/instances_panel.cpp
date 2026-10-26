@@ -52,6 +52,26 @@ bool instance_matches(std::string_view filter, std::string_view name,
         || contains_folded(id, filter);
 }
 
+bool instance_less(std::string_view lhs_name, std::string_view lhs_id,
+    std::string_view rhs_name, std::string_view rhs_id) noexcept {
+    const auto less = [](std::string_view lhs, std::string_view rhs) {
+        const std::size_t shared =
+            lhs.size() < rhs.size() ? lhs.size() : rhs.size();
+        for (std::size_t i = 0; i < shared; ++i) {
+            const char a = fold(lhs[i]);
+            const char b = fold(rhs[i]);
+            if (a != b)
+                return a < b;
+        }
+        return lhs.size() < rhs.size();
+    };
+    if (less(lhs_name, rhs_name))
+        return true;
+    if (less(rhs_name, lhs_name))
+        return false;
+    return less(lhs_id, rhs_id);
+}
+
 int tile_columns(float width, float tile_width, float gap) noexcept {
     const float pitch = tile_width + gap;
     if (pitch <= 0.0f)

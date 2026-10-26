@@ -554,8 +554,8 @@ struct render_input final {
     /**
      * @brief What the operator has pinned as shortcuts.
      *
-     * Read for the TOOLS menu's Accounts list and for the control that adds to
-     * it, both of which ask the same question of the same table. It is the
+     * Read for the Instances panel's pinned row and for the control that adds
+     * to it, both of which ask the same question of the same table. It is the
      * store's own order rather than one the interface imposes, so the entries
      * are listed in the order the table returns them.
      */

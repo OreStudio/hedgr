@@ -611,8 +611,34 @@ inline constexpr float instances_tile_gap = 8.0f;
 /** @brief The photo of a pinned shortcut tile, which is smaller than a grid tile's. */
 inline constexpr float instances_pin_photo = 40.0f;
 
+/**
+ * @brief The VIEW > Windows panel: the open windows grouped by kind.
+ *
+ * Narrower than the catalogue panels because each row is one title, and short
+ * enough to leave the desk visible behind it. The list scrolls inside it.
+ */
+inline constexpr float windows_panel_width = 380.0f;
+inline constexpr float windows_panel_height = 420.0f;
+
 /** @brief The radius of the status dot on a tile. */
 inline constexpr float instances_status_dot = 4.0f;
+
+/**
+ * @brief The height of the bottom status strip, which insets the work area.
+ *
+ * A single line of dim text on a dark plate, edge to edge, as the reference's
+ * status bar. It is the second of the two bars the work area gives up.
+ */
+inline constexpr float status_bar_height = 24.0f;
+
+/** @brief The room between the strip's edge and its first and last text. */
+inline constexpr float status_bar_padding_x = 10.0f;
+
+/** @brief The strip's fill: the menu plate's dark, opaque. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 status_bar_surface() noexcept;
+
+/** @brief The rule along the strip's top edge. */
+[[nodiscard]] HEDGR_UI_EXPORT ImVec4 status_bar_edge() noexcept;
 
 /**
  * @brief The floating toolbar: a pill with a purple outline over the desk, a

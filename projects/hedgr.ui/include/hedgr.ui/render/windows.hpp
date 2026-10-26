@@ -63,6 +63,17 @@ HEDGR_UI_EXPORT void select_folder_for_capture(std::string_view folder_id);
 HEDGR_UI_EXPORT void select_instance_for_capture(std::string_view instance_id);
 
 /**
+ * @brief Selects an instance in the Instances window, on the next frame it
+ *        draws.
+ *
+ * The Instances panel picks a tile and expects the window it raises to show
+ * that instance's pane, but the selection lives in the window's own state,
+ * which the panel does not hold. The request is kept until the window draws,
+ * then written as the click would have written it.
+ */
+HEDGR_UI_EXPORT void request_instance_selection(std::string_view instance_id);
+
+/**
  * @brief Selects an account in the Accounts window, on the next frame it draws.
  *
  * The account pane is reached by selecting a row, and a capture that wants to

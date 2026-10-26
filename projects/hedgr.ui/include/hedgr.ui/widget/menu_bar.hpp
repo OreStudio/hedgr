@@ -24,8 +24,44 @@
 #include "hedgr.ui/widget/instances_panel.hpp"
 #include "hedgr.ui/widget/menu.hpp"
 #include "imgui.h"
+#include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace hedgr::ui::widget {
+
+/**
+ * @brief The password form the ACCOUNTS menu opens for an account with none
+ * memorised.
+ *
+ * It is the same three facts the Accounts window's form uses -- who, on which
+ * deployment, and the typed password -- kept here because the menu owns the
+ * prompt rather than navigating to a window. The buffer is fixed so typing
+ * allocates nothing and is wiped when the form closes.
+ */
+struct account_sign_in_state final {
+    std::string instance_id;
+    std::string instance_name;
+    std::string account_id;
+    std::string principal;
+    std::array<char, 128> password{};
+    bool remember = false;
+    bool open = false;
+    bool focus = false;
+};
+
+/** @brief The scratch the ACCOUNTS menu rebuilds on each frame it draws. */
+struct accounts_menu_state final {
+    /** @brief Slab indices of the instances that have at least one account. */
+    std::vector<std::uint32_t> environments;
+
+    /** @brief Slab indices of the folders of the open environment, in draw order. */
+    std::vector<std::uint32_t> folders;
+
+    /** @brief Slab indices of the accounts of the open environment, in draw order. */
+    std::vector<std::uint32_t> accounts;
+};
 
 /**
  * @brief Which top-level menu of the bar is open, if any.
@@ -45,6 +81,12 @@ struct menu_bar_state final {
 
     /** @brief The Instances panel's filter and filtered list. */
     instances_panel_state instances;
+
+    /** @brief The ACCOUNTS menu's per-environment scratch. */
+    accounts_menu_state accounts;
+
+    /** @brief The password form an account without a memorised one opens. */
+    account_sign_in_state sign_in;
 };
 
 /**

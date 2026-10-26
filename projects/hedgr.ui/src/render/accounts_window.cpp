@@ -373,16 +373,9 @@ void draw_sign_in_form(const render_input& input, window_ui_state& window) {
     ImGui::SetItemTooltip("%s", "Do not sign in");
 
     if (signed_in && complete) {
-        command request;
-        request.kind = command_kind::connect_session;
-        request.instance_id = row->instance_id;
-        request.account_id = row->id;
-        request.principal = row->principal;
-        request.password =
-            hedgr::model::domain::secret_string{
-                std::string{browser.credential.data()}};
-        request.remember = browser.remember;
-        input.commands.push(std::move(request));
+        input.commands.push(hedgr::ui::render::account_sign_in_command(
+            row->instance_id, row->id, row->principal,
+            browser.credential.data(), browser.remember));
 
         std::fill(browser.credential.begin(), browser.credential.end(), '\0');
         browser.password_visible = false;
@@ -707,6 +700,28 @@ command account_save_command(const render_input& input,
     return request;
 }
 
+command account_sign_in_command(std::string_view instance_id,
+    std::string_view account_id, std::string_view principal,
+    std::string_view password, bool remember) {
+    command request;
+    request.kind = command_kind::connect_session;
+    request.instance_id = std::string{instance_id};
+    request.account_id = std::string{account_id};
+    request.principal = std::string{principal};
+    /*
+     * No password means "use the one the store holds". A typed password is
+     * handed over for this attempt only, and remember is set only when there is
+     * one: a command with an empty password and remember set would ask the
+     * runtime to seal nothing.
+     */
+    if (!password.empty()) {
+        request.password = hedgr::model::domain::secret_string{
+            std::string{password}};
+        request.remember = remember;
+    }
+    return request;
+}
+
 void select_account_for_capture(std::string_view account_id) {
     pending_capture_selected_account = std::string{account_id};
 }
@@ -809,12 +824,8 @@ void accounts_window_actions(const render_input& input,
         << "Signing in '" << row->principal << "' on '" << row->instance_id
         << "' with the stored credential";
 
-    command request;
-    request.kind = command_kind::connect_session;
-    request.instance_id = row->instance_id;
-    request.account_id = row->id;
-    request.principal = row->principal;
-    input.commands.push(std::move(request));
+    input.commands.push(hedgr::ui::render::account_sign_in_command(
+        row->instance_id, row->id, row->principal));
 
     /*
      * The landing window is not asked for here. Whether this account's session

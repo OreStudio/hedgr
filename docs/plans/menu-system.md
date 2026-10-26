@@ -2,8 +2,8 @@
 
 A menu system in the look of the reference
 (`docs/samples/572312177-2d9a6bd9-b2d3-4322-b650-aa904833b128.png`), replacing
-the ImCoolBar shortcut bar over several small PRs. Steps 1 to 5 and 9 are done; the
-rest is plan.
+the ImCoolBar shortcut bar over several small PRs. All nine steps are done; the
+notes after each record what the implementation found.
 
 ## The reference
 
@@ -23,18 +23,19 @@ rest is plan.
 - **Shortcut bar (retired).** `render/shortcut_bar.cpp` drew an ImCoolBar window
   at the bottom centre, one tile per catalogue shortcut plus Undock all, and the
   dock space stopped short of it. Step 9 deleted it, with the vendored ImCoolBar.
-  The catalogue (`input.shortcuts`) stays: the TOOLS menu's Accounts submenu
+  The catalogue (`input.shortcuts`) stays: the Instances panel's pinned row
   lists it. The tile photos and the hover tick went with the bar.
 - **Mini plots actions.** There are none on the bar in this checkout. The mini
   plot is opened from a chart or from the series browser. The Windows menu below
   is where "tidy mini plots" and "close all mini plots" would live if wanted.
 - **Menu bars.** Only the command centre and the workspace window use
   `ImGui::BeginMenuBar`, inside their own windows. There is no main menu bar.
-- **Status.** There is no application-wide status bar. Each window draws its own
-  foot with `widget::draw_status_foot` (`widget/status_foot.hpp`: identity,
-  state dot, optional combos), and `widget/status_bar.hpp` holds a one-line
-  message ladder (notice, problem, error) that a window renders itself. A
-  bottom bar like the reference's would be new.
+- **Status.** There is an application-wide status strip along the bottom
+  (step 8). Each window still draws its own foot with
+  `widget::draw_status_foot` (`widget/status_foot.hpp`: identity, state dot,
+  optional combos), and `widget/status_bar.hpp` holds a one-line message
+  ladder (notice, problem, error) that the strip and the window foots both
+  read.
 - **The logo.** `render/intro.cpp` draws the launch intro
   (the splash and its artwork are gone). Nothing draws a small logo.
 - **Docking and viewports.** `hedgr.imgui/src/app/application.cpp` enables
@@ -67,10 +68,10 @@ Each step is one PR, with tests, and leaves the app working.
    - Notes. A submenu row only draws the chevron. It does not use
      `ImGui::BeginMenu`, whose arrow and hover logic cannot be restyled; the
      caller opens the child panel beside `GetItemRectMax` on hover or press,
-     which is what the large Instances and Accounts panels do anyway
-     (decision 2). Closing a submenu when the pointer moves to another row is
-     step 2's to build and check in a real window. The popup is wired to
-     nothing yet; the hidden `component gallery` test draws one for a look.
+     which is what the large Instances panel does anyway (decision 2). Closing a
+     submenu when the pointer moves to another row is step 2's to build and
+     check in a real window. The popup is wired to nothing yet; the hidden
+     `component gallery` test draws one for a look.
 2. [x] **The top bar and the system menu.** A fixed-height menu bar window
    (`render/menu_bar.cpp`), our own window (decision 1), drawn by `workspace`
    before the dock space. The ORE swirl at the left
@@ -99,7 +100,7 @@ Each step is one PR, with tests, and leaves the app working.
      the lock state, a separator, Quit. Instances moves here from the system
      menu.
    - VIEW: Undock all, a disabled row until something is docked. The Windows
-     submenu is step 7's.
+     submenu is step 7's, and was added there.
    - TOOLS: Series browser, Accounts (a submenu, see step 9) and, for a system
      administration session, Command centre. They act on the first signed-in session and are disabled
      when there is none. The CRM matrix has no row: it needs a party and a
@@ -180,20 +181,73 @@ Each step is one PR, with tests, and leaves the app working.
      window and the same signal; there is no selection to drive, so the window
      does not move to that instance yet. Ctrl keeps the panel open for several
      picks. An empty store and a filter that matches nothing both draw the no
-     data mark, the words in its tooltip. TOOLS > Accounts stays until step 6.
+     data mark, the words in its tooltip. TOOLS > Accounts stayed until step 6
+     deleted it.
      Not checked in a real window.
-6. **Accounts.** An Accounts menu opens a panel with tenant headings and the
-   accounts under each, from `tenant_row` and the accounts table. A click opens
-   the accounts window for that instance and account.
-7. **The Windows list.** A Windows menu lists open windows from `input.windows`
-   grouped by `window_kind`. Click raises (reusing the `focus_instances`
-   mechanism, which is a request read before the walk), the x closes through the
-   close command, as the window's own close control does. Mini plot actions go
-   here. It comes before the status bar (decision 9).
-8. **The status bar.** One viewport-wide bottom strip in the reference's look,
-   carrying the message ladder from `status_bar.hpp` and the connection state
-   once PR 94 lands. It is a bottom side bar like the top bar, so the work
-   area is inset by the bars alone (the dock space already fills the work area).
+6. [x] **Accounts.** An ACCOUNTS menu lists the environments, and under each the
+   accounts, as submenus. A click signs in to that account; an account with no
+   memorised password opens a password form.
+   - Notes. ACCOUNTS is the fourth label, after INSTANCES and before TOOLS, and
+     it is drawn only while the store is unlocked. Its popup lists the
+     environments that hold at least one account, sorted by name and carrying
+     each one's account count. Hovering or clicking an environment opens its
+     accounts beside it. The accounts are grouped by their folder in the
+     instance's accounts tree: a folder is a `menu_heading` (for the seeded
+     data, "PRIVILEGED"), not a row, and the accounts under it sort by name. An
+     account whose folder has gone is listed last under "No folder" rather than
+     dropped. TOOLS > Accounts is deleted.
+   - The pick signs in. With a stored credential and the store unlocked, the
+     click pushes `connect_session` straight away, carrying no password so the
+     runtime reads the sealed one. With nothing memorised it opens a password
+     form owned by the menu bar (not the Accounts window): the principal, the
+     deployment, a password field, and "Remember this password". The password is
+     wiped as soon as the form closes, and the command is built by
+     `account_sign_in_command`, which the Accounts window's own form and stored
+     sign-in now share.
+   - This replaced an earlier large panel with a filter and tenant headings. The
+     operator asked for a shortcut organised by environment that logs in
+     directly, so the panel, its widget helpers and its tests were deleted
+     rather than kept beside the menu.
+   - The environment list is rebuilt every frame into vectors kept across
+     frames, and the open submenu's folders and accounts likewise; the sort is
+     allocation-free, pinned by a frame-cost test. Folders are walked depth
+     first in the order the folders table holds them.
+   - Not checked in a real window.
+7. [x] **The Windows list.** A Windows menu lists open windows from
+   `input.windows` grouped by `window_kind`. Click raises (reusing the
+   `focus_instances` mechanism, which is a request read before the walk), the x
+   closes through the close command, as the window's own close control does.
+   Mini plot actions go here. It comes before the status bar (decision 9).
+   - Notes. Windows is the fourth row of VIEW, a chevron row with an anchored
+     panel beside it (`theme::windows_panel_width` and `_height`, 380 by 420).
+     The panel walks the kinds in enum order and draws a heading only for a kind
+     that has an open window, then one row per window. A row is two items: a
+     selectable title that sets `menu_bar_result::focus_window`, and a small x
+     that pushes `close_window` for that id. `workspace::render` folds the id
+     into the focus request it already takes from the window table before the
+     walk, so the raise happens where a window can still be focused. A pick
+     closes the panel and VIEW with `ClosePopupToLevel(0, true)`. The last row,
+     "Close all mini plots", pushes one close per open mini plot and is left out
+     when there is none. Tidy has no action to call, so it is not there.
+   - Not checked in a real window.
+8. [x] **The status bar.** One viewport-wide bottom strip in the reference's look,
+   carrying the message ladder from `status_bar.hpp` and the connection state.
+   It is a bottom side bar like the top bar, so the work area is inset by the
+   bars alone (the dock space already fills the work area).
+   - Notes. `render/status_bar.cpp` submits `###hedgr-status-bar` through
+     `BeginViewportSideBar(ImGuiDir_Down)` at `theme::status_bar_height` (24 px),
+     so the dock space and every window read the smaller work area without
+     knowing about it. The left end is `status_bar::message()` in the severity's
+     colour, dimming on the event's tail; the right end is a dot and one word
+     from the sessions: failed, connecting, connected, partly connected,
+     disconnected, or "no session". Failure outranks a connection in flight,
+     which outranks quiet connectivity. The strip advances the message clock
+     itself, so an event ages out even with no window open.
+   - Kept: the window foots (decision 8). A consequence is that a runtime error
+     is currently drawn both in the strip and in the foot of each open window,
+     because the workspace's one `status_bar` is passed to them too. Folding the
+     foot's message line into the strip is follow-up work, not this step.
+   - Not checked in a real window.
 9. [x] **Retire the cool bar.** Brought forward. Deleted `shortcut_bar.cpp`,
    `shortcut_bar_result`, `shortcut_bar_height`, `shortcut_bar_tests.cpp` and the
    vendored ImCoolBar (nothing else used it). The dock space now spans the whole

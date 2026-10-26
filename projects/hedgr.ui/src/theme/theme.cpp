@@ -441,6 +441,14 @@ ImVec4 menu_border() noexcept {
     return menu_edge;
 }
 
+ImVec4 status_bar_surface() noexcept {
+    return menu_fill;
+}
+
+ImVec4 status_bar_edge() noexcept {
+    return menu_edge;
+}
+
 ImVec4 menu_selected_colour() noexcept {
     return chart_tag;
 }
