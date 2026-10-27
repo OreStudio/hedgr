@@ -50,9 +50,15 @@ namespace domain = hedgr::model::domain;
     return false;
 }
 
+[[nodiscard]] bool is_ir(const domain::market_series_row& row) {
+    if (row.asset != domain::market_asset::unknown)
+        return row.asset == domain::market_asset::ir;
+    return row.asset_class == "IR";
+}
+
 [[nodiscard]] bool listed_as_curve(const domain::market_series_row& row,
     const series_browser_query& query) {
-    return row.asset_class == "IR"
+    return is_ir(row)
         && (query.party.empty() || row.party_id == query.party)
         && (query.provider.empty() || row.provider_code == query.provider)
         && (contains_ci(row.label, query.filter)
@@ -99,7 +105,10 @@ bool update_series_browser_view(series_browser_view& view,
                    query.hidden_providers.end(), code)
             != query.hidden_providers.end();
     };
-    const bool curves = query.asset_class == "IR";
+    const auto wanted = domain::market_asset_of(query.asset_class);
+    const bool curves = wanted != domain::market_asset::unknown
+        ? wanted == domain::market_asset::ir
+        : query.asset_class == "IR";
     view.rows.clear();
     for (std::size_t i = 0; i < catalogue.size(); ++i) {
         if (hidden(catalogue[i].provider_code))

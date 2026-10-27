@@ -79,6 +79,7 @@ domain::market_series_row fx_series(std::string id, std::string base,
     row.identity.party_id = row.party_id;
     row.identity.provider_code = row.provider_code;
     row.identity.fields.push_back({.name = "ccy", .text = quote});
+    row.asset = domain::market_asset::fx;
     return row;
 }
 

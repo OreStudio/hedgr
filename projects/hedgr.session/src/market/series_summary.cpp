@@ -64,6 +64,10 @@ series_identity_from_uri(std::string_view uri, std::string_view party_id,
 transport::market_series_summary
 summarise_series(const ores::marketdata::domain::market_series& series) {
     const auto party = boost::uuids::to_string(series.party_id);
+    auto identity = series_identity_from_uri(series.oresmd_uri, party,
+        series.provider_code).value_or(
+        hedgr::model::domain::market_series_identity{});
+    const auto asset = hedgr::model::domain::market_asset_of(identity.asset);
     return transport::market_series_summary{
         .id = boost::uuids::to_string(series.id),
         .oresmd_uri = series.oresmd_uri,
@@ -74,9 +78,8 @@ summarise_series(const ores::marketdata::domain::market_series& series) {
         .tenor = series_term(series.oresmd_uri),
         .curve_key = series_curve_key(series.oresmd_uri),
         .curve_label = series_curve_label(series.oresmd_uri),
-        .identity = series_identity_from_uri(series.oresmd_uri, party,
-            series.provider_code).value_or(
-            hedgr::model::domain::market_series_identity{})};
+        .identity = std::move(identity),
+        .asset = asset};
 }
 
 }

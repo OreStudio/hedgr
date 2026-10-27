@@ -129,7 +129,8 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .tenor = row.tenor,
                     .curve_key = row.curve_key,
                     .curve_label = row.curve_label,
-                    .identity = row.identity});
+                    .identity = row.identity,
+                    .asset = row.asset});
             }
             /*
              * The providers travel with the catalogue because the browser

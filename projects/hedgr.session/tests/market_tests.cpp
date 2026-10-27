@@ -75,10 +75,13 @@ TEST_CASE("a catalogue summary carries the series' parsed identity",
     CHECK(summary.identity.instrument_type == "fx_spot");
     CHECK(summary.identity.party_id == summary.party_id);
     CHECK(summary.identity.provider_code == "bloomberg");
+    CHECK(summary.asset == hedgr::model::domain::market_asset::fx);
 
     /* An unreadable URI leaves the identity empty, and the read falls back. */
     series.oresmd_uri = "not a uri";
     CHECK(market::summarise_series(series).identity.empty());
+    CHECK(market::summarise_series(series).asset
+        == hedgr::model::domain::market_asset::unknown);
 }
 
 TEST_CASE("a series label names the parts its URI carries", "[market]") {

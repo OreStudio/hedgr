@@ -198,6 +198,10 @@ struct market_series_summary final {
 
     /** @brief The typed identity a tick read names the series by. */
     hedgr::model::domain::market_series_identity identity;
+
+    /** @brief The schema's asset class, parsed with the identity. */
+    hedgr::model::domain::market_asset asset
+        = hedgr::model::domain::market_asset::unknown;
 };
 
 /** @brief One observation: when the market was observed and what it was. */

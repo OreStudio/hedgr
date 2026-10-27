@@ -87,6 +87,18 @@ TEST_CASE("the series view drops a hidden provider and shows it again",
     CHECK(ids(view, catalogue) == strings{"ore-row", "vendor-row"});
 }
 
+TEST_CASE("a parsed asset decides the curve view, not the display class",
+    "[browser][view]") {
+    auto rates = row("c", "C", "RATES", "1Y");
+    rates.asset = domain::market_asset::ir;
+    const std::vector catalogue{rates};
+    render::series_browser_view view;
+    /* The display class says RATES; the parsed asset is what chooses curves. */
+    CHECK(render::update_series_browser_view(
+        view, query(1, "", "IR"), catalogue));
+    CHECK(ids(view, catalogue) == strings{"c"});
+}
+
 TEST_CASE("the series view matches the filter on label, class, uri and provider",
     "[browser][view]") {
     const std::vector catalogue{row("a", "GBP/USD", "FX"),

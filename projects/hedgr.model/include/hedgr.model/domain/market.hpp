@@ -30,6 +30,100 @@
 
 namespace hedgr::model::domain {
 
+/**
+ * @brief The deployment's asset class, as the schema spells it.
+ *
+ * Render code branches on this rather than on the upper-cased URI authority:
+ * the authority is the session's working vocabulary, not the server's, and a
+ * change in its casing silently stopped the IR and FX views matching.
+ */
+enum class market_asset : std::uint8_t {
+    unknown = 0,
+    ir,
+    fx,
+    credit,
+    equity,
+    commodity,
+    inflation,
+    security,
+    correlation,
+    rating,
+    shape_profile,
+    generic,
+};
+
+/** @brief The asset @p name spells, folding case; unknown for anything else. */
+[[nodiscard]] inline market_asset market_asset_of(
+    std::string_view name) noexcept {
+    const auto equals = [](std::string_view a, std::string_view b) {
+        if (a.size() != b.size())
+            return false;
+        for (std::size_t i = 0; i < a.size(); ++i) {
+            const auto fold = [](char c) {
+                return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a')
+                                            : c;
+            };
+            if (fold(a[i]) != fold(b[i]))
+                return false;
+        }
+        return true;
+    };
+    if (equals(name, "ir"))
+        return market_asset::ir;
+    if (equals(name, "fx"))
+        return market_asset::fx;
+    if (equals(name, "credit"))
+        return market_asset::credit;
+    if (equals(name, "equity"))
+        return market_asset::equity;
+    if (equals(name, "commodity"))
+        return market_asset::commodity;
+    if (equals(name, "inflation"))
+        return market_asset::inflation;
+    if (equals(name, "security"))
+        return market_asset::security;
+    if (equals(name, "correlation"))
+        return market_asset::correlation;
+    if (equals(name, "rating"))
+        return market_asset::rating;
+    if (equals(name, "shape_profile"))
+        return market_asset::shape_profile;
+    if (equals(name, "generic"))
+        return market_asset::generic;
+    return market_asset::unknown;
+}
+
+/** @brief The schema's spelling of @p asset, or "unknown". */
+[[nodiscard]] inline std::string_view to_string(market_asset asset) noexcept {
+    switch (asset) {
+    case market_asset::ir:
+        return "ir";
+    case market_asset::fx:
+        return "fx";
+    case market_asset::credit:
+        return "credit";
+    case market_asset::equity:
+        return "equity";
+    case market_asset::commodity:
+        return "commodity";
+    case market_asset::inflation:
+        return "inflation";
+    case market_asset::security:
+        return "security";
+    case market_asset::correlation:
+        return "correlation";
+    case market_asset::rating:
+        return "rating";
+    case market_asset::shape_profile:
+        return "shape_profile";
+    case market_asset::generic:
+        return "generic";
+    case market_asset::unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
 /** @brief One extra field of a typed series identity: a name and its text. */
 struct market_series_identity_field final {
     std::string name;
@@ -110,6 +204,14 @@ struct market_series_row final {
 
     /** @brief The typed identity a tick read names the series by. */
     market_series_identity identity;
+
+    /**
+     * @brief The schema's asset class, for a branch that must not guess.
+     *
+     * Unknown for a row from before the parse; render code falls back to the
+     * display string then.
+     */
+    market_asset asset = market_asset::unknown;
 };
 
 /**
