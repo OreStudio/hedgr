@@ -111,7 +111,9 @@ Follow-ups noticed while building the Instances panel, both done:
 
 ## Small items
 
-- The VIEW > Windows panel has no filter; a wall of forty charts is a scroll.
+- Done: VIEW > Windows has a title filter at the top of the panel, folded, with a
+  "No window matches" row. The "Close all mini plots" action still closes every
+  card, not only the filtered ones.
 - Done: the catalogue's pin control and `shortcuts_list_holds` (was
   `shortcuts_bar_holds`) say the Accounts list, not "the bar".
 - Rename `docs/plans/mini-plots.md` step notes that mention the retired compact layout.

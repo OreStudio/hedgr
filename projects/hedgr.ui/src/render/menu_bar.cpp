@@ -139,6 +139,29 @@ void draw_file_menu(const render_input& input, menu_bar_result& result) {
     return false;
 }
 
+[[nodiscard]] bool folded_contains(std::string_view text,
+    std::string_view needle) noexcept {
+    if (needle.empty())
+        return true;
+    if (needle.size() > text.size())
+        return false;
+    const auto fold = [](char c) {
+        return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c;
+    };
+    for (std::size_t start = 0; start + needle.size() <= text.size(); ++start) {
+        bool matches = true;
+        for (std::size_t i = 0; i < needle.size(); ++i) {
+            if (fold(text[start + i]) != fold(needle[i])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches)
+            return true;
+    }
+    return false;
+}
+
 /**
  * @brief Draws one open window's row: the title raises it, the x closes it.
  *
@@ -198,7 +221,8 @@ bool draw_window_row(const render_input& input, menu_bar_result& result,
  * has an open window. The last row closes every mini plot, which is the one
  * action those cards have as a set, and it is left out when there is none.
  */
-void draw_windows_panel(const render_input& input, menu_bar_result& result) {
+void draw_windows_panel(const render_input& input, menu_bar_result& result,
+    widget::menu_bar_state& state) {
     const ImVec2 anchor(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y);
     const ImGuiViewport* const viewport = ImGui::GetMainViewport();
     const float width = theme::windows_panel_width;
@@ -216,6 +240,15 @@ void draw_windows_panel(const render_input& input, menu_bar_result& result) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     bool acted = false;
     if (ImGui::BeginChild("##windows-list", ImVec2(0.0f, 0.0f))) {
+        /*
+         * The filter narrows the list, not the "Close all" action below it:
+         * that row is about the whole set of cards however the list is read.
+         */
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        ImGui::InputTextWithHint("##windows-filter", "filter by title",
+            state.windows_filter.data(), state.windows_filter.size());
+        const std::string_view filter{state.windows_filter.data()};
+        bool any_row = false;
         const auto& layout = input.windows.layout();
         const auto kinds = input.windows.kind_column();
         const auto open = input.windows.open_column();
@@ -233,6 +266,9 @@ void draw_windows_panel(const render_input& input, menu_bar_result& result) {
                 const auto kind_value = static_cast<domain::window_kind>(kind);
                 append_window_title(title, kind_value,
                     input.windows.state(handle), input);
+                if (!folded_contains(title, filter))
+                    continue;
+                any_row = true;
                 if (!heading) {
                     const auto kind_text = domain::to_string(kind_value);
                     char text[32];
@@ -248,6 +284,12 @@ void draw_windows_panel(const render_input& input, menu_bar_result& result) {
                         domain::window_kind::mini_plot))
                     ++mini_plots;
             }
+        }
+
+        if (!any_row && !filter.empty()) {
+            ImGui::Spacing();
+            widget::menu_item_row(
+                {.label = "No window matches the filter", .enabled = false});
         }
 
         if (mini_plots > 0) {
@@ -292,7 +334,7 @@ void draw_windows_panel(const render_input& input, menu_bar_result& result) {
  * column so their labels stay on one line.
  */
 void draw_view_menu(const render_input& input, bool desk_docked,
-    menu_bar_result& result) {
+    menu_bar_result& result, widget::menu_bar_state& state) {
     if (widget::menu_item_row({.label = "Undock all", .checkable = true,
             .enabled = desk_docked}))
         result.undock_all = true;
@@ -316,7 +358,7 @@ void draw_view_menu(const render_input& input, bool desk_docked,
     if ((pressed || ImGui::IsItemHovered())
         && !ImGui::IsPopupOpen(windows_submenu_id))
         ImGui::OpenPopup(windows_submenu_id);
-    draw_windows_panel(input, result);
+    draw_windows_panel(input, result, state);
 }
 
 namespace {
@@ -772,7 +814,8 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
         if (shows_instances(input)) {
             ImGui::SameLine();
             widget::menu_bar_label(state, view_entry, "View",
-                [&] { draw_view_menu(input, desk_docked, result); }, height);
+                [&] { draw_view_menu(input, desk_docked, result, state); },
+                height);
             ImGui::SameLine();
             widget::menu_bar_label(state, instances_entry, "Instances",
                 [&] { draw_instances_panel(input, state.instances, result); },

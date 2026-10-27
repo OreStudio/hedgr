@@ -1713,6 +1713,33 @@ TEST_CASE("VIEW > Windows raises the window its row names",
     CHECK(GImGui->OpenPopupStack.Size == 0);
 }
 
+TEST_CASE("VIEW > Windows filters its list by title",
+    "[menu_bar][view][windows]") {
+    bar_harness h;
+    static_cast<void>(h.desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "One", .series_id = "s1"},
+        "w-one"));
+    static_cast<void>(h.desk.open(model::domain::window_kind::chart,
+        model::domain::chart_state{.label = "Two", .series_id = "s2"},
+        "w-two"));
+    const std::string filter = "two";
+    std::copy(filter.begin(), filter.end(), h.state.windows_filter.begin());
+    h.state.windows_filter[filter.size()] = '\0';
+
+    open_windows_list(h);
+    REQUIRE(GImGui->OpenPopupStack.Size == 2);
+    const ImGuiWindow* child = popup_child();
+    REQUIRE(child != nullptr);
+    const ImGuiWindow* panel = GImGui->OpenPopupStack.back().Window;
+    const float x = panel->Pos.x + 30.0f;
+    CHECK_FALSE(find_popup_row(h, x,
+                    ImHashStr("##raise", 0, ImHashStr("w-one", 0, child->ID)))
+                    .has_value());
+    CHECK(find_popup_row(h, x,
+              ImHashStr("##raise", 0, ImHashStr("w-two", 0, child->ID)))
+              .has_value());
+}
+
 TEST_CASE("VIEW > Windows closes a window through its x",
     "[menu_bar][view][windows]") {
     bar_harness h;
