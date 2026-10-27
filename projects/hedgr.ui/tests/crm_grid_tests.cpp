@@ -61,14 +61,24 @@ std::string rate_at(const crm_grid& grid, std::string_view pair) {
 
 domain::market_series_row fx_series(std::string id, std::string base,
     std::string quote, std::string party = "p1",
-    std::string provider = "bloomberg") {
+    std::string provider = "bloomberg",
+    std::string instrument = "fx_spot") {
     domain::market_series_row row;
     row.id = std::move(id);
     row.label = "FX " + base + "/" + quote;
     row.asset_class = "FX";
     row.party_id = std::move(party);
     row.provider_code = std::move(provider);
-    row.uri = "oresmd:///fx/" + base + "?ccy=" + quote;
+    row.uri = "oresmd:///fx/" + base + "?instrument=" + instrument + "&ccy="
+        + quote;
+    /* A parsed identity, as the catalogue read leaves it. */
+    row.identity.asset = "fx";
+    row.identity.scope = base;
+    row.identity.instrument_type = std::move(instrument);
+    row.identity.quote_type = "rate";
+    row.identity.party_id = row.party_id;
+    row.identity.provider_code = row.provider_code;
+    row.identity.fields.push_back({.name = "ccy", .text = quote});
     return row;
 }
 
@@ -145,6 +155,33 @@ TEST_CASE("a CRM pair prefers a data vendor over an earlier reference series",
     const auto* first = crm_series_for_pair(series, "p1", "EUR", "USD");
     REQUIRE(first != nullptr);
     CHECK(first->id == "ore-row");
+}
+
+TEST_CASE("a CRM pair takes the spot, not a forward or an option",
+    "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("fwd", "EUR", "USD", "p1", "bloomberg", "fx_fwd"),
+        fx_series("opt", "EUR", "USD", "p1", "bloomberg", "fx_option"),
+        fx_series("spot", "EUR", "USD", "p1", "bloomberg", "fx_spot")};
+
+    const auto* chosen = crm_series_for_pair(series, "p1", "EUR", "USD");
+    REQUIRE(chosen != nullptr);
+    CHECK(chosen->id == "spot");
+
+    /* A pair held only by a forward has no CRM series at all. */
+    const std::vector<domain::market_series_row> forward_only{
+        fx_series("fwd", "EUR", "USD", "p1", "bloomberg", "fx_fwd")};
+    CHECK(crm_series_for_pair(forward_only, "p1", "EUR", "USD") == nullptr);
+}
+
+TEST_CASE("a row without a parsed identity still matches by its URI",
+    "[crm]") {
+    auto legacy = fx_series("legacy", "EUR", "USD");
+    legacy.identity = {};
+    const std::vector<domain::market_series_row> series{legacy};
+    const auto* row = crm_series_for_pair(series, "p1", "EUR", "USD");
+    REQUIRE(row != nullptr);
+    CHECK(row->id == "legacy");
 }
 
 TEST_CASE("CRM mini plots take the data vendor's series for a pair", "[crm]") {
