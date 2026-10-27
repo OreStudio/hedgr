@@ -486,6 +486,15 @@ private:
         party_switches_;
 
     /**
+     * @brief Pairs whose catalogue must be read again after a party change.
+     *
+     * A catalogue read that was already in flight holds the pending mark, so
+     * the new read would be dropped. The pair is remembered here and the read
+     * is started when that answer lands.
+     */
+    std::unordered_set<std::string> catalogue_rereads_;
+
+    /**
      * @brief The attempt each pair is on, by the pair's running key.
      *
      * A replacement worker is started while the old one is still winding down.

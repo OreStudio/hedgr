@@ -199,11 +199,14 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     state.market_party_id = session_party.empty()
         ? (parties.empty() ? std::string{} : std::string{parties.id(0)})
         : std::string{session_party};
-    state.acting_party = static_cast<int>(parties.index_of(session_party));
+    const auto acting = parties.index_of(session_party);
+    state.acting_party = static_cast<int>(
+        acting < parties.size() ? acting : 0);
     if (parties.size() > 1) {
         foot.controls.push_back(widget::foot_combo{
             .id = "acting-as",
             .tooltip = "Act as another party for this session",
+            .caption = "Acting as",
             .options = parties.names.data(),
             .option_count = static_cast<int>(parties.size()),
             .selected = &state.acting_party});

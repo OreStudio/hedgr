@@ -23,9 +23,11 @@
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
 #include "imgui.h"
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
 
 namespace hedgr::ui::widget {
 
@@ -45,6 +47,9 @@ struct foot_combo final {
     /** @brief The control's name, shown on hover. */
     const char* tooltip;
 
+    /** @brief A quiet word drawn before the control, or null for none. */
+    const char* caption = nullptr;
+
     /** @brief The option labels, in menu order. */
     const char* const* options;
 
@@ -53,6 +58,40 @@ struct foot_combo final {
 
     /** @brief The selected index, which the control writes. */
     int* selected = nullptr;
+};
+
+/**
+ * @brief The choices one foot carries, in a fixed room.
+ *
+ * A foot is one line and has space for a couple of controls; a vector here
+ * allocated once per frame for a control that never changes size. The cap is
+ * asserted rather than grown, because a third control would not fit.
+ */
+class foot_controls final {
+public:
+    /** @brief How many controls a foot can carry. */
+    static constexpr std::size_t capacity = 2;
+
+    void push_back(const foot_combo& control) {
+        assert(count_ < capacity);
+        if (count_ >= capacity)
+            return;
+        items_[count_++] = control;
+    }
+
+    [[nodiscard]] bool empty() const noexcept { return count_ == 0; }
+    [[nodiscard]] std::size_t size() const noexcept { return count_; }
+
+    [[nodiscard]] const foot_combo* begin() const noexcept {
+        return items_.data();
+    }
+    [[nodiscard]] const foot_combo* end() const noexcept {
+        return items_.data() + count_;
+    }
+
+private:
+    std::array<foot_combo, capacity> items_{};
+    std::size_t count_ = 0;
 };
 
 /**
@@ -109,7 +148,7 @@ struct foot_state final {
     bool updating = false;
 
     /** @brief The choices drawn to the left of the state, in order. */
-    std::vector<foot_combo> controls;
+    foot_controls controls;
 };
 
 /**

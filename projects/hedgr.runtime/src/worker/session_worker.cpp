@@ -310,69 +310,80 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                      * and the wait below is woken by any request that arrives
                      * after this point.
                      */
-                    if (job.party) {
-                        if (auto requested = job.party->take();
-                            requested.has_value() && *requested != party_id) {
-                            const std::string wanted = *requested;
-                            const auto selected = client.select_party(wanted);
-                            if (!selected) {
-                                BOOST_LOG_SEV(lg(), ores::logging::warn)
-                                    << "Acting as party '" << wanted << "' for '"
-                                    << key.account_id << "' on '"
-                                    << key.instance_id << "' was refused: "
-                                    << selected.error().message << " ["
-                                    << transport::to_string(
-                                           selected.error().code)
-                                    << "]";
-                                auto refused = for_key(key, job.attempt);
-                                refused.kind =
-                                    event::event_kind::session_party_refused;
-                                refused.code = std::string{
-                                    transport::to_string(
-                                        selected.error().code)};
-                                refused.message = selected.error().message;
-                                events.push(std::move(refused));
-                            } else {
-                                const auto& current = client.account();
-                                token = current.token;
-                                principal = current.principal;
-                                tenant_id = current.tenant_id;
-                                tenant_name = current.tenant_name;
-                                party_id = current.party_id;
-                                party_name = current.party_name;
+                    if (auto requested = job.party->take();
+                        requested.has_value() && *requested != party_id) {
+                        const std::string wanted = *requested;
+                        /*
+                         * A live session moves with switch_party; select_party
+                         * is the login flow's single-use exchange and the
+                         * instance refuses a normal session token there.
+                         */
+                        const auto selected = client.switch_party(wanted);
+                        if (!selected) {
+                            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                                << "Acting as party '" << wanted << "' for '"
+                                << key.account_id << "' on '"
+                                << key.instance_id << "' was refused: "
+                                << selected.error().message << " ["
+                                << transport::to_string(
+                                       selected.error().code)
+                                << "]";
+                            auto refused = for_key(key, job.attempt);
+                            refused.kind =
+                                event::event_kind::session_party_refused;
+                            refused.code = std::string{
+                                transport::to_string(
+                                    selected.error().code)};
+                            refused.message = selected.error().message;
+                            events.push(std::move(refused));
+                        } else {
+                            const auto& current = client.account();
+                            token = current.token;
+                            principal = current.principal;
+                            party_id = current.party_id;
+                            party_name = current.party_name;
 
-                                auto changed = for_key(key, job.attempt);
-                                changed.kind =
-                                    event::event_kind::session_party_changed;
-                                changed.token =
-                                    domain::secret_string{token};
-                                changed.tenant_id = tenant_id;
-                                changed.tenant_name = tenant_name;
-                                changed.party_id = party_id;
-                                changed.party_name = party_name;
-                                changed.payload = principal;
-                                events.push(std::move(changed));
-
-                                BOOST_LOG_SEV(lg(), ores::logging::info)
-                                    << "Session '" << key.account_id << "' on '"
-                                    << key.instance_id << "' now acts as party '"
-                                    << party_id << "'";
+                            /*
+                             * The new token has its own lifetime, which may be
+                             * shorter than the one the old refresh deadline was
+                             * armed for; re-arm from the answer rather than
+                             * letting the old deadline miss the expiry.
+                             */
+                            if (current.access_lifetime_s > 0) {
+                                lifetime_s = current.access_lifetime_s;
+                                next_refresh = std::chrono::steady_clock::now()
+                                    + refresh_delay_for(lifetime_s);
                             }
+
+                            auto changed = for_key(key, job.attempt);
+                            changed.kind =
+                                event::event_kind::session_party_changed;
+                            changed.token =
+                                domain::secret_string{token};
+                            /*
+                             * The tenant does not change with the party; the
+                             * instance's answer carries a tenant name and no
+                             * key, so the session's own pair is reported.
+                             */
+                            changed.tenant_id = tenant_id;
+                            changed.tenant_name = tenant_name;
+                            changed.party_id = party_id;
+                            changed.party_name = party_name;
+                            changed.payload = principal;
+                            events.push(std::move(changed));
+
+                            BOOST_LOG_SEV(lg(), ores::logging::info)
+                                << "Session '" << key.account_id << "' on '"
+                                << key.instance_id << "' now acts as party '"
+                                << party_id << "'";
                         }
                     }
 
-                    std::shared_ptr<std::stop_source> waker;
-                    if (job.party) {
-                        waker = std::make_shared<std::stop_source>();
-                        job.party->arm(waker);
-                    }
-                    if (waker)
-                        co_await wait_until_or_stop_or_wake(next_refresh,
-                            stop, waker);
-                    else
-                        co_await wait_until_or_stop(next_refresh, stop);
-                    if (job.party)
-                        job.party->disarm();
+                    const auto waker = std::make_shared<std::stop_source>();
+                    job.party->arm(waker);
+                    co_await wait_until_or_stop_or_wake(next_refresh, stop,
+                        waker);
+                    job.party->disarm();
                     if (stop->stop_requested())
                         break;
 

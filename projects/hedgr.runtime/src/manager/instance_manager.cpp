@@ -134,6 +134,7 @@ void instance_manager::stop() noexcept {
     }
     running_.clear();
     party_switches_.clear();
+    catalogue_rereads_.clear();
     attempts_.clear();
     market_feed_.cancel();
     read_service_.clear();
@@ -454,6 +455,7 @@ void instance_manager::handle(command::command& cmd) {
         }
         running_.clear();
         party_switches_.clear();
+        catalogue_rereads_.clear();
 
         /*
          * A probe is cancelled here too, and the schedule is left alone: the
@@ -961,8 +963,21 @@ void instance_manager::apply(const event::event& ev) {
      * because the operator signed out meanwhile would leave the read marked as
      * running, and refuse it again after the next sign-in.
      */
-    if (read_service_.apply(ev))
+    if (read_service_.apply(ev)) {
+        /*
+         * A party change that wanted a catalogue read while another was in
+         * flight is honoured here, now that the old answer has cleared the
+         * pending mark. The new read then uses the new token.
+         */
+        if (ev.kind == event::event_kind::series_catalogue
+            && catalogue_rereads_.erase(
+                   running_key(ev.instance_id, ev.account_id)) > 0) {
+            if (auto refused = read_service_.start_market_catalogue_read(
+                    ev.instance_id, ev.account_id))
+                raise(std::move(refused->key), std::move(refused->message));
+        }
         return;
+    }
 
     /*
      * A fact from a sign-in attempt that has since been replaced is not news
@@ -1050,6 +1065,10 @@ void instance_manager::apply(const event::event& ev) {
             ev.party_id, ev.token);
         sessions_.set_tenant_id(*handle, ev.tenant_id);
         market_feed_.open(ev);
+        if (read_service_.market_catalogue_pending(ev.instance_id,
+                ev.account_id))
+            catalogue_rereads_.insert(
+                running_key(ev.instance_id, ev.account_id));
         if (auto refused = read_service_.start_market_catalogue_read(
                 ev.instance_id, ev.account_id))
             raise(std::move(refused->key), std::move(refused->message));
@@ -1075,6 +1094,13 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);
         market_feed_.close(ev.instance_id, ev.account_id);
+        /*
+         * The worker has finished, so there is nobody left to apply a party
+         * choice to. Forgetting the switch here is what makes the next one
+         * refused rather than silently kept.
+         */
+        party_switches_.erase(
+            running_key(ev.instance_id, ev.account_id));
 
         /*
          * The sentence a person reads stays first and the code follows it in

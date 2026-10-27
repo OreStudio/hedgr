@@ -177,6 +177,17 @@ public:
     [[nodiscard]] std::optional<refusal> start_market_catalogue_read(
         std::string_view instance_id, std::string_view account_id);
 
+    /**
+     * @brief Whether a catalogue read for the pair is already in flight.
+     *
+     * A party change must read the catalogue again, but a read that started
+     * under the old party is holding the pending mark. The caller waits for
+     * that answer and then starts the new read, rather than passing a request
+     * that would be dropped.
+     */
+    [[nodiscard]] bool market_catalogue_pending(std::string_view instance_id,
+        std::string_view account_id) const;
+
     /** @brief Seeds one watched series' history on a fresh connection. */
     void start_market_backfill(std::string_view instance_id,
         std::string_view account_id, std::string_view series_id);

@@ -79,15 +79,21 @@ Follow-ups noticed while building the Instances panel, both done:
 
 - Done: **Act as a party.** The market browser's header Party combo only filtered the
   list, so choosing another party showed its series and read their ticks with the wrong
-  token. The session now has one party at a time, and the control that changes it is a
-  foot combo in the series browser (shown when the login has more than one party). A
-  change pushes a `select_party` command; the runtime leaves the party for the session's
-  own worker and wakes its refresh wait, the worker calls the existing `select_party`
-  and reports the new token, tenant and party, and the runtime replaces the session's
+  token. The session now has one party at a time, and the control that changes it is an
+  "Acting as" foot combo in the series browser (shown when the login has more than one
+  party). A change pushes a `select_party` command; the runtime leaves the party for the
+  session's own worker and wakes its refresh wait, the worker calls the instance's
+  live-session `switch_party` operation (`select_party` stays the login's single-use
+  exchange), and reports the new token and party. The runtime replaces the session's
   token and party, reopens the live stream for the new party and starts a catalogue
-  read. A refusal leaves the session on its old party and raises a condition on the
-  strip. The header combo is gone: the window follows the session. Other windows read
-  the party from the session as before.
+  read, waiting for an in-flight read first. A refusal leaves the session on its old
+  party and raises a condition on the strip. The header combo is gone: the window
+  follows the session, and the other windows read the party from the session as before.
+  ADR 9 records the shared switch object.
+- The "Acting as" control is only in the series browser's foot. Charts, CRM, term
+  structures and the workspace show the party in their identity line but cannot change
+  it; the design asked for a control on the session's identity bar, so the shared foot
+  should grow one.
 - **All parties** choice in the market data browser's Party combo, with a note when the
   list is narrower than the catalogue.
 - **Carry the series identity in the catalogue.** Each tick read now makes one extra

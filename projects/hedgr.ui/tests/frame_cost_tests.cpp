@@ -664,9 +664,8 @@ TEST_CASE("a steady series browser frame costs nothing per row",
     INFO("allocations over 200 rows: " << small << ", over 5000: " << large);
     CHECK(large == small);
     /* Equal counts pass on the old code too, whose rows cost bytes and time. The
-       three left are the chrome's identity and footer text and the foot's
-       one-combo vector, not the rows. */
-    CHECK(small <= 3);
+       two left are the chrome's identity and footer text, not the rows. */
+    CHECK(small <= 2);
 }
 
 TEST_CASE("a series browser survives its catalogue being replaced by a shorter one",

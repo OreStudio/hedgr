@@ -832,6 +832,64 @@ TEST_CASE("a refused party leaves the session on the party it had", "[feed][part
     CHECK(w.manager->sessions().status(*handle) == session_status::authenticated);
 }
 
+namespace {
+
+[[nodiscard]] bool raised(const instance_manager& manager,
+    std::string_view words) {
+    for (const auto& row : manager.conditions().rows())
+        if (row.key.source == hedgr::model::state::condition_source::session
+            && row.message.find(words) != std::string::npos)
+            return true;
+    return false;
+}
+
+}
+
+TEST_CASE("a party command without a party is refused", "[feed][party]") {
+    world w;
+
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "no party was named"));
+}
+
+TEST_CASE("a party command on a session that is not signed in is refused",
+    "[feed][party]") {
+    world w;
+
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    request.party_id = "p-2";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "needs a signed-in session"));
+}
+
+TEST_CASE("a party command with no worker is refused", "[feed][party]") {
+    world w;
+    w.sign_in("a-1");
+
+    /*
+     * The sign-in above is a hand-pushed fact after a failed connect, so the
+     * session row is authenticated while its worker has already finished. The
+     * manager must not leave the control changed with nothing to apply it.
+     */
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    request.party_id = "p-2";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "no worker"));
+}
+
 TEST_CASE("a refresh that follows a failure in one frame opens a stream the "
     "same frame retires", "[feed]") {
     world w;

@@ -361,6 +361,20 @@ public:
     [[nodiscard]] result<void> select_party(std::string_view party_id);
 
     /**
+     * @brief Moves a live session to another party.
+     *
+     * The instance's `switch_party` operation, which accepts an ordinary
+     * session token. `select_party` is the login flow's single-use exchange
+     * and only accepts the narrowly scoped token a sign-in issued, so a
+     * session that is already running must come through here.
+     *
+     * @pre the session is authenticated.
+     * @param party_id the party the session should act as.
+     * @return nothing on success, or why the instance refused.
+     */
+    [[nodiscard]] result<void> switch_party(std::string_view party_id);
+
+    /**
      * @brief Signs out, and gives up the token whatever the instance says.
      *
      * A sign-out is a state rather than an event: the point of it is that this
@@ -612,6 +626,16 @@ public:
     [[nodiscard]] const session_options& options() const noexcept;
 
 private:
+    /**
+     * @brief The shared body of select_party and switch_party.
+     *
+     * The two requests carry the same one field and are answered by the same
+     * response, so the exchanging and the updating are written once; only the
+     * subject and the request type differ.
+     */
+    template <typename Request>
+    [[nodiscard]] result<void> choose_party(std::string_view party_id);
+
     /**
      * @brief The wrapped client, for the two request methods.
      *
