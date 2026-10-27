@@ -2629,13 +2629,14 @@ TEST_CASE("an image is read once and not asked for again while in flight or afte
     /*
      * Six requests in one pump, so the five after the first find it in flight.
      * One read may open the connection twice, so the bound is two and not one,
-     * and six reads could not fit under it.
+     * and six reads could not fit under it. The pending mark is not asserted:
+     * pump drains events after the commands, and a fast failure can clear it
+     * before pump returns, which made that line race.
      */
     const auto before = counter.count();
     for (int request = 0; request < 6; ++request)
         manager.commands().push(load_image("img-a"));
     manager.pump();
-    CHECK(manager.pending_images().size() == 1);
     settle(manager, counter);
     CHECK(counter.count() - before >= 1);
     CHECK(counter.count() - before <= 2);
