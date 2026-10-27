@@ -83,13 +83,21 @@ struct status_text final {
     return widest + style.FramePadding.x * 2.0f + ImGui::GetFrameHeight();
 }
 
+/** @brief The width a caption and the spacing after it take, or zero. */
+[[nodiscard]] float caption_width(const foot_combo& control) {
+    if (control.caption == nullptr || control.caption[0] == '\0')
+        return 0.0f;
+    return ImGui::CalcTextSize(control.caption).x
+        + ImGui::GetStyle().ItemInnerSpacing.x;
+}
+
 /** @brief The width of every control plus the gaps between them. */
 [[nodiscard]] float controls_width(const foot_state& state) {
     if (state.controls.empty())
         return 0.0f;
     float width = 0.0f;
     for (const auto& control : state.controls)
-        width += combo_width(control);
+        width += caption_width(control) + combo_width(control);
     return width
         + ImGui::GetStyle().ItemSpacing.x
             * static_cast<float>(state.controls.size() - 1);
@@ -113,7 +121,12 @@ struct status_text final {
         control.option_count - 1);
 
     bool changed = false;
-    ImGui::SetCursorPos(ImVec2(x, y));
+    if (control.caption != nullptr && control.caption[0] != '\0') {
+        ImGui::SetCursorPos(ImVec2(x,
+            y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f));
+        ImGui::TextDisabled("%s", control.caption);
+    }
+    ImGui::SetCursorPos(ImVec2(x + caption_width(control), y));
     ImGui::PushID(control.id);
     ImGui::SetNextItemWidth(combo_width(control));
     if (ImGui::BeginCombo("##combo",
@@ -339,7 +352,7 @@ bool draw_status_foot(status_bar& status, std::int64_t now_ns,
     float x = controls_x;
     for (const auto& control : state.controls) {
         changed = draw_control(control, x, combo_y) || changed;
-        x += combo_width(control) + gap;
+        x += caption_width(control) + combo_width(control) + gap;
     }
 
     if (!text.age.empty() || !text.timestamp.empty()) {

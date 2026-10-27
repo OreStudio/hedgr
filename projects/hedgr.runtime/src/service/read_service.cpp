@@ -221,6 +221,12 @@ read_service::start_market_read(std::string_view window_id,
     return launch_market_read(std::move(*read), series_id);
 }
 
+bool read_service::market_catalogue_pending(std::string_view instance_id,
+    std::string_view account_id) const {
+    return pending_.contains(
+        request_id::catalogue(instance_id, account_id));
+}
+
 std::optional<refusal> read_service::start_market_catalogue_read(
     std::string_view instance_id, std::string_view account_id) {
     if (!is_open()) {

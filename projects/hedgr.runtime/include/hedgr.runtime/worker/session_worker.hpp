@@ -29,9 +29,45 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <stop_token>
+#include <string>
 
 namespace hedgr::runtime::worker {
+
+/**
+ * @brief A party the runtime asks a live session's worker to act as.
+ *
+ * A session's transport belongs to its worker, so the frame loop cannot call
+ * `select_party` itself. It leaves the party here and wakes the worker's wait;
+ * the worker takes it, asks the instance, and reports the answer as an event.
+ * A newer request replaces one not yet taken, because the last choice is the
+ * one the operator made.
+ *
+ * The wake is a stop source the worker arms before each wait. Requesting a
+ * stop on it is the one thread-safe way to cancel an asio timer from another
+ * thread, and the same mechanism the worker already uses for its own stop.
+ */
+class HEDGR_RUNTIME_EXPORT party_switch final {
+public:
+    /** @brief Leaves @p party_id for the worker and wakes it. */
+    void request(std::string party_id);
+
+    /** @brief Takes the requested party, if there is one. */
+    [[nodiscard]] std::optional<std::string> take();
+
+    /** @brief Arms the wake the next request will fire. */
+    void arm(std::shared_ptr<std::stop_source> waker);
+
+    /** @brief Disarms the wake once the wait is over. */
+    void disarm();
+
+private:
+    std::mutex mutex_;
+    std::optional<std::string> pending_;
+    std::shared_ptr<std::stop_source> waker_;
+};
 
 /**
  * @brief Everything a worker needs, copied so the worker never reads state.
@@ -78,6 +114,15 @@ struct session_job final {
      * stopped worker's last words from the worker that replaced it.
      */
     std::uint64_t attempt = 0;
+
+    /**
+     * @brief Where the frame loop leaves a party the operator chose.
+     *
+     * Never null for a worker started by the manager. A worker whose loop is
+     * between refreshes is woken by a request rather than waiting out the
+     * token's life before applying it.
+     */
+    std::shared_ptr<party_switch> party;
 };
 
 /**

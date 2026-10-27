@@ -35,9 +35,10 @@ using timer_ptr = std::shared_ptr<boost::asio::steady_timer>;
 
 boost::asio::awaitable<void>
 wait_on_strand(timer_ptr timer, std::chrono::steady_clock::time_point deadline,
-               std::shared_ptr<std::stop_source> stop) {
+               std::shared_ptr<std::stop_source> stop,
+               std::shared_ptr<std::stop_source> wake) {
     timer->expires_at(deadline);
-    if (stop->stop_requested())
+    if (stop->stop_requested() || (wake && wake->stop_requested()))
         co_return;
 
     boost::system::error_code ignored;
@@ -65,7 +66,26 @@ wait_until_or_stop(std::chrono::steady_clock::time_point deadline,
     });
 
     co_await boost::asio::co_spawn(
-        strand, wait_on_strand(timer, deadline, stop),
+        strand, wait_on_strand(timer, deadline, stop, nullptr),
+        boost::asio::use_awaitable);
+}
+
+boost::asio::awaitable<void>
+wait_until_or_stop_or_wake(std::chrono::steady_clock::time_point deadline,
+                           std::shared_ptr<std::stop_source> stop,
+                           std::shared_ptr<std::stop_source> wake) {
+    const auto strand =
+        boost::asio::make_strand(co_await boost::asio::this_coro::executor);
+    const auto timer = std::make_shared<boost::asio::steady_timer>(strand);
+
+    const auto cancel = [strand, timer] {
+        boost::asio::post(strand, [timer] { timer->cancel(); });
+    };
+    const std::stop_callback stop_cancel(stop->get_token(), cancel);
+    const std::stop_callback wake_cancel(wake->get_token(), cancel);
+
+    co_await boost::asio::co_spawn(
+        strand, wait_on_strand(timer, deadline, stop, wake),
         boost::asio::use_awaitable);
 }
 

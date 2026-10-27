@@ -39,6 +39,19 @@ HEDGR_RUNTIME_EXPORT boost::asio::awaitable<void>
 wait_until_or_stop(std::chrono::steady_clock::time_point deadline,
                    std::shared_ptr<std::stop_source> stop);
 
+/**
+ * @brief Suspends until a deadline passes, a stop is requested, or @p wake is.
+ *
+ * The same wait with a second thing that may end it, for work that has to be
+ * applied promptly while the session is otherwise idle: a party change does not
+ * wait out the token's life. Check both sources on return; @p stop means the
+ * session is ending, @p wake means there is work waiting.
+ */
+HEDGR_RUNTIME_EXPORT boost::asio::awaitable<void>
+wait_until_or_stop_or_wake(std::chrono::steady_clock::time_point deadline,
+                           std::shared_ptr<std::stop_source> stop,
+                           std::shared_ptr<std::stop_source> wake);
+
 }
 
 #endif

@@ -83,6 +83,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "load_history";
     case command_kind::configure_chart:
         return "configure_chart";
+    case command_kind::select_party:
+        return "select_party";
     }
     return "unknown";
 }

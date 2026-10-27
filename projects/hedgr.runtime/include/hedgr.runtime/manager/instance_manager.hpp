@@ -58,6 +58,10 @@
 #include <unordered_map>
 #include <unordered_set>
 
+namespace hedgr::runtime::worker {
+class party_switch;
+}
+
 namespace hedgr::runtime::manager {
 
 /**
@@ -389,6 +393,7 @@ private:
     wire_format_holder(const model::domain::instance& row) const;
 
     void do_disconnect_session(const model::command::command& cmd);
+    void do_select_party(const model::command::command& cmd);
     void do_refresh_window(const model::command::command& cmd);
 
     /** @brief Starts the read an open asked for, then raises what it refused. */
@@ -469,6 +474,25 @@ private:
     std::unique_ptr<store::sqlite::database> database_;
 
     std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
+
+    /**
+     * @brief Where each live session's party choice is left for its worker.
+     *
+     * Keyed by the same running key as @c running_, because a party belongs to
+     * the worker that owns the transport. A session with no worker has no
+     * entry, and a choice sent to one is refused rather than kept.
+     */
+    std::unordered_map<std::string, std::shared_ptr<worker::party_switch>>
+        party_switches_;
+
+    /**
+     * @brief Pairs whose catalogue must be read again after a party change.
+     *
+     * A catalogue read that was already in flight holds the pending mark, so
+     * the new read would be dropped. The pair is remembered here and the read
+     * is started when that answer lands.
+     */
+    std::unordered_set<std::string> catalogue_rereads_;
 
     /**
      * @brief The attempt each pair is on, by the pair's running key.

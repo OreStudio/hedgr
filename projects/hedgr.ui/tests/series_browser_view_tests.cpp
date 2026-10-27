@@ -239,6 +239,12 @@ TEST_CASE("the party list parses the session's column once", "[browser][parties]
     CHECK(std::string{list.name(0)} == "First");
     CHECK(std::string{list.id(1)} == "p2");
     CHECK(std::string{list.name(1)} == "Second");
+    REQUIRE(list.names.size() == 2);
+    CHECK(std::string{list.names[0]} == "First");
+    CHECK(std::string{list.names[1]} == "Second");
+    CHECK(list.index_of("p1") == 0);
+    CHECK(list.index_of("p2") == 1);
+    CHECK(list.index_of("p9") == list.size());
     CHECK_FALSE(render::update_party_list(list, serialised, "p1", "First"));
     CHECK(list.builds == 1);
 

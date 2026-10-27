@@ -45,6 +45,7 @@
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
+#include "hedgr.runtime/worker/session_worker.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/sqlite/database.hpp"
@@ -3038,4 +3039,35 @@ TEST_CASE("each chart keeps its own view across a restart", "[windows]") {
     CHECK(view_of(manager, "chart:inst-refused:ident-1:s-1") == daily);
     CHECK(view_of(manager, "chart:inst-refused:ident-1:s-2") == hourly);
     manager.stop();
+}
+
+TEST_CASE("a party switch holds the last request and wakes the armed wait",
+    "[runtime][session][party]") {
+    using hedgr::runtime::worker::party_switch;
+
+    party_switch choice;
+    CHECK_FALSE(choice.take().has_value());
+
+    const auto first = std::make_shared<std::stop_source>();
+    choice.arm(first);
+    CHECK_FALSE(first->stop_requested());
+    choice.request("party-one");
+    CHECK(first->stop_requested());
+    const auto taken = choice.take();
+    REQUIRE(taken.has_value());
+    CHECK(*taken == "party-one");
+    CHECK_FALSE(choice.take().has_value());
+    choice.disarm();
+
+    /*
+     * A request that lands before the worker arms its next wait still wakes
+     * that wait, which is the race the arm call exists to close.
+     */
+    choice.request("party-two");
+    const auto second = std::make_shared<std::stop_source>();
+    choice.arm(second);
+    CHECK(second->stop_requested());
+    const auto next = choice.take();
+    REQUIRE(next.has_value());
+    CHECK(*next == "party-two");
 }

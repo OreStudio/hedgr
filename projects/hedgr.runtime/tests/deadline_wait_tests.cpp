@@ -31,11 +31,13 @@ namespace {
 
 using namespace std::chrono_literals;
 using hedgr::runtime::worker::wait_until_or_stop;
+using hedgr::runtime::worker::wait_until_or_stop_or_wake;
 
 /** @brief Runs one wait on a pool and returns how long it took to resume. */
 struct waiter final {
     boost::asio::thread_pool pool{2};
     std::shared_ptr<std::stop_source> stop = std::make_shared<std::stop_source>();
+    std::shared_ptr<std::stop_source> wake = std::make_shared<std::stop_source>();
     std::promise<void> done;
     std::chrono::steady_clock::time_point started;
 
@@ -46,11 +48,23 @@ struct waiter final {
             [this](std::exception_ptr) { done.set_value(); });
     }
 
+    void start_wakeable(std::chrono::steady_clock::duration wait) {
+        started = std::chrono::steady_clock::now();
+        boost::asio::co_spawn(pool,
+            wait_until_or_stop_or_wake(started + wait, stop, wake),
+            [this](std::exception_ptr) { done.set_value(); });
+    }
+
     [[nodiscard]] bool finished_within(std::chrono::milliseconds limit) {
         return done.get_future().wait_for(limit) == std::future_status::ready;
     }
 
-    ~waiter() { stop->request_stop(); pool.stop(); pool.join(); }
+    ~waiter() {
+        stop->request_stop();
+        wake->request_stop();
+        pool.stop();
+        pool.join();
+    }
 };
 
 }
@@ -81,4 +95,16 @@ TEST_CASE("a stop requested before the wait begins returns at once", "[runtime][
     w.start(1h);
 
     REQUIRE(w.finished_within(2s));
+}
+
+TEST_CASE("a wake ends the wait without stopping the session",
+    "[runtime][deadline_wait]") {
+    waiter w;
+    w.start_wakeable(1h);
+
+    std::this_thread::sleep_for(100ms);
+    w.wake->request_stop();
+
+    REQUIRE(w.finished_within(2s));
+    REQUIRE_FALSE(w.stop->stop_requested());
 }

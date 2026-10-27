@@ -133,6 +133,8 @@ void instance_manager::stop() noexcept {
             source->request_stop();
     }
     running_.clear();
+    party_switches_.clear();
+    catalogue_rereads_.clear();
     attempts_.clear();
     market_feed_.cancel();
     read_service_.clear();
@@ -393,6 +395,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::disconnect_session:
         do_disconnect_session(cmd);
         break;
+    case command::command_kind::select_party:
+        do_select_party(cmd);
+        break;
     case command::command_kind::open_window:
         complete_open(window_service_.open(cmd));
         break;
@@ -449,6 +454,8 @@ void instance_manager::handle(command::command& cmd) {
                 source->request_stop();
         }
         running_.clear();
+        party_switches_.clear();
+        catalogue_rereads_.clear();
 
         /*
          * A probe is cancelled here too, and the schedule is left alone: the
@@ -637,6 +644,14 @@ void instance_manager::start_session_for(const command::command& cmd,
     job.attempt = attempt;
 
     /*
+     * The worker owns the transport, and with it the only way to select a
+     * party. The frame loop leaves the choice here and wakes the worker, which
+     * is why the switch is made before the spawn and replaced with the worker.
+     */
+    job.party = std::make_shared<worker::party_switch>();
+    party_switches_[attempt_key] = job.party;
+
+    /*
      * A stored credential travels sealed, with the password that opens it, and
      * the worker opens it on its own thread. The password is copied out of the
      * held secret here and moved into the job, so the job's copy is wiped when
@@ -771,6 +786,36 @@ void instance_manager::do_disconnect_session(const command::command& cmd) {
 
     sessions_.remove(*handle);
     static_cast<void>(save_windows());
+}
+
+void instance_manager::do_select_party(const command::command& cmd) {
+    if (cmd.party_id.empty()) {
+        raise({model_state::condition_source::session, cmd.account_id},
+            "no party was named");
+        return;
+    }
+
+    const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
+    if (!handle
+        || sessions_.status(*handle) != domain::session_status::authenticated) {
+        raise({model_state::condition_source::session, cmd.account_id},
+            "acting as another party needs a signed-in session");
+        return;
+    }
+
+    /*
+     * The choice is handed to the session's own worker, which holds the
+     * transport. A session with no worker left has nothing to ask, and saying
+     * so is better than leaving the control changed and nothing happening.
+     */
+    const auto found = party_switches_.find(
+        running_key(cmd.instance_id, cmd.account_id));
+    if (found == party_switches_.end() || !found->second) {
+        raise({model_state::condition_source::session, cmd.account_id},
+            "the session has no worker to act as another party");
+        return;
+    }
+    found->second->request(cmd.party_id);
 }
 
 void instance_manager::do_refresh_window(const command::command& cmd) {
@@ -918,8 +963,21 @@ void instance_manager::apply(const event::event& ev) {
      * because the operator signed out meanwhile would leave the read marked as
      * running, and refuse it again after the next sign-in.
      */
-    if (read_service_.apply(ev))
+    if (read_service_.apply(ev)) {
+        /*
+         * A party change that wanted a catalogue read while another was in
+         * flight is honoured here, now that the old answer has cleared the
+         * pending mark. The new read then uses the new token.
+         */
+        if (ev.kind == event::event_kind::series_catalogue
+            && catalogue_rereads_.erase(
+                   running_key(ev.instance_id, ev.account_id)) > 0) {
+            if (auto refused = read_service_.start_market_catalogue_read(
+                    ev.instance_id, ev.account_id))
+                raise(std::move(refused->key), std::move(refused->message));
+        }
         return;
+    }
 
     /*
      * A fact from a sign-in attempt that has since been replaced is not news
@@ -996,6 +1054,37 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_token(*handle, ev.token);
         market_feed_.retoken_or_open(ev);
         break;
+    case event::event_kind::session_party_changed:
+        /*
+         * The session now acts as another party, so the token IAM just issued
+         * is the one every read must carry, and the stream, which was opened
+         * for the old party, is reopened for the new one. The catalogue is
+         * party-scoped too, so it is read again rather than filtered.
+         */
+        sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
+            ev.party_id, ev.token);
+        sessions_.set_tenant_id(*handle, ev.tenant_id);
+        market_feed_.open(ev);
+        if (read_service_.market_catalogue_pending(ev.instance_id,
+                ev.account_id))
+            catalogue_rereads_.insert(
+                running_key(ev.instance_id, ev.account_id));
+        if (auto refused = read_service_.start_market_catalogue_read(
+                ev.instance_id, ev.account_id))
+            raise(std::move(refused->key), std::move(refused->message));
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' now acts as party '" << ev.party_id << "'";
+        break;
+    case event::event_kind::session_party_refused:
+        /*
+         * The session keeps its old party and token; the control that asked
+         * goes back to what the session says, and the bar carries the reason.
+         */
+        raise({model_state::condition_source::session, ev.account_id},
+            ev.message.empty() ? "the instance refused that party"
+                               : ev.message);
+        break;
     case event::event_kind::deployment_snapshot:
         sessions_.set_deployment(*handle, ev.deployment);
         BOOST_LOG_SEV(lg(), ores::logging::debug)
@@ -1005,6 +1094,13 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);
         market_feed_.close(ev.instance_id, ev.account_id);
+        /*
+         * The worker has finished, so there is nobody left to apply a party
+         * choice to. Forgetting the switch here is what makes the next one
+         * refused rather than silently kept.
+         */
+        party_switches_.erase(
+            running_key(ev.instance_id, ev.account_id));
 
         /*
          * The sentence a person reads stays first and the code follows it in
@@ -1076,6 +1172,7 @@ void instance_manager::stop_session(const std::string& window_or_session_id) {
     if (found->second)
         found->second->request_stop();
     running_.erase(found);
+    party_switches_.erase(window_or_session_id);
 }
 
 }

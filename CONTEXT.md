@@ -88,6 +88,15 @@ pair, so reconnecting resumes the same session rather than creating a second
 one. A session owns its transport, its bearer token, its tenant and party
 selection, and its last error.
 
+## Party selection
+
+The one party a session acts as. IAM answers with a token scoped to it, and
+every read, tick and stream the session starts carries that token. Choosing
+another party asks IAM for a fresh token and replaces the session's own; the
+catalogue is read again and the live stream is reopened, because both belonged
+to the party that was let go. There is no filter by another party, because the
+series it would list could not be read with the token the session holds.
+
 ## Probe
 
 A reachability and readiness check of one instance. A probe opens its own NATS

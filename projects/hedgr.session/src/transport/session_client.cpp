@@ -817,25 +817,21 @@ result<int> session_client::refresh() {
     }
 }
 
-result<void> session_client::select_party(std::string_view party_id) {
+template <typename Request>
+result<void> session_client::choose_party(std::string_view party_id) {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,
             "a party can only be chosen by a signed-in session");
     }
 
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Selecting party '" << party_id << "' on '"
-        << options_.subject_prefix << "'";
-
-    using ores::iam::messaging::select_party_request;
-    using ores::iam::messaging::select_party_response;
+    using response_type = typename Request::response_type;
 
     try {
-        const select_party_request request{.party_id = std::string(party_id)};
+        const Request request{.party_id = std::string(party_id)};
 
         const auto reply =
-            ores::nats::service::authenticated_request_and_decode<select_party_response>(
-                nats_, select_party_request::nats_subject, request,
+            ores::nats::service::authenticated_request_and_decode<response_type>(
+                nats_, Request::nats_subject, request,
                 options_.request_timeout);
         if (!reply) {
             return fail(session_errc::protocol_error,
@@ -850,7 +846,7 @@ result<void> session_client::select_party(std::string_view party_id) {
                     ? std::string("the instance refused this party")
                     : answer.message,
                 .detail = std::format("{} answered success=false",
-                    select_party_request::nats_subject)});
+                    Request::nats_subject)});
         }
 
         /*
@@ -878,6 +874,20 @@ result<void> session_client::select_party(std::string_view party_id) {
     } catch (...) {
         return transport_failure();
     }
+}
+
+result<void> session_client::select_party(std::string_view party_id) {
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Selecting party '" << party_id << "' on '"
+        << options_.subject_prefix << "'";
+    return choose_party<ores::iam::messaging::select_party_request>(party_id);
+}
+
+result<void> session_client::switch_party(std::string_view party_id) {
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Switching to party '" << party_id << "' on '"
+        << options_.subject_prefix << "'";
+    return choose_party<ores::iam::messaging::switch_party_request>(party_id);
 }
 
 result<void> session_client::logout() {

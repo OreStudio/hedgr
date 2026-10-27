@@ -184,48 +184,47 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         catalogue != nullptr ? catalogue->generation : 0;
 
     /*
-     * The parties this login may act as, from the sign-in answer. The session
-     * is signed in as one of them and this window starts on it. A login whose
-     * answer carried no list still has the party it is scoped to, so the
-     * picker is never empty.
+     * The parties this login may act as, from the sign-in answer, and the one
+     * it acts as now. A login whose answer carried no list still has the party
+     * it is scoped to, so the list is never empty while a party is held.
+     *
+     * There is one party at a time per session: this window follows it rather
+     * than filtering by another, and the control at the foot is what changes
+     * it. Filtering by a party the session does not hold would list series
+     * whose ticks then had to be read with a token for another party.
      */
     const auto& parties = state.parties;
     update_party_list(state.parties, input.sessions.parties(*session),
         session_party, input.sessions.party_name(*session));
-    if (state.market_party_id.empty()) {
-        state.market_party_id = session_party.empty()
-            ? (parties.empty() ? std::string{} : parties.id(0))
-            : std::string{session_party};
+    state.market_party_id = session_party.empty()
+        ? (parties.empty() ? std::string{} : std::string{parties.id(0)})
+        : std::string{session_party};
+    const auto acting = parties.index_of(session_party);
+    state.acting_party = static_cast<int>(
+        acting < parties.size() ? acting : 0);
+    if (parties.size() > 1) {
+        foot.controls.push_back(widget::foot_combo{
+            .id = "acting-as",
+            .tooltip = "Act as another party for this session",
+            .caption = "Acting as",
+            .options = parties.names.data(),
+            .option_count = static_cast<int>(parties.size()),
+            .selected = &state.acting_party});
     }
-
-    if (!parties.empty()) {
-        const char* current = state.market_party_id.c_str();
-        for (std::size_t i = 0; i < parties.size(); ++i) {
-            if (state.market_party_id == parties.id(i))
-                current = parties.name(i);
-        }
-        const std::string session_party_name{
-            input.sessions.party_name(*session)};
-
-        ImGui::AlignTextToFramePadding();
-        widget::caption("Party");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(240.0f);
-        if (ImGui::BeginCombo("##party", current)) {
-            for (std::size_t i = 0; i < parties.size(); ++i) {
-                const bool chosen = state.market_party_id == parties.id(i);
-                if (ImGui::Selectable(parties.name(i), chosen))
-                    state.market_party_id = parties.id(i);
-                if (chosen)
-                    ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
-        ImGui::SetItemTooltip(
-            "The party whose series this window lists. The session is signed in "
-            "as %s; choosing another party shows its series in this window.",
-            session_party_name.c_str());
-    }
+    const auto draw_foot = [&] {
+        if (!widget::draw_status_foot(status, input.now_ns, foot))
+            return;
+        const auto chosen = static_cast<std::size_t>(state.acting_party);
+        if (chosen >= parties.size())
+            return;
+        model::command::command request;
+        request.kind = model::command::command_kind::select_party;
+        request.instance_id =
+            std::string{input.sessions.instance_id(*session)};
+        request.account_id = std::string{input.sessions.account_id(*session)};
+        request.party_id = parties.id(chosen);
+        input.commands.push(std::move(request));
+    };
 
     /*
      * Asset class is the first cut. Choosing IR switches the list from points
@@ -358,7 +357,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     if (catalogue_verdict.state != widget::view_state::none && rows.empty()) {
         widget::draw_view_state_body(status, foot, catalogue_verdict);
-        widget::draw_status_foot(status, input.now_ns, foot);
+        draw_foot();
         ImGui::PopID();
         return;
     }
@@ -374,7 +373,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             std::fill(state.filter.begin(), state.filter.end(), '\0');
         widget::draw_view_state_body(status, foot,
             {widget::view_state::no_data, widget::view_words::empty, what});
-        widget::draw_status_foot(status, input.now_ns, foot);
+        draw_foot();
         ImGui::PopID();
     };
 
@@ -476,7 +475,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
         ImGui::TextDisabled(
             "Double-click a curve to open its term structure.");
-        widget::draw_status_foot(status, input.now_ns, foot);
+        draw_foot();
         ImGui::PopID();
         return;
     }
@@ -608,7 +607,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     ImGui::TextDisabled(
         "Double-click a series to plot it. Each plot keeps its own window.");
-    widget::draw_status_foot(status, input.now_ns, foot);
+    draw_foot();
     ImGui::PopID();
 }
 

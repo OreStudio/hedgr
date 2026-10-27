@@ -400,6 +400,15 @@ struct window_ui_state final {
     series_browser_view series_view;
     party_list parties;
 
+    /**
+     * @brief The party the foot control shows, as an index into @c parties.
+     *
+     * The control writes this and the window turns a change into a command; the
+     * next frame follows the session's own party again, so a refused switch
+     * returns the control to the party the session actually holds.
+     */
+    int acting_party = 0;
+
     /** @brief The series last chosen in the chooser's combobox. */
     std::string market_selected_series_id;
     std::string market_selected_series_label;

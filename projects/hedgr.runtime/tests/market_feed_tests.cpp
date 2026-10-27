@@ -776,6 +776,120 @@ TEST_CASE("a token refresh keeps the stream and its watches", "[feed]") {
     CHECK(feed.unwatches.empty());
 }
 
+TEST_CASE("acting as another party replaces the token and reopens the stream",
+    "[feed][party]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    REQUIRE(w.feeds.size() == 1);
+
+    event changed;
+    changed.kind = event_kind::session_party_changed;
+    changed.instance_id = instance_id;
+    changed.account_id = "a-1";
+    changed.tenant_id = "tenant-2";
+    changed.tenant_name = "Tenant Two";
+    changed.party_id = "p-2";
+    changed.party_name = "Second";
+    changed.token = secret_string{std::string{"token-2"}};
+    changed.payload = "a-1@example.test";
+    w.manager->events().push(std::move(changed));
+    w.manager->pump();
+
+    const auto handle = w.manager->sessions().find(instance_id, "a-1");
+    REQUIRE(handle.has_value());
+    CHECK(w.manager->sessions().party_id(*handle) == "p-2");
+    CHECK(w.manager->sessions().party_name(*handle) == "Second");
+    CHECK(w.manager->sessions().tenant_id(*handle) == "tenant-2");
+    CHECK(w.manager->sessions().token(*handle) == "token-2");
+
+    /*
+     * The old stream belonged to the old party, so it is retired and another
+     * opened against the same deployment with the new party and token.
+     */
+    REQUIRE(w.feeds.size() == 2);
+    CHECK(w.feeds[0]->stops == 1);
+    CHECK(w.feeds[1]->options.party_id == "p-2");
+    CHECK(w.feeds[1]->options.token == "token-2");
+}
+
+TEST_CASE("a refused party leaves the session on the party it had", "[feed][party]") {
+    world w;
+    w.sign_in("a-1");
+
+    event refused;
+    refused.kind = event_kind::session_party_refused;
+    refused.instance_id = instance_id;
+    refused.account_id = "a-1";
+    refused.message = "not a party of this login";
+    w.manager->events().push(std::move(refused));
+    w.manager->pump();
+
+    const auto handle = w.manager->sessions().find(instance_id, "a-1");
+    REQUIRE(handle.has_value());
+    CHECK(w.manager->sessions().party_id(*handle) == party);
+    CHECK(w.manager->sessions().status(*handle) == session_status::authenticated);
+}
+
+namespace {
+
+[[nodiscard]] bool raised(const instance_manager& manager,
+    std::string_view words) {
+    for (const auto& row : manager.conditions().rows())
+        if (row.key.source == hedgr::model::state::condition_source::session
+            && row.message.find(words) != std::string::npos)
+            return true;
+    return false;
+}
+
+}
+
+TEST_CASE("a party command without a party is refused", "[feed][party]") {
+    world w;
+
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "no party was named"));
+}
+
+TEST_CASE("a party command on a session that is not signed in is refused",
+    "[feed][party]") {
+    world w;
+
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    request.party_id = "p-2";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "needs a signed-in session"));
+}
+
+TEST_CASE("a party command with no worker is refused", "[feed][party]") {
+    world w;
+    w.sign_in("a-1");
+
+    /*
+     * The sign-in above is a hand-pushed fact after a failed connect, so the
+     * session row is authenticated while its worker has already finished. The
+     * manager must not leave the control changed with nothing to apply it.
+     */
+    command request;
+    request.kind = command_kind::select_party;
+    request.instance_id = instance_id;
+    request.account_id = "a-1";
+    request.party_id = "p-2";
+    w.push(std::move(request));
+
+    CHECK(raised(*w.manager, "no worker"));
+}
+
 TEST_CASE("a refresh that follows a failure in one frame opens a stream the "
     "same frame retires", "[feed]") {
     world w;

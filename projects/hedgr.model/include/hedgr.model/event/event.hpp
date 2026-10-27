@@ -119,6 +119,21 @@ enum class event_kind : std::uint8_t {
      * apart from the first backfill's @c series_points.
      */
     series_history = 19,
+    /**
+     * @brief A live session was re-scoped to another party.
+     *
+     * Carries the fresh, party-scoped token and the tenant and party IAM
+     * answered with. The frame loop replaces the session's token and party,
+     * reopens the live stream for the new party, and re-reads the catalogue.
+     */
+    session_party_changed = 20,
+    /**
+     * @brief The instance refused to scope a live session to a party.
+     *
+     * The session stays signed in with its old token; the refusal is reported
+     * as a condition so the operator sees why the control went back.
+     */
+    session_party_refused = 21,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
