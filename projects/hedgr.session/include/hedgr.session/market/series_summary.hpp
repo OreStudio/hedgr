@@ -27,6 +27,19 @@
 namespace hedgr::session::market {
 
 /**
+ * @brief The typed identity of @p uri, or nothing when it is not a series URI.
+ *
+ * Mirrors the deployment's own projection: the asset and quote spelling come
+ * from the codec, the scope is the URI's subject, and every other identity
+ * field follows in schema order. The party and provider are the series row's,
+ * not the URI's.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT
+std::optional<hedgr::model::domain::market_series_identity>
+series_identity_from_uri(std::string_view uri, std::string_view party_id,
+    std::string_view provider_code);
+
+/**
  * @brief The catalogue row the interface lists for one series of the deployment.
  *
  * The id is the series' own uuid, which the deployment keys by item, provider

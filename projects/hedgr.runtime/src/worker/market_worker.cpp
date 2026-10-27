@@ -129,7 +129,8 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .party_id = row.party_id,
                     .tenor = row.tenor,
                     .curve_key = row.curve_key,
-                    .curve_label = row.curve_label});
+                    .curve_label = row.curve_label,
+                    .identity = row.identity});
             }
             /*
              * The providers travel with the catalogue because the browser
@@ -150,8 +151,8 @@ boost::asio::awaitable<void> run_market(market_job job,
     } else {
         const auto read = job.history
             ? client.market_series_history(job.series_id, job.history_from_ns,
-                  job.history_to_ns)
-            : client.market_series_points(job.series_id);
+                  job.history_to_ns, job.identity)
+            : client.market_series_points(job.series_id, job.identity);
         if (read) {
             fact.history_truncated = read->truncated;
             fact.tick_from_ns = read->from_ns;

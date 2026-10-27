@@ -1418,7 +1418,8 @@ series_identity(ores::nats::service::nats_client& nats,
 
 result<market_series_read>
 session_client::market_series_ticks(std::string_view series_id,
-    std::int64_t from_ns, std::int64_t to_ns) const {
+    std::int64_t from_ns, std::int64_t to_ns,
+    const hedgr::model::domain::market_series_identity& identity) const {
     if (!is_connected()) {
         return fail(session_errc::closed,
             "a tick read needs an open connection to the instance");
@@ -1443,15 +1444,33 @@ session_client::market_series_ticks(std::string_view series_id,
 
     try {
         /*
-         * The call names a series by its typed identity, not by its key, and
-         * the service is the one that knows each series' identity, so it is
-         * asked for the list and the series' own entry is sent back as it came.
+         * The call names a series by its typed identity, not by its key. The
+         * catalogue parsed that identity from the series URI when it arrived,
+         * so it is used directly. A series whose catalogue row predates that
+         * parse falls back to the list the service publishes.
          */
-        auto identity = series_identity(client(), series_id,
-            options_.request_timeout);
-        if (!identity)
-            return std::unexpected(std::move(identity.error()));
-        request.identity = std::move(*identity);
+        ores::marketdata::messaging::resolve_series_identity_request
+            request_identity;
+        if (!identity.empty()) {
+            request_identity.asset = identity.asset;
+            request_identity.scope = identity.scope;
+            request_identity.instrument_type = identity.instrument_type;
+            request_identity.quote_type = identity.quote_type;
+            request_identity.party_id = identity.party_id;
+            request_identity.provider_code = identity.provider_code;
+            request_identity.fields.reserve(identity.fields.size());
+            for (const auto& field : identity.fields) {
+                request_identity.fields.push_back(
+                    {.name = field.name, .text = field.text});
+            }
+        } else {
+            auto listed = series_identity(client(), series_id,
+                options_.request_timeout);
+            if (!listed)
+                return std::unexpected(std::move(listed.error()));
+            request_identity = std::move(*listed);
+        }
+        request.identity = std::move(request_identity);
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Tick read of series '" << series_id << "' names identity "
             << "asset '" << request.identity.asset << "' scope '"
@@ -1459,8 +1478,9 @@ session_client::market_series_ticks(std::string_view series_id,
             << request.identity.instrument_type << "' quote '"
             << request.identity.quote_type << "' party '"
             << request.identity.party_id << "' with "
-            << request.identity.fields.size() << " fields (from_ns " << from_ns
-            << ", to_ns " << to_ns << ")";
+            << request.identity.fields.size() << " fields ("
+            << (identity.empty() ? "listed" : "from the catalogue")
+            << "; from_ns " << from_ns << ", to_ns " << to_ns << ")";
 
         const auto reply = ores::nats::service::authenticated_request_and_decode<
             get_series_ticks_response>(client(),
@@ -1516,10 +1536,13 @@ namespace {
 }
 
 result<market_series_read>
-session_client::market_series_points(std::string_view series_id) const {
-    const tick_fetch fetch = [this, series_id](const tick_span& span) {
-        return market_series_ticks(series_id, span.from_ns, span.to_ns);
-    };
+session_client::market_series_points(std::string_view series_id,
+    const hedgr::model::domain::market_series_identity& identity) const {
+    const tick_fetch fetch
+        = [this, series_id, &identity](const tick_span& span) {
+              return market_series_ticks(series_id, span.from_ns, span.to_ns,
+                  identity);
+          };
     return read_first_load(fetch, clock_now_ns());
 }
 
@@ -1535,10 +1558,13 @@ session_client::market_series_tail(std::string_view series_id,
 
 result<market_series_read>
 session_client::market_series_history(std::string_view series_id,
-    std::int64_t from_ns, std::int64_t to_ns) const {
-    const tick_fetch fetch = [this, series_id](const tick_span& span) {
-        return market_series_ticks(series_id, span.from_ns, span.to_ns);
-    };
+    std::int64_t from_ns, std::int64_t to_ns,
+    const hedgr::model::domain::market_series_identity& identity) const {
+    const tick_fetch fetch
+        = [this, series_id, &identity](const tick_span& span) {
+              return market_series_ticks(series_id, span.from_ns, span.to_ns,
+                  identity);
+          };
     return read_tick_span(fetch, tick_span{from_ns, to_ns}, to_ns, 1);
 }
 

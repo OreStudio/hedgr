@@ -30,11 +30,55 @@
 
 namespace hedgr::model::domain {
 
+/** @brief One extra field of a typed series identity: a name and its text. */
+struct market_series_identity_field final {
+    std::string name;
+    std::string text;
+};
+
+/**
+ * @brief The typed identity of one market series.
+ *
+ * What a tick read names a series by: the asset, the scope (the URI's subject),
+ * the instrument and quote types, the owning party and provider, and every
+ * other identity field. It is parsed from the catalogue's oresmd URI once, when
+ * the catalogue arrives, so a tick read does not list the deployment's
+ * identities to find this series' own.
+ */
+struct market_series_identity final {
+    /** @brief The asset class as the schema spells it, for example fx. */
+    std::string asset;
+
+    /** @brief The URI's subject, for example the base currency. */
+    std::string scope;
+
+    /** @brief The instrument type as the schema spells it, for example fx_spot. */
+    std::string instrument_type;
+
+    /** @brief The quote type as the schema spells it, for example rate. */
+    std::string quote_type;
+
+    /** @brief The party that owns the series. */
+    std::string party_id;
+
+    /** @brief The provider whose ids the series carries. */
+    std::string provider_code;
+
+    /** @brief The identity's remaining fields, in schema order. */
+    std::vector<market_series_identity_field> fields;
+
+    /** @brief Whether the identity was parsed; an empty one falls back to a list. */
+    [[nodiscard]] bool empty() const noexcept {
+        return instrument_type.empty();
+    }
+};
+
 /**
  * @brief One market series, as the catalogue lists it.
  *
- * The URI is the identity every request carries. The label is the interface's
- * reading of it, made once when the catalogue arrives.
+ * The URI is the series' identity. The label is the interface's reading of it,
+ * made once when the catalogue arrives; the typed identity is the read's, made
+ * once then too.
  */
 struct market_series_row final {
     /** @brief The series' own key. */
@@ -63,6 +107,9 @@ struct market_series_row final {
 
     /** @brief The curve's name, from the URI without its term. */
     std::string curve_label;
+
+    /** @brief The typed identity a tick read names the series by. */
+    market_series_identity identity;
 };
 
 /**
