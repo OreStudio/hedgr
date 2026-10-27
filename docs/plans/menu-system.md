@@ -34,8 +34,8 @@ notes after each record what the implementation found.
   (step 8). Each window still draws its own foot with
   `widget::draw_status_foot` (`widget/status_foot.hpp`: identity, state dot,
   optional combos), and `widget/status_bar.hpp` holds a one-line message
-  ladder (notice, problem, error) that the strip and the window foots both
-  read.
+  ladder (notice, problem, error). The strip owns that ladder; the foots read
+  an empty bar, so a failure is said once and not repeated in every window.
 - **The logo.** `render/intro.cpp` draws the launch intro
   (the splash and its artwork are gone). Nothing draws a small logo.
 - **Docking and viewports.** `hedgr.imgui/src/app/application.cpp` enables

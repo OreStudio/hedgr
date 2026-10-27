@@ -2239,9 +2239,9 @@ void render_instances_window(hedgr::model::state::window_handle handle,
     /*
      * The status bar, last, so that its reservation is made after everything
      * else has taken the height it needs and its own foot is measured back
-     * from the window's edge. It carries the runtime's messages and nothing
-     * else: the lock control used to live here and moved into the window's one
-     * toolbar, so the bar is read and not operated.
+     * from the window's edge. The bar this window is handed carries no
+     * message: the bottom strip owns the run's ladder. What is drawn here is
+     * the window's own state, and the bar is read and not operated.
      */
     widget::draw_status_foot(status, input.now_ns, foot);
 

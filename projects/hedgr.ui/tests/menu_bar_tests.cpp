@@ -1788,6 +1788,44 @@ TEST_CASE("the status strip carries the message ladder in its severity's colour"
     CHECK(vertices_of(theme::warning_colour) > 0);
 }
 
+TEST_CASE("a runtime failure is drawn once, in the strip and not in a window's "
+          "foot",
+    "[menu_bar][status_bar][workspace]") {
+    headless_imgui imgui;
+    theme::apply_theme();
+    desk desk;
+    static_cast<void>(desk.open(model::domain::window_kind::instance_manager,
+        model::domain::notice_state{}, "instance-manager"));
+    render::workspace workspace;
+    auto input = desk.input();
+    input.now_ns = 1000;
+    input.runtime_error = "one unique failure the store refused";
+
+    /*
+     * The window foots draw text through ImGui, which the log buffer records;
+     * the strip draws on the window's draw list, which it does not. So the
+     * message being absent from the log is the foots not saying it, and the
+     * strip's red vertices are the strip still saying it.
+     */
+    std::string text;
+    for (int i = 0; i < 3; ++i) {
+        ImGui::NewFrame();
+        ImGui::LogToBuffer();
+        workspace.render(input);
+        text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+        ImGui::LogFinish();
+        ImGui::Render();
+    }
+    CHECK(text.find("one unique failure the store refused") == std::string::npos);
+
+    const ImGuiWindow* strip = ImGui::FindWindowByName("###hedgr-status-bar");
+    REQUIRE(strip != nullptr);
+    std::size_t red = 0;
+    for (const ImDrawVert& vertex : strip->DrawList->VtxBuffer)
+        red += vertex.col == theme::failure_colour ? 1 : 0;
+    CHECK(red > 0);
+}
+
 TEST_CASE("VIEW > Windows closes every mini plot at once",
     "[menu_bar][view][windows]") {
     bar_harness h;
