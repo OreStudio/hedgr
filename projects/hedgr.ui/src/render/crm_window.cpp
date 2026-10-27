@@ -21,6 +21,7 @@
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/party_foot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -150,7 +151,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         widget::draw_view_state_body(status, foot,
             {widget::view_state::no_data, widget::view_words::empty,
                 "No CRM is selected."});
-        widget::draw_status_foot(status, input.now_ns, foot);
+        static_cast<void>(
+            draw_foot_with_party(input, *session, status, foot, state));
         ImGui::PopID();
         return;
     }
@@ -224,7 +226,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         facts.has_data = false;
         facts.empty_what = "No rates are configured for this party.";
         widget::draw_view_state_body(status, foot, widget::view_state_of(facts));
-        widget::draw_status_foot(status, input.now_ns, foot);
+        static_cast<void>(
+            draw_foot_with_party(input, *session, status, foot, state));
         ImGui::PopID();
         return;
     }
@@ -266,7 +269,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         widget::draw_view_state_body(status, foot,
             {widget::view_state::no_data, widget::view_words::empty,
                 "This CRM has no pairs."});
-        widget::draw_status_foot(status, input.now_ns, foot);
+        static_cast<void>(
+            draw_foot_with_party(input, *session, status, foot, state));
         ImGui::PopID();
         return;
     }
@@ -443,7 +447,7 @@ void render_crm_matrix(window_handle handle, const render_input& input,
     }
     ImGui::PopStyleVar();
 
-    widget::draw_status_foot(status, input.now_ns, foot);
+    static_cast<void>(draw_foot_with_party(input, *session, status, foot, state));
     ImGui::PopID();
 }
 

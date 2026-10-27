@@ -84,7 +84,7 @@ Follow-ups noticed while building the Instances panel, both done:
 - Done: **Act as a party.** The market browser's header Party combo only filtered the
   list, so choosing another party showed its series and read their ticks with the wrong
   token. The session now has one party at a time, and the control that changes it is an
-  "Acting as" foot combo in the series browser (shown when the login has more than one
+  "Acting as" foot combo on every session window (shown when the login has more than one
   party). A change pushes a `select_party` command; the runtime leaves the party for the
   session's own worker and wakes its refresh wait, the worker calls the instance's
   live-session `switch_party` operation (`select_party` stays the login's single-use
@@ -94,10 +94,10 @@ Follow-ups noticed while building the Instances panel, both done:
   party and raises a condition on the strip. The header combo is gone: the window
   follows the session, and the other windows read the party from the session as before.
   ADR 9 records the shared switch object.
-- The "Acting as" control is only in the series browser's foot. Charts, CRM, term
-  structures and the workspace show the party in their identity line but cannot change
-  it; the design asked for a control on the session's identity bar, so the shared foot
-  should grow one.
+- Done: **the "Acting as" control is on every window's identity bar.** The series
+  browser's foot logic moved to `render/party_foot.cpp`, and the chart, CRM and term
+  structure feet draw through it too. One control builds the request; a choice pushes
+  `select_party`, and choosing the party the session already holds pushes nothing.
 - The old **All parties** choice is obsolete: the act-as-party work removed the
   browser's Party combo, and a session now holds one party at a time, so there is
   nothing to list across.

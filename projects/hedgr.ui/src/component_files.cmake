@@ -22,6 +22,7 @@ set(files
     "render/mini_plot_window.cpp"
     "render/notice_window.cpp"
     "render/panels.cpp"
+    "render/party_foot.cpp"
     "render/renderer.cpp"
     "render/series_browser.cpp"
     "render/series_browser_view.cpp"
