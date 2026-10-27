@@ -75,11 +75,15 @@ namespace domain = hedgr::model::domain;
 bool update_series_browser_view(series_browser_view& view,
     const series_browser_query& query,
     const std::vector<domain::market_series_row>& catalogue) {
+    const bool hidden_changed =
+        view.hidden_providers.size() != query.hidden_providers.size()
+        || !std::equal(view.hidden_providers.begin(),
+            view.hidden_providers.end(), query.hidden_providers.begin());
     if (view.builds != 0 && view.generation == query.generation
         && view.filter == query.filter
         && view.asset_class == query.asset_class
         && view.party == query.party
-        && view.provider == query.provider)
+        && view.provider == query.provider && !hidden_changed)
         return false;
     ++view.builds;
     view.generation = query.generation;
@@ -87,10 +91,19 @@ bool update_series_browser_view(series_browser_view& view,
     view.asset_class = query.asset_class;
     view.party = query.party;
     view.provider = query.provider;
+    view.hidden_providers.assign(query.hidden_providers.begin(),
+        query.hidden_providers.end());
 
+    const auto hidden = [&](std::string_view code) {
+        return std::find(query.hidden_providers.begin(),
+                   query.hidden_providers.end(), code)
+            != query.hidden_providers.end();
+    };
     const bool curves = query.asset_class == "IR";
     view.rows.clear();
     for (std::size_t i = 0; i < catalogue.size(); ++i) {
+        if (hidden(catalogue[i].provider_code))
+            continue;
         if (curves ? listed_as_curve(catalogue[i], query)
                    : listed_as_series(catalogue[i], query))
             view.rows.push_back(static_cast<std::uint32_t>(i));

@@ -207,6 +207,14 @@ struct event final {
     /** @brief The series catalogue, for series_catalogue. */
     std::vector<domain::market_series_row> series;
 
+    /**
+     * @brief The deployment's providers, for series_catalogue.
+     *
+     * Empty when the provider read failed; the browser then hides no provider
+     * rather than hiding the wrong rows.
+     */
+    std::vector<domain::market_provider_row> providers;
+
     /** @brief The series a points event is about, for series_points. */
     std::string series_id;
 

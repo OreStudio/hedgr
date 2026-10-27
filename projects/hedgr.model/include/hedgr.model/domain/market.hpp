@@ -65,6 +65,31 @@ struct market_series_row final {
     std::string curve_label;
 };
 
+/**
+ * @brief One market data provider, as the deployment lists it.
+ *
+ * The kind is the deployment's own word, not a mapping: `data_vendor`,
+ * `exchange`, `broker` or `reference`. A reference provider publishes the
+ * definition of an instrument and never ticks; a series of one is listed
+ * beside the same pair's data-vendor series.
+ */
+struct market_provider_row final {
+    /** @brief The provider's code, for example ore or bloomberg. */
+    std::string code;
+
+    /** @brief The provider's name as a person knows it. */
+    std::string name;
+
+    /** @brief The deployment's kind for it, for example data_vendor. */
+    std::string kind;
+};
+
+/** @brief Whether @p row publishes data rather than a reference definition. */
+[[nodiscard]] inline bool is_reference_provider(
+    const market_provider_row& row) noexcept {
+    return row.kind == "reference";
+}
+
 /** @brief One node of a term structure: a tenor and the rate at it. */
 struct term_node final {
     /** @brief The tenor or term label, as the series URI spells it. */

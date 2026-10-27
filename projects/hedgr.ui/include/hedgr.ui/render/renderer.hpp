@@ -401,6 +401,16 @@ struct window_ui_state final {
     party_list parties;
 
     /**
+     * @brief The catalogue's reference provider codes.
+     *
+     * A reference provider publishes an instrument's definition and never
+     * ticks, so its series are hidden unless VIEW > Reference providers is on.
+     * The codes are rebuilt when the catalogue's generation changes.
+     */
+    std::vector<std::string> reference_providers;
+    std::uint64_t reference_generation = 0;
+
+    /**
      * @brief The party the foot control shows, as an index into @c parties.
      *
      * The control writes this and the window turns a change into a command; the

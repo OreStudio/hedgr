@@ -297,6 +297,10 @@ void draw_view_menu(const render_input& input, bool desk_docked,
     auto& visible = input.market_view.toolbar_visible;
     if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
         visible = !visible;
+    auto& reference = input.market_view.show_reference_providers;
+    if (widget::menu_item_row({.label = "Reference providers",
+            .selected = reference}))
+        reference = !reference;
 
     const bool any = any_window_open(input);
     const bool pressed = widget::menu_item_row({.label = "Windows",

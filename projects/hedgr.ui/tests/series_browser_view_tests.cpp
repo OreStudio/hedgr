@@ -70,6 +70,23 @@ TEST_CASE("the series view orders by tenor and then label", "[browser][view]") {
     CHECK(ids(view, catalogue) == strings{"d", "c", "b", "a"});
 }
 
+TEST_CASE("the series view drops a hidden provider and shows it again",
+    "[browser][view][providers]") {
+    const std::vector catalogue{
+        row("ore-row", "EUR/USD", "FX", "1Y", "p1", "ore"),
+        row("vendor-row", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
+    render::series_browser_view view;
+    auto q = query(1);
+    const std::vector<std::string> hidden{"ore"};
+    q.hidden_providers = hidden;
+    CHECK(render::update_series_browser_view(view, q, catalogue));
+    CHECK(ids(view, catalogue) == strings{"vendor-row"});
+
+    q.hidden_providers = {};
+    CHECK(render::update_series_browser_view(view, q, catalogue));
+    CHECK(ids(view, catalogue) == strings{"ore-row", "vendor-row"});
+}
+
 TEST_CASE("the series view matches the filter on label, class, uri and provider",
     "[browser][view]") {
     const std::vector catalogue{row("a", "GBP/USD", "FX"),
