@@ -116,12 +116,15 @@ Follow-ups noticed while building the Instances panel, both done:
   card, not only the filtered ones.
 - Done: the catalogue's pin control and `shortcuts_list_holds` (was
   `shortcuts_bar_holds`) say the Accounts list, not "the bar".
-- Rename `docs/plans/mini-plots.md` step notes that mention the retired compact layout.
+- Done: `docs/plans/mini-plots.md` opens with a partly-superseded note, and its two
+  former compact-layout steps are titled as superseded.
 - Done: VIEW's switches (Full screen, Toolbar, Reference providers) carry a check in
   a reserved column rather than the chosen-row bar.
 - Done: HELP stays on the bar while the store is locked, so About is reachable.
-- Docked content is not retinted to the reference's content colour (`#191923`); the
-  tab hover colour (`#84719F`) is a guess.
+- Done: a docked card's body is the reference's flat content colour (`#191923`),
+  sampled at (400, 300) of the tab reference, instead of the floating card's
+  gradient. The tab hover colour (`#84719F`) is still a derived guess: the
+  reference shows no hovered tab.
 - Tabs outside the desk's dock space (floating dock nodes) keep the base font.
 - The reference's menu bar mode switcher and window controls are not built.
 - Monospace font: JetBrains Mono Regular is bundled. A bold weight is not; the intro's

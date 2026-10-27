@@ -719,7 +719,13 @@ void shade_dock_tabs() {
 
 void paint_dock_cards(ImGuiID dock_space) {
     const ImGuiContext& g = *ImGui::GetCurrentContext();
-    const ImU32 strip = ImGui::ColorConvertFloat4ToU32(tab_bar);
+    /*
+     * The reference's strip and its content are the same flat colour, #191923:
+     * a docked card is one dark body under its tabs, not the floating card's
+     * gradient. The strip and the body are still drawn separately so the
+     * corners round at the ends that are visible.
+     */
+    const ImU32 content = ImGui::ColorConvertFloat4ToU32(tab_bar);
     for (const ImGuiStoragePair& pair : g.DockContext.Nodes.Data) {
         const auto* node = static_cast<const ImGuiDockNode*>(pair.val_p);
         if (node == nullptr || !node->IsLeafNode() || !node->IsVisible
@@ -734,11 +740,10 @@ void paint_dock_cards(ImGuiID dock_space) {
         /* A host window keeps channel 0 for backgrounds and 1 for its tabs. */
         draw->ChannelsSetCurrent(0);
         if (has_strip)
-            draw->AddRectFilled(node->Pos, ImVec2(end.x, top), strip,
+            draw->AddRectFilled(node->Pos, ImVec2(end.x, top), content,
                 dock_rounding, ImDrawFlags_RoundCornersTop);
-        /* The body's own rect carries the window gradient, as a window's fill does. */
-        fill_gradient(draw, ImVec2(node->Pos.x, top), end, window_gradient,
-            axis::vertical, dock_rounding,
+        draw->AddRectFilled(ImVec2(node->Pos.x, top), end, content,
+            dock_rounding,
             has_strip ? ImDrawFlags_RoundCornersBottom
                       : ImDrawFlags_RoundCornersAll);
         draw->ChannelsSetCurrent(1);
