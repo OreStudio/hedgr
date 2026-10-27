@@ -667,22 +667,23 @@ bool near_colour(ImU32 c, ImU32 want, unsigned int slack) {
 
 }
 
-TEST_CASE("a docked card's body runs the window gradient over its own rect",
+TEST_CASE("a docked card's body is the reference's content colour",
     "[docking][workspace][look]") {
     docked_pair p;
+    const ImU32 content
+        = ImGui::ColorConvertFloat4ToU32(theme::tab_bar_colour());
     for (const char* window : {"###a", "###b"}) {
         const auto body = card_body(p.node(window));
         REQUIRE_FALSE(body.empty());
         const auto [high, low] = std::ranges::minmax(body, {},
             [](const ImDrawVert& v) { return v.pos.y; });
-        /* The solid vertices sit half a pixel inside the card's edges. */
-        CHECK(near_colour(high.col, theme::window_gradient_top, 2));
-        CHECK(near_colour(low.col, theme::window_gradient_bottom, 2));
-        CHECK_FALSE(near_colour(high.col, low.col, 2));
+        /* The fill's top and foot are the same flat colour. */
+        CHECK(near_colour(high.col, content, 2));
+        CHECK(near_colour(low.col, content, 2));
     }
 }
 
-TEST_CASE("a docked card keeps its rounded corners under the gradient",
+TEST_CASE("a docked card keeps its rounded corners under the content fill",
     "[docking][workspace][look]") {
     docked_pair p;
     const ImGuiDockNode& left = p.node("###a");
@@ -695,10 +696,12 @@ TEST_CASE("a docked card keeps its rounded corners under the gradient",
     }
 }
 
-TEST_CASE("two cards stacked in the desk each have their own gradient",
+TEST_CASE("two cards stacked in the desk each have their own content fill",
     "[docking][workspace][look]") {
     dock_desk d{"a", "b"};
     theme::apply_theme();
+    const ImU32 content
+        = ImGui::ColorConvertFloat4ToU32(theme::tab_bar_colour());
     const ImGuiID space = d.workspace.dock_space();
     ImGuiID lower = 0;
     const ImGuiID upper = ImGui::DockBuilderSplitNode(space, ImGuiDir_Up, 0.5f,
@@ -716,8 +719,8 @@ TEST_CASE("two cards stacked in the desk each have their own gradient",
         REQUIRE_FALSE(body.empty());
         const auto [high, low] = std::ranges::minmax(body, {},
             [](const ImDrawVert& v) { return v.pos.y; });
-        CHECK(near_colour(high.col, theme::window_gradient_top, 2));
-        CHECK(near_colour(low.col, theme::window_gradient_bottom, 2));
+        CHECK(near_colour(high.col, content, 2));
+        CHECK(near_colour(low.col, content, 2));
     }
 }
 

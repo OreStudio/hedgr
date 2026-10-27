@@ -4,6 +4,12 @@ How a chart becomes a small tile that sits in a grid with other tiles, and back
 into a big floating window, in steps that each land on their own with the suite
 green.
 
+> **Partly superseded.** The compact docked chart this plan chose was replaced
+> by full-size docked charts with ImGui's own tab bar; small cards are a
+> separate window kind (`docs/plans/mini-plot-widget.md`). The docking, dock
+> space and placement steps below still describe the code; every "compact" step
+> is historical and marked where it is not obvious.
+
 The request is to be able to build a desk like
 `docs/samples/multi-chart-and-tools-e1732517002809.png`: a 2x2 grid of compact
 charts, each with a one-line header (name, interval, venue, OHLC, last price), a
@@ -481,7 +487,7 @@ draws with the `market-view.ini` defaults and saves them as its own on its
 first frame. The `configure_chart` command writes one window row. The restart
 check is a runtime test of two charts, not four.
 
-### 3. The compact chart
+### 3. The compact chart (superseded)
 
 > **Superseded.** The compact layout this step built was removed in
 > `mini-plot-widget.md` step 1. A docked chart draws as a full chart with
@@ -507,7 +513,7 @@ also opens the menu. Window padding stays as it is, because ImGui applies it
 in `Begin`, before the chart can know it is docked. The gallery's
 `docked-charts` capture shows four tiles.
 
-### 4. Dock and pop out by click
+### 4. Dock and pop out by click (partly superseded)
 
 > **Partly superseded.** The Pop out and close icons on the compact header, the
 > right-click view menu and the focus outline went with the compact layout
