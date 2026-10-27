@@ -23,6 +23,18 @@
 
 namespace hedgr::runtime::worker {
 
+void run_image_map_read(session::transport::session_link& link,
+    model::event::event& answer) {
+    if (const auto images = link.currency_images(); images) {
+        for (const auto& image : *images) {
+            answer.image_refs.push_back(
+                {.currency = image.currency, .image_id = image.image_id});
+        }
+    } else {
+        answer.message = images.error().message;
+    }
+}
+
 void spawn_image_map_read(boost::asio::io_context& context, image_map_job job,
     model::command::event_queue& events) {
     model::event::event fact;
@@ -31,19 +43,12 @@ void spawn_image_map_read(boost::asio::io_context& context, image_map_job job,
     fact.account_id = job.session.account_id;
     fact.tenant_id = job.session.tenant_id;
 
-    auto work = [](session::transport::session_client& client,
+    auto work = [](session::transport::session_link& link,
                     model::event::event& answer) {
-        if (const auto images = client.currency_images(); images) {
-            for (const auto& image : *images) {
-                answer.image_refs.push_back({.currency = image.currency,
-                    .image_id = image.image_id});
-            }
-        } else {
-            answer.message = images.error().message;
-        }
+        run_image_map_read(link, answer);
     };
     boost::asio::co_spawn(context,
-        run_session_read(std::move(job.session), std::move(fact),
+        run_session_read_on_link(std::move(job.session), std::move(fact),
             std::move(work), events),
         boost::asio::detached);
 }

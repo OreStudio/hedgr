@@ -25,5 +25,6 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_account.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_client.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_error.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_link.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.session/transport/session_options.hpp"
 )

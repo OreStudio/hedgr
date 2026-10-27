@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <boost/asio/io_context.hpp>
 #include <string>
 
@@ -41,6 +42,11 @@ struct crm_names_job final {
 HEDGR_RUNTIME_EXPORT void spawn_crm_names_read(
     boost::asio::io_context& context, crm_names_job job,
     model::command::event_queue& events);
+
+/** @brief Fills the event with a party's CRM names, or with the failure. */
+HEDGR_RUNTIME_EXPORT void run_crm_names_read(
+    hedgr::session::transport::session_link& link, std::string_view party,
+    model::event::event& answer);
 
 }
 

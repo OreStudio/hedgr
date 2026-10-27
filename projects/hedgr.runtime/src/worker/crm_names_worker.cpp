@@ -23,6 +23,16 @@
 
 namespace hedgr::runtime::worker {
 
+void run_crm_names_read(session::transport::session_link& link,
+    std::string_view party, model::event::event& answer) {
+    const auto names = link.crm_names(party);
+    if (!names) {
+        answer.message = names.error().message;
+        return;
+    }
+    answer.crm_names = *names;
+}
+
 void spawn_crm_names_read(boost::asio::io_context& context,
     crm_names_job job, model::command::event_queue& events) {
     const auto party = job.party_id;
@@ -32,17 +42,12 @@ void spawn_crm_names_read(boost::asio::io_context& context,
     fact.account_id = job.session.account_id;
     fact.tenant_id = job.session.tenant_id;
     fact.party_id = party;
-    auto work = [party](session::transport::session_client& client,
+    auto work = [party](session::transport::session_link& link,
                     model::event::event& answer) {
-        const auto names = client.crm_names(party);
-        if (!names) {
-            answer.message = names.error().message;
-            return;
-        }
-        answer.crm_names = *names;
+        run_crm_names_read(link, party, answer);
     };
     boost::asio::co_spawn(context,
-        run_session_read(std::move(job.session), std::move(fact),
+        run_session_read_on_link(std::move(job.session), std::move(fact),
             std::move(work), events),
         boost::asio::detached);
 }

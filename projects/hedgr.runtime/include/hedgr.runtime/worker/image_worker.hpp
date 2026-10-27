@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <boost/asio/io_context.hpp>
 #include <string>
 
@@ -38,6 +39,11 @@ struct image_job final {
 HEDGR_RUNTIME_EXPORT void
 spawn_image_read(boost::asio::io_context& context, image_job job,
     model::command::event_queue& events);
+
+/** @brief Fills the event with one image answer, or with its failure. */
+HEDGR_RUNTIME_EXPORT void run_image_read(
+    hedgr::session::transport::session_link& link, std::string_view image_id,
+    model::event::event& answer);
 
 }
 

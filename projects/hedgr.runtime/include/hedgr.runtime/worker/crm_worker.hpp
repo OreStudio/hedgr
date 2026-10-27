@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <boost/asio/io_context.hpp>
 #include <cstdint>
 #include <string>
@@ -53,6 +54,18 @@ struct crm_job final {
  */
 HEDGR_RUNTIME_EXPORT void spawn_crm_read(boost::asio::io_context& context,
     crm_job job, model::command::event_queue& events);
+
+/**
+ * @brief Turns one CRM batch answer into the event's fields.
+ *
+ * Separated from the spawn so the mapping can be driven against a fake link:
+ * the cells, their newest as-of, the latency and the conventions are all filled
+ * here, and a failed batch becomes the event's message.
+ */
+HEDGR_RUNTIME_EXPORT void run_crm_read(
+    hedgr::session::transport::session_link& link, std::string_view party,
+    std::string_view crm_name, bool reciprocal,
+    model::event::event& answer);
 
 /**
  * @brief Reads an ISO-8601 UTC instant, or returns zero when it cannot.
