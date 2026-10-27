@@ -132,8 +132,9 @@ Follow-ups noticed while building the Instances panel, both done:
 - The reference's menu bar mode switcher and window controls are not built.
 - Monospace font: JetBrains Mono Regular is bundled. A bold weight is not; the intro's
   "HEDGR." uses the system bold face, so a host without it shows regular weight.
-- The tick call's identity lookup, the probe backoff wiring and the market worker's
-  silence window have no test beyond the pure rules.
+- Done: the probe service's deadline wiring is tested against the backoff rule
+  (`probe_backoff_tests.cpp`); the tick identity parse is tested too. The market
+  worker's silence window wiring still has no test beyond the pure rule.
 - `docs/review/README.md` status cells are not updated. Older unreviewed items: the
   series table decisions D1 to D7, the session actor decisions D1 to D6, the wording of
   PR #63.
