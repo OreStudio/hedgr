@@ -1,6 +1,8 @@
 # Provider kind
 
-**Status.** Plan. Written after the party switch merged, before building it.
+**Status.** Built. The browser control ended up in VIEW rather than the filter
+row: a new widget there shifted the series-browser layout and broke the
+mini-plot icon test's coordinate scan.
 
 ## What
 

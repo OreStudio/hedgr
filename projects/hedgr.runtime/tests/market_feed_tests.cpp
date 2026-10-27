@@ -437,6 +437,31 @@ struct world final {
 
 }
 
+TEST_CASE("a catalogue event carries the provider kinds it was read with",
+    "[feed][providers]") {
+    world w;
+    w.sign_in("a-1");
+
+    event fact;
+    fact.kind = event_kind::series_catalogue;
+    fact.instance_id = instance_id;
+    fact.account_id = "a-1";
+    fact.series = {row("s-1")};
+    fact.providers = {
+        {.code = "ore", .name = "ORE Studio", .kind = "reference"},
+        {.code = "bloomberg", .name = "Bloomberg", .kind = "data_vendor"}};
+    w.push(std::move(fact));
+
+    const auto* catalogue
+        = w.manager->market().catalogue(instance_id, "a-1");
+    REQUIRE(catalogue != nullptr);
+    REQUIRE(catalogue->providers.size() == 2);
+    CHECK(hedgr::model::domain::is_reference_provider(
+        catalogue->providers[0]));
+    CHECK(catalogue->providers[1].code == "bloomberg");
+    CHECK(catalogue->providers[1].kind == "data_vendor");
+}
+
 TEST_CASE("signing in opens one stream with the session's credentials",
     "[feed]") {
     world w;

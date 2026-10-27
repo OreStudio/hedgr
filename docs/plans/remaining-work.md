@@ -64,10 +64,14 @@ Follow-ups noticed while building the Instances panel, both done:
   reference providers by default with an `include_reference` flag (recommended), or the
   `ore` series are no longer published. No answer sent yet. When the server decides,
   adjust the Provider combo's default.
-- **Provider kind.** `marketdata.v1.providers.list` returns each provider's `code`,
-  `name` and `kind` (`reference`, `data_vendor`). Hedgr does not call it. Reading it
-  lets the browser hide reference providers by default and the CRM and Mini plots
-  button prefer data vendors.
+- Done: **Provider kind.** `marketdata.v1.providers.list` is read with every
+  catalogue, paged to the deployment's total, and carried on the catalogue as
+  `market_provider_row` (`code`, `name`, `kind`). The browser hides `reference`
+  providers by default, and VIEW > Reference providers shows them; the Provider
+  combo lists only the providers that survive. The CRM's pair lookup and Mini
+  plots prefer a non-reference (data-vendor) series and fall back to catalogue
+  order when the kinds are unknown. A failed provider read hides nothing.
+  `docs/plans/provider-kind.md` has the design.
 - **Ticks per party.** The tick table filters by the party in the session's token.
   Only data-vendor series of four parties tick (UK, US, HK, System Party). Their own
   fix for the operator's party (PR 3710) may change this. Re-check after the next
@@ -103,9 +107,6 @@ Follow-ups noticed while building the Instances panel, both done:
 ## Small items
 
 - The VIEW > Windows panel has no filter; a wall of forty charts is a scroll.
-- The CRM "Mini plots" button and the CRM double-click take the first catalogue row that
-  matches a pair, whatever its provider. It lands on `bloomberg` only because that
-  sorts before `ore`. Prefer data-vendor providers once the kind is known.
 - The catalogue's "add to bar" control and `shortcuts_bar_holds` still say "bar". They
   mean pin to the Accounts list.
 - Rename `docs/plans/mini-plots.md` step notes that mention the retired compact layout.
