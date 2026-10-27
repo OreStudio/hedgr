@@ -569,7 +569,7 @@ TEST_CASE("FILE: Quit asks to leave and nothing else", "[menu_bar][file]") {
     CHECK(h.commands().empty());
 }
 
-TEST_CASE("a locked store shows File alone, with the way in and Quit",
+TEST_CASE("a locked store shows File and Help, with the way in and Quit",
     "[menu_bar][lock]") {
     bar_harness h;
     h.input.store_lock = model::domain::store_lock::locked;
@@ -578,7 +578,8 @@ TEST_CASE("a locked store shows File alone, with the way in and Quit",
     CHECK_FALSE(h.label("View").has_value());
     CHECK_FALSE(h.label("Instances").has_value());
     CHECK_FALSE(h.label("Tools").has_value());
-    CHECK_FALSE(h.label("Help").has_value());
+    /* About is useful precisely when the store will not open. */
+    CHECK(h.label("Help").has_value());
     h.open_menu("File");
     REQUIRE(bar_harness::popup_open());
     h.click(bar_harness::row_centre(0));

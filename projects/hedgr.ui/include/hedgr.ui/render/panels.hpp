@@ -337,22 +337,22 @@ HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
     hedgr::model::domain::window_kind kind, std::string_view target_id);
 
 /**
- * @brief Whether the bar already holds an entry that opens this target.
+ * @brief Whether the Accounts list already holds an entry that opens this target.
  *
  * The match is on the kind and the id rather than on the derived key, for the
  * same reason the store's own removal matches on both halves: a shortcut is a
  * statement about a target, and two entries claiming one target are one fact
  * said twice.
  */
-[[nodiscard]] HEDGR_UI_EXPORT bool shortcuts_bar_holds(
+[[nodiscard]] HEDGR_UI_EXPORT bool shortcuts_list_holds(
     const hedgr::model::state::shortcut_table& table,
     hedgr::model::domain::window_kind kind, std::string_view target_id);
 
 /**
  * @brief The position a new entry takes, which is after every entry already on
- * the bar.
+ * the Accounts list.
  *
- * A new entry lands at the end rather than at the front, because a bar that
+ * A new entry lands at the end rather than at the front, because a list that
  * rearranged itself as entries were added would be an operator's own order
  * being overwritten by their next click.
  */
@@ -360,7 +360,7 @@ HEDGR_UI_EXPORT void raise_shortcut_activated(const render_input& input,
     const hedgr::model::state::shortcut_table& table) noexcept;
 
 /**
- * @brief The command that puts a target on the bar, or takes it off.
+ * @brief The command that puts a target on the Accounts list, or takes it off.
  *
  * One function rather than two branches at the control, because the state the
  * control draws and the command it sends have to be the same fact. A control

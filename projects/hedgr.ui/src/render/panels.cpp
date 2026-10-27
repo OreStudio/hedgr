@@ -465,7 +465,8 @@ std::string shortcut_id_for(domain::window_kind kind,
     return std::format("sc:{}/{}", domain::to_string(kind), target_id);
 }
 
-bool shortcuts_bar_holds(const hedgr::model::state::shortcut_table& table,
+bool shortcuts_list_holds(
+    const hedgr::model::state::shortcut_table& table,
     domain::window_kind kind, std::string_view target_id) {
     for (const auto& row : table.rows()) {
         if (row.target_kind == kind
@@ -497,7 +498,7 @@ hedgr::model::command::command shortcut_toggle_command(
 
     hedgr::model::command::command request;
     request.shortcut_row.id = shortcut_id_for(kind, target_id);
-    if (shortcuts_bar_holds(input.shortcuts, kind, target_id)) {
+    if (shortcuts_list_holds(input.shortcuts, kind, target_id)) {
         request.kind = command_kind::remove_shortcut;
         return request;
     }

@@ -1014,7 +1014,8 @@ TEST_CASE("a shortcut key names both the kind and the target", "[shortcut]") {
                             window_kind::accounts, "shared-id"));
 }
 
-TEST_CASE("the bar reports the targets it already holds", "[shortcut]") {
+TEST_CASE("the Accounts list reports the targets it already holds",
+    "[shortcut]") {
     hedgr::model::state::shortcut_table table;
 
     hedgr::model::domain::shortcut row;
@@ -1023,12 +1024,12 @@ TEST_CASE("the bar reports the targets it already holds", "[shortcut]") {
     row.target_id = "inst-prod";
     table.upsert(row);
 
-    REQUIRE(hedgr::ui::render::shortcuts_bar_holds(table,
+    REQUIRE(hedgr::ui::render::shortcuts_list_holds(table,
         window_kind::accounts, "inst-prod"));
     /* The same id under a different kind is a different shortcut. */
-    REQUIRE_FALSE(hedgr::ui::render::shortcuts_bar_holds(table,
+    REQUIRE_FALSE(hedgr::ui::render::shortcuts_list_holds(table,
         window_kind::instance_manager, "inst-prod"));
-    REQUIRE_FALSE(hedgr::ui::render::shortcuts_bar_holds(table,
+    REQUIRE_FALSE(hedgr::ui::render::shortcuts_list_holds(table,
         window_kind::accounts, "inst-lab"));
 }
 

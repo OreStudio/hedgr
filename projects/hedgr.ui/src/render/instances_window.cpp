@@ -73,7 +73,7 @@ using hedgr::ui::render::instance_icon_texture;
 using hedgr::ui::render::instance_edit_state;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::shortcut_toggle_command;
-using hedgr::ui::render::shortcuts_bar_holds;
+using hedgr::ui::render::shortcuts_list_holds;
 using hedgr::ui::render::window_ui_state;
 using hedgr::ui::widget::browser_state;
 using hedgr::ui::widget::tree_folder;
@@ -1323,19 +1323,19 @@ void instance_window_actions(const render_input& input, window_ui_state& state) 
     /*
      * The shortcut toggle used to sit at the pane's top right, where the pane
      * had no other control and the dismiss glyph on it read as an action on the
-     * instance rather than on the bar. It lives here now, with the window's
-     * other actions, where it carries a word and the pane goes back to being a
-     * place that reports. "Pin" and "Unpin" are the words because the thing it
-     * changes is the shortcuts bar, and the glyphs stay the add and dismiss the
-     * icon set carries since it has no pin of its own.
+     * instance rather than on the Accounts list. It lives here now, with the
+     * window's other actions, where it carries a word and the pane goes back to
+     * being a place that reports. "Pin" and "Unpin" are the words because the
+     * thing it changes is the Accounts list, and the glyphs stay the add and
+     * dismiss the icon set carries since it has no pin of its own.
      */
     const bool have_instance = !state.browser.selected_leaf.empty();
-    const bool on_bar = shortcuts_bar_holds(
+    const bool on_list = shortcuts_list_holds(
         input.shortcuts, window_kind::accounts, state.browser.selected_leaf);
     if (widget::rail_button("shortcut-toggle",
-            on_bar ? icon::cancel : icon::add, on_bar ? "Unpin" : "Pin",
-            on_bar ? "Take this instance off the shortcuts bar"
-                   : "Put this instance on the shortcuts bar",
+            on_list ? icon::cancel : icon::add, on_list ? "Unpin" : "Pin",
+            on_list ? "Take this instance off the Accounts list"
+                    : "Put this instance on the Accounts list",
             have_instance)) {
         input.commands.push(shortcut_toggle_command(
             input, window_kind::accounts, state.browser.selected_leaf));

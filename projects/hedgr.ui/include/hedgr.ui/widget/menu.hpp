@@ -94,6 +94,17 @@ struct menu_row final {
     /** @brief Whether the row is the chosen one, drawn as the purple bar. */
     bool selected = false;
 
+    /**
+     * @brief Whether the row reserves the check column, drawn or blank.
+     *
+     * Give every row of one menu the same value, as with @c icon, or the
+     * labels will not line up. A row that is a switch sets @c checked as well.
+     */
+    bool checkable = false;
+
+    /** @brief Whether the check mark is drawn in the check column. */
+    bool checked = false;
+
     /** @brief A disabled row is dimmed, takes no hover and is skipped by navigation. */
     bool enabled = true;
 };
