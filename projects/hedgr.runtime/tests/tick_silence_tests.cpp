@@ -18,7 +18,11 @@
  *
  */
 #include "hedgr.runtime/worker/tick_silence.hpp"
+#include "hedgr.runtime/worker/market_worker.hpp"
+#include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <string>
 
 namespace {
 
@@ -61,4 +65,31 @@ TEST_CASE("a tick read gives up well before the default request timeout",
     "[tick_silence]") {
     CHECK(tick_read_timeout.count() <= 10000);
     CHECK(tick_silence_ns > 0);
+}
+
+TEST_CASE("a tick read inside the silence window reports the wait",
+    "[tick_silence][wiring]") {
+    namespace model = hedgr::model;
+    namespace worker = hedgr::runtime::worker;
+
+    const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    worker::market_silence().note("silent-wiring", true, now);
+
+    boost::asio::io_context pool;
+    model::command::event_queue events;
+    worker::market_job job;
+    job.key = model::domain::session_key{"silent-wiring", "a"};
+    job.series_id = "s";
+    worker::spawn_market_read(pool, std::move(job), events);
+    pool.run_for(std::chrono::milliseconds(100));
+
+    const auto got = events.drain();
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].kind == model::event::event_kind::series_points);
+    CHECK(got[0].series_id == "s");
+    CHECK(got[0].message.find("not asked again") != std::string::npos);
+
+    /* Leave no window behind for another test using the shared rule. */
+    worker::market_silence().note("silent-wiring", false, now);
 }
