@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.ui/render/party_foot.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
@@ -258,7 +259,8 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::EndChild();
     ImGui::PopStyleVar();
 
-    const bool changed = widget::draw_status_foot(status, input.now_ns, foot);
+    const bool changed
+        = draw_foot_with_party(input, *session, status, foot, state);
     state.market_view.term_history = history_index + 1;
     if (changed)
         input.market_view.term_history = state.market_view.term_history;

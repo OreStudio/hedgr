@@ -23,6 +23,7 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/party_foot.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
@@ -212,37 +213,16 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * it. Filtering by a party the session does not hold would list series
      * whose ticks then had to be read with a token for another party.
      */
-    const auto& parties = state.parties;
     update_party_list(state.parties, input.sessions.parties(*session),
         session_party, input.sessions.party_name(*session));
     state.market_party_id = session_party.empty()
-        ? (parties.empty() ? std::string{} : std::string{parties.id(0)})
+        ? (state.parties.empty()
+                  ? std::string{}
+                  : std::string{state.parties.id(0)})
         : std::string{session_party};
-    const auto acting = parties.index_of(session_party);
-    state.acting_party = static_cast<int>(
-        acting < parties.size() ? acting : 0);
-    if (parties.size() > 1) {
-        foot.controls.push_back(widget::foot_combo{
-            .id = "acting-as",
-            .tooltip = "Act as another party for this session",
-            .caption = "Acting as",
-            .options = parties.names.data(),
-            .option_count = static_cast<int>(parties.size()),
-            .selected = &state.acting_party});
-    }
     const auto draw_foot = [&] {
-        if (!widget::draw_status_foot(status, input.now_ns, foot))
-            return;
-        const auto chosen = static_cast<std::size_t>(state.acting_party);
-        if (chosen >= parties.size())
-            return;
-        model::command::command request;
-        request.kind = model::command::command_kind::select_party;
-        request.instance_id =
-            std::string{input.sessions.instance_id(*session)};
-        request.account_id = std::string{input.sessions.account_id(*session)};
-        request.party_id = parties.id(chosen);
-        input.commands.push(std::move(request));
+        static_cast<void>(
+            draw_foot_with_party(input, *session, status, foot, state));
     };
 
     /*

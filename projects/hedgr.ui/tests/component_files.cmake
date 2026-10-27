@@ -28,6 +28,7 @@ set(files
     "menu_look_tests.cpp"
     "mini_plot_open_tests.cpp"
     "mini_plot_tests.cpp"
+    "party_foot_tests.cpp"
     "view_state_tests.cpp"
     "render_tests.cpp"
     "sound_tests.cpp"

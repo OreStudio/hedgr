@@ -24,6 +24,7 @@
 #include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/party_foot.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
 #include "hedgr.ui/render/series_text.hpp"
 #include "hedgr.ui/render/windows.hpp"
@@ -826,7 +827,7 @@ void render_chart(window_handle handle, const render_input& input,
     ImGui::PopStyleVar();
 
     const auto before = state.market_view;
-    if (widget::draw_status_foot(status, input.now_ns, *foot))
+    if (draw_foot_with_party(input, *session, status, *foot, state))
         chart_view_changed(handle, input, state, before);
     ImGui::PopID();
 }
