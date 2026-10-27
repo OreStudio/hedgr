@@ -24,6 +24,7 @@
 #include "hedgr.ui/export.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,6 +40,9 @@ struct series_browser_query final {
     std::string_view party;
     /** @brief The provider to list, or empty for every provider. */
     std::string_view provider;
+
+    /** @brief Providers whose rows are not listed, usually the reference ones. */
+    std::span<const std::string> hidden_providers;
 };
 
 /**
@@ -83,6 +87,7 @@ struct series_browser_view final {
     std::string asset_class;
     std::string party;
     std::string provider;
+    std::vector<std::string> hidden_providers;
 
     /** @brief The generation @c classes was taken at, valid once @c class_builds is above zero. */
     std::uint64_t classes_generation = 0;
