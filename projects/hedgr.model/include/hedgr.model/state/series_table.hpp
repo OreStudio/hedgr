@@ -130,6 +130,14 @@ struct HEDGR_MODEL_EXPORT series_catalogue final {
     /** @brief The series, in the order the chooser shows them. */
     std::vector<domain::market_series_row> series;
 
+    /**
+     * @brief The deployment's providers and their kinds, as the read found them.
+     *
+     * Empty when the provider read failed; the browser then hides nothing
+     * rather than hiding the wrong rows.
+     */
+    std::vector<domain::market_provider_row> providers;
+
     /** @brief Where the read stands. */
     catalogue_state state = catalogue_state::unread;
 
@@ -182,7 +190,8 @@ public:
     /** @brief Records one session's catalogue and refreshes its held rows. */
     void apply_catalogue(std::string_view instance_id,
         std::string_view account_id,
-        std::vector<domain::market_series_row> rows);
+        std::vector<domain::market_series_row> rows,
+        std::vector<domain::market_provider_row> providers = {});
 
     /** @brief Marks one session's catalogue read as started. */
     void begin_catalogue(std::string_view instance_id,

@@ -118,10 +118,12 @@ bool series_table::refresh(row& r, const series_catalogue& catalogue) {
 }
 
 void series_table::apply_catalogue(std::string_view instance_id,
-    std::string_view account_id, std::vector<domain::market_series_row> rows) {
+    std::string_view account_id, std::vector<domain::market_series_row> rows,
+    std::vector<domain::market_provider_row> providers) {
     auto& entry = slot_in(scopes_, {instance_id, account_id});
     auto& catalogue = entry.catalogue;
     catalogue.series = std::move(rows);
+    catalogue.providers = std::move(providers);
     catalogue.index.clear();
     catalogue.index.reserve(catalogue.series.size());
     for (std::size_t i = 0; i < catalogue.series.size(); ++i)
