@@ -686,7 +686,11 @@ void workspace::render(const render_input& input) {
         if (!ImGui::IsWindowDocked())
             state.floating_size = ImGui::GetWindowSize();
         if (const auto draw = renderer_for(kind))
-            draw(handle, input, state, status_, lock_control_);
+            /*
+             * The windows read the empty bar, not the strip's: the message is
+             * said once at the bottom, and a window says only what it is about.
+             */
+            draw(handle, input, state, windows_status_, lock_control_);
 
         /*
          * A card has no title bar, so no close button. Its close control shows

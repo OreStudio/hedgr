@@ -81,9 +81,11 @@ struct foot_state final {
     /**
      * @brief Who the window's session is and where it is, or empty.
      *
-     * Drawn at the left in the disabled colour, and only while there is no
-     * message to draw. A message is news and the identity is not, so the news
-     * takes the line when it comes.
+     * Drawn at the left in the disabled colour, and only while the bar carries
+     * no message. A message is news and the identity is not, so the news takes
+     * the line when it comes. In the application the strip owns the run-wide
+     * message and the workspace hands each window an empty bar, so this line is
+     * the identity rather than a placeholder for a message that never arrives.
      */
     std::string identity;
 

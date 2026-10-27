@@ -338,7 +338,7 @@ private:
     bool focus_instances_ = false;
 
     /**
-     * @brief The one-line notices the windows show and the frame ages.
+     * @brief The message ladder the bottom strip draws and the frame ages.
      *
      * Interface scratch, owned here rather than by the window that draws it,
      * because the fact being announced is about the run and not about a
@@ -347,6 +347,17 @@ private:
      * happens when two things want to say something at once.
      */
     hedgr::ui::widget::status_bar status_;
+
+    /**
+     * @brief The bar the windows' foots read, kept empty on purpose.
+     *
+     * The strip owns the message ladder: a runtime failure said once at the
+     * bottom is not said again in every open window's foot. The foots still
+     * draw their identity and their own state, and read this bar for the
+     * message line they would otherwise share with the strip -- which is
+     * always empty, because nothing raises it.
+     */
+    hedgr::ui::widget::status_bar windows_status_;
 
     /**
      * @brief What the lock control asked for this frame, and what it drew.
