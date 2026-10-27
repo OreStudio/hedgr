@@ -77,13 +77,17 @@ Follow-ups noticed while building the Instances panel, both done:
 
 ## Design agreed but not built
 
-- **Act as a party.** A session signs in as one party and never changes it. The market
-  data browser's Party combo only filters the list, so choosing another party shows its
-  series but reads their ticks with the wrong token. Design: a control on the session
-  ("Acting as: ..." in the identity bar) that calls the existing `select_party`, swaps
-  the token, re-reads the catalogue and moves the live stream. One party at a time per
-  session. A session per party is the larger alternative. Plan it, then build it as its
-  own PR.
+- Done: **Act as a party.** The market browser's header Party combo only filtered the
+  list, so choosing another party showed its series and read their ticks with the wrong
+  token. The session now has one party at a time, and the control that changes it is a
+  foot combo in the series browser (shown when the login has more than one party). A
+  change pushes a `select_party` command; the runtime leaves the party for the session's
+  own worker and wakes its refresh wait, the worker calls the existing `select_party`
+  and reports the new token, tenant and party, and the runtime replaces the session's
+  token and party, reopens the live stream for the new party and starts a catalogue
+  read. A refusal leaves the session on its old party and raises a condition on the
+  strip. The header combo is gone: the window follows the session. Other windows read
+  the party from the session as before.
 - **All parties** choice in the market data browser's Party combo, with a note when the
   list is narrower than the catalogue.
 - **Carry the series identity in the catalogue.** Each tick read now makes one extra

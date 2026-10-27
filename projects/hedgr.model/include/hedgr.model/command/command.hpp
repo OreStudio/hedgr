@@ -125,6 +125,14 @@ enum class command_kind : std::uint8_t {
     load_history = 28,
     /** @brief Save a chart window's own view, carried in @c chart_view. */
     configure_chart = 29,
+    /**
+     * @brief Scope a live session to another party, in @c party_id.
+     *
+     * The runtime asks the session's own worker to call `select_party`, which
+     * replaces the token with one scoped to the party. It then re-reads the
+     * catalogue and moves the live stream, because both were for the old party.
+     */
+    select_party = 30,
 };
 
 /** @brief The canonical text of a command kind, for logs. */

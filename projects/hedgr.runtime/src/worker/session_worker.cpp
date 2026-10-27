@@ -268,9 +268,11 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                  * out of scope at the end of this branch.
                  */
                 std::string token = account.token;
-                const std::string principal = account.principal;
-                const std::string tenant_id = account.tenant_id;
-                const std::string party_id = account.party_id;
+                std::string principal = account.principal;
+                std::string tenant_id = account.tenant_id;
+                std::string tenant_name = account.tenant_name;
+                std::string party_id = account.party_id;
+                std::string party_name = account.party_name;
                 int lifetime_s = account.access_lifetime_s > 0
                     ? account.access_lifetime_s : 1800;
 
@@ -301,7 +303,76 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                     << " s";
 
                 while (!stop->stop_requested()) {
-                    co_await wait_until_or_stop(next_refresh, stop);
+                    /*
+                     * A party the frame loop left while this worker was idle.
+                     * It is applied before the wait so a request that arrived
+                     * between two frames is not delayed by a refresh interval,
+                     * and the wait below is woken by any request that arrives
+                     * after this point.
+                     */
+                    if (job.party) {
+                        if (auto requested = job.party->take();
+                            requested.has_value() && *requested != party_id) {
+                            const std::string wanted = *requested;
+                            const auto selected = client.select_party(wanted);
+                            if (!selected) {
+                                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                                    << "Acting as party '" << wanted << "' for '"
+                                    << key.account_id << "' on '"
+                                    << key.instance_id << "' was refused: "
+                                    << selected.error().message << " ["
+                                    << transport::to_string(
+                                           selected.error().code)
+                                    << "]";
+                                auto refused = for_key(key, job.attempt);
+                                refused.kind =
+                                    event::event_kind::session_party_refused;
+                                refused.code = std::string{
+                                    transport::to_string(
+                                        selected.error().code)};
+                                refused.message = selected.error().message;
+                                events.push(std::move(refused));
+                            } else {
+                                const auto& current = client.account();
+                                token = current.token;
+                                principal = current.principal;
+                                tenant_id = current.tenant_id;
+                                tenant_name = current.tenant_name;
+                                party_id = current.party_id;
+                                party_name = current.party_name;
+
+                                auto changed = for_key(key, job.attempt);
+                                changed.kind =
+                                    event::event_kind::session_party_changed;
+                                changed.token =
+                                    domain::secret_string{token};
+                                changed.tenant_id = tenant_id;
+                                changed.tenant_name = tenant_name;
+                                changed.party_id = party_id;
+                                changed.party_name = party_name;
+                                changed.payload = principal;
+                                events.push(std::move(changed));
+
+                                BOOST_LOG_SEV(lg(), ores::logging::info)
+                                    << "Session '" << key.account_id << "' on '"
+                                    << key.instance_id << "' now acts as party '"
+                                    << party_id << "'";
+                            }
+                        }
+                    }
+
+                    std::shared_ptr<std::stop_source> waker;
+                    if (job.party) {
+                        waker = std::make_shared<std::stop_source>();
+                        job.party->arm(waker);
+                    }
+                    if (waker)
+                        co_await wait_until_or_stop_or_wake(next_refresh,
+                            stop, waker);
+                    else
+                        co_await wait_until_or_stop(next_refresh, stop);
+                    if (job.party)
+                        job.party->disarm();
                     if (stop->stop_requested())
                         break;
 
@@ -368,6 +439,39 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         push_status(events, key, job.attempt, domain::session_status::disconnected);
 }
 
+}
+
+void party_switch::request(std::string party_id) {
+    std::scoped_lock lock(mutex_);
+    pending_ = std::move(party_id);
+    if (waker_)
+        waker_->request_stop();
+}
+
+std::optional<std::string> party_switch::take() {
+    std::scoped_lock lock(mutex_);
+    if (!pending_)
+        return std::nullopt;
+    std::optional<std::string> result = std::move(pending_);
+    pending_.reset();
+    return result;
+}
+
+void party_switch::arm(std::shared_ptr<std::stop_source> waker) {
+    std::scoped_lock lock(mutex_);
+    waker_ = std::move(waker);
+    /*
+     * A request that landed between the worker's take() and this arm() found
+     * no waker. It is honoured by stopping the one just armed, so the wait
+     * returns at once rather than at the refresh deadline.
+     */
+    if (pending_ && waker_)
+        waker_->request_stop();
+}
+
+void party_switch::disarm() {
+    std::scoped_lock lock(mutex_);
+    waker_.reset();
 }
 
 void spawn_session(boost::asio::io_context& context, session_job job,

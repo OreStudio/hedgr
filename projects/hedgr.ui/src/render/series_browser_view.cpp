@@ -194,6 +194,16 @@ bool update_party_list(party_list& list, std::string_view serialised,
         list.text.push_back('\0');
         list.entries.push_back({id_at, name_at});
     }
+
+    /*
+     * The option array a foot control borrows, built once with the parse.
+     * text stops growing above, so the pointers it hands out stay valid until
+     * the next parse.
+     */
+    list.names.clear();
+    list.names.reserve(list.entries.size());
+    for (std::size_t i = 0; i < list.entries.size(); ++i)
+        list.names.push_back(list.name(i));
     return true;
 }
 

@@ -59,6 +59,10 @@ std::string_view to_string(event_kind value) noexcept {
         return "crm_names";
     case event_kind::session_token_refreshed:
         return "session_token_refreshed";
+    case event_kind::session_party_changed:
+        return "session_party_changed";
+    case event_kind::session_party_refused:
+        return "session_party_refused";
     case event_kind::master_sealed:
         return "master_sealed";
     }

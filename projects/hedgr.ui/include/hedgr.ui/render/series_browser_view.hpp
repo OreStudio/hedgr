@@ -152,12 +152,28 @@ struct party_list final {
         return text.data() + entries[i].name_at;
     }
 
+    /** @brief The index of the party with this id, or size() when absent. */
+    [[nodiscard]] std::size_t index_of(std::string_view party_id) const {
+        for (std::size_t i = 0; i < entries.size(); ++i)
+            if (party_id == id(i))
+                return i;
+        return entries.size();
+    }
+
     struct entry final {
         std::uint32_t id_at = 0;
         std::uint32_t name_at = 0;
     };
     std::string text;
     std::vector<entry> entries;
+
+    /**
+     * @brief The names as the option array a foot control borrows.
+     *
+     * Rebuilt with the parse and not per frame. Each points into @c text, so
+     * the list must not be re-parsed while a frame is still reading it.
+     */
+    std::vector<const char*> names;
 };
 
 /**
