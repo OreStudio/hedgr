@@ -79,6 +79,14 @@ struct menu_bar_state final {
     /** @brief Whether the About window is showing. */
     bool about_open = false;
 
+    /**
+     * @brief VIEW > Windows' title filter.
+     *
+     * Kept across openings so a search survives a click elsewhere; an empty
+     * buffer lists every window.
+     */
+    std::array<char, 64> windows_filter{};
+
     /** @brief The Instances panel's filter and filtered list. */
     instances_panel_state instances;
 
