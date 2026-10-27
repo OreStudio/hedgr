@@ -20,6 +20,7 @@
 #ifndef HEDGR_SESSION_TRANSPORT_SESSION_CLIENT_HPP
 #define HEDGR_SESSION_TRANSPORT_SESSION_CLIENT_HPP
 
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_error.hpp"
@@ -484,6 +485,20 @@ public:
      */
     [[nodiscard]] result<std::vector<market_series_summary>>
     market_series(std::uint32_t limit = 500) const;
+
+    /**
+     * @brief Reads every market data provider and its kind.
+     *
+     * Pages `marketdata.v1.providers.list` until the deployment's total is
+     * reached. The kinds are the deployment's words: `data_vendor`, `exchange`,
+     * `broker` or `reference`. A reference provider publishes an instrument's
+     * definition and never ticks.
+     *
+     * @pre the session is authenticated.
+     * @return the providers, or why they could not be read.
+     */
+    [[nodiscard]] result<std::vector<hedgr::model::domain::market_provider_row>>
+    list_providers() const;
 
     /**
      * @brief Reads the ticks of one span of one series, in one call.

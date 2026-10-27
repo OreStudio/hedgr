@@ -131,6 +131,19 @@ boost::asio::awaitable<void> run_market(market_job job,
                     .curve_key = row.curve_key,
                     .curve_label = row.curve_label});
             }
+            /*
+             * The providers travel with the catalogue because the browser
+             * needs them to tell a reference series from a data vendor's. A
+             * failed provider read leaves the list empty and hides nothing;
+             * it does not fail the catalogue.
+             */
+            if (const auto providers = client.list_providers(); providers) {
+                fact.providers = std::move(*providers);
+            } else {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The market provider read failed: "
+                    << providers.error().message;
+            }
         } else {
             fact.message = describe(read.error());
         }

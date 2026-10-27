@@ -562,7 +562,7 @@ bool read_service::apply(const model::event::event& ev) {
     case event::event_kind::series_catalogue: {
         if (ev.message.empty()) {
             market_.apply_catalogue(ev.instance_id, ev.account_id,
-                ev.series);
+                ev.series, ev.providers);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);

@@ -38,6 +38,7 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
+#include "ores.marketdata.api/messaging/provider_protocol.hpp"
 #include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_pair_convention_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
@@ -1308,6 +1309,67 @@ session_client::market_series(std::uint32_t limit) const {
     } catch (...) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "The market series read failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
+result<std::vector<hedgr::model::domain::market_provider_row>>
+session_client::list_providers() const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "a provider read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "a provider read needs a signed-in session");
+    }
+
+    using ores::marketdata::messaging::list_providers_request;
+    using ores::marketdata::messaging::list_providers_response;
+
+    try {
+        std::vector<hedgr::model::domain::market_provider_row> rows;
+        std::uint32_t offset = 0;
+        for (;;) {
+            list_providers_request request{};
+            request.offset = offset;
+            request.limit = 100;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_providers_response>(client(),
+                    list_providers_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer) {
+                return fail(session_errc::protocol_error,
+                    "the provider answer could not be decoded");
+            }
+            if (answer->result.outcome != ores::utility::domain::outcome::ok) {
+                return fail(session_errc::read_refused,
+                    answer->result.message.empty()
+                        ? std::string("the deployment refused the providers")
+                        : answer->result.message);
+            }
+            for (const auto& provider : answer->providers) {
+                rows.push_back(hedgr::model::domain::market_provider_row{
+                    .code = provider.code,
+                    .name = provider.name,
+                    .kind = provider.kind});
+            }
+            offset += static_cast<std::uint32_t>(answer->providers.size());
+            if (answer->providers.empty() || rows.size() >= answer->total)
+                break;
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read " << rows.size() << " market providers on '"
+            << options_.subject_prefix << "'";
+        return rows;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The market provider read failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The market provider read failed for an unnamed reason";
         return transport_failure();
     }
 }
