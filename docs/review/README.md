@@ -48,7 +48,7 @@ split (done, see `docs/plans/instance-manager-split.md`), session actor (planned
 - Bundle 7: the deadline-policy half of SR-10, in `instance_manager.cpp`.
 - Bundle 9: UR-OS-1 and C-10 (CRM rate formatting through `currency_pair_rate_formatter`) need an edit at `crm_window.cpp:337-344`. UR-OS-3 needs `in_term_order` moved into an ores api library. UR-OS-4, 5, 6, C-8 and C-9 need session URI parsing or the core codec.
 - Bundle 10: no redraw predicate, which needs version stamps first. GLFW on Wayland never reports a minimised window.
-- Bundle 3: folder ids in `browser.cpp` have the same rename-then-create collision the instance and account ids had.
+- Bundle 3: done. Folder ids in `browser.cpp` now come from a fresh v7 uuid, so a rename-then-create cannot reuse a key, as the instance and account ids already did.
 - Bundle 4: `domain::credential::password`, worker job tokens and `market_stream_options::token` are still `std::string`.
 - Bundle 8: UR-OS-4 and UR-OS-6 need parsed URI fields and `asset_class` on `market_series_row`. Typed clocks and the age and time formatting are not in the model. Charts keep the FX thresholds because they hold only a series id. A disconnected CRM cell is still drawn grey. A collapsed CRM window keeps reading because the runtime cannot see collapse. AR-11 is done for the CRM only.
 - Bundle 11: UR-8 (term-structure ladder copy and sort), UR-10 (series browser filter and sort), SR-11 and SR-14 (per-frame save and watch work) need version stamps on the window and session tables or a transactional `save_all`.
