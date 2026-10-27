@@ -112,12 +112,12 @@ Follow-ups noticed while building the Instances panel, both done:
 ## Small items
 
 - The VIEW > Windows panel has no filter; a wall of forty charts is a scroll.
-- The catalogue's "add to bar" control and `shortcuts_bar_holds` still say "bar". They
-  mean pin to the Accounts list.
+- Done: the catalogue's pin control and `shortcuts_list_holds` (was
+  `shortcuts_bar_holds`) say the Accounts list, not "the bar".
 - Rename `docs/plans/mini-plots.md` step notes that mention the retired compact layout.
-- VIEW > Toolbar and VIEW > Full screen are lit rows, not checkmarks, because
-  `menu_row` has no check column.
-- The About window is hidden while the store is locked.
+- Done: VIEW's switches (Full screen, Toolbar, Reference providers) carry a check in
+  a reserved column rather than the chosen-row bar.
+- Done: HELP stays on the bar while the store is locked, so About is reachable.
 - Docked content is not retinted to the reference's content colour (`#191923`); the
   tab hover colour (`#84719F`) is a guess.
 - Tabs outside the desk's dock space (floating dock nodes) keep the base font.

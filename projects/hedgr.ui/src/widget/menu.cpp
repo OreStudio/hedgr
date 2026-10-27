@@ -20,6 +20,7 @@
 #include "hedgr.ui/widget/menu.hpp"
 
 #include "hedgr.ui/icon/fonts.hpp"
+#include "hedgr.ui/icon/icons.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -191,6 +192,15 @@ bool menu_item_row(const menu_row& row) {
     float left = min.x + theme::menu_row_padding_x;
     if (row.icon != nullptr) {
         draw->AddText(ImVec2(left, top), glyph_colour, row.icon);
+        left += ImGui::GetFontSize() * theme::menu_icon_share;
+    } else if (row.checkable) {
+        /*
+         * The check column. It is reserved whether or not the row draws a
+         * mark, so a menu of switches keeps its labels on one line and a
+         * switch reads as a tick rather than as a chosen row.
+         */
+        if (row.checked)
+            draw->AddText(ImVec2(left, top), glyph_colour, icon::ready);
         left += ImGui::GetFontSize() * theme::menu_icon_share;
     }
     draw->AddText(ImVec2(left, top), label_colour, row.label);

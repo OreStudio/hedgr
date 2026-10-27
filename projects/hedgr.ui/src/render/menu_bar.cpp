@@ -285,26 +285,32 @@ void draw_windows_panel(const render_input& input, menu_bar_result& result) {
 
 /**
  * @brief VIEW: Undock all, live only while something is docked, Full screen,
- * the Toolbar row, lit while the floating toolbar is shown, and Windows.
+ * the Toolbar row, checked while the floating toolbar is shown, and Windows.
+ *
+ * The switches carry a check rather than the chosen-row bar, so a menu of
+ * toggles reads as state and not as navigation. Every row reserves the check
+ * column so their labels stay on one line.
  */
 void draw_view_menu(const render_input& input, bool desk_docked,
     menu_bar_result& result) {
-    if (widget::menu_item_row({.label = "Undock all", .enabled = desk_docked}))
+    if (widget::menu_item_row({.label = "Undock all", .checkable = true,
+            .enabled = desk_docked}))
         result.undock_all = true;
     if (widget::menu_item_row({.label = "Full screen", .shortcut = "F11",
-            .selected = input.fullscreen}))
+            .checkable = true, .checked = input.fullscreen}))
         result.fullscreen_toggled = true;
     auto& visible = input.market_view.toolbar_visible;
-    if (widget::menu_item_row({.label = "Toolbar", .selected = visible}))
+    if (widget::menu_item_row({.label = "Toolbar", .checkable = true,
+            .checked = visible}))
         visible = !visible;
     auto& reference = input.market_view.show_reference_providers;
     if (widget::menu_item_row({.label = "Reference providers",
-            .selected = reference}))
+            .checkable = true, .checked = reference}))
         reference = !reference;
 
     const bool any = any_window_open(input);
     const bool pressed = widget::menu_item_row({.label = "Windows",
-        .submenu = true, .enabled = any});
+        .submenu = true, .checkable = true, .enabled = any});
     if (!any)
         return;
     if ((pressed || ImGui::IsItemHovered())
@@ -781,12 +787,17 @@ void draw_menu_bar(const render_input& input, std::string_view logo_svg,
             ImGui::SameLine();
             widget::menu_bar_label(state, tools_entry, "Tools",
                 [&] { draw_tools_menu(input); }, height);
-            ImGui::SameLine();
-            widget::menu_bar_label(state, help_entry, "Help", [&] {
-                if (widget::menu_item_row({.label = "About"}))
-                    state.about_open = true;
-            }, height);
         }
+        /*
+         * HELP is always drawn: About is what a person asks for when the store
+         * will not open, and hiding it with the session menus leaves them with
+         * nothing to read.
+         */
+        ImGui::SameLine();
+        widget::menu_bar_label(state, help_entry, "Help", [&] {
+            if (widget::menu_item_row({.label = "About"}))
+                state.about_open = true;
+        }, height);
 
         /* The hairline round the plate, drawn over the fill. */
         draw->AddRect(ImVec2(plate_min.x + 0.5f, plate_min.y + 0.5f),
