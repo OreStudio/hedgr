@@ -22,6 +22,7 @@
 
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/renderer.hpp"
+#include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "implot.h"
@@ -176,7 +177,7 @@ struct desk final {
 /** @brief Draws one frame of @p draw inside a fixed window. */
 template<class Draw>
 inline void frame(Draw&& draw) {
-    ImGui::NewFrame();
+    hedgr::ui::theme::begin_frame_with_tab_font();
     ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(1000.0f, 700.0f));
     ImGui::Begin("frame");
@@ -194,7 +195,7 @@ inline void frame(Draw&& draw) {
 template<class Draw>
 inline void docked_frame(Draw&& draw) {
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    ImGui::NewFrame();
+    hedgr::ui::theme::begin_frame_with_tab_font();
     const ImGuiID root = ImGui::GetID("test-dock");
     if (ImGui::DockBuilderGetNode(root) == nullptr) {
         ImGui::DockBuilderAddNode(root, ImGuiDockNodeFlags_None);

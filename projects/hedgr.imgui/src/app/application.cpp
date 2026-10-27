@@ -794,7 +794,12 @@ void application::render_loop(GLFWwindow* window) {
          */
         ui::widget::record_capture_clipboard();
 
-        ImGui::NewFrame();
+        /*
+         * Floating dock nodes submit their tab bars while the frame starts, so
+         * the tab face and metrics are in force across NewFrame and gone
+         * before any window body draws.
+         */
+        ui::theme::begin_frame_with_tab_font();
         ui::widget::hold_capture_pointer();
 
         if (ImGui::IsKeyPressed(ImGuiKey_F11, false))

@@ -381,6 +381,18 @@ inline constexpr float tab_spacing = 4.0f;
 /** @brief The colour of a dock tab's label and close x, chosen tab or idle. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_label_colour() noexcept;
 
+/**
+ * @brief Starts an ImGui frame with the dock tab face and metrics in force.
+ *
+ * ImGui submits a floating dock node's tab bar inside `NewFrame`, before any
+ * window body, and resets the current font from `io.FontDefault` there. This
+ * makes the tab face the default for that call and gives the window bodies the
+ * base face back immediately after, so the frame draws as it always did except
+ * for those tab bars. The desk's dock space still pushes its own tab style
+ * around `DockSpace`.
+ */
+HEDGR_UI_EXPORT void begin_frame_with_tab_font();
+
 /** @brief The fill of a tab that is neither chosen nor hovered. */
 [[nodiscard]] HEDGR_UI_EXPORT ImVec4 tab_idle_colour() noexcept;
 

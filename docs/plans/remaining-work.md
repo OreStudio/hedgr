@@ -125,7 +125,10 @@ Follow-ups noticed while building the Instances panel, both done:
   sampled at (400, 300) of the tab reference, instead of the floating card's
   gradient. The tab hover colour (`#84719F`) is still a derived guess: the
   reference shows no hovered tab.
-- Tabs outside the desk's dock space (floating dock nodes) keep the base font.
+- Done: tabs in floating dock nodes use the tab face too. Their host windows are
+  submitted inside `ImGui::NewFrame`, so the app starts a frame through
+  `theme::begin_frame_with_tab_font()`, which makes the tab face the default for
+  that call and restores the base face before any window body draws.
 - The reference's menu bar mode switcher and window controls are not built.
 - Monospace font: JetBrains Mono Regular is bundled. A bold weight is not; the intro's
   "HEDGR." uses the system bold face, so a host without it shows regular weight.
