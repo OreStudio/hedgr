@@ -26,6 +26,7 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/tables.hpp"
+#include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/refusal.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
@@ -60,7 +61,7 @@ using probe_allowed = std::function<bool(const model::domain::instance&)>;
  * channel, so the probe table keeps the single writer the concurrency model
  * requires.
  */
-class probe_service final {
+class HEDGR_RUNTIME_EXPORT probe_service final {
 public:
     probe_service(const model::state::instance_table& instances,
         boost::asio::io_context& pool, model::command::event_queue& events);

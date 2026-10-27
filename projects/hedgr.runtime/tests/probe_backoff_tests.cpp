@@ -18,7 +18,10 @@
  *
  */
 #include "hedgr.runtime/service/probe_backoff.hpp"
+#include "hedgr.runtime/service/probe_service.hpp"
+#include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 
 namespace {
 
@@ -58,4 +61,48 @@ TEST_CASE("a broker that answered while IAM did not is not an answer",
         probe_answered(reachability::reachable, readiness::service_missing));
     CHECK(probe_answered(reachability::reachable, readiness::ready));
     CHECK(probe_answered(reachability::reachable, readiness::bootstrapping));
+}
+
+TEST_CASE("the service's next deadline follows the backoff",
+    "[probe_backoff][wiring]") {
+    namespace model = hedgr::model;
+    model::state::instance_table instances;
+    const auto handle = instances.upsert(model::domain::instance{
+        .id = "i", .name = "Probe target", .nats_url = "nats://127.0.0.1:1"});
+    boost::asio::io_context pool;
+    model::command::event_queue events;
+    hedgr::runtime::service::probe_service service(instances, pool, events);
+
+    model::event::event ev;
+    ev.kind = model::event::event_kind::probe_result;
+    ev.instance_id = "i";
+    ev.reach = reachability::unreachable;
+    ev.ready = readiness::unknown;
+
+    const auto wait_ms = [&] {
+        const auto now = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        return (service.probes().next_probe_ns(handle) - now) / 1'000'000;
+    };
+
+    /* No answer: the first wait is twice the cadence, not the cadence. */
+    service.apply_probe_result(ev);
+    CHECK(wait_ms() >= 9'000);
+    CHECK(wait_ms() <= 11'000);
+    service.apply_probe_result(ev);
+    CHECK(wait_ms() >= 19'000);
+    CHECK(wait_ms() <= 21'000);
+
+    /* A real answer returns the schedule to its cadence. */
+    ev.reach = reachability::reachable;
+    ev.ready = readiness::ready;
+    service.apply_probe_result(ev);
+    CHECK(wait_ms() >= 4'000);
+    CHECK(wait_ms() <= 6'000);
+
+    /* A broker that answered but whose IAM did not is faulted, not answered. */
+    ev.ready = readiness::service_missing;
+    service.apply_probe_result(ev);
+    CHECK(wait_ms() >= 9'000);
+    CHECK(wait_ms() <= 11'000);
 }
