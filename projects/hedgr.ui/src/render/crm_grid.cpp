@@ -128,6 +128,13 @@ crm_grid build_crm_grid(const model::state::crm_snapshot& batch,
 
 namespace {
 
+/** @brief Whether a row is FX, on its parsed asset when it has one. */
+[[nodiscard]] bool is_fx(const model::domain::market_series_row& row) {
+    if (row.asset != model::domain::market_asset::unknown)
+        return row.asset == model::domain::market_asset::fx;
+    return row.asset_class == "FX";
+}
+
 /**
  * @brief Whether a parsed identity is the FX spot series of @p base / @p quote.
  *
@@ -157,7 +164,7 @@ const model::domain::market_series_row* crm_series_for_pair(
     const std::string field = std::format("ccy={}", quote);
     const model::domain::market_series_row* fallback = nullptr;
     for (const auto& row : series) {
-        if (row.asset_class != "FX" || row.party_id != party_id)
+        if (!is_fx(row) || row.party_id != party_id)
             continue;
         if (row.identity.empty()) {
             /* A row from before the parse: the old substring test, unchanged. */

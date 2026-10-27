@@ -385,7 +385,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         ImGui::PopID();
     };
 
-    if (state.market_asset_class == "IR") {
+    if (model::domain::market_asset_of(state.market_asset_class)
+        == model::domain::market_asset::ir) {
         update_series_browser_view(state.series_view,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
