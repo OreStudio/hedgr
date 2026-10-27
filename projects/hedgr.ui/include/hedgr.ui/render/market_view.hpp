@@ -107,6 +107,15 @@ struct market_view_state final {
 
     /** @brief Whether the floating toolbar is shown; VIEW > Toolbar flips it. */
     bool toolbar_visible = true;
+
+    /**
+     * @brief Whether reference providers' series are listed.
+     *
+     * Off by default: a reference provider defines an instrument and never
+     * ticks, so its rows are the ones an operator plots by mistake. VIEW >
+     * Reference providers flips it.
+     */
+    bool show_reference_providers = false;
 };
 
 /** @brief The nanoseconds a span index names, or zero for the whole series. */

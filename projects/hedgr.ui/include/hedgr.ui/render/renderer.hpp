@@ -401,15 +401,14 @@ struct window_ui_state final {
     party_list parties;
 
     /**
-     * @brief The catalogue's reference provider codes, and whether to show them.
+     * @brief The catalogue's reference provider codes.
      *
      * A reference provider publishes an instrument's definition and never
-     * ticks, so its series are hidden by default and the checkbox brings them
-     * back. The codes are rebuilt when the catalogue's generation changes.
+     * ticks, so its series are hidden unless VIEW > Reference providers is on.
+     * The codes are rebuilt when the catalogue's generation changes.
      */
     std::vector<std::string> reference_providers;
     std::uint64_t reference_generation = 0;
-    bool market_show_reference = false;
 
     /**
      * @brief The party the foot control shows, as an index into @c parties.

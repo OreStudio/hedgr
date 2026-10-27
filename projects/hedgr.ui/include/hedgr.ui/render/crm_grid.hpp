@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -95,12 +96,16 @@ struct crm_grid final {
  *
  * An FX series of @p party_id whose URI names the base as its path and the
  * quote as its @c ccy field. A pair the CRM derives by reciprocal has no series
- * of its own and finds none here. Returns nullptr when nothing matches.
+ * of its own and finds none here. When a pair is listed by more than one
+ * provider, a row whose provider is not in @p reference_providers wins over a
+ * reference one, which defines the instrument and never ticks. Returns nullptr
+ * when nothing matches.
  */
 [[nodiscard]] HEDGR_UI_EXPORT const model::domain::market_series_row*
 crm_series_for_pair(
     const std::vector<model::domain::market_series_row>& series,
-    std::string_view party_id, std::string_view base, std::string_view quote);
+    std::string_view party_id, std::string_view base, std::string_view quote,
+    std::span<const std::string> reference_providers = {});
 
 /** @brief One series the matrix's pairs open as a card. */
 struct crm_card final {
@@ -122,7 +127,8 @@ struct crm_card final {
 [[nodiscard]] HEDGR_UI_EXPORT std::vector<crm_card> crm_pair_cards(
     const std::vector<model::domain::market_series_row>& series,
     std::string_view party_id, const std::vector<std::string>& currencies,
-    std::size_t& unmatched);
+    std::size_t& unmatched,
+    std::span<const std::string> reference_providers = {});
 
 /**
  * @brief The most cards "Mini plots" opens without asking first.

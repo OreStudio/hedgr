@@ -60,12 +60,14 @@ std::string rate_at(const crm_grid& grid, std::string_view pair) {
 }
 
 domain::market_series_row fx_series(std::string id, std::string base,
-    std::string quote, std::string party = "p1") {
+    std::string quote, std::string party = "p1",
+    std::string provider = "bloomberg") {
     domain::market_series_row row;
     row.id = std::move(id);
     row.label = "FX " + base + "/" + quote;
     row.asset_class = "FX";
     row.party_id = std::move(party);
+    row.provider_code = std::move(provider);
     row.uri = "oresmd:///fx/" + base + "?ccy=" + quote;
     return row;
 }
@@ -125,6 +127,36 @@ TEST_CASE("a CRM pair finds the FX series of its own party", "[crm]") {
     REQUIRE(row != nullptr);
     CHECK(row->id == "b");
     CHECK(crm_series_for_pair(series, "p1", "USD", "EUR") == nullptr);
+}
+
+TEST_CASE("a CRM pair prefers a data vendor over an earlier reference series",
+    "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("ore-row", "EUR", "USD", "p1", "ore"),
+        fx_series("vendor-row", "EUR", "USD", "p1", "bloomberg")};
+    const std::vector<std::string> reference{"ore"};
+
+    const auto* preferred
+        = crm_series_for_pair(series, "p1", "EUR", "USD", reference);
+    REQUIRE(preferred != nullptr);
+    CHECK(preferred->id == "vendor-row");
+
+    /* With no kinds known, the catalogue's own order still decides. */
+    const auto* first = crm_series_for_pair(series, "p1", "EUR", "USD");
+    REQUIRE(first != nullptr);
+    CHECK(first->id == "ore-row");
+}
+
+TEST_CASE("CRM mini plots take the data vendor's series for a pair", "[crm]") {
+    const std::vector<domain::market_series_row> series{
+        fx_series("ore-row", "EUR", "USD", "p1", "ore"),
+        fx_series("vendor-row", "EUR", "USD", "p1", "bloomberg")};
+    const std::vector<std::string> reference{"ore"};
+    std::size_t unmatched = 0;
+    const auto cards = crm_pair_cards(series, "p1", {"EUR", "USD"}, unmatched,
+        reference);
+    REQUIRE(cards.size() == 1);
+    CHECK(cards[0].id == "vendor-row");
 }
 
 TEST_CASE("CRM mini plots open one card per pair, skipping pairs with none",

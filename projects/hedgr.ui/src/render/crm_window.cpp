@@ -71,6 +71,18 @@ void open_pending_cards(const render_input& input,
     state.crm_pending_cards.clear();
 }
 
+/** @brief The providers the catalogue says publish definitions only. */
+[[nodiscard]] std::vector<std::string> reference_provider_codes(
+    const model::state::series_catalogue* catalogue) {
+    std::vector<std::string> codes;
+    if (catalogue == nullptr)
+        return codes;
+    for (const auto& provider : catalogue->providers)
+        if (model::domain::is_reference_provider(provider))
+            codes.push_back(provider.code);
+    return codes;
+}
+
 /** @brief The confirmation a set above the limit waits behind. */
 void draw_mini_plot_confirmation(const render_input& input,
     const hedgr::model::state::session_handle session, window_ui_state& state) {
@@ -192,7 +204,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         state.crm_pending_cards = catalogue == nullptr
             ? std::vector<crm_card>{}
             : crm_pair_cards(catalogue->series, state.crm_party_id,
-                  state.crm_view.currencies, state.crm_unmatched_pairs);
+                  state.crm_view.currencies, state.crm_unmatched_pairs,
+                  reference_provider_codes(catalogue));
         if (state.crm_pending_cards.size() > crm_mini_plot_confirm_above)
             ImGui::OpenPopup("Open mini plots?");
         else
@@ -380,7 +393,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
                         if (catalogue != nullptr) {
                             if (const auto* row = crm_series_for_pair(
                                     catalogue->series, state.crm_party_id,
-                                    base, quote)) {
+                                    base, quote,
+                                    reference_provider_codes(catalogue))) {
                                 model::command::command chart;
                                 chart.kind
                                     = model::command::command_kind::open_window;

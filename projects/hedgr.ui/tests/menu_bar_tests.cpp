@@ -628,6 +628,18 @@ TEST_CASE("VIEW: Toolbar flips whether the floating toolbar is shown",
     CHECK(h.desk.market_view.toolbar_visible);
 }
 
+TEST_CASE("VIEW: Reference providers flips whether they are listed",
+    "[menu_bar][view]") {
+    bar_harness h;
+    REQUIRE_FALSE(h.desk.market_view.show_reference_providers);
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(3));
+    CHECK(h.desk.market_view.show_reference_providers);
+    h.open_menu("View");
+    h.click(bar_harness::row_centre(3));
+    CHECK_FALSE(h.desk.market_view.show_reference_providers);
+}
+
 TEST_CASE("VIEW: Full screen asks the application to switch full screen",
     "[menu_bar][view]") {
     bar_harness h;
@@ -1522,7 +1534,7 @@ std::optional<float> find_popup_row(bar_harness& h, float x, ImGuiID target) {
 
 void open_windows_list(bar_harness& h) {
     h.open_menu("View");
-    h.click(bar_harness::row_centre(3));
+    h.click(bar_harness::row_centre(4));
     h.settle();
 }
 
@@ -1672,7 +1684,7 @@ TEST_CASE("VIEW: Windows is disabled while no window is open",
     "[menu_bar][view][windows]") {
     bar_harness h;
     h.open_menu("View");
-    h.click(bar_harness::row_centre(3));
+    h.click(bar_harness::row_centre(4));
     h.settle();
     CHECK(GImGui->OpenPopupStack.Size == 1);
 }

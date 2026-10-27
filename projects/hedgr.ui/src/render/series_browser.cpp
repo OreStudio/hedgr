@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 #include <string>
 #include <string_view>
@@ -153,6 +154,24 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     static const std::vector<domain::market_series_row> none;
     const auto& rows = catalogue != nullptr ? catalogue->series : none;
 
+    /*
+     * The providers the catalogue read brought with it. A reference provider
+     * defines an instrument and never ticks, so its rows are hidden unless
+     * VIEW > Reference providers is on; an empty provider list hides nothing.
+     */
+    if (catalogue != nullptr
+        && state.reference_generation != catalogue->generation) {
+        state.reference_generation = catalogue->generation;
+        state.reference_providers.clear();
+        for (const auto& provider : catalogue->providers)
+            if (domain::is_reference_provider(provider))
+                state.reference_providers.push_back(provider.code);
+    }
+    const std::span<const std::string> hidden_providers =
+        input.market_view.show_reference_providers
+        ? std::span<const std::string>{}
+        : std::span<const std::string>{state.reference_providers};
+
     ImGui::SameLine();
     ImGui::TextDisabled("%zu in tenant", rows.size());
 
@@ -254,6 +273,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      * only a data vendor's series tick, so this narrows the list to one.
      */
     update_providers(state.series_view, generation, rows);
+    const auto hidden_provider = [&](std::string_view code) {
+        return std::find(hidden_providers.begin(), hidden_providers.end(),
+                   code)
+            != hidden_providers.end();
+    };
+    if (hidden_provider(state.market_provider))
+        state.market_provider.clear();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(130.0f);
     const char* provider_preview = state.market_provider.empty()
@@ -263,6 +289,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             state.market_provider.clear();
         for (const auto at : state.series_view.providers) {
             const auto& provider = rows[at].provider_code;
+            if (hidden_provider(provider))
+                continue;
             const bool chosen = provider == state.market_provider;
             if (ImGui::Selectable(provider.c_str(), chosen))
                 state.market_provider = provider;
@@ -382,7 +410,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
                 .party = state.market_party_id,
-                .provider = state.market_provider},
+                .provider = state.market_provider,
+                .hidden_providers = hidden_providers},
             rows);
         const auto& curves = state.series_view.rows;
         if (curves.empty()) {
@@ -489,7 +518,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         {.generation = generation, .filter = filter,
             .asset_class = state.market_asset_class,
             .party = state.market_party_id,
-            .provider = state.market_provider},
+            .provider = state.market_provider,
+            .hidden_providers = hidden_providers},
         rows);
     const auto& visible = state.series_view.rows;
 
