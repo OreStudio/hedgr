@@ -19,6 +19,7 @@
  */
 #include "hedgr.ui/theme/theme.hpp"
 
+#include "hedgr.ui/icon/fonts.hpp"
 #include "hedgr.ui/icon/icons.hpp"
 #include "imgui_internal.h"
 #include "implot.h"
@@ -413,6 +414,40 @@ ImVec4 tab_bar_colour() noexcept {
 
 ImVec4 tab_label_colour() noexcept {
     return tab_label;
+}
+
+void begin_frame_with_tab_font() {
+    /*
+     * A floating dock node's tab bar is submitted inside NewFrame, before any
+     * window body, and NewFrame resets the current font from io.FontDefault.
+     * So the tab face has to BE the default for that call, and the window
+     * bodies get the base face back immediately after: a PushFont around
+     * NewFrame would be undone by the reset, and an unbalanced font stack
+     * after it would leave the whole frame in the wrong face.
+     *
+     * The tab metrics and label colour are ordinary stack pushes and survive
+     * the frame start, so they are pushed here and popped before any body.
+     */
+    ImGuiIO& io = ImGui::GetIO();
+    ImFont* const base = io.FontDefault;
+    ImFont* const mono = icon::mono_font();
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+        ImVec2(tab_padding_x, tab_padding_y));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing,
+        ImVec2(tab_spacing, ImGui::GetStyle().ItemInnerSpacing.y));
+    ImGui::PushStyleColor(ImGuiCol_Text, tab_label);
+    if (mono != nullptr)
+        io.FontDefault = mono;
+    ImGui::NewFrame();
+    if (mono != nullptr) {
+        io.FontDefault = base;
+        ImFont* const restore
+            = base != nullptr ? base : ImGui::GetDefaultFont();
+        ImGui::SetCurrentFont(restore, ImGui::GetStyle().FontSizeBase, 0.0f);
+    }
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
 }
 
 ImVec4 chart_tag_colour() noexcept {
