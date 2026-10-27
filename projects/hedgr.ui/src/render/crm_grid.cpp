@@ -126,6 +126,28 @@ crm_grid build_crm_grid(const model::state::crm_snapshot& batch,
 }
 
 
+namespace {
+
+/**
+ * @brief Whether a parsed identity is the FX spot series of @p base / @p quote.
+ *
+ * The URI substring test cannot tell a spot from a forward or an option: they
+ * share the currencies and differ only in the instrument. A row that carries a
+ * parsed identity is matched on it, and only `fx_spot` is the CRM's series.
+ */
+[[nodiscard]] bool identity_is_fx_spot(
+    const model::domain::market_series_identity& identity,
+    const std::string_view base, const std::string_view quote) {
+    if (identity.instrument_type != "fx_spot" || identity.scope != base)
+        return false;
+    for (const auto& field : identity.fields)
+        if (field.name == "ccy" && field.text == quote)
+            return true;
+    return false;
+}
+
+}
+
 const model::domain::market_series_row* crm_series_for_pair(
     const std::vector<model::domain::market_series_row>& series,
     const std::string_view party_id, const std::string_view base,
@@ -137,9 +159,14 @@ const model::domain::market_series_row* crm_series_for_pair(
     for (const auto& row : series) {
         if (row.asset_class != "FX" || row.party_id != party_id)
             continue;
-        if (row.uri.find(path) == std::string::npos
-            || row.uri.find(field) == std::string::npos)
+        if (row.identity.empty()) {
+            /* A row from before the parse: the old substring test, unchanged. */
+            if (row.uri.find(path) == std::string::npos
+                || row.uri.find(field) == std::string::npos)
+                continue;
+        } else if (!identity_is_fx_spot(row.identity, base, quote)) {
             continue;
+        }
         const bool reference = std::find(reference_providers.begin(),
             reference_providers.end(), row.provider_code)
             != reference_providers.end();
