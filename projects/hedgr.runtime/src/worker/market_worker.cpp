@@ -54,8 +54,7 @@ using hedgr::model::command::event_queue;
 }
 
 [[nodiscard]] tick_silence& silence() {
-    static tick_silence instance;
-    return instance;
+    return market_silence();
 }
 
 /** @brief What an unanswered tick read says, for the chart's foot and plot. */
@@ -191,6 +190,11 @@ boost::asio::awaitable<void> run_market(market_job job,
     events.push(std::move(fact));
 }
 
+}
+
+tick_silence& market_silence() {
+    static tick_silence instance;
+    return instance;
 }
 
 market_read_report report_market_read(const market_job& job,

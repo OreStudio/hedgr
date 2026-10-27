@@ -24,6 +24,7 @@
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/worker/tick_silence.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
 #include <cstdint>
@@ -114,6 +115,15 @@ struct market_read_report final {
 HEDGR_RUNTIME_EXPORT void
 spawn_market_read(boost::asio::io_context& context, market_job job,
                   model::command::event_queue& events);
+
+/**
+ * @brief The process-wide tick-silence window every read job shares.
+ *
+ * A read that went unanswered quiets the next tick read of its instance for a
+ * few seconds. Exposed so a test can put an instance inside the window and see
+ * the read that follows report the wait rather than ask again.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT tick_silence& market_silence();
 
 }
 
