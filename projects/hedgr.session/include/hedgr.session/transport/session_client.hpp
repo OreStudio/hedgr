@@ -195,6 +195,9 @@ struct market_series_summary final {
 
     /** @brief The curve's name, from the URI without its term. */
     std::string curve_label;
+
+    /** @brief The typed identity a tick read names the series by. */
+    hedgr::model::domain::market_series_identity identity;
 };
 
 /** @brief One observation: when the market was observed and what it was. */
@@ -517,7 +520,9 @@ public:
      */
     [[nodiscard]] result<market_series_read>
     market_series_ticks(std::string_view series_id, std::int64_t from_ns,
-        std::int64_t to_ns) const;
+        std::int64_t to_ns,
+        const hedgr::model::domain::market_series_identity& identity = {})
+        const;
 
     /**
      * @brief Reads the first load of a series: its newest ticks for a chart.
@@ -531,7 +536,9 @@ public:
      * @return the points oldest first, or why they could not be read.
      */
     [[nodiscard]] result<market_series_read>
-    market_series_points(std::string_view series_id) const;
+    market_series_points(std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity = {})
+        const;
 
     /**
      * @brief Reads at least @p count of a series' newest ticks, if it has them.
@@ -560,7 +567,9 @@ public:
      */
     [[nodiscard]] result<market_series_read>
     market_series_history(std::string_view series_id, std::int64_t from_ns,
-        std::int64_t to_ns) const;
+        std::int64_t to_ns,
+        const hedgr::model::domain::market_series_identity& identity = {})
+        const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.

@@ -58,6 +58,15 @@ struct market_job final {
     std::string series_id;
 
     /**
+     * @brief The typed identity the catalogue read gave this series.
+     *
+     * A tick read names its series by this, so the read does not also list the
+     * deployment's identities. Empty when the catalogue did not carry one, and
+     * the read then falls back to the list.
+     */
+    model::domain::market_series_identity identity;
+
+    /**
      * @brief Whether this reads a time range of the series, not its first load.
      *
      * A history read asks for the ticks from @c history_from_ns to

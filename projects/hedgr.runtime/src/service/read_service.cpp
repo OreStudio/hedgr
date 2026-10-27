@@ -58,6 +58,25 @@ using support::steady_now_ns;
  * party's rate engine, paid once per matrix however many windows show it.
  */
 constexpr std::chrono::milliseconds crm_cadence{5000};
+
+/**
+ * @brief The identity a session's catalogue holds for one series.
+ *
+ * A tick read wants the typed identity; the catalogue parsed it from the
+ * series URI when the catalogue arrived. An empty result (no catalogue, an
+ * older row, or a series the catalogue does not list) makes the read fall back
+ * to the deployment's list of identities.
+ */
+[[nodiscard]] domain::market_series_identity catalogue_identity(
+    const model_state::series_table& market, std::string_view instance_id,
+    std::string_view account_id, std::string_view series_id) {
+    const auto* catalogue = market.catalogue(instance_id, account_id);
+    if (catalogue == nullptr)
+        return {};
+    const auto* row = catalogue->row_of(series_id);
+    return row != nullptr ? row->identity : domain::market_series_identity{};
+}
+
 }
 
 read_service::read_service(boost::asio::io_context& pool,
@@ -258,6 +277,9 @@ std::optional<refusal> read_service::launch_market_read(
     job.principal = std::move(read.principal);
     job.catalogue = catalogue;
     job.series_id = std::string{series_id};
+    if (!catalogue)
+        job.identity = catalogue_identity(market_, read.instance_id,
+            read.account_id, series_id);
 
     pending_.mark(id);
     if (catalogue)
@@ -486,6 +508,8 @@ void read_service::start_market_backfill(std::string_view instance_id,
     job.principal = std::move(read->principal);
     job.catalogue = false;
     job.series_id = std::string{series_id};
+    job.identity = catalogue_identity(market_, instance_id, account_id,
+        series_id);
 
     pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::info)
@@ -535,6 +559,8 @@ void read_service::load_history(const model::command::command& cmd) {
     job.token = std::move(read->token);
     job.principal = std::move(read->principal);
     job.series_id = cmd.series_id;
+    job.identity = catalogue_identity(market_, cmd.instance_id,
+        cmd.account_id, cmd.series_id);
     job.history = true;
     job.history_from_ns = plan->from_ns;
     job.history_to_ns = plan->to_ns;

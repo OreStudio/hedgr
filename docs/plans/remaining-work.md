@@ -98,11 +98,16 @@ Follow-ups noticed while building the Instances panel, both done:
   structures and the workspace show the party in their identity line but cannot change
   it; the design asked for a control on the session's identity bar, so the shared foot
   should grow one.
-- **All parties** choice in the market data browser's Party combo, with a note when the
-  list is narrower than the catalogue.
-- **Carry the series identity in the catalogue.** Each tick read now makes one extra
-  `list_series_identities` call (up to three per first load) and the reply is the whole
-  list. Carry the identity into the series row from the catalogue read instead.
+- The old **All parties** choice is obsolete: the act-as-party work removed the
+  browser's Party combo, and a session now holds one party at a time, so there is
+  nothing to list across.
+- Done: **Carry the series identity in the catalogue.** Each catalogue row now
+  carries the typed identity (asset, scope, instrument and quote spelling, party,
+  provider, and the schema-order fields) parsed once from its `oresmd_uri` with
+  OreStudio's codec. A tick read sends that identity instead of calling
+  `list_series_identities` for the whole deployment; a row whose URI the codec
+  cannot read falls back to the list, so an old catalogue still works. The extra
+  call per read, and the two more of a widened first load, are gone.
 
 ## Small items
 

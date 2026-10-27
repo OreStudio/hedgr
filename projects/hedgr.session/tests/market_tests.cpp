@@ -30,6 +30,57 @@
 
 namespace market = hedgr::session::market;
 
+TEST_CASE("a series URI gives the typed identity a tick read needs",
+    "[market][identity]") {
+    const auto identity = market::series_identity_from_uri(
+        "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate&ccy=USD",
+        "party-1", "bloomberg");
+    REQUIRE(identity.has_value());
+    CHECK(identity->asset == "fx");
+    CHECK(identity->scope == "GBP");
+    CHECK(identity->instrument_type == "fx_spot");
+    CHECK(identity->quote_type == "rate");
+    CHECK(identity->party_id == "party-1");
+    CHECK(identity->provider_code == "bloomberg");
+    REQUIRE(identity->fields.size() == 1);
+    CHECK(identity->fields[0].name == "ccy");
+    CHECK(identity->fields[0].text == "USD");
+    CHECK_FALSE(identity->empty());
+
+    /* A quote URI is not a series, and nonsense has no identity at all. */
+    CHECK_FALSE(market::series_identity_from_uri(
+        "oresmd://fx/GBP?type=quote&instrument=fx_spot&quote=rate&ccy=USD",
+        "party-1", "bloomberg")
+            .has_value());
+    CHECK_FALSE(
+        market::series_identity_from_uri("not a uri", "party-1", "bloomberg")
+            .has_value());
+}
+
+TEST_CASE("a catalogue summary carries the series' parsed identity",
+    "[market][identity]") {
+    boost::uuids::string_generator ids;
+    ores::marketdata::domain::market_series series;
+    series.id = ids("11111111-1111-1111-1111-111111111111");
+    series.party_id = ids("22222222-2222-2222-2222-222222222222");
+    series.provider_code = "bloomberg";
+    series.oresmd_uri
+        = "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate&ccy=USD";
+
+    const auto summary = market::summarise_series(series);
+    CHECK(summary.party_id == "22222222-2222-2222-2222-222222222222");
+    CHECK(summary.provider_code == "bloomberg");
+    CHECK(summary.identity.asset == "fx");
+    CHECK(summary.identity.scope == "GBP");
+    CHECK(summary.identity.instrument_type == "fx_spot");
+    CHECK(summary.identity.party_id == summary.party_id);
+    CHECK(summary.identity.provider_code == "bloomberg");
+
+    /* An unreadable URI leaves the identity empty, and the read falls back. */
+    series.oresmd_uri = "not a uri";
+    CHECK(market::summarise_series(series).identity.empty());
+}
+
 TEST_CASE("a series label names the parts its URI carries", "[market]") {
     /*
      * The deployment names a series by URI. These are the shapes the live
