@@ -34,7 +34,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <span>
 #include <vector>
 #include <string>
 #include <string_view>
@@ -143,11 +142,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     ImGui::InputTextWithHint("##filter", "filter by series, asset, provider or URI",
         state.filter.data(), state.filter.size());
     ImGui::SameLine();
-    ImGui::Checkbox("Reference", &state.market_show_reference);
-    ImGui::SetItemTooltip("%s",
-        "Show series from reference providers, which define instruments and "
-        "never tick");
-    ImGui::SameLine();
     if (ImGui::Button(icon::refresh))
         input.commands.push(command{
             .kind = command_kind::refresh_window,
@@ -158,25 +152,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         input.sessions.account_id(*session));
     static const std::vector<domain::market_series_row> none;
     const auto& rows = catalogue != nullptr ? catalogue->series : none;
-
-    /*
-     * The providers the catalogue read brought with it. A reference provider
-     * publishes an instrument's definition and never ticks, so its rows are
-     * hidden unless the operator asks for them; an empty provider list (a
-     * failed provider read) hides nothing.
-     */
-    if (catalogue != nullptr
-        && state.reference_generation != catalogue->generation) {
-        state.reference_generation = catalogue->generation;
-        state.reference_providers.clear();
-        for (const auto& provider : catalogue->providers)
-            if (domain::is_reference_provider(provider))
-                state.reference_providers.push_back(provider.code);
-    }
-    const std::span<const std::string> hidden_providers =
-        state.market_show_reference
-        ? std::span<const std::string>{}
-        : std::span<const std::string>{state.reference_providers};
 
     ImGui::SameLine();
     ImGui::TextDisabled("%zu in tenant", rows.size());
@@ -407,8 +382,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
                 .party = state.market_party_id,
-                .provider = state.market_provider,
-                .hidden_providers = hidden_providers},
+                .provider = state.market_provider},
             rows);
         const auto& curves = state.series_view.rows;
         if (curves.empty()) {
@@ -515,8 +489,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         {.generation = generation, .filter = filter,
             .asset_class = state.market_asset_class,
             .party = state.market_party_id,
-            .provider = state.market_provider,
-            .hidden_providers = hidden_providers},
+            .provider = state.market_provider},
         rows);
     const auto& visible = state.series_view.rows;
 
