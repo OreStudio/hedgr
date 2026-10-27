@@ -243,10 +243,10 @@ Each step is one PR, with tests, and leaves the app working.
      disconnected, or "no session". Failure outranks a connection in flight,
      which outranks quiet connectivity. The strip advances the message clock
      itself, so an event ages out even with no window open.
-   - Kept: the window foots (decision 8). A consequence is that a runtime error
-     is currently drawn both in the strip and in the foot of each open window,
-     because the workspace's one `status_bar` is passed to them too. Folding the
-     foot's message line into the strip is follow-up work, not this step.
+   - Kept: the window foots (decision 8). They carry each window's identity and
+     its own state, and read an empty status bar, so the message ladder is drawn
+     once, in the strip, and a runtime failure is not repeated in every open
+     window's foot.
    - Not checked in a real window.
 9. [x] **Retire the cool bar.** Brought forward. Deleted `shortcut_bar.cpp`,
    `shortcut_bar_result`, `shortcut_bar_height`, `shortcut_bar_tests.cpp` and the

@@ -92,9 +92,6 @@ Follow-ups noticed while building the Instances panel, both done:
 
 ## Small items
 
-- The bottom strip and every open window's foot both draw the message ladder,
-  because the workspace hands one `status_bar` to both. Let the strip own the
-  message and leave the foots the identity and the state.
 - The VIEW > Windows panel has no filter; a wall of forty charts is a scroll.
 - The CRM "Mini plots" button and the CRM double-click take the first catalogue row that
   matches a pair, whatever its provider. It lands on `bloomberg` only because that
@@ -104,8 +101,7 @@ Follow-ups noticed while building the Instances panel, both done:
 - Rename `docs/plans/mini-plots.md` step notes that mention the retired compact layout.
 - VIEW > Toolbar and VIEW > Full screen are lit rows, not checkmarks, because
   `menu_row` has no check column.
-- The Accounts child panel has no caret. The About window is hidden while the store is
-  locked.
+- The About window is hidden while the store is locked.
 - Docked content is not retinted to the reference's content colour (`#191923`); the
   tab hover colour (`#84719F`) is a guess.
 - Tabs outside the desk's dock space (floating dock nodes) keep the base font.
