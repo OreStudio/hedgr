@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <boost/asio/io_context.hpp>
 
 namespace hedgr::runtime::worker {
@@ -36,6 +37,11 @@ struct image_map_job final {
 HEDGR_RUNTIME_EXPORT void
 spawn_image_map_read(boost::asio::io_context& context, image_map_job job,
     model::command::event_queue& events);
+
+/** @brief Fills the event with the currency-to-image map, or its failure. */
+HEDGR_RUNTIME_EXPORT void run_image_map_read(
+    hedgr::session::transport::session_link& link,
+    model::event::event& answer);
 
 }
 

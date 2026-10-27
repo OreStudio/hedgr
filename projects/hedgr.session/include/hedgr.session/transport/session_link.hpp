@@ -58,6 +58,18 @@ public:
     /** @brief Every pair convention the deployment publishes. */
     [[nodiscard]] virtual result<std::vector<session_client::pair_convention>>
     currency_pair_conventions() const = 0;
+
+    /** @brief The enabled CRM names a party has configured. */
+    [[nodiscard]] virtual result<std::vector<std::string>> crm_names(
+        std::string_view party_id) const = 0;
+
+    /** @brief Every currency the tenant has an image for, by ISO code. */
+    [[nodiscard]] virtual result<std::vector<session_client::currency_image>>
+    currency_images() const = 0;
+
+    /** @brief One image of the tenant, by its identifier. */
+    [[nodiscard]] virtual result<session_client::image_content> image_by_id(
+        std::string_view image_id) const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -85,6 +97,21 @@ public:
     [[nodiscard]] result<std::vector<session_client::pair_convention>>
     currency_pair_conventions() const override {
         return client_.currency_pair_conventions();
+    }
+
+    [[nodiscard]] result<std::vector<std::string>> crm_names(
+        std::string_view party_id) const override {
+        return client_.crm_names(party_id);
+    }
+
+    [[nodiscard]] result<std::vector<session_client::currency_image>>
+    currency_images() const override {
+        return client_.currency_images();
+    }
+
+    [[nodiscard]] result<session_client::image_content> image_by_id(
+        std::string_view image_id) const override {
+        return client_.image_by_id(image_id);
     }
 
 private:

@@ -23,6 +23,16 @@
 
 namespace hedgr::runtime::worker {
 
+void run_image_read(session::transport::session_link& link,
+    std::string_view image_id, model::event::event& answer) {
+    if (const auto image = link.image_by_id(image_id); image) {
+        answer.mime_type = image->mime_type;
+        answer.bytes = image->data;
+    } else {
+        answer.message = image.error().message;
+    }
+}
+
 void spawn_image_read(boost::asio::io_context& context, image_job job,
     model::command::event_queue& events) {
     const auto image_id = std::move(job.image_id);
@@ -33,17 +43,12 @@ void spawn_image_read(boost::asio::io_context& context, image_job job,
     fact.tenant_id = job.session.tenant_id;
     fact.image_id = image_id;
 
-    auto work = [image_id](session::transport::session_client& client,
+    auto work = [image_id](session::transport::session_link& link,
                     model::event::event& answer) {
-        if (const auto image = client.image_by_id(image_id); image) {
-            answer.mime_type = image->mime_type;
-            answer.bytes = image->data;
-        } else {
-            answer.message = image.error().message;
-        }
+        run_image_read(link, image_id, answer);
     };
     boost::asio::co_spawn(context,
-        run_session_read(std::move(job.session), std::move(fact),
+        run_session_read_on_link(std::move(job.session), std::move(fact),
             std::move(work), events),
         boost::asio::detached);
 }
