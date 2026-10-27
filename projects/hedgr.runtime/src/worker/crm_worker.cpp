@@ -19,6 +19,7 @@
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "ores.platform/time/datetime.hpp"
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,44 @@ std::int64_t parse_iso8601_utc(std::string_view text) {
     }
 }
 
+void run_crm_read(session::transport::session_link& link,
+    std::string_view party, std::string_view crm_name, bool reciprocal,
+    model::event::event& answer) {
+    const auto started = std::chrono::steady_clock::now();
+    const auto rates = link.crm_rates(party, crm_name, reciprocal);
+    answer.crm_latency_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - started)
+            .count();
+    if (!rates) {
+        answer.message = rates.error().message;
+        return;
+    }
+    std::int64_t newest = 0;
+    for (const auto& item : *rates) {
+        answer.crm_cells.push_back(model::domain::crm_cell{
+            .crm_name = item.crm_name,
+            .base_currency_code = item.base_currency_code,
+            .quote_currency_code = item.quote_currency_code,
+            .rate = item.rate,
+            .status = item.status,
+            .as_of = item.as_of,
+            .reciprocal = item.reciprocal,
+            .delta_pct = item.delta_pct});
+        newest = std::max(newest, parse_iso8601_utc(item.as_of));
+    }
+    answer.crm_as_of_ns = newest;
+    if (const auto conventions = link.currency_pair_conventions()) {
+        for (const auto& item : *conventions) {
+            answer.crm_conventions.push_back(model::domain::crm_convention{
+                .pair_code = item.pair_code,
+                .decimal_places = item.decimal_places,
+                .pip_factor = item.pip_factor,
+                .tick_size = item.tick_size});
+        }
+    }
+}
+
 void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     model::command::event_queue& events) {
     const auto party = job.party_id;
@@ -54,44 +93,12 @@ void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     fact.crm_name = crm_name;
     fact.crm_reciprocal = reciprocal;
     auto work = [party, crm_name, reciprocal](
-                    session::transport::session_client& client,
+                    session::transport::session_link& link,
                     model::event::event& answer) {
-        const auto started = std::chrono::steady_clock::now();
-        const auto rates = client.crm_rates(party, crm_name, reciprocal);
-        answer.crm_latency_ns =
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::steady_clock::now() - started)
-                .count();
-        if (!rates) {
-            answer.message = rates.error().message;
-            return;
-        }
-        std::int64_t newest = 0;
-        for (const auto& item : *rates) {
-            answer.crm_cells.push_back(model::domain::crm_cell{
-                .crm_name = item.crm_name,
-                .base_currency_code = item.base_currency_code,
-                .quote_currency_code = item.quote_currency_code,
-                .rate = item.rate,
-                .status = item.status,
-                .as_of = item.as_of,
-                .reciprocal = item.reciprocal,
-                .delta_pct = item.delta_pct});
-            newest = std::max(newest, parse_iso8601_utc(item.as_of));
-        }
-        answer.crm_as_of_ns = newest;
-        if (const auto conventions = client.currency_pair_conventions()) {
-            for (const auto& item : *conventions) {
-                answer.crm_conventions.push_back(model::domain::crm_convention{
-                    .pair_code = item.pair_code,
-                    .decimal_places = item.decimal_places,
-                    .pip_factor = item.pip_factor,
-                    .tick_size = item.tick_size});
-            }
-        }
+        run_crm_read(link, party, crm_name, reciprocal, answer);
     };
     boost::asio::co_spawn(context,
-        run_session_read(std::move(job.session), std::move(fact),
+        run_session_read_on_link(std::move(job.session), std::move(fact),
             std::move(work), events),
         boost::asio::detached);
 }

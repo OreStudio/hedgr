@@ -283,6 +283,11 @@ by the broker's own connection list on a live deployment.
 
 ### 1. The seam, and tests for the workers
 
+> **Status: started.** `session_link` and `session_client_link` exist with
+> `connect`, `resume` and the two CRM reads; the CRM worker's mapping is
+> `run_crm_read(link, …)` and is tested against a fake, including a failed
+> connect. The rest of the call surface and the other workers follow.
+
 Add `session_link`, an interface of the calls the workers and the actor make:
 `connect`, `resume`, `authenticate`, `refresh`, `logout`, `is_connected`,
 `ping` (the anonymous `bootstrap_status`), `subscribe_ticks`, and the eight reads

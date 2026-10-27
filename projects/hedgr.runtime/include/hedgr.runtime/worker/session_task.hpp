@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -55,13 +56,35 @@ struct session_read final {
  * names the call it makes.
  */
 template<class Work>
-boost::asio::awaitable<void> run_session_read(session_read job,
+boost::asio::awaitable<void> run_session_read(
+    session::transport::session_link& link, session_read job,
     model::event::event fact, Work work,
     model::command::event_queue& events) {
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
         boost::asio::use_awaitable);
 
+    if (const auto connected = link.connect(); !connected) {
+        fact.message = connected.error().message;
+    } else if (const auto resumed = link.resume(job.token, job.principal);
+        !resumed) {
+        fact.message = resumed.error().message;
+    } else {
+        work(link, fact);
+    }
+
+    std::fill(job.token.begin(), job.token.end(), '\0');
+    job.token.clear();
+    events.push(std::move(fact));
+}
+
+template<class Work>
+boost::asio::awaitable<void> run_session_read(session_read job,
+    model::event::event fact, Work work,
+    model::command::event_queue& events) {
     session::transport::session_client client(std::move(job.options));
+    co_await boost::asio::post(co_await boost::asio::this_coro::executor,
+        boost::asio::use_awaitable);
+
     if (const auto connected = client.connect(); !connected) {
         fact.message = connected.error().message;
     } else if (const auto resumed = client.resume(job.token, job.principal);
@@ -74,6 +97,23 @@ boost::asio::awaitable<void> run_session_read(session_read job,
     std::fill(job.token.begin(), job.token.end(), '\0');
     job.token.clear();
     events.push(std::move(fact));
+}
+
+/**
+ * @brief Runs one read over a link that owns the client it forwards to.
+ *
+ * The client lives in this coroutine's frame for as long as the link is used,
+ * which is why it is a coroutine of its own rather than a captured lambda: a
+ * link must never outlive the client it points at.
+ */
+template<class Work>
+boost::asio::awaitable<void> run_session_read_on_link(session_read job,
+    model::event::event fact, Work work,
+    model::command::event_queue& events) {
+    session::transport::session_client client(std::move(job.options));
+    session::transport::session_client_link link(client);
+    co_await run_session_read(link, std::move(job), std::move(fact),
+        std::move(work), events);
 }
 
 }
