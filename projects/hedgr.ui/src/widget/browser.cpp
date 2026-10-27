@@ -40,6 +40,8 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include "ores.utility/uuid/uuid_v7_generator.hpp"
+#include <boost/uuid/uuid_io.hpp>
 
 namespace {
 
@@ -48,6 +50,20 @@ namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/**
+ * @brief A fresh folder id, never derived from where it goes or what it is
+ * called.
+ *
+ * The runtime saves by key, so a key built from a name would let a new folder
+ * land on an old one that was later renamed away from that name: the rename
+ * keeps the id while the name moves, and the next creation under the old name
+ * would take the same key. A v7 uuid is unique and time-ordered.
+ */
+[[nodiscard]] std::string new_folder_id() {
+    static ores::utility::uuid::uuid_v7_generator generate;
+    return std::format("folder-{}", boost::uuids::to_string(generate()));
+}
 
 /**
  * @brief One group of the rail: a folder and the entries that name it.
@@ -552,13 +568,11 @@ void draw_folder_form(widget::browser_state& state,
         hedgr::model::command::command request;
         request.kind = hedgr::model::command::command_kind::save_folder;
         /*
-         * The id is derived from where the folder goes and what it is called,
-         * which is unique among its siblings by the check above. A serial or a
-         * clock reading would be unique too, and would also mean the same
-         * folder had a different name every time it was created in a test.
+         * A fresh key, not one built from the parent and the name: a folder
+         * renamed away from a name would keep its old key, and a new folder
+         * under that name would then take the same key and overwrite it.
          */
-        request.folder_row.id =
-            std::format("folder:{}:{}", state.form_folder, name);
+        request.folder_row.id = new_folder_id();
         request.folder_row.parent_id = state.form_folder;
         request.folder_row.name = std::string{name};
         input.commands.push(std::move(request));
