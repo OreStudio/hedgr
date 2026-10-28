@@ -62,7 +62,7 @@ market_feed::market_feed(const model::state::instance_table& instances,
       read_catalogue_(std::move(read_catalogue)),
       read_backfill_(std::move(read_backfill)) {
     if (!market_feeds_) {
-        market_feeds_ = [](worker::market_stream_options options)
+        market_feeds_ = [](worker::session_actor_options options)
             -> std::unique_ptr<worker::tick_feed> {
             auto stream =
                 std::make_unique<worker::session_actor>(std::move(options));
@@ -83,7 +83,7 @@ void market_feed::open(const model::event::event& ev) {
     if (!instance)
         return;
 
-    worker::market_stream_options options;
+    worker::session_actor_options options;
     options.options = connection_options_for(*instances_.get(*instance),
         seed_, database_path_);
     options.token = std::string{ev.token.view()};

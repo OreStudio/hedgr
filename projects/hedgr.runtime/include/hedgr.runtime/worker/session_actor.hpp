@@ -39,7 +39,7 @@
 namespace hedgr::runtime::worker {
 
 /** @brief What one session's tick stream needs to connect. */
-struct market_stream_options final {
+struct session_actor_options final {
     session::transport::session_options options;
     std::string token;
     std::string principal;
@@ -66,7 +66,7 @@ struct market_stream_options final {
  */
 class HEDGR_RUNTIME_EXPORT session_actor final : public tick_feed {
 public:
-    explicit session_actor(market_stream_options options);
+    explicit session_actor(session_actor_options options);
 
     /** @brief Stops and joins the thread. Blocks for a connect in flight. */
     ~session_actor() override;
@@ -154,7 +154,7 @@ private:
     void stop();
     void wait_for_retry();
 
-    market_stream_options options_;
+    session_actor_options options_;
     std::shared_ptr<tick_sink> sink_;
 
     std::thread thread_;

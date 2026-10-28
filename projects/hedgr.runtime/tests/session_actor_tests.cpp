@@ -255,10 +255,10 @@ TEST_CASE("asking a stream to stop does not wait for its connect",
     "[market_stream]") {
     using namespace std::chrono;
     using hedgr::runtime::worker::session_actor;
-    using hedgr::runtime::worker::market_stream_options;
+    using hedgr::runtime::worker::session_actor_options;
 
     silent_listener listener;
-    market_stream_options options;
+    session_actor_options options;
     options.options.nats_url = listener.url();
     options.options.subject_prefix = "hedgr";
     options.token = "token";

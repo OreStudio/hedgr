@@ -73,7 +73,7 @@ using hedgr::model::state::condition_source;
 using hedgr::model::state::series_bucket;
 using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
-using hedgr::runtime::worker::market_stream_options;
+using hedgr::runtime::worker::session_actor_options;
 using hedgr::runtime::worker::tick_feed;
 using hedgr::session::transport::session_options;
 
@@ -208,7 +208,7 @@ constexpr auto refused_url = "nats://127.0.0.1:1";
 struct world final {
     world() {
         manager = std::make_unique<instance_manager>(1,
-            [this](market_stream_options) -> std::unique_ptr<tick_feed> {
+            [this](session_actor_options) -> std::unique_ptr<tick_feed> {
                 feeds.push_back(std::make_shared<feed_state>());
                 return std::make_unique<fake_feed>(feeds.back());
             });
