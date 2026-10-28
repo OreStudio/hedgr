@@ -194,34 +194,44 @@ bool market_feed::wanted(const market_stream_entry& entry,
 }
 
 void market_feed::reconcile(market_stream_entry& entry,
-    model::state::series_handle series, std::vector<refusal>& refusals) {
-    const auto watching = std::ranges::find(entry.watched, series);
-    const bool is_watched = watching != entry.watched.end();
-    const bool is_wanted = wanted(entry, series, refusals);
-    if (is_wanted == is_watched)
-        return;
-
-    if (!is_wanted) {
-        entry.stream->unwatch(series);
-        entry.watched.erase(watching);
-        return;
+    std::vector<refusal>& refusals) {
+    std::vector<worker::watch_target> targets;
+    std::vector<model::state::series_handle> watching;
+    for (const auto series :
+        series_.held(entry.instance_id, entry.account_id)) {
+        if (!wanted(entry, series, refusals))
+            continue;
+        const auto* info = series_.info(series);
+        if (info == nullptr)
+            continue;
+        const bool already = std::ranges::find(entry.watched, series)
+            != entry.watched.end();
+        if (!already) {
+            const auto key = *series_.key_of(series);
+            read_backfill_(key.instance_id, key.account_id, key.series_id);
+        }
+        auto canonical = session::market::canonical_series_uri(info->uri);
+        if (!canonical) {
+            const auto key = series_.key_of(series);
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Not watching series '"
+                << (key ? key->series_id : std::string{"?"})
+                << "' in party '" << info->party_id
+                << "': its URI names no series: " << info->uri;
+            continue;
+        }
+        if (!already) {
+            const auto key = *series_.key_of(series);
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Watching series '" << key.series_id << "' as '"
+                << *canonical << "' in party '" << info->party_id << "'";
+        }
+        watching.push_back(series);
+        targets.push_back(
+            {.series = series, .canonical_uri = std::move(*canonical)});
     }
-
-    entry.watched.push_back(series);
-    const auto key = *series_.key_of(series);
-    if (auto canonical = session::market::canonical_series_uri(
-            series_.info(series)->uri)) {
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Watching series '" << key.series_id << "' as '" << *canonical
-            << "' in party '" << series_.info(series)->party_id << "'";
-        entry.stream->watch(series, std::move(*canonical));
-    } else {
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "Not watching series '" << key.series_id << "' in party '"
-            << series_.info(series)->party_id << "': its URI names no series: "
-            << series_.info(series)->uri;
-    }
-    read_backfill_(key.instance_id, key.account_id, key.series_id);
+    entry.stream->set_watch(targets);
+    entry.watched = std::move(watching);
 }
 
 void market_feed::forget(model::state::series_handle series) {
@@ -255,9 +265,7 @@ std::vector<refusal> market_feed::pump() {
         if (!entry.needs_pass)
             continue;
         entry.needs_pass = false;
-        for (const auto series :
-            series_.held(entry.instance_id, entry.account_id))
-            reconcile(entry, series, refusals);
+        reconcile(entry, refusals);
     }
 
     series_.drain_changes(changes_);
@@ -270,7 +278,7 @@ std::vector<refusal> market_feed::pump() {
         const auto stream = market_streams_.find(
             running_key(named->instance_id, named->account_id));
         if (stream != market_streams_.end())
-            reconcile(stream->second, series, refusals);
+            reconcile(stream->second, refusals);
     }
 
     const auto now = steady_now_ns();

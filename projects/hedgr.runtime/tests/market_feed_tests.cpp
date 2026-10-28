@@ -74,6 +74,7 @@ using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
 using hedgr::runtime::worker::session_actor_options;
 using hedgr::runtime::worker::tick_feed;
+using hedgr::runtime::worker::watch_target;
 using hedgr::session::transport::session_options;
 
 constexpr auto instance_id = "inst-refused";
@@ -181,6 +182,27 @@ public:
         state_->unwatches.emplace_back(series);
     }
 
+    void set_watch(std::span<const watch_target> wanted) override {
+        for (const auto& held : watching_) {
+            const bool kept = std::ranges::any_of(wanted,
+                [&](const watch_target& target) {
+                    return target.series == held.series;
+                });
+            if (!kept)
+                state_->unwatches.emplace_back(held.series);
+        }
+        for (const auto& target : wanted) {
+            const bool held = std::ranges::any_of(watching_,
+                [&](const watch_target& current) {
+                    return current.series == target.series;
+                });
+            if (!held)
+                state_->watches.emplace_back(
+                    target.series, target.canonical_uri);
+        }
+        watching_.assign(wanted.begin(), wanted.end());
+    }
+
     std::size_t drain(std::vector<series_bucket>& out) override {
         out.clear();
         out.swap(state_->waiting);
@@ -193,6 +215,7 @@ public:
 
 private:
     std::shared_ptr<feed_state> state_;
+    std::vector<watch_target> watching_;
 };
 
 /** @brief The manager, one unreachable instance, and every feed it made. */
