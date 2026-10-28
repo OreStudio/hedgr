@@ -159,16 +159,27 @@ void session_actor::push(model::event::event fact) const {
 void session_actor::wait_for_retry() {
     std::unique_lock lock(mu_);
     cv_.wait_for(lock, std::chrono::seconds{1},
-        [this]() { return stopping_ || !commands_.empty(); });
+        [this]() {
+            return stopping_ || !commands_.empty() || !reads_.empty();
+        });
 }
 
 void session_actor::run() {
     /*
-     * The stream owns the one connection: it is built on this thread's
-     * coroutine frame and the tick stream only names what to do on it.
+     * The stream runs on one connection: the caller's when it gave one, which
+     * is how a test scripts the answers, and otherwise one this thread owns.
+     * The tick stream only names what to do on it.
      */
-    session::transport::session_client client(options_.options);
-    session::transport::session_client_link link(client);
+    std::unique_ptr<session::transport::session_client> client;
+    std::shared_ptr<session::transport::session_link> connection = options_.link;
+    if (connection == nullptr) {
+        client = std::make_unique<session::transport::session_client>(
+            options_.options);
+        connection =
+            std::make_shared<session::transport::session_client_link>(*client);
+    }
+    auto& link = *connection;
+
     const ores::nats::wire_codec codec(options_.options.wire_format == "json"
             ? ores::nats::wire_format::json
             : ores::nats::wire_format::msgpack);
@@ -208,6 +219,10 @@ void session_actor::run() {
              * connect that fails answers every queued read with its reason,
              * because waiting for a deployment that refused the connection
              * would leave the caller waiting for a read that cannot run.
+             *
+             * A read needs the connection and not the subscription: a session
+             * whose tick subscription cannot be opened can still answer the
+             * reads its windows ask for.
              */
             const bool live = stream.connected() && stream.subscribed();
             const auto ready = [this]() {
@@ -224,7 +239,7 @@ void session_actor::run() {
             queued.swap(commands_);
             watch.swap(new_watch_);
             token.swap(new_token_);
-            if (live)
+            if (stream.connected())
                 reads.swap(reads_);
         }
 

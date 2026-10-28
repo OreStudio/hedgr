@@ -18,6 +18,7 @@
  *
  */
 #include "allocation_counter.hpp"
+#include "fake_link.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
 #include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
@@ -368,6 +369,61 @@ TEST_CASE("a read queued on a stream that stops is answered once",
     CHECK(answers[0].instance_id == "i-1");
     CHECK(answers[0].account_id == "a-1");
     CHECK_FALSE(answers[0].message.empty());
+}
+
+TEST_CASE("a read is answered on the connection the actor was given",
+    "[market_stream][reads]") {
+    using namespace std::chrono;
+    using hedgr::model::command::event_queue;
+    using hedgr::model::event::event_kind;
+    using hedgr::runtime::worker::image_request;
+    using hedgr::runtime::worker::session_actor;
+    using hedgr::runtime::worker::session_actor_options;
+    using fake_link = hedgr::testing::fake_session_link;
+
+    auto link = std::make_shared<fake_link>();
+    link->image.mime_type = "image/png";
+    link->image.data = {std::uint8_t{7}, std::uint8_t{8}};
+
+    event_queue events;
+    session_actor_options options;
+    options.options.wire_format = "json";
+    options.token = "token";
+    options.principal = "principal";
+    options.tenant_id = "tenant";
+    options.party_id = "party";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+    options.link = link;
+
+    session_actor actor(std::move(options));
+
+    /* Queued before the thread starts, so the first loop answers it. */
+    REQUIRE(actor.submit_read(image_request{.image_id = "img-1"}));
+    actor.start();
+
+    std::vector<hedgr::model::event::event> answers;
+    const auto deadline = steady_clock::now() + seconds{10};
+    while (answers.empty() && steady_clock::now() < deadline) {
+        answers = events.drain();
+        std::this_thread::sleep_for(milliseconds{5});
+    }
+
+    actor.request_stop();
+    const auto stopped = steady_clock::now() + seconds{10};
+    while (!actor.finished() && steady_clock::now() < stopped)
+        std::this_thread::sleep_for(milliseconds{5});
+    REQUIRE(actor.finished());
+
+    REQUIRE(answers.size() == 1);
+    CHECK(answers[0].kind == event_kind::image_loaded);
+    CHECK(answers[0].image_id == "img-1");
+    CHECK(answers[0].bytes == std::vector<std::uint8_t>{7, 8});
+    CHECK(answers[0].message.empty());
+
+    /* The scripted connection is the one it used, and it opened it once. */
+    CHECK(link->connects == 1);
+    CHECK(link->resumes == 1);
 }
 
 TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
