@@ -21,6 +21,7 @@
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
+#include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <string>
@@ -97,4 +98,40 @@ TEST_CASE("a refused CRM names read becomes the event's message", "[link]") {
     worker::run_crm_names_read(link, "p", fact);
     CHECK(fact.crm_names.empty());
     CHECK(fact.message == "names refused");
+}
+
+TEST_CASE("a curve is built from each member's tail", "[link][term]") {
+    fake_link link;
+    link.tails["s-1"] = {
+        session::market_point{.at_ns = 100, .value = 1.0},
+        session::market_point{.at_ns = 200, .value = 1.1}};
+    link.tails["s-2"] = {
+        session::market_point{.at_ns = 100, .value = 2.0},
+        session::market_point{.at_ns = 200, .value = 2.1}};
+    const std::vector<std::string> ids{"s-1", "s-2"};
+    const std::vector<std::string> tenors{"1Y", "2Y"};
+
+    model::event::event fact;
+    worker::run_term_structure_read(link, ids, tenors, fact);
+    REQUIRE(fact.term_curves.size() == 2);
+    CHECK(fact.term_curves[0].at_ns == 100);
+    REQUIRE(fact.term_curves[0].nodes.size() == 2);
+    CHECK(fact.term_curves[0].nodes[0].tenor == "1Y");
+    CHECK(fact.term_curves[0].nodes[0].value == 1.0);
+    CHECK(fact.term_curves[1].nodes[1].value == 2.1);
+    CHECK(fact.message.empty());
+    CHECK(link.tail_calls == 2);
+}
+
+TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
+    fake_link link;
+    link.tail_error = session::session_error{
+        .code = session::session_errc::timeout, .message = "no answer"};
+    const std::vector<std::string> ids{"s-1"};
+    const std::vector<std::string> tenors{"1Y"};
+
+    model::event::event fact;
+    worker::run_term_structure_read(link, ids, tenors, fact);
+    CHECK(fact.term_curves.empty());
+    CHECK(fact.message == "no answer");
 }

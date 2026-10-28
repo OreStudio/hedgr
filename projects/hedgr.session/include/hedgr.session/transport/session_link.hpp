@@ -73,6 +73,10 @@ public:
 
     /** @brief The deployment's tenant counts and roster. */
     [[nodiscard]] virtual result<deployment_read> deployment() const = 0;
+
+    /** @brief At least @p count of a series' newest ticks. */
+    [[nodiscard]] virtual result<market_series_read> market_series_tail(
+        std::string_view series_id, std::size_t count) const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -119,6 +123,11 @@ public:
 
     [[nodiscard]] result<deployment_read> deployment() const override {
         return client_.deployment();
+    }
+
+    [[nodiscard]] result<market_series_read> market_series_tail(
+        std::string_view series_id, std::size_t count) const override {
+        return client_.market_series_tail(series_id, count);
     }
 
 private:
