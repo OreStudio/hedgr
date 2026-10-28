@@ -20,25 +20,12 @@
 #ifndef HEDGR_RUNTIME_WORKER_IMAGE_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_IMAGE_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
-#include <boost/asio/io_context.hpp>
-#include <string>
+#include <string_view>
 
 namespace hedgr::runtime::worker {
-
-/** @brief One tenant image read, on the session's token. */
-struct image_job final {
-    session_read session;
-    std::string image_id;
-};
-
-/** @brief Reads one image by identifier and posts it as image_loaded. */
-HEDGR_RUNTIME_EXPORT void
-spawn_image_read(boost::asio::io_context& context, image_job job,
-    model::command::event_queue& events);
 
 /** @brief Fills the event with one image answer, or with its failure. */
 HEDGR_RUNTIME_EXPORT void run_image_read(

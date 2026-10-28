@@ -99,8 +99,9 @@ constexpr std::size_t probe_thread_count = 2;
 instance_manager::instance_manager(std::size_t pool_threads,
     worker::tick_feed_factory market_feeds)
     : pool_(pool_threads), probe_pool_(probe_thread_count)
+    , session_service_(events_, std::move(market_feeds))
     , market_feed_(catalogue_.instances(), sessions_, series_, seed_options_,
-          std::move(market_feeds),
+          session_service_,
           [this](std::string_view instance_id, std::string_view account_id) {
               return read_service_.start_market_catalogue_read(instance_id,
                   account_id);

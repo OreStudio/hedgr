@@ -389,6 +389,15 @@ bounded by one interval plus the request timeout.
 
 ### 4. Reads move onto the actor, one kind at a time
 
+> **Status: started.** `session_service` holds the map from a session to its
+> actor and `submit_read`; the feed asks it for the actor instead of making one.
+> The actor queues what it is given, runs it on its own link and pushes the
+> answer, and a connect that fails or a stop answers every read already queued
+> with its failure, so a caller's mark is never stranded. Images and the
+> currency image map are converted: their per-read connection and their spawn
+> functions are gone. CRM, term structure, deployment and the market reads still
+> open their own, in the order below.
+
 > **The request shape is a typed variant.** `read_request =
 > std::variant<image_request, image_map_request, crm_names_request,
 > crm_rates_request, deployment_request, term_request, catalogue_request,
@@ -503,6 +512,10 @@ Measure: long-lived connections per session 2 to 1, and per session threads
 (actor plus `market_stream`) 2 to 1.
 
 ### 7. `session_service`
+
+The class already exists, holding the actor map from step 4, so this moves
+supervision into it rather than creating it: a session and its connection end up
+owned by one object, which is the point of both steps.
 
 What remains in the facade after step 6 is `running_`, `attempts_`,
 `start_session_for`, `start_stored_connect`, `do_connect_session`,

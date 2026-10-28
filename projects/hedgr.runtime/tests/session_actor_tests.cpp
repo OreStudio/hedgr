@@ -326,6 +326,50 @@ TEST_CASE("asking a stream to stop does not wait for its connect",
     CHECK(finished_at - asked >= seconds{1});
 }
 
+TEST_CASE("a read queued on a stream that stops is answered once",
+    "[market_stream][reads]") {
+    using namespace std::chrono;
+    using hedgr::model::command::event_queue;
+    using hedgr::model::event::event_kind;
+    using hedgr::runtime::worker::image_request;
+    using hedgr::runtime::worker::session_actor;
+    using hedgr::runtime::worker::session_actor_options;
+
+    event_queue events;
+    session_actor_options options;
+    options.options.nats_url = "nats://127.0.0.1:1";
+    options.options.wire_format = "json";
+    options.token = "token";
+    options.principal = "principal";
+    options.tenant_id = "tenant";
+    options.party_id = "party";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+
+    session_actor stream(std::move(options));
+    stream.start();
+
+    /*
+     * The read is answered whether it reaches a connection or not: the caller
+     * marked it in flight, and only an answer clears that mark.
+     */
+    REQUIRE(stream.submit_read(image_request{.image_id = "img-1"}));
+    stream.request_stop();
+
+    const auto deadline = steady_clock::now() + seconds{10};
+    while (!stream.finished() && steady_clock::now() < deadline)
+        std::this_thread::sleep_for(milliseconds{10});
+    REQUIRE(stream.finished());
+
+    const auto answers = events.drain();
+    REQUIRE(answers.size() == 1);
+    CHECK(answers[0].kind == event_kind::image_loaded);
+    CHECK(answers[0].image_id == "img-1");
+    CHECK(answers[0].instance_id == "i-1");
+    CHECK(answers[0].account_id == "a-1");
+    CHECK_FALSE(answers[0].message.empty());
+}
+
 TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
     constexpr std::int64_t second = 1'000'000'000;
     tick_sink sink;

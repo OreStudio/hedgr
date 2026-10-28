@@ -27,6 +27,7 @@
 #include "hedgr.runtime/service/pending_reads.hpp"
 #include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
@@ -36,6 +37,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -104,8 +106,22 @@ struct fixture final {
     hedgr::session::transport::session_options seed;
     hedgr::runtime::async::executor pool{1};
     hedgr::model::state::series_table series;
+
+    /** @brief The reads handed to the session's actor, in order. */
+    std::vector<hedgr::runtime::worker::read_request> submitted;
+
+    /** @brief Whether the session refuses the next read, as a stopped one would. */
+    bool refuse_reads = false;
+
     service::read_service reads{pool.context(), events, instances, accounts,
-        sessions, windows, series, seed};
+        sessions, windows, series, seed,
+        [this](std::string_view, std::string_view,
+               const hedgr::runtime::worker::read_request& request) {
+            if (refuse_reads)
+                return false;
+            submitted.push_back(request);
+            return true;
+        }};
 };
 
 /** @brief One kind of read, how to start it and how it ends. */
@@ -293,6 +309,65 @@ TEST_CASE("every terminal outcome clears the mark of a read", "[reads][registry]
             CHECK(f.reads.pending().empty());
         }
     }
+}
+
+TEST_CASE("an image read is handed to the session's actor", "[reads][actor]") {
+    fixture f;
+    f.open();
+    hedgr::model::command::command cmd;
+    cmd.kind = hedgr::model::command::command_kind::load_image;
+    cmd.instance_id = instance_id;
+    cmd.account_id = account_id;
+    cmd.image_id = "img-1";
+
+    f.reads.load_image(cmd);
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request =
+        std::get_if<hedgr::runtime::worker::image_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->image_id == "img-1");
+    CHECK(f.reads.pending().contains(request_id::image(tenant_id, "img-1")));
+}
+
+TEST_CASE("the currency image map is handed to the session's actor",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    auto signed_in = answer_of(event::event_kind::session_authenticated);
+    f.reads.start_currency_image_map(signed_in);
+
+    REQUIRE(f.submitted.size() == 1);
+    CHECK(std::holds_alternative<hedgr::runtime::worker::image_map_request>(
+        f.submitted[0]));
+    CHECK(f.reads.pending().contains(
+        request_id::currency_image_map(tenant_id)));
+}
+
+TEST_CASE("a read the actor refuses leaves nothing in flight",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+    f.refuse_reads = true;
+
+    hedgr::model::command::command cmd;
+    cmd.kind = hedgr::model::command::command_kind::load_image;
+    cmd.instance_id = instance_id;
+    cmd.account_id = account_id;
+    cmd.image_id = "img-1";
+    f.reads.load_image(cmd);
+
+    CHECK(f.submitted.empty());
+    CHECK(f.reads.pending().empty());
+    CHECK(f.reads.failed_images().empty());
+
+    auto signed_in = answer_of(event::event_kind::session_authenticated);
+    f.reads.start_currency_image_map(signed_in);
+
+    CHECK(f.submitted.empty());
+    CHECK(f.reads.pending().empty());
+    CHECK(f.reads.currency_images().get(tenant_id) == nullptr);
 }
 
 TEST_CASE("a read the session cannot make is refused without a mark",

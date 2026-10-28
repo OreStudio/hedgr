@@ -22,6 +22,7 @@
 
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -73,7 +74,7 @@ public:
      * A level rather than a pair of edits: the caller states what it wants and
      * the feed works out the difference. The base does nothing so a feed that
      * only supports edits keeps compiling; a feed used with a set-level caller
-     * overrides it. Nothing calls this yet.
+     * overrides it.
      */
     virtual void set_watch(std::span<const watch_target> wanted) {
         static_cast<void>(wanted);
@@ -84,6 +85,19 @@ public:
 
     /** @brief Whether the feed reconnected since the last call. */
     virtual bool take_reconnected() = 0;
+
+    /**
+     * @brief Asks the feed to run one read on the session's connection.
+     *
+     * True when the read was queued, which means an answer event follows
+     * whether the read succeeds or not. False means this feed cannot read: it
+     * holds no connection, or it has been asked to stop. A caller that gets
+     * false has nothing in flight and must not mark one.
+     */
+    virtual bool submit_read(read_request request) {
+        static_cast<void>(request);
+        return false;
+    }
 };
 
 /** @brief Makes and starts the feed for one authenticated session. */

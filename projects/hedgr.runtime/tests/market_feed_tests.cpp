@@ -27,6 +27,7 @@
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/service/market_feed.hpp"
+#include "hedgr.runtime/service/session_service.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/handle.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
@@ -1117,9 +1118,7 @@ struct bare_feed final {
         }
 
         feed = std::make_unique<hedgr::runtime::service::market_feed>(
-            instances, sessions, series, options, [this](session_actor_options) {
-                return std::make_unique<fake_feed>(state);
-            },
+            instances, sessions, series, options, actors,
             [this](std::string_view, std::string_view)
                 -> std::optional<hedgr::runtime::refusal> {
                 ++catalogue_reads;
@@ -1143,6 +1142,11 @@ struct bare_feed final {
     hedgr::model::state::session_handle session;
     session_options options;
     std::shared_ptr<feed_state> state = std::make_shared<feed_state>();
+    hedgr::model::command::event_queue events;
+    hedgr::runtime::service::session_service actors{events,
+        [this](session_actor_options) -> std::unique_ptr<tick_feed> {
+            return std::make_unique<fake_feed>(state);
+        }};
     std::size_t catalogue_reads = 0;
     std::size_t backfills = 0;
     std::unique_ptr<hedgr::runtime::service::market_feed> feed;

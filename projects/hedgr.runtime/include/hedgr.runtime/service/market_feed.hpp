@@ -39,6 +39,8 @@
 
 namespace hedgr::runtime::service {
 
+class session_service;
+
 /**
  * @brief The live price feed of every authenticated session.
  *
@@ -62,8 +64,9 @@ namespace hedgr::runtime::service {
  * stream whatever supervision did.
  *
  * Holds no reference to the manager. The tables it reads are passed in as
- * const references, the series table it appends to as a reference, and the two
- * reads it asks for as callbacks, so it never reaches the read service.
+ * const references, the series table it appends to as a reference, the actors
+ * it plots on as the session service, and the two reads it asks for as
+ * callbacks, so it never reaches the read service.
  */
 class HEDGR_RUNTIME_EXPORT market_feed final {
 public:
@@ -76,14 +79,14 @@ public:
         std::string_view account_id, std::string_view series_id)>;
 
     /**
-     * @param feeds makes the feed of one session. Empty means a real
-     * @c session_actor.
+     * @param actors the session's actors, which this feed plots on and does
+     * not own.
      */
     market_feed(const model::state::instance_table& instances,
         const model::state::session_table& sessions,
         model::state::series_table& series,
         const session::transport::session_options& seed,
-        worker::tick_feed_factory feeds, catalogue_read read_catalogue,
+        session_service& actors, catalogue_read read_catalogue,
         backfill_read read_backfill);
 
     /** @brief Records where the store is, which a stream's options need. */
@@ -133,8 +136,8 @@ private:
     model::state::series_table& series_;
     const session::transport::session_options& seed_;
 
-    /** @brief Makes the feed for one session; a real stream unless a test says. */
-    worker::tick_feed_factory market_feeds_;
+    /** @brief The actors this feed plots on. It does not own them. */
+    session_service& actors_;
 
     catalogue_read read_catalogue_;
     backfill_read read_backfill_;
@@ -147,14 +150,16 @@ private:
     /**
      * @brief One authenticated session's live prices.
      *
-     * The stream owns the connection and its thread; the feed owns the
-     * watch set, the backfill and the drain into the model. Keyed by the
-     * session's running key.
+     * The actor owns the connection and its thread; the feed owns the watch
+     * set, the backfill and the drain into the model. Keyed by the session's
+     * running key. The actor is held here because the feed asks it for
+     * buckets every frame, and the session service holds it too, so a retired
+     * actor stays alive until its thread has finished.
      */
     struct market_stream_entry final {
         std::string instance_id;
         std::string account_id;
-        std::unique_ptr<worker::tick_feed> stream;
+        std::shared_ptr<worker::tick_feed> stream;
 
         /**
          * @brief The session the stream was opened for.
@@ -198,18 +203,6 @@ private:
     std::size_t late_buckets_ = 0;
 
     std::unordered_map<std::string, market_stream_entry> market_streams_;
-
-    /**
-     * @brief Streams asked to stop, joined once each says it has finished.
-     *
-     * A stream's thread can be inside a connect, so the frame thread never
-     * joins one that is still running. The pump joins the finished ones,
-     * which costs nothing, and shutdown joins the rest.
-     */
-    std::vector<std::unique_ptr<worker::tick_feed>> retired_market_streams_;
-
-    /** @brief Asks one stream to stop without waiting for it. */
-    void retire_market_stream(std::unique_ptr<worker::tick_feed> stream);
 };
 
 }

@@ -41,9 +41,8 @@
 #include "hedgr.runtime/service/password_policy_service.hpp"
 #include "hedgr.runtime/service/probe_service.hpp"
 #include "hedgr.runtime/service/read_service.hpp"
+#include "hedgr.runtime/service/session_service.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
-#include "hedgr.runtime/worker/image_map_worker.hpp"
-#include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/sqlite/database.hpp"
@@ -539,8 +538,14 @@ private:
     model::state::series_table series_;
     service::window_service window_service_{sessions_, series_};
     service::lock_service lock_service_{pool_.context(), commands_, events_, catalogue_.accounts()};
+    service::session_service session_service_{events_};
     service::read_service read_service_{pool_.context(), events_,
-        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), series_, seed_options_};
+        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), series_, seed_options_,
+        [this](std::string_view instance_id, std::string_view account_id,
+               const worker::read_request& request) {
+            return session_service_.submit_read(instance_id, account_id,
+                request);
+        }};
     service::market_feed market_feed_;
 };
 
