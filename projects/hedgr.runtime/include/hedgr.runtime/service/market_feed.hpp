@@ -77,7 +77,7 @@ public:
 
     /**
      * @param feeds makes the feed of one session. Empty means a real
-     * @c market_stream.
+     * @c session_actor.
      */
     market_feed(const model::state::instance_table& instances,
         const model::state::session_table& sessions,

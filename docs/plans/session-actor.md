@@ -327,7 +327,8 @@ one. Measure: none. The step produces the counter.
 > wakes; only a stream not yet connected/subscribed wakes on the retry cadence.
 > The tick stream connects, resumes, disconnects and subscribes through a
 > `session_link`, which the stream's run owns; a fake link test covers it. The
-> actor rename, the `set_watch` command level and the `read` command follow.
+> stream is now named `session_actor`; the `set_watch` command level and the
+> `read` command follow.
 
 `market_stream` becomes `session_actor`: the same thread, `connect`, `resume`,
 subscription, `tick_sink` and ring, now over `session_link`, with the

@@ -19,7 +19,7 @@
  */
 #include "allocation_counter.hpp"
 #include "hedgr.model/state/series_bucket.hpp"
-#include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <arpa/inet.h>
@@ -254,7 +254,7 @@ TEST_CASE("a tick that closes a bucket allocates nothing", "[market_stream][cost
 TEST_CASE("asking a stream to stop does not wait for its connect",
     "[market_stream]") {
     using namespace std::chrono;
-    using hedgr::runtime::worker::market_stream;
+    using hedgr::runtime::worker::session_actor;
     using hedgr::runtime::worker::market_stream_options;
 
     silent_listener listener;
@@ -266,7 +266,7 @@ TEST_CASE("asking a stream to stop does not wait for its connect",
     options.tenant_id = "tenant";
     options.party_id = "party";
 
-    market_stream stream(std::move(options));
+    session_actor stream(std::move(options));
     stream.start();
 
     /* The thread connects at once, so by now it is inside the connect. */
