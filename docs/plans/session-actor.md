@@ -322,8 +322,10 @@ one. Measure: none. The step produces the counter.
 
 > **Status: started.** The codec half is in: `market_tick_stream` holds its
 > deployment's format and decodes through it, and `decode_tick` has a
-> codec-taking overload tested against msgpack and JSON. The thread, command
-> vector and `session_link` move follow.
+> codec-taking overload tested against msgpack and JSON. A live stream now
+> sleeps until a watch change, a token or a stop, so an idle session costs no
+> wakes; only a stream not yet connected/subscribed wakes on the retry cadence.
+> The thread, command vector and `session_link` move follow.
 
 `market_stream` becomes `session_actor`: the same thread, `connect`, `resume`,
 subscription, `tick_sink` and ring, now over `session_link`, with the
