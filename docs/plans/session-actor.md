@@ -285,13 +285,13 @@ by the broker's own connection list on a live deployment.
 
 > **Status: started.** `session_link` and `session_client_link` exist with
 > `connect`, `resume`, both CRM reads, CRM names, the two image reads, the
-> deployment read and the series tail. The CRM, image, image-map, CRM-names and
-> term-structure workers map through `run_*_read(link, …)` and are tested
-> against one shared fake, including failed connects, refusals and failed
-> pillars; the deployment worker runs its coroutine over the link with the
-> client owned by a wrapper coroutine. The rest of the call surface
-> (authenticate, refresh, logout, ping, subscribe, market) and their workers
-> follow.
+> deployment read, the series tail, the catalogue, points/history and the
+> provider list. The CRM, image, image-map, CRM-names, term-structure and market
+> workers map through `run_*_read(link, …)` and are tested against one shared
+> fake, including failed connects, refusals, failed pillars and a failed points
+> read; the deployment and market workers own their client in a wrapper
+> coroutine. The rest of the call surface (authenticate, refresh, logout, ping,
+> subscribe) and the session worker follow.
 
 Add `session_link`, an interface of the calls the workers and the actor make:
 `connect`, `resume`, `authenticate`, `refresh`, `logout`, `is_connected`,

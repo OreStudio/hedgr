@@ -21,6 +21,7 @@
 #include "hedgr.runtime/worker/tick_silence.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <format>
@@ -76,8 +77,8 @@ using hedgr::model::command::event_queue;
         .count();
 }
 
-boost::asio::awaitable<void> run_market(market_job job,
-    event_queue& events) {
+boost::asio::awaitable<void> run_market(transport::session_link& link,
+    market_job job, event_queue& events) {
     const auto key = job.key;
 
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
@@ -109,14 +110,13 @@ boost::asio::awaitable<void> run_market(market_job job,
         co_return;
     }
 
-    transport::session_client client(job.options);
-    if (const auto connected = client.connect(); !connected) {
+    if (const auto connected = link.connect(); !connected) {
         fact.message = describe(connected.error());
-    } else if (const auto resumed = client.resume(job.token, job.principal);
+    } else if (const auto resumed = link.resume(job.token, job.principal);
         !resumed) {
         fact.message = describe(resumed.error());
     } else if (job.catalogue) {
-        if (const auto read = client.market_series(); read) {
+        if (const auto read = link.market_series(); read) {
             fact.series.reserve(read->size());
             for (const auto& row : *read) {
                 fact.series.push_back(domain::market_series_row{
@@ -138,7 +138,7 @@ boost::asio::awaitable<void> run_market(market_job job,
              * failed provider read leaves the list empty and hides nothing;
              * it does not fail the catalogue.
              */
-            if (const auto providers = client.list_providers(); providers) {
+            if (const auto providers = link.list_providers(); providers) {
                 fact.providers = std::move(*providers);
             } else {
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
@@ -150,9 +150,9 @@ boost::asio::awaitable<void> run_market(market_job job,
         }
     } else {
         const auto read = job.history
-            ? client.market_series_history(job.series_id, job.history_from_ns,
+            ? link.market_series_history(job.series_id, job.history_from_ns,
                   job.history_to_ns, job.identity)
-            : client.market_series_points(job.series_id, job.identity);
+            : link.market_series_points(job.series_id, job.identity);
         if (read) {
             fact.history_truncated = read->truncated;
             fact.tick_from_ns = read->from_ns;
@@ -191,6 +191,18 @@ boost::asio::awaitable<void> run_market(market_job job,
     events.push(std::move(fact));
 }
 
+boost::asio::awaitable<void> run_market_with_client(market_job job,
+    event_queue& events) {
+    transport::session_client client(job.options);
+    transport::session_client_link link(client);
+    co_await run_market(link, std::move(job), events);
+}
+
+}
+
+boost::asio::awaitable<void> run_market_read(transport::session_link& link,
+    market_job job, event_queue& events) {
+    return run_market(link, std::move(job), events);
 }
 
 tick_silence& market_silence() {
@@ -268,7 +280,8 @@ market_read_report report_market_read(const market_job& job,
 
 void spawn_market_read(boost::asio::io_context& context, market_job job,
     event_queue& events) {
-    boost::asio::co_spawn(context, run_market(std::move(job), events),
+    boost::asio::co_spawn(context,
+        run_market_with_client(std::move(job), events),
         boost::asio::detached);
 }
 

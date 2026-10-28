@@ -25,7 +25,9 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/tick_silence.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
 #include <cstdint>
 #include <string>
@@ -115,6 +117,16 @@ struct market_read_report final {
 HEDGR_RUNTIME_EXPORT void
 spawn_market_read(boost::asio::io_context& context, market_job job,
                   model::command::event_queue& events);
+
+/**
+ * @brief Runs one market read over a link the caller owns and posts its event.
+ *
+ * The coroutine is the same one the spawn runs after building a client; taking
+ * the link is what lets a test put a fake behind it.
+ */
+HEDGR_RUNTIME_EXPORT boost::asio::awaitable<void> run_market_read(
+    hedgr::session::transport::session_link& link, market_job job,
+    model::command::event_queue& events);
 
 /**
  * @brief The process-wide tick-silence window every read job shares.

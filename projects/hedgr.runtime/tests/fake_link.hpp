@@ -45,12 +45,18 @@ struct fake_session_link final : session::transport::session_link {
     client::image_content image;
     session::transport::deployment_read deployment_read;
     std::map<std::string, std::vector<session::transport::market_point>> tails;
+    std::vector<session::transport::market_series_summary> catalogue;
+    session::transport::market_series_read points_read;
+    std::vector<hedgr::model::domain::market_provider_row> providers;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
     std::optional<session::transport::session_error> rates_error;
     std::optional<session::transport::session_error> names_error;
     std::optional<session::transport::session_error> images_error;
+    std::optional<session::transport::session_error> catalogue_error;
+    std::optional<session::transport::session_error> points_error;
+    std::optional<session::transport::session_error> providers_error;
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
     std::optional<session::transport::session_error> tail_error;
@@ -134,6 +140,40 @@ struct fake_session_link final : session::transport::session_link {
             found != tails.end())
             read.points = found->second;
         return read;
+    }
+
+    [[nodiscard]] session::transport::result<
+        std::vector<session::transport::market_series_summary>>
+    market_series() const override {
+        if (catalogue_error)
+            return std::unexpected(*catalogue_error);
+        return catalogue;
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::market_series_read>
+    market_series_points(std::string_view,
+        const hedgr::model::domain::market_series_identity&) const override {
+        if (points_error)
+            return std::unexpected(*points_error);
+        return points_read;
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::market_series_read>
+    market_series_history(std::string_view, std::int64_t, std::int64_t,
+        const hedgr::model::domain::market_series_identity&) const override {
+        if (points_error)
+            return std::unexpected(*points_error);
+        return points_read;
+    }
+
+    [[nodiscard]] session::transport::result<
+        std::vector<hedgr::model::domain::market_provider_row>>
+    list_providers() const override {
+        if (providers_error)
+            return std::unexpected(*providers_error);
+        return providers;
     }
 };
 
