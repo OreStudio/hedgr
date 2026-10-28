@@ -25,12 +25,14 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace hedgr::runtime::worker {
 
 struct session_actor_options;
+struct watch_target;
 
 /**
  * @brief What the frame thread asks of one session's live prices.
@@ -64,6 +66,18 @@ public:
 
     /** @brief Stops watching one series. */
     virtual void unwatch(model::state::series_handle series) = 0;
+
+    /**
+     * @brief Makes @p wanted the whole watched set.
+     *
+     * A level rather than a pair of edits: the caller states what it wants and
+     * the feed works out the difference. The base does nothing so a feed that
+     * only supports edits keeps compiling; a feed used with a set-level caller
+     * overrides it. Nothing calls this yet.
+     */
+    virtual void set_watch(std::span<const watch_target> wanted) {
+        static_cast<void>(wanted);
+    }
 
     /** @brief Replaces @p out with the closed buckets waiting for the frame. */
     virtual std::size_t drain(std::vector<model::state::series_bucket>& out) = 0;
