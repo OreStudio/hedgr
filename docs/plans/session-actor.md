@@ -389,6 +389,19 @@ bounded by one interval plus the request timeout.
 
 ### 4. Reads move onto the actor, one kind at a time
 
+> **The request shape is a typed variant.** `read_request =
+> std::variant<image_request, image_map_request, crm_names_request,
+> crm_rates_request, deployment_request, term_request, catalogue_request,
+> market_points_request, market_history_request>`, each carrying only its
+> parameters (image id, party + crm name + reciprocal, series id + identity,
+> spans, member ids + tenors). The actor dispatches on it with a visitor, builds
+> the event there through one `read_event(request, session_key)` factory, and
+> calls the existing `run_*_read(link, …, event)` mapping. No closure, no
+> per-read allocation beyond the event, and every input travels in the command.
+> A read that fails fills that event; a link that is down is a session event,
+> not a read event, so `run_session_read`'s connect/resume wording does not
+> apply on the actor.
+
 Add `session_service`'s first piece, a map from session key to actor, and
 `submit(session, request)`. Each pull request converts one group, in this order,
 by lowest risk and highest count first.
