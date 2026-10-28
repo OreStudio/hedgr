@@ -397,6 +397,22 @@ TEST_CASE("the CRM names are handed to the session's actor",
     CHECK(request->party_id == "p-1");
 }
 
+TEST_CASE("a deployment read is handed to the session's actor",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    const auto refused = f.reads.start(
+        {service::read_kind::deployment, f.command_centre});
+    CHECK_FALSE(refused.has_value());
+
+    REQUIRE(f.submitted.size() == 1);
+    CHECK(std::holds_alternative<hedgr::runtime::worker::deployment_request>(
+        f.submitted[0]));
+    CHECK(f.reads.pending().contains(
+        request_id::deployment(instance_id, account_id)));
+}
+
 TEST_CASE("a read the actor refuses leaves nothing in flight",
     "[reads][actor]") {
     fixture f;
@@ -427,6 +443,12 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
     CHECK(f.submitted.empty());
     CHECK(f.reads.crm().get(instance_id, account_id, "p-1", "majors", false)
         == nullptr);
+
+    static_cast<void>(f.reads.start(
+        {service::read_kind::deployment, f.command_centre}));
+
+    CHECK(f.submitted.empty());
+    CHECK(f.reads.pending().empty());
 }
 
 TEST_CASE("a read the session cannot make is refused without a mark",

@@ -19,7 +19,6 @@
  */
 #include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
-#include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "ores.logging/boost_severity.hpp"
@@ -194,17 +193,13 @@ read_service::start_deployment_read(std::string_view window_id) {
     if (pending_.contains(id))
         return std::nullopt;
 
-    worker::deployment_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{read->instance_id, read->account_id};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
+    if (!submit_read(*read, worker::deployment_request{}))
+        return std::nullopt;
 
     pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "Starting a deployment read for '" << read->instance_id << "' / '"
         << read->account_id << "'";
-    worker::spawn_deployment_read(pool_, std::move(job), events_);
     return std::nullopt;
 }
 
