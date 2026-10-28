@@ -17,7 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_link.hpp"
@@ -26,22 +26,22 @@
 
 namespace hedgr::runtime::worker {
 
-market_stream::market_stream(market_stream_options options)
+session_actor::session_actor(market_stream_options options)
     : options_(std::move(options))
     , sink_(std::make_shared<tick_sink>()) {
 }
 
-market_stream::~market_stream() {
+session_actor::~session_actor() {
     stop();
 }
 
-void market_stream::start() {
+void session_actor::start() {
     if (thread_.joinable())
         return;
     thread_ = std::thread([this]() { run(); });
 }
 
-void market_stream::request_stop() {
+void session_actor::request_stop() {
     {
         std::lock_guard lock(mu_);
         stopping_ = true;
@@ -49,13 +49,13 @@ void market_stream::request_stop() {
     cv_.notify_all();
 }
 
-void market_stream::stop() {
+void session_actor::stop() {
     request_stop();
     if (thread_.joinable())
         thread_.join();
 }
 
-void market_stream::set_token(std::string token) {
+void session_actor::set_token(std::string token) {
     {
         std::lock_guard lock(mu_);
         new_token_ = std::move(token);
@@ -63,7 +63,7 @@ void market_stream::set_token(std::string token) {
     cv_.notify_all();
 }
 
-void market_stream::watch(model::state::series_handle series,
+void session_actor::watch(model::state::series_handle series,
     std::string canonical_uri) {
     {
         std::lock_guard lock(mu_);
@@ -74,7 +74,7 @@ void market_stream::watch(model::state::series_handle series,
     cv_.notify_all();
 }
 
-void market_stream::unwatch(model::state::series_handle series) {
+void session_actor::unwatch(model::state::series_handle series) {
     {
         std::lock_guard lock(mu_);
         commands_.push_back(command{.add = false, .series = series});
@@ -82,17 +82,17 @@ void market_stream::unwatch(model::state::series_handle series) {
     cv_.notify_all();
 }
 
-bool market_stream::take_reconnected() {
+bool session_actor::take_reconnected() {
     return reconnected_.exchange(false, std::memory_order_acq_rel);
 }
 
-void market_stream::wait_for_retry() {
+void session_actor::wait_for_retry() {
     std::unique_lock lock(mu_);
     cv_.wait_for(lock, std::chrono::seconds{1},
         [this]() { return stopping_ || !commands_.empty(); });
 }
 
-void market_stream::run() {
+void session_actor::run() {
     /*
      * The stream owns the one connection: it is built on this thread's
      * coroutine frame and the tick stream only names what to do on it.

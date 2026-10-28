@@ -84,7 +84,7 @@ public:
      * @brief Zero threads means the executor's default pool size.
      *
      * @p market_feeds makes the live price feed of each authenticated session.
-     * Empty means a real @c market_stream; a test passes a fake.
+     * Empty means a real @c session_actor; a test passes a fake.
      */
     explicit instance_manager(std::size_t pool_threads = 0,
         worker::tick_feed_factory market_feeds = {});

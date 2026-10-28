@@ -20,7 +20,7 @@
 #include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
-#include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
@@ -65,7 +65,7 @@ market_feed::market_feed(const model::state::instance_table& instances,
         market_feeds_ = [](worker::market_stream_options options)
             -> std::unique_ptr<worker::tick_feed> {
             auto stream =
-                std::make_unique<worker::market_stream>(std::move(options));
+                std::make_unique<worker::session_actor>(std::move(options));
             stream->start();
             return stream;
         };

@@ -64,15 +64,15 @@ struct market_stream_options final {
  * thread asks it to stop with @c request_stop and joins it only once
  * @c finished says the connection is closed.
  */
-class HEDGR_RUNTIME_EXPORT market_stream final : public tick_feed {
+class HEDGR_RUNTIME_EXPORT session_actor final : public tick_feed {
 public:
-    explicit market_stream(market_stream_options options);
+    explicit session_actor(market_stream_options options);
 
     /** @brief Stops and joins the thread. Blocks for a connect in flight. */
-    ~market_stream() override;
+    ~session_actor() override;
 
-    market_stream(const market_stream&) = delete;
-    market_stream& operator=(const market_stream&) = delete;
+    session_actor(const session_actor&) = delete;
+    session_actor& operator=(const session_actor&) = delete;
 
     /** @brief Starts the connection thread. */
     void start();

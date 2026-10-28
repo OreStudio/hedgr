@@ -36,7 +36,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
-#include "hedgr.runtime/worker/market_stream.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/sqlite/database.hpp"
