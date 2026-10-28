@@ -72,7 +72,7 @@ using hedgr::model::event::event_kind;
 using hedgr::model::state::series_bucket;
 using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
-using hedgr::runtime::worker::market_stream_options;
+using hedgr::runtime::worker::session_actor_options;
 using hedgr::runtime::worker::tick_feed;
 using hedgr::session::transport::session_options;
 
@@ -145,7 +145,7 @@ private:
  * it forgets it. Everything here is touched on the frame thread only.
  */
 struct feed_state final {
-    market_stream_options options;
+    session_actor_options options;
     std::vector<std::pair<series_handle, std::string>> watches;
     std::vector<series_handle> unwatches;
     std::vector<std::string> tokens;
@@ -212,7 +212,7 @@ struct world final {
 
     void make_manager() {
         manager = std::make_unique<instance_manager>(1,
-            [this](market_stream_options options)
+            [this](session_actor_options options)
                 -> std::unique_ptr<tick_feed> {
                 auto state = std::make_shared<feed_state>();
                 state->options = std::move(options);
@@ -1094,7 +1094,7 @@ struct bare_feed final {
         }
 
         feed = std::make_unique<hedgr::runtime::service::market_feed>(
-            instances, sessions, series, options, [this](market_stream_options) {
+            instances, sessions, series, options, [this](session_actor_options) {
                 return std::make_unique<fake_feed>(state);
             },
             [this](std::string_view, std::string_view)

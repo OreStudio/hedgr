@@ -30,7 +30,7 @@
 
 namespace hedgr::runtime::worker {
 
-struct market_stream_options;
+struct session_actor_options;
 
 /**
  * @brief What the frame thread asks of one session's live prices.
@@ -74,7 +74,7 @@ public:
 
 /** @brief Makes and starts the feed for one authenticated session. */
 using tick_feed_factory = std::function<std::unique_ptr<tick_feed>(
-    market_stream_options)>;
+    session_actor_options)>;
 
 }
 

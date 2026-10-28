@@ -26,7 +26,7 @@
 
 namespace hedgr::runtime::worker {
 
-session_actor::session_actor(market_stream_options options)
+session_actor::session_actor(session_actor_options options)
     : options_(std::move(options))
     , sink_(std::make_shared<tick_sink>()) {
 }
