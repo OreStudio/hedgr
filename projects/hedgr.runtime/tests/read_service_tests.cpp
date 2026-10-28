@@ -99,6 +99,17 @@ struct fixture final {
             .reciprocal = false};
         crm_matrix = windows.insert(matrix);
         windows.bind_session(crm_matrix, session);
+
+        domain::window_spec curve;
+        curve.id = "term-structure";
+        curve.kind = domain::window_kind::term_structure;
+        curve.session = domain::session_key{instance_id, account_id};
+        curve.state = domain::term_structure_state{.label = "Curve",
+            .curve_key = "curve-1",
+            .member_ids = {"m-1y", "m-2y"},
+            .member_tenors = {"1Y", "2Y"}};
+        term_table = windows.insert(curve);
+        windows.bind_session(term_table, session);
     }
 
     ~fixture() { pool.stop(); }
@@ -114,6 +125,7 @@ struct fixture final {
     state::window_handle command_centre;
     state::window_handle series_browser;
     state::window_handle crm_matrix;
+    state::window_handle term_table;
     hedgr::session::transport::session_options seed;
     hedgr::runtime::async::executor pool{1};
     hedgr::model::state::series_table series;
@@ -413,6 +425,26 @@ TEST_CASE("a deployment read is handed to the session's actor",
         request_id::deployment(instance_id, account_id)));
 }
 
+TEST_CASE("a curve read is handed to the session's actor", "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    const auto refused = f.reads.start(
+        {service::read_kind::term_structure, f.term_table});
+    CHECK_FALSE(refused.has_value());
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request =
+        std::get_if<hedgr::runtime::worker::term_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->key == "curve-1");
+    CHECK(request->label == "Curve");
+    CHECK(request->member_ids == std::vector<std::string>{"m-1y", "m-2y"});
+    CHECK(request->member_tenors == std::vector<std::string>{"1Y", "2Y"});
+    CHECK(f.reads.term_structures().get(instance_id, account_id, "curve-1")
+        != nullptr);
+}
+
 TEST_CASE("a read the actor refuses leaves nothing in flight",
     "[reads][actor]") {
     fixture f;
@@ -449,6 +481,13 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
 
     CHECK(f.submitted.empty());
     CHECK(f.reads.pending().empty());
+
+    static_cast<void>(f.reads.start(
+        {service::read_kind::term_structure, f.term_table}));
+
+    CHECK(f.submitted.empty());
+    CHECK(f.reads.term_structures().get(instance_id, account_id, "curve-1")
+        == nullptr);
 }
 
 TEST_CASE("a read the session cannot make is refused without a mark",

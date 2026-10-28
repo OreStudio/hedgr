@@ -19,7 +19,6 @@
  */
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.runtime/worker/read_request.hpp"
 #include <algorithm>
 #include <iterator>
 #include <limits>
@@ -101,28 +100,6 @@ void run_term_structure_read(session::transport::session_link& link,
     answer.term_curves = build_term_curves(by_term, max_history);
     if (answer.term_curves.empty())
         answer.message = "the curve's tenors hold no observations";
-}
-
-void spawn_term_structure_read(boost::asio::io_context& context,
-    term_structure_job job, model::command::event_queue& events) {
-    const read_request request = term_request{.key = job.key,
-        .label = job.label,
-        .member_ids = job.member_ids,
-        .member_tenors = job.member_tenors};
-
-    auto fact = read_event(request,
-        model::domain::session_key{job.session.instance_id,
-            job.session.account_id},
-        job.session.tenant_id);
-
-    auto work = [request](session::transport::session_link& link,
-                    model::event::event& answer) {
-        run_read(link, request, answer);
-    };
-    boost::asio::co_spawn(context,
-        run_session_read_on_link(std::move(job.session), std::move(fact),
-            std::move(work), events),
-        boost::asio::detached);
 }
 
 }

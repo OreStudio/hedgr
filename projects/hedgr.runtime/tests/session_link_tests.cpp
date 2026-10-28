@@ -24,6 +24,9 @@
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <string>
