@@ -2628,18 +2628,21 @@ TEST_CASE("an image is read once and not asked for again while in flight or afte
 
     /*
      * Six requests in one pump, so the five after the first find it in flight.
-     * One read may open the connection twice, so the bound is two and not one,
-     * and six reads could not fit under it. The pending mark is not asserted:
-     * pump drains events after the commands, and a fast failure can clear it
-     * before pump returns, which made that line race.
+     * The read runs on the session's actor, so it is answered once the actor's
+     * connect attempt returns, which can take the connect timeout: the wait is
+     * on the answer and not on the connections going quiet. The pending mark is
+     * not asserted: pump drains events after the commands, and a fast failure
+     * can clear it before the first pump returns, which made that line race.
      */
-    const auto before = counter.count();
     for (int request = 0; request < 6; ++request)
         manager.commands().push(load_image("img-a"));
-    manager.pump();
-    settle(manager, counter);
-    CHECK(counter.count() - before >= 1);
-    CHECK(counter.count() - before <= 2);
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (manager.failed_images().empty()
+        && std::chrono::steady_clock::now() < deadline) {
+        manager.pump();
+        std::this_thread::sleep_for(std::chrono::milliseconds{5});
+    }
 
     REQUIRE(manager.failed_images().size() == 1);
     CHECK(manager.pending_images().empty());

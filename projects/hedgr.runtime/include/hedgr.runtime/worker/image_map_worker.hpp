@@ -20,23 +20,11 @@
 #ifndef HEDGR_RUNTIME_WORKER_IMAGE_MAP_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_IMAGE_MAP_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
-#include <boost/asio/io_context.hpp>
 
 namespace hedgr::runtime::worker {
-
-/** @brief One tenant's currency-to-image map read. */
-struct image_map_job final {
-    session_read session;
-};
-
-/** @brief Reads the map and posts it as currency_image_map. */
-HEDGR_RUNTIME_EXPORT void
-spawn_image_map_read(boost::asio::io_context& context, image_map_job job,
-    model::command::event_queue& events);
 
 /** @brief Fills the event with the currency-to-image map, or its failure. */
 HEDGR_RUNTIME_EXPORT void run_image_map_read(

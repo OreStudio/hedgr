@@ -20,6 +20,7 @@
 #include "hedgr.runtime/service/market_feed.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
+#include "hedgr.runtime/service/session_service.hpp"
 #include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.logging/boost_severity.hpp"
@@ -55,21 +56,12 @@ market_feed::market_feed(const model::state::instance_table& instances,
     const model::state::session_table& sessions,
     model::state::series_table& series,
     const session::transport::session_options& seed,
-    worker::tick_feed_factory feeds, catalogue_read read_catalogue,
+    session_service& actors, catalogue_read read_catalogue,
     backfill_read read_backfill)
     : instances_(instances), sessions_(sessions), series_(series),
-      seed_(seed), market_feeds_(std::move(feeds)),
+      seed_(seed), actors_(actors),
       read_catalogue_(std::move(read_catalogue)),
       read_backfill_(std::move(read_backfill)) {
-    if (!market_feeds_) {
-        market_feeds_ = [](worker::session_actor_options options)
-            -> std::unique_ptr<worker::tick_feed> {
-            auto stream =
-                std::make_unique<worker::session_actor>(std::move(options));
-            stream->start();
-            return stream;
-        };
-    }
 }
 
 void market_feed::attach(std::filesystem::path database_path) {
@@ -90,8 +82,9 @@ void market_feed::open(const model::event::event& ev) {
     options.principal = ev.payload;
     options.tenant_id = ev.tenant_id;
     options.party_id = ev.party_id;
+    options.key = domain::session_key{ev.instance_id, ev.account_id};
 
-    auto stream = market_feeds_(std::move(options));
+    auto stream = actors_.open(std::move(options));
 
     market_stream_entry entry;
     entry.instance_id = ev.instance_id;
@@ -122,16 +115,8 @@ void market_feed::close(std::string_view instance_id,
     const auto found = market_streams_.find(key);
     if (found == market_streams_.end())
         return;
-    retire_market_stream(std::move(found->second.stream));
+    actors_.retire(instance_id, account_id);
     market_streams_.erase(found);
-}
-
-void market_feed::retire_market_stream(
-    std::unique_ptr<worker::tick_feed> stream) {
-    if (!stream)
-        return;
-    stream->request_stop();
-    retired_market_streams_.push_back(std::move(stream));
 }
 
 bool market_feed::wanted(const market_stream_entry& entry,
@@ -256,7 +241,7 @@ std::vector<refusal> market_feed::pump() {
             ++it;
             continue;
         }
-        retire_market_stream(std::move(it->second.stream));
+        actors_.retire(it->second.instance_id, it->second.account_id);
         it = market_streams_.erase(it);
     }
 
@@ -306,19 +291,14 @@ std::vector<refusal> market_feed::pump() {
         }
     }
 
-    std::erase_if(retired_market_streams_,
-        [](const auto& stream) { return stream->finished(); });
+    actors_.reap();
 
     return refusals;
 }
 
 void market_feed::cancel() {
-    for (auto& [key, entry] : market_streams_) {
-        static_cast<void>(key);
-        retire_market_stream(std::move(entry.stream));
-    }
     market_streams_.clear();
-    retired_market_streams_.clear();
+    actors_.cancel();
 }
 
 }

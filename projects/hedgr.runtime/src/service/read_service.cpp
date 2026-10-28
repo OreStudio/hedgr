@@ -22,8 +22,6 @@
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
-#include "hedgr.runtime/worker/image_map_worker.hpp"
-#include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "ores.logging/boost_severity.hpp"
@@ -86,10 +84,10 @@ read_service::read_service(boost::asio::io_context& pool,
     const model::state::session_table& sessions,
     const model::state::window_table& windows,
     model::state::series_table& series,
-    const session::transport::session_options& seed)
+    const session::transport::session_options& seed, read_submit submit)
     : pool_(pool), events_(events), instances_(instances),
       accounts_(accounts), sessions_(sessions), windows_(windows),
-      seed_(seed), market_(series) {
+      seed_(seed), submit_(std::move(submit)), market_(series) {
 }
 
 void read_service::attach(std::filesystem::path database_path) {
@@ -168,6 +166,11 @@ std::optional<worker::session_read> read_service::session_read_for(
     if (!session)
         return std::nullopt;
     return session_read_for(*session, gate);
+}
+
+bool read_service::submit_read(const worker::session_read& read,
+    worker::read_request request) {
+    return submit_ && submit_(read.instance_id, read.account_id, request);
 }
 
 std::optional<refusal>
@@ -312,13 +315,11 @@ void read_service::start_currency_image_map(const model::event::event& ev) {
         read_gate::token_only);
     if (!read)
         return;
+    if (!submit_read(*read, worker::image_map_request{}))
+        return;
 
-    worker::image_map_job job;
-    job.session = std::move(*read);
-    job.session.tenant_id = ev.tenant_id;
     pending_.mark(request_id::currency_image_map(ev.tenant_id));
     currency_images_.begin(ev.tenant_id);
-    worker::spawn_image_map_read(pool_, std::move(job), events_);
 }
 
 void read_service::retry_currency_image_map(std::string_view instance_id,
@@ -473,11 +474,10 @@ void read_service::load_image(const model::command::command& cmd) {
         || failed_images_.contains(id.subject))
         return;
 
-    worker::image_job job;
-    job.session = std::move(*read);
-    job.image_id = cmd.image_id;
+    if (!submit_read(*read, worker::image_request{.image_id = cmd.image_id}))
+        return;
+
     pending_.mark(id);
-    worker::spawn_image_read(pool_, std::move(job), events_);
 }
 
 void read_service::start_market_backfill(std::string_view instance_id,

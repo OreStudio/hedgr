@@ -17,13 +17,16 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HEDGR_RUNTIME_WORKER_MARKET_STREAM_HPP
-#define HEDGR_RUNTIME_WORKER_MARKET_STREAM_HPP
+#ifndef HEDGR_RUNTIME_WORKER_SESSION_ACTOR_HPP
+#define HEDGR_RUNTIME_WORKER_SESSION_ACTOR_HPP
 
+#include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
 #include <condition_variable>
@@ -45,6 +48,17 @@ struct session_actor_options final {
     std::string principal;
     std::string tenant_id;
     std::string party_id;
+
+    /** @brief The session this actor belongs to, which its reads name. */
+    model::domain::session_key key;
+
+    /**
+     * @brief Where the answers to the reads asked of this actor go.
+     *
+     * Null only for a test that asks it no reads, because an actor with no
+     * queue could only drop an answer.
+     */
+    model::command::event_queue* events = nullptr;
 };
 
 /**
@@ -130,6 +144,16 @@ public:
      */
     bool take_reconnected() override;
 
+    /**
+     * @brief Queues one read for this session's connection. Thread safe.
+     *
+     * True when it was queued, and then an answer event follows: the read's
+     * own answer when the connection is signed in, or its failure when the
+     * actor stops before running it. False means the actor is stopping and
+     * nothing was queued.
+     */
+    bool submit_read(read_request request) override;
+
     /** @brief Ticks bucketed since construction. */
     [[nodiscard]] std::size_t ticks() const noexcept {
         return sink_->ticks();
@@ -157,6 +181,16 @@ private:
     void stop();
     void wait_for_retry();
 
+    /** @brief Runs @p reads on @p link and pushes each answer. */
+    void answer_reads(std::vector<read_request>& reads,
+        session::transport::session_link& link);
+
+    /** @brief Pushes a failed answer for each of @p reads, then clears it. */
+    void fail_reads(std::vector<read_request>& reads, std::string_view reason);
+
+    /** @brief Pushes @p fact when the actor has a queue to push it to. */
+    void push(model::event::event fact) const;
+
     session_actor_options options_;
     std::shared_ptr<tick_sink> sink_;
 
@@ -166,6 +200,7 @@ private:
     std::vector<command> commands_;
     std::optional<std::vector<watch_target>> new_watch_;
     std::optional<std::string> new_token_;
+    std::vector<read_request> reads_;
     bool stopping_ = false;
 
     std::atomic<bool> finished_{false};

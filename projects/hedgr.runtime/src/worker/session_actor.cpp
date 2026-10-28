@@ -26,6 +26,30 @@
 
 namespace hedgr::runtime::worker {
 
+namespace {
+
+/**
+ * @brief The answer a read gets when the actor stops before running it.
+ *
+ * A stopped actor still answers every read it accepted, because the caller
+ * marked the read in flight when it submitted it and only an answer clears
+ * that mark.
+ */
+constexpr std::string_view stopped_read_message =
+    "the session stopped before the read ran";
+
+/**
+ * @brief The answer a read gets when the failure came with no sentence.
+ *
+ * An empty message would read as a successful answer to every handler that
+ * asks whether the read failed, so a reason that did not say anything is
+ * replaced with one that does.
+ */
+constexpr std::string_view unknown_read_failure_message =
+    "the read did not run: the session's connection is not open";
+
+}
+
 session_actor::session_actor(session_actor_options options)
     : options_(std::move(options))
     , sink_(std::make_shared<tick_sink>()) {
@@ -94,6 +118,44 @@ bool session_actor::take_reconnected() {
     return reconnected_.exchange(false, std::memory_order_acq_rel);
 }
 
+bool session_actor::submit_read(read_request request) {
+    {
+        std::lock_guard lock(mu_);
+        if (stopping_)
+            return false;
+        reads_.push_back(std::move(request));
+    }
+    cv_.notify_all();
+    return true;
+}
+
+void session_actor::answer_reads(std::vector<read_request>& reads,
+    session::transport::session_link& link) {
+    for (const auto& request : reads) {
+        auto fact = read_event(request, options_.key, options_.tenant_id);
+        run_read(link, request, fact);
+        push(std::move(fact));
+    }
+    reads.clear();
+}
+
+void session_actor::fail_reads(std::vector<read_request>& reads,
+    std::string_view reason) {
+    const auto sentence = reason.empty() ? unknown_read_failure_message
+                                         : reason;
+    for (const auto& request : reads) {
+        auto fact = read_event(request, options_.key, options_.tenant_id);
+        fact.message = std::string{sentence};
+        push(std::move(fact));
+    }
+    reads.clear();
+}
+
+void session_actor::push(model::event::event fact) const {
+    if (options_.events != nullptr)
+        options_.events->push(std::move(fact));
+}
+
 void session_actor::wait_for_retry() {
     std::unique_lock lock(mu_);
     cv_.wait_for(lock, std::chrono::seconds{1},
@@ -127,19 +189,31 @@ void session_actor::run() {
         std::vector<command> queued;
         std::optional<std::string> token;
         std::optional<std::vector<watch_target>> watch;
+        std::vector<read_request> reads;
         {
             std::unique_lock lock(mu_);
             /*
              * A live stream sleeps until there is something to do: a watch
-             * change, a new token or a stop. Only a stream that is not yet
-             * connected or subscribed wakes on the retry cadence, because
-             * that is the state a connect or a subscribe has to be tried
-             * again from. An idle session therefore costs no wakes.
+             * change, a new token, a read or a stop. Only a stream that is not
+             * yet connected or subscribed wakes on the retry cadence, because
+             * that is the state a connect or a subscribe has to be tried again
+             * from. An idle session therefore costs no wakes.
+             *
+             * A read waits for the connection rather than being refused by it:
+             * the session is authenticated when the read is asked for, so the
+             * stream is about to connect, and a read refused merely because
+             * the connect had not finished is a read the caller cannot retry.
+             * A queued read therefore wakes the actor, which is also the
+             * reason to try a connect before the retry cadence says so. A
+             * connect that fails answers every queued read with its reason,
+             * because waiting for a deployment that refused the connection
+             * would leave the caller waiting for a read that cannot run.
              */
             const bool live = stream.connected() && stream.subscribed();
             const auto ready = [this]() {
                 return stopping_ || !commands_.empty()
-                    || new_watch_.has_value() || new_token_.has_value();
+                    || new_watch_.has_value() || new_token_.has_value()
+                    || !reads_.empty();
             };
             if (live)
                 cv_.wait(lock, ready);
@@ -150,6 +224,8 @@ void session_actor::run() {
             queued.swap(commands_);
             watch.swap(new_watch_);
             token.swap(new_token_);
+            if (live)
+                reads.swap(reads_);
         }
 
         if (token)
@@ -162,9 +238,17 @@ void session_actor::run() {
         }
         if (watch)
             sink->set_watch(*watch);
+        if (!reads.empty())
+            answer_reads(reads, link);
 
         if (!stream.connected()) {
             if (!stream.connect()) {
+                std::vector<read_request> refused;
+                {
+                    std::lock_guard lock(mu_);
+                    refused.swap(reads_);
+                }
+                fail_reads(refused, stream.last_error());
                 wait_for_retry();
                 continue;
             }
@@ -175,6 +259,20 @@ void session_actor::run() {
 
         if (!stream.subscribed() && !stream.subscribe(on_tick))
             wait_for_retry();
+    }
+
+    /*
+     * A read that is still queued has a caller waiting on its event, so it is
+     * answered with its failure when the actor stops rather than left to
+     * strand whatever mark the caller set when it submitted it.
+     */
+    {
+        std::vector<read_request> stranded;
+        {
+            std::lock_guard lock(mu_);
+            stranded.swap(reads_);
+        }
+        fail_reads(stranded, stopped_read_message);
     }
 
     stream.disconnect();

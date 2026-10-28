@@ -24,6 +24,7 @@ set(files
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
     "session_link_tests.cpp"
+    "session_service_tests.cpp"
     "store_lock_tests.cpp"
     "term_curve_tests.cpp"
     "tick_silence_tests.cpp"

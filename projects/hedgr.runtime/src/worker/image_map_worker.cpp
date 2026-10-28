@@ -19,8 +19,6 @@
  */
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.runtime/worker/read_request.hpp"
-#include <utility>
 
 namespace hedgr::runtime::worker {
 
@@ -34,24 +32,6 @@ void run_image_map_read(session::transport::session_link& link,
     } else {
         answer.message = images.error().message;
     }
-}
-
-void spawn_image_map_read(boost::asio::io_context& context, image_map_job job,
-    model::command::event_queue& events) {
-    const read_request request = image_map_request{};
-    auto fact = read_event(request,
-        model::domain::session_key{job.session.instance_id,
-            job.session.account_id},
-        job.session.tenant_id);
-
-    auto work = [request](session::transport::session_link& link,
-                    model::event::event& answer) {
-        run_read(link, request, answer);
-    };
-    boost::asio::co_spawn(context,
-        run_session_read_on_link(std::move(job.session), std::move(fact),
-            std::move(work), events),
-        boost::asio::detached);
 }
 
 }

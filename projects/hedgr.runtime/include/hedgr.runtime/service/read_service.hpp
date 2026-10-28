@@ -34,10 +34,12 @@
 #include "hedgr.runtime/refusal.hpp"
 #include "hedgr.runtime/service/pending_reads.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <boost/asio/io_context.hpp>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -51,9 +53,11 @@ namespace hedgr::runtime::service {
  *
  * Owns the market, currency image, image, term structure and CRM tables with
  * the in-flight mark of every read that has no row of its own to say it is
- * running. A starter checks the session, marks the read and spawns a coroutine
- * on the pool. The coroutine only fetches and pushes an event, and @c apply
- * writes the answer on the frame thread, so the pool never touches a table.
+ * running. A starter checks the session, marks the read and asks the session's
+ * actor to run it, which answers with one event; a read that still runs on a
+ * connection of its own is spawned as a coroutine on the pool, and the
+ * coroutine only fetches and pushes an event. @c apply writes the answer on
+ * the frame thread, so neither the pool nor the actor ever touches a table.
  *
  * The catalogue and the CRM batches are scheduled here too: a batch owns its
  * deadline, and the @c crm_rates answer is what moves it.
@@ -64,6 +68,20 @@ namespace hedgr::runtime::service {
  */
 class HEDGR_RUNTIME_EXPORT read_service final {
 public:
+    /**
+     * @brief Asks a session's actor to run one read.
+     *
+     * True when the read was queued, and then an answer event follows. False
+     * when the session has no actor or it is stopping, and then nothing is in
+     * flight and the caller must not mark one.
+     */
+    using read_submit = std::function<bool(std::string_view instance_id,
+        std::string_view account_id, const worker::read_request& request)>;
+
+    /**
+     * @param submit the session's actors. Empty means no read is run on one,
+     * which is what a test that only drives the tables asks for.
+     */
     read_service(boost::asio::io_context& pool,
         model::command::event_queue& events,
         const model::state::instance_table& instances,
@@ -71,7 +89,8 @@ public:
         const model::state::session_table& sessions,
         const model::state::window_table& windows,
         model::state::series_table& series,
-        const session::transport::session_options& seed);
+        const session::transport::session_options& seed,
+        read_submit submit = {});
 
     /**
      * @brief Records where the store is, which is what opens the reads.
@@ -255,6 +274,16 @@ private:
         std::string_view instance_id, std::string_view account_id,
         read_gate gate) const;
 
+    /**
+     * @brief Hands @p request to the session's actor.
+     *
+     * False when there is no actor to run it, and then nothing is in flight:
+     * the read's mark is set only after this says true, so a read that could
+     * not be started is not left marked.
+     */
+    [[nodiscard]] bool submit_read(const worker::session_read& read,
+        worker::read_request request);
+
     [[nodiscard]] bool is_open() const noexcept {
         return !database_path_.empty();
     }
@@ -304,6 +333,7 @@ private:
     const model::state::session_table& sessions_;
     const model::state::window_table& windows_;
     const session::transport::session_options& seed_;
+    read_submit submit_;
     std::filesystem::path database_path_;
 
     /**
