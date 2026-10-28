@@ -22,6 +22,7 @@
 
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include <cstdint>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -77,6 +78,26 @@ public:
     /** @brief At least @p count of a series' newest ticks. */
     [[nodiscard]] virtual result<market_series_read> market_series_tail(
         std::string_view series_id, std::size_t count) const = 0;
+
+    /** @brief The series this login may plot. */
+    [[nodiscard]] virtual result<std::vector<market_series_summary>>
+    market_series() const = 0;
+
+    /** @brief The first load of one series: its newest ticks. */
+    [[nodiscard]] virtual result<market_series_read> market_series_points(
+        std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity) const = 0;
+
+    /** @brief One series' ticks over a span. */
+    [[nodiscard]] virtual result<market_series_read> market_series_history(
+        std::string_view series_id, std::int64_t from_ns,
+        std::int64_t to_ns,
+        const hedgr::model::domain::market_series_identity& identity) const = 0;
+
+    /** @brief Every market data provider and its kind. */
+    [[nodiscard]] virtual result<
+        std::vector<hedgr::model::domain::market_provider_row>>
+    list_providers() const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -128,6 +149,32 @@ public:
     [[nodiscard]] result<market_series_read> market_series_tail(
         std::string_view series_id, std::size_t count) const override {
         return client_.market_series_tail(series_id, count);
+    }
+
+    [[nodiscard]] result<std::vector<market_series_summary>> market_series()
+        const override {
+        return client_.market_series();
+    }
+
+    [[nodiscard]] result<market_series_read> market_series_points(
+        std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity)
+        const override {
+        return client_.market_series_points(series_id, identity);
+    }
+
+    [[nodiscard]] result<market_series_read> market_series_history(
+        std::string_view series_id, std::int64_t from_ns, std::int64_t to_ns,
+        const hedgr::model::domain::market_series_identity& identity)
+        const override {
+        return client_.market_series_history(series_id, from_ns, to_ns,
+            identity);
+    }
+
+    [[nodiscard]] result<
+        std::vector<hedgr::model::domain::market_provider_row>>
+    list_providers() const override {
+        return client_.list_providers();
     }
 
 private:
