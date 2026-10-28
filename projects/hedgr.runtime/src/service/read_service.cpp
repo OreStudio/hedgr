@@ -20,7 +20,6 @@
 #include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
-#include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
 #include <boost/log/sources/severity_feature.hpp>
@@ -420,15 +419,14 @@ void read_service::start_term_structure_read(
     if (!read)
         return;
 
-    worker::term_structure_job job;
-    job.session = std::move(*read);
-    job.key = st->curve_key;
-    job.label = st->label;
-    job.member_ids = st->member_ids;
-    job.member_tenors = st->member_tenors;
-    term_structures_.begin(job.session.instance_id, job.session.account_id,
-        st->curve_key, st->label);
-    worker::spawn_term_structure_read(pool_, std::move(job), events_);
+    const worker::term_request request{.key = st->curve_key,
+        .label = st->label,
+        .member_ids = st->member_ids,
+        .member_tenors = st->member_tenors};
+    if (!submit_read(*read, request))
+        return;
+    term_structures_.begin(read->instance_id, read->account_id, st->curve_key,
+        st->label);
 }
 
 void read_service::load_term_structure(
@@ -442,15 +440,14 @@ void read_service::load_term_structure(
     if (!read)
         return;
 
-    worker::term_structure_job job;
-    job.session = std::move(*read);
-    job.key = cmd.curve_key;
-    job.label = cmd.curve_label;
-    job.member_ids = cmd.member_ids;
-    job.member_tenors = cmd.member_tenors;
+    const worker::term_request request{.key = cmd.curve_key,
+        .label = cmd.curve_label,
+        .member_ids = cmd.member_ids,
+        .member_tenors = cmd.member_tenors};
+    if (!submit_read(*read, request))
+        return;
     term_structures_.begin(cmd.instance_id, cmd.account_id, cmd.curve_key,
         cmd.curve_label);
-    worker::spawn_term_structure_read(pool_, std::move(job), events_);
 }
 
 void read_service::load_image(const model::command::command& cmd) {

@@ -20,12 +20,10 @@
 #ifndef HEDGR_RUNTIME_WORKER_TERM_STRUCTURE_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_TERM_STRUCTURE_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/market.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
-#include <boost/asio/io_context.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -34,15 +32,6 @@
 #include <vector>
 
 namespace hedgr::runtime::worker {
-
-/** @brief The tenor members of one curve, in the order the table shows them. */
-struct term_structure_job final {
-    session_read session;
-    std::string key;
-    std::string label;
-    std::vector<std::string> member_ids;
-    std::vector<std::string> member_tenors;
-};
 
 /** @brief Each tenor's observed values, keyed by observation time. */
 using pillar_history = std::map<std::string, std::map<std::int64_t, double>>;
@@ -57,11 +46,6 @@ using pillar_history = std::map<std::string, std::map<std::int64_t, double>>;
  */
 [[nodiscard]] HEDGR_RUNTIME_EXPORT std::vector<model::domain::term_curve>
 build_term_curves(const pillar_history& by_term, std::size_t max_history);
-
-/** @brief Reads each member's latest point and posts the curve. */
-HEDGR_RUNTIME_EXPORT void
-spawn_term_structure_read(boost::asio::io_context& context,
-    term_structure_job job, model::command::event_queue& events);
 
 /** @brief Fills the event's curves from each member's tail, or its failure. */
 HEDGR_RUNTIME_EXPORT void run_term_structure_read(
