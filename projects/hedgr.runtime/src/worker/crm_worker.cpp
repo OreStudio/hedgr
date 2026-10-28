@@ -19,6 +19,7 @@
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "ores.platform/time/datetime.hpp"
 #include <algorithm>
@@ -81,21 +82,16 @@ void run_crm_read(session::transport::session_link& link,
 
 void spawn_crm_read(boost::asio::io_context& context, crm_job job,
     model::command::event_queue& events) {
-    const auto party = job.party_id;
-    const auto crm_name = job.crm_name;
-    const auto reciprocal = job.reciprocal;
-    model::event::event fact;
-    fact.kind = model::event::event_kind::crm_rates;
-    fact.instance_id = job.session.instance_id;
-    fact.account_id = job.session.account_id;
-    fact.tenant_id = job.session.tenant_id;
-    fact.party_id = party;
-    fact.crm_name = crm_name;
-    fact.crm_reciprocal = reciprocal;
-    auto work = [party, crm_name, reciprocal](
-                    session::transport::session_link& link,
+    const read_request request = crm_rates_request{.party_id = job.party_id,
+        .crm_name = job.crm_name,
+        .reciprocal = job.reciprocal};
+    auto fact = read_event(request,
+        model::domain::session_key{job.session.instance_id,
+            job.session.account_id},
+        job.session.tenant_id);
+    auto work = [request](session::transport::session_link& link,
                     model::event::event& answer) {
-        run_crm_read(link, party, crm_name, reciprocal, answer);
+        run_read(link, request, answer);
     };
     boost::asio::co_spawn(context,
         run_session_read_on_link(std::move(job.session), std::move(fact),

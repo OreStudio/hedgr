@@ -19,6 +19,7 @@
  */
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include <utility>
 
 namespace hedgr::runtime::worker {
@@ -35,17 +36,16 @@ void run_image_read(session::transport::session_link& link,
 
 void spawn_image_read(boost::asio::io_context& context, image_job job,
     model::command::event_queue& events) {
-    const auto image_id = std::move(job.image_id);
-    model::event::event fact;
-    fact.kind = model::event::event_kind::image_loaded;
-    fact.instance_id = job.session.instance_id;
-    fact.account_id = job.session.account_id;
-    fact.tenant_id = job.session.tenant_id;
-    fact.image_id = image_id;
+    const read_request request = image_request{.image_id =
+            std::move(job.image_id)};
+    auto fact = read_event(request,
+        model::domain::session_key{job.session.instance_id,
+            job.session.account_id},
+        job.session.tenant_id);
 
-    auto work = [image_id](session::transport::session_link& link,
+    auto work = [request](session::transport::session_link& link,
                     model::event::event& answer) {
-        run_image_read(link, image_id, answer);
+        run_read(link, request, answer);
     };
     boost::asio::co_spawn(context,
         run_session_read_on_link(std::move(job.session), std::move(fact),

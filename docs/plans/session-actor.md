@@ -395,12 +395,19 @@ bounded by one interval plus the request timeout.
 > market_points_request, market_history_request>`, each carrying only its
 > parameters (image id, party + crm name + reciprocal, series id + identity,
 > spans, member ids + tenors). The actor dispatches on it with a visitor, builds
-> the event there through one `read_event(request, session_key)` factory, and
-> calls the existing `run_*_read(link, …, event)` mapping. No closure, no
-> per-read allocation beyond the event, and every input travels in the command.
-> A read that fails fills that event; a link that is down is a session event,
-> not a read event, so `run_session_read`'s connect/resume wording does not
-> apply on the actor.
+> the event there through one `read_event(request, session_key, tenant_id)`
+> factory, and calls the existing `run_*_read(link, …, event)` mapping. No
+> closure, no per-read allocation beyond the event, and every input travels in
+> the command. A read that fails fills that event; a link that is down is a
+> session event, not a read event, so `run_session_read`'s connect/resume wording
+> does not apply on the actor.
+>
+> The variant grows by group: it holds the reads that already have a
+> `run_read` mapping from an open connection to an event, which is the five that
+> a read today runs as a closure over its own connection. Deployment and the
+> three market reads join as the groups that convert them land, because until
+> then their read functions own the connection and their job carries the token.
+> The tenant rides beside the key because the image kinds key their cache by it.
 
 Add `session_service`'s first piece, a map from session key to actor, and
 `submit(session, request)`. Each pull request converts one group, in this order,

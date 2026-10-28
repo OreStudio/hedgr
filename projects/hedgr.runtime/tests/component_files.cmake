@@ -19,6 +19,7 @@ set(files
     "session_actor_tests.cpp"
     "probe_backoff_tests.cpp"
     "read_service_tests.cpp"
+    "read_request_tests.cpp"
     "reported_error_tests.cpp"
     "runtime_tests.cpp"
     "seed_store_tests.cpp"
