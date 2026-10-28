@@ -29,11 +29,20 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace hedgr::runtime::worker {
+
+/**
+ * @brief One series the frame loop wants watched, and the URI it ticks under.
+ */
+struct watch_target final {
+    model::state::series_handle series;
+    std::string canonical_uri;
+};
 
 /**
  * @brief The watched series of one session, bucketed for the frame loop.
@@ -69,6 +78,16 @@ public:
 
     /** @brief Drops one series' ticks from here on. */
     void unwatch(model::state::series_handle series);
+
+    /**
+     * @brief Makes @p wanted the whole watched set.
+     *
+     * A series that was and still is wanted keeps its open buckets; one that
+     * is no longer wanted is dropped; a new one starts. This is the level a
+     * caller states once rather than a pair of add/remove calls whose order
+     * matters.
+     */
+    void set_watch(std::span<const watch_target> wanted);
 
     /** @brief Buckets one tick, or drops it when its series is not watched. */
     void on_tick(const session::market::tick& tick);

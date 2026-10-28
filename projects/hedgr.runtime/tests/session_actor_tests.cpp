@@ -38,6 +38,7 @@ namespace {
 using hedgr::model::state::series_bucket;
 using hedgr::model::state::series_handle;
 using hedgr::runtime::worker::tick_sink;
+using hedgr::runtime::worker::watch_target;
 using hedgr::session::market::canonical_series_uri;
 using hedgr::session::market::tick;
 
@@ -155,6 +156,40 @@ TEST_CASE("the sink keeps the ticks of watched series and drops the rest",
     REQUIRE(sink.drain(buckets) == 1);
     CHECK(buckets.front().series == swap_handle);
     CHECK(buckets.front().value == 5.0);
+}
+
+TEST_CASE("set_watch makes the given set the whole watch list",
+    "[market_stream]") {
+    constexpr std::int64_t second = 1'000'000'000;
+    tick_sink sink;
+    std::vector<series_bucket> buckets;
+
+    sink.watch(fx_handle, canonical(fx_series));
+    sink.watch(swap_handle, canonical(swap_series));
+    REQUIRE(sink.watched() == 2);
+
+    const std::vector<watch_target> only_fx{
+        {.series = fx_handle, .canonical_uri = canonical(fx_series)}};
+    sink.set_watch(only_fx);
+    REQUIRE(sink.watched() == 1);
+
+    for (const auto* series : {fx_series, swap_series}) {
+        sink.on_tick(tick_for(series, 1 * second, 1.0));
+        sink.on_tick(tick_for(series, 2 * second, 2.0));
+    }
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == fx_handle);
+
+    /* Putting the second series back watches it from now on. */
+    const std::vector<watch_target> both{
+        {.series = fx_handle, .canonical_uri = canonical(fx_series)},
+        {.series = swap_handle, .canonical_uri = canonical(swap_series)}};
+    sink.set_watch(both);
+    REQUIRE(sink.watched() == 2);
+    sink.on_tick(tick_for(swap_series, 3 * second, 3.0));
+    sink.on_tick(tick_for(swap_series, 4 * second, 4.0));
+    REQUIRE(sink.drain(buckets) == 1);
+    CHECK(buckets.front().series == swap_handle);
 }
 
 TEST_CASE("a bucket of a series that is not watched is not published",
