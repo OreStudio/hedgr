@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <memory>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace hedgr::session::transport {
@@ -50,6 +51,20 @@ public:
     /** @brief Resumes the session's token on the connection. */
     [[nodiscard]] virtual result<void> resume(std::string_view token,
         std::string_view principal) = 0;
+
+    /** @brief Closes the connection and drops any subscription. */
+    virtual void disconnect() = 0;
+
+    /** @brief Whether the connection is open. */
+    [[nodiscard]] virtual bool is_connected() const noexcept = 0;
+
+    /** @brief Whether the connection has a resumed session. */
+    [[nodiscard]] virtual bool is_authenticated() const noexcept = 0;
+
+    /** @brief Subscribes to @p subject, replacing any previous one. */
+    [[nodiscard]] virtual ores::nats::service::subscription subscribe(
+        std::string_view subject,
+        ores::nats::message_handler handler) const = 0;
 
     /** @brief Every configured CRM rate for a party, in one batch call. */
     [[nodiscard]] virtual result<std::vector<session_client::crm_rate>>
@@ -114,6 +129,24 @@ public:
     [[nodiscard]] result<void> resume(std::string_view token,
         std::string_view principal) override {
         return client_.resume(token, principal);
+    }
+
+    void disconnect() override {
+        client_.disconnect();
+    }
+
+    [[nodiscard]] bool is_connected() const noexcept override {
+        return client_.is_connected();
+    }
+
+    [[nodiscard]] bool is_authenticated() const noexcept override {
+        return client_.is_authenticated();
+    }
+
+    [[nodiscard]] ores::nats::service::subscription subscribe(
+        std::string_view subject,
+        ores::nats::message_handler handler) const override {
+        return client_.subscribe(subject, std::move(handler));
     }
 
     [[nodiscard]] result<std::vector<session_client::crm_rate>> crm_rates(

@@ -23,6 +23,7 @@
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
+#include "hedgr.session/market/tick_stream.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <string>
@@ -203,4 +204,21 @@ TEST_CASE("a failed points read becomes the event's message", "[link][market]") 
     const auto fact = market_read(link, points_job());
     CHECK(fact.points.empty());
     CHECK(fact.message == "the read was refused");
+}
+
+TEST_CASE("the tick stream connects and resumes through the link", "[link][tick]") {
+    fake_link link;
+    const ores::nats::wire_codec codec{ores::nats::wire_format::msgpack};
+    hedgr::session::market::market_tick_stream stream(link, "token",
+        "principal", "tenant", "party", codec);
+    CHECK_FALSE(stream.connected());
+
+    CHECK(stream.connect());
+    CHECK(stream.connected());
+    CHECK(link.connects == 1);
+    CHECK(link.resumes == 1);
+
+    stream.disconnect();
+    CHECK_FALSE(stream.connected());
+    CHECK(link.disconnects == 1);
 }
