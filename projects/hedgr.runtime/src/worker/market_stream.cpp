@@ -110,10 +110,22 @@ void market_stream::run() {
         std::optional<std::string> token;
         {
             std::unique_lock lock(mu_);
-            cv_.wait_for(lock, std::chrono::milliseconds{100}, [this]() {
+            /*
+             * A live stream sleeps until there is something to do: a watch
+             * change, a new token or a stop. Only a stream that is not yet
+             * connected or subscribed wakes on the retry cadence, because
+             * that is the state a connect or a subscribe has to be tried
+             * again from. An idle session therefore costs no wakes.
+             */
+            const bool live = stream.connected() && stream.subscribed();
+            const auto ready = [this]() {
                 return stopping_ || !commands_.empty()
                     || new_token_.has_value();
-            });
+            };
+            if (live)
+                cv_.wait(lock, ready);
+            else
+                cv_.wait_for(lock, std::chrono::milliseconds{100}, ready);
             if (stopping_)
                 break;
             queued.swap(commands_);
