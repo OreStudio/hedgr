@@ -86,13 +86,11 @@ std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
     return decode_tick(payload, ores::nats::default_wire_codec());
 }
 
-market_tick_stream::market_tick_stream(transport::session_options options,
+market_tick_stream::market_tick_stream(transport::session_link& link,
     std::string token, std::string principal, std::string tenant_id,
-    std::string party_id)
-    : codec_(options.wire_format == "json"
-              ? ores::nats::wire_format::json
-              : ores::nats::wire_format::msgpack)
-    , client_(std::move(options))
+    std::string party_id, ores::nats::wire_codec codec)
+    : link_(link)
+    , codec_(codec)
     , token_(std::move(token))
     , principal_(std::move(principal))
     , tenant_id_(std::move(tenant_id))
@@ -108,17 +106,17 @@ bool market_tick_stream::connect() {
         return true;
 
     last_error_.clear();
-    if (auto opened = client_.connect(); !opened) {
+    if (auto opened = link_.connect(); !opened) {
         last_error_ = opened.error().message;
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Tick stream could not connect: " << last_error_;
         return false;
     }
-    if (auto resumed = client_.resume(token_, principal_); !resumed) {
+    if (auto resumed = link_.resume(token_, principal_); !resumed) {
         last_error_ = resumed.error().message;
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Tick stream could not resume the session: " << last_error_;
-        client_.disconnect();
+        link_.disconnect();
         return false;
     }
     BOOST_LOG_SEV(lg(), ores::logging::info)
@@ -127,7 +125,7 @@ bool market_tick_stream::connect() {
 }
 
 bool market_tick_stream::connected() const {
-    return client_.is_connected() && client_.is_authenticated();
+    return link_.is_connected() && link_.is_authenticated();
 }
 
 void market_tick_stream::disconnect() {
@@ -137,7 +135,7 @@ void market_tick_stream::disconnect() {
      * caller's state is free to go once this returns.
      */
     subscription_.reset();
-    client_.disconnect();
+    link_.disconnect();
 }
 
 void market_tick_stream::set_token(std::string token) {
@@ -155,7 +153,7 @@ bool market_tick_stream::subscribe(tick_handler handler) {
             ores::marketdata::domain::market_tick_subject_all(tenant_id_,
                 party_id_);
         auto warned = std::make_shared<std::atomic<bool>>(false);
-        auto subscription = client_.subscribe(subject,
+        auto subscription = link_.subscribe(subject,
             [handler = std::move(handler), warned, subject,
                 codec = codec_](ores::nats::message msg) {
                 if (auto tick = decode_tick(msg.data, codec)) {

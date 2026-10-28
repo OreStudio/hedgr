@@ -23,6 +23,7 @@
 #include "hedgr.session/transport/session_link.hpp"
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -63,15 +64,19 @@ struct fake_session_link final : session::transport::session_link {
 
     mutable int connects = 0;
     mutable int resumes = 0;
+    mutable int disconnects = 0;
     mutable int crm_calls = 0;
     mutable int names_calls = 0;
     mutable int image_calls = 0;
     mutable int tail_calls = 0;
+    bool connected = false;
+    bool authenticated = false;
 
     [[nodiscard]] session::transport::result<void> connect() override {
         ++connects;
         if (connect_error)
             return std::unexpected(*connect_error);
+        connected = true;
         return {};
     }
 
@@ -80,7 +85,28 @@ struct fake_session_link final : session::transport::session_link {
         ++resumes;
         if (resume_error)
             return std::unexpected(*resume_error);
+        authenticated = true;
         return {};
+    }
+
+    void disconnect() override {
+        ++disconnects;
+        connected = false;
+        authenticated = false;
+    }
+
+    [[nodiscard]] bool is_connected() const noexcept override {
+        return connected;
+    }
+
+    [[nodiscard]] bool is_authenticated() const noexcept override {
+        return authenticated;
+    }
+
+    [[nodiscard]] ores::nats::service::subscription subscribe(
+        std::string_view,
+        ores::nats::message_handler) const override {
+        throw std::logic_error("the fake link cannot subscribe");
     }
 
     [[nodiscard]] session::transport::result<std::vector<client::crm_rate>>

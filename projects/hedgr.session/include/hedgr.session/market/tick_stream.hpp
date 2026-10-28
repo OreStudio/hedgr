@@ -21,7 +21,7 @@
 #define HEDGR_SESSION_MARKET_TICK_STREAM_HPP
 
 #include "hedgr.session/export.hpp"
-#include "hedgr.session/transport/session_client.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/service/subscription.hpp"
@@ -100,8 +100,9 @@ decode_tick(const std::vector<std::byte>& payload,
  */
 class HEDGR_SESSION_EXPORT market_tick_stream final {
 public:
-    market_tick_stream(transport::session_options options, std::string token,
-        std::string principal, std::string tenant_id, std::string party_id);
+    market_tick_stream(transport::session_link& link, std::string token,
+        std::string principal, std::string tenant_id, std::string party_id,
+        ores::nats::wire_codec codec);
     ~market_tick_stream();
 
     market_tick_stream(const market_tick_stream&) = delete;
@@ -156,11 +157,11 @@ private:
     /**
      * @brief The deployment's format, fixed for the stream's life.
      *
-     * Before the client so the constructor can read the options before they
-     * are moved into it.
+     * The connection is the caller's: the stream only names what to do on it,
+     * so the actor that owns the link owns the one connection.
      */
+    transport::session_link& link_;
     ores::nats::wire_codec codec_;
-    transport::session_client client_;
     std::string token_;
     std::string principal_;
     std::string tenant_id_;

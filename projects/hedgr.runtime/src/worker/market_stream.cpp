@@ -19,6 +19,8 @@
  */
 #include "hedgr.runtime/worker/market_stream.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
+#include "hedgr.session/transport/session_client.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <chrono>
 #include <utility>
 
@@ -91,9 +93,17 @@ void market_stream::wait_for_retry() {
 }
 
 void market_stream::run() {
-    session::market::market_tick_stream stream(options_.options,
-        options_.token, options_.principal, options_.tenant_id,
-        options_.party_id);
+    /*
+     * The stream owns the one connection: it is built on this thread's
+     * coroutine frame and the tick stream only names what to do on it.
+     */
+    session::transport::session_client client(options_.options);
+    session::transport::session_client_link link(client);
+    const ores::nats::wire_codec codec(options_.options.wire_format == "json"
+            ? ores::nats::wire_format::json
+            : ores::nats::wire_format::msgpack);
+    session::market::market_tick_stream stream(link, options_.token,
+        options_.principal, options_.tenant_id, options_.party_id, codec);
 
     /*
      * The handler owns the sink with this object, so a handler still running
