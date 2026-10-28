@@ -59,15 +59,26 @@ struct session_actor_options final {
      * queue could only drop an answer.
      */
     model::command::event_queue* events = nullptr;
+
+    /**
+     * @brief The connection the actor runs on, when the caller owns one.
+     *
+     * Empty means the actor opens and owns its own. A test supplies a link it
+     * scripts, which is how the loop's connect, its answers and its shutdown
+     * are driven without a broker. The link must outlive the actor's thread.
+     */
+    std::shared_ptr<session::transport::session_link> link;
 };
 
 /**
  * @brief One session's live prices, aggregated and handed to the frame loop.
  *
- * Owns the connection and its own thread. The frame thread posts the set of
- * series it wants and drains closed buckets; the NATS dispatch thread decodes
- * ticks and closes buckets; this class never touches the model. One instance
- * exists per authenticated session for as long as the session is live.
+ * Runs on one connection and its own thread: the connection the caller gave
+ * it, or one it opens itself when the caller gave none. The frame thread posts
+ * the set of series it wants and drains closed buckets; the NATS dispatch
+ * thread decodes ticks and closes buckets; this class never touches the model.
+ * One instance exists per authenticated session for as long as the session is
+ * live.
  *
  * A tick updates three current buckets, one per resolution. When a bucket's
  * interval passes, the previous bucket is published to the ring the frame loop

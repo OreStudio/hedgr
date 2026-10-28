@@ -356,6 +356,12 @@ per second per idle session fall from 10 (`market_stream.cpp:124`) to 0.
 
 ### 3. Liveness, loss and reseed (SR-6)
 
+> **Status: the seam it needs is in.** The actor runs on the `session_link` its
+> options carry, opening one of its own only when it was given none, so the
+> loop can be driven over the fake link. One test does that today: a read
+> queued before the thread starts is answered on the scripted connection, which
+> is opened once. The liveness itself is not written.
+
 The actor sends `ping` every interval while idle and on any wake after a gap,
 and treats a timeout or `closed` as loss. It emits `link_lost` once, keeps its
 subscription (cnats is reconnecting underneath), and keeps pinging. The first
