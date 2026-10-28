@@ -20,6 +20,7 @@
 #include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
+#include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
@@ -68,6 +69,9 @@ model::event::event read_event(const read_request& request,
                        fact.crm_name = value.crm_name;
                        fact.crm_reciprocal = value.reciprocal;
                    },
+                   [&](const deployment_request&) {
+                       fact.kind = event::event_kind::deployment_snapshot;
+                   },
                    [&](const term_request& value) {
                        fact.kind = event::event_kind::term_structure;
                        fact.curve_key = value.key;
@@ -75,6 +79,23 @@ model::event::event read_event(const read_request& request,
                    },
                },
         request);
+    return fact;
+}
+
+model::event::event read_failed(const read_request& request,
+    const model::domain::session_key& key, std::string_view tenant_id,
+    std::string_view reason) {
+    auto fact = read_event(request, key, tenant_id);
+    fact.message = std::string{reason};
+    if (std::holds_alternative<deployment_request>(request)) {
+        /*
+         * The deployment's handlers draw the snapshot's own failure and never
+         * its message, so a failure that set only the message would leave the
+         * pane showing an empty snapshot as if the read had succeeded.
+         */
+        fact.deployment.failure = std::string{reason};
+        fact.deployment.failing_read = "session";
+    }
     return fact;
 }
 
@@ -93,6 +114,9 @@ void run_read(hedgr::session::transport::session_link& link,
                    [&](const crm_rates_request& value) {
                        run_crm_read(link, value.party_id, value.crm_name,
                            value.reciprocal, answer);
+                   },
+                   [&](const deployment_request&) {
+                       run_deployment_read(link, answer);
                    },
                    [&](const term_request& value) {
                        run_term_structure_read(link, value.member_ids,

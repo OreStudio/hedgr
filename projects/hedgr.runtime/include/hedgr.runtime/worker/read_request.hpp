@@ -59,6 +59,10 @@ struct crm_rates_request final {
     bool reciprocal = false;
 };
 
+/** @brief The deployment's tenant counts and roster. */
+struct deployment_request final {
+};
+
 /** @brief One curve, named as its tenor members. */
 struct term_request final {
     /** @brief The curve's key, as the browser holds it. */
@@ -84,12 +88,12 @@ struct term_request final {
  * from the caller's frame.
  *
  * The alternatives are the reads that already have a mapping from an open
- * connection to an event, @c run_read. Deployment and the market reads join as
- * the groups that convert them land, because until then their read functions
+ * connection to an event, @c run_read. Term structure and the market reads join
+ * as the groups that convert them land, because until then their read functions
  * own their own connection.
  */
 using read_request = std::variant<image_request, image_map_request,
-    crm_names_request, crm_rates_request, term_request>;
+    crm_names_request, crm_rates_request, deployment_request, term_request>;
 
 /**
  * @brief The event a request will answer with, before the read runs.
@@ -104,11 +108,22 @@ using read_request = std::variant<image_request, image_map_request,
     std::string_view tenant_id);
 
 /**
+ * @brief The event that answers a request which could not run.
+ *
+ * The same event @c read_event names, carrying @p reason where its handlers
+ * look for a failure: the message, and the deployment's snapshot failure,
+ * which is the field its pane draws rather than the message.
+ */
+[[nodiscard]] HEDGR_RUNTIME_EXPORT model::event::event read_failed(
+    const read_request& request, const model::domain::session_key& key,
+    std::string_view tenant_id, std::string_view reason);
+
+/**
  * @brief Runs one request on an open connection and fills its event.
  *
  * The connection is already resumed, so this makes no call of its own to the
- * transport's lifecycle: a failed read fills the event's message and a link
- * that is down is the caller's session event, not a read answer.
+ * transport's lifecycle: a failed read fills the event's own failure field and
+ * a link that is down is the caller's session event, not a read answer.
  */
 HEDGR_RUNTIME_EXPORT void run_read(
     hedgr::session::transport::session_link& link,

@@ -394,9 +394,11 @@ bounded by one interval plus the request timeout.
 > The actor queues what it is given, runs it on its own link and pushes the
 > answer, and a connect that fails or a stop answers every read already queued
 > with its failure, so a caller's mark is never stranded. Images, the currency
-> image map, CRM names and the CRM batch are converted: their per-read
-> connection and their spawn functions are gone. Term structure, deployment and
-> the market reads still open their own, in the order below.
+> image map, CRM names, the CRM batch and the deployment are converted: their
+> per-read connection and their spawn functions are gone, and a read that does
+> not run answers where its handlers look — the message, and for the deployment
+> the snapshot's own failure, which is the field its pane draws. Term structure
+> and the market reads still open their own, in the order below.
 
 > **The request shape is a typed variant.** `read_request =
 > std::variant<image_request, image_map_request, crm_names_request,

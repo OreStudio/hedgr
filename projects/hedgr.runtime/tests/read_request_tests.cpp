@@ -176,3 +176,66 @@ TEST_CASE("a curve read fills the event's curves", "[read][term]") {
     CHECK(fact.term_curves[0].nodes[0].tenor == "1Y");
     CHECK(fact.term_curves[0].nodes[0].value == 1.5);
 }
+
+TEST_CASE("a deployment request names its event", "[read]") {
+    const worker::read_request request = worker::deployment_request{};
+
+    const auto fact = worker::read_event(request, key(), "t-1");
+    CHECK(fact.kind == model::event::event_kind::deployment_snapshot);
+    CHECK(fact.instance_id == "i-1");
+}
+
+TEST_CASE("a deployment read fills the snapshot", "[read]") {
+    fake_link link;
+    link.deployment_read.tenant_total = 3;
+    link.deployment_read.in_service = 2;
+    link.deployment_read.tenants.push_back(
+        session::tenant_summary{.id = "t-1",
+            .name = "First",
+            .status = "active",
+            .type = "application"});
+
+    const worker::read_request request = worker::deployment_request{};
+    auto fact = worker::read_event(request, key(), "t-1");
+    worker::run_read(link, request, fact);
+
+    CHECK(fact.deployment.tenant_total == 3);
+    CHECK(fact.deployment.in_service == 2);
+    REQUIRE(fact.deployment.tenants.size() == 1);
+    CHECK(fact.deployment.tenants[0].name == "First");
+    CHECK(fact.deployment.observed_at_ns != 0);
+    CHECK(fact.deployment.failure.empty());
+}
+
+TEST_CASE("a refused deployment read names the read that failed", "[read]") {
+    fake_link link;
+    link.deployment_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "the deployment refused"};
+
+    const worker::read_request request = worker::deployment_request{};
+    auto fact = worker::read_event(request, key(), "t-1");
+    worker::run_read(link, request, fact);
+
+    CHECK(fact.deployment.failure == "the deployment refused");
+    CHECK(fact.deployment.failing_read == "deployment");
+    CHECK(fact.deployment.tenants.empty());
+}
+
+TEST_CASE("a request that could not run answers where its handlers look",
+    "[read]") {
+    const auto deployment = worker::read_failed(worker::deployment_request{},
+        key(), "t-1", "the session stopped before the read ran");
+
+    CHECK(deployment.kind == model::event::event_kind::deployment_snapshot);
+    CHECK(deployment.message == "the session stopped before the read ran");
+    CHECK(deployment.deployment.failure
+        == "the session stopped before the read ran");
+    CHECK(deployment.deployment.failing_read == "session");
+
+    const auto names = worker::read_failed(
+        worker::crm_names_request{.party_id = "p-1"}, key(), "t-1", "no link");
+
+    CHECK(names.message == "no link");
+    CHECK(names.party_id == "p-1");
+}

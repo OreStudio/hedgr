@@ -19,20 +19,10 @@
  */
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "ores.logging/make_logger.hpp"
-#include <algorithm>
-#include <boost/asio/awaitable.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-#include <boost/asio/post.hpp>
-#include <boost/asio/this_coro.hpp>
-#include <boost/asio/use_awaitable.hpp>
 #include <chrono>
 #include <string>
-#include <utility>
-#include <vector>
 
 namespace hedgr::runtime::worker {
 
@@ -41,8 +31,6 @@ namespace {
 namespace domain = hedgr::model::domain;
 namespace event = hedgr::model::event;
 namespace transport = hedgr::session::transport;
-
-using hedgr::model::command::event_queue;
 
 /** @brief This read's logger. Counts are logged; secrets are not. */
 [[nodiscard]] auto& lg() {
@@ -65,34 +53,16 @@ using hedgr::model::command::event_queue;
     return error.message;
 }
 
-/**
- * @brief Reads one deployment and posts it, whatever happened.
- *
- * The token is wiped before the frame ends. It is a secret the process already
- * holds elsewhere, and a copy left in a finished coroutine's frame is a copy
- * nobody is tracking.
- */
-boost::asio::awaitable<void> run_deployment(transport::session_link& link,
-    deployment_job job, event_queue& events) {
-    const auto key = job.key;
+}
 
-    co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-        boost::asio::use_awaitable);
+void run_deployment_read(transport::session_link& link, event::event& answer) {
+    auto& snapshot = answer.deployment;
 
     BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "Reading the deployment for '" << key.instance_id << "' / '"
-        << key.account_id << "'";
+        << "Reading the deployment for '" << answer.instance_id << "' / '"
+        << answer.account_id << "'";
 
-    domain::deployment_snapshot snapshot;
-
-    if (const auto connected = link.connect(); !connected) {
-        snapshot.failure = describe(connected.error());
-        snapshot.failing_read = "connect";
-    } else if (const auto resumed = link.resume(job.token, job.principal);
-        !resumed) {
-        snapshot.failure = describe(resumed.error());
-        snapshot.failing_read = "resume";
-    } else if (const auto read = link.deployment(); !read) {
+    if (const auto read = link.deployment(); !read) {
         snapshot.failure = describe(read.error());
         snapshot.failing_read = "deployment";
     } else {
@@ -114,41 +84,14 @@ boost::asio::awaitable<void> run_deployment(transport::session_link& link,
 
     if (!snapshot.failure.empty()) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "The deployment read for '" << key.instance_id
+            << "The deployment read for '" << answer.instance_id
             << "' failed while " << snapshot.failing_read << ": "
             << snapshot.failure;
     } else {
         BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Deployment read for '" << key.instance_id << "' returned "
+            << "Deployment read for '" << answer.instance_id << "' returned "
             << snapshot.tenant_total << " tenants";
     }
-
-    std::fill(job.token.begin(), job.token.end(), '\0');
-    job.token.clear();
-    job.principal.clear();
-
-    event::event fact;
-    fact.kind = event::event_kind::deployment_snapshot;
-    fact.instance_id = key.instance_id;
-    fact.account_id = key.account_id;
-    fact.deployment = std::move(snapshot);
-    events.push(std::move(fact));
-}
-
-boost::asio::awaitable<void> run_deployment_with_client(deployment_job job,
-    event_queue& events) {
-    transport::session_client client(job.options);
-    transport::session_client_link link(client);
-    co_await run_deployment(link, std::move(job), events);
-}
-
-}
-
-void spawn_deployment_read(boost::asio::io_context& context,
-    deployment_job job, event_queue& events) {
-    boost::asio::co_spawn(context,
-        run_deployment_with_client(std::move(job), events),
-        boost::asio::detached);
 }
 
 }

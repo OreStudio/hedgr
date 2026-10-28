@@ -20,55 +20,27 @@
 #ifndef HEDGR_RUNTIME_WORKER_DEPLOYMENT_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_DEPLOYMENT_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
-#include "hedgr.model/domain/session.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.session/transport/session_options.hpp"
-#include <boost/asio/io_context.hpp>
-#include <string>
+#include "hedgr.session/transport/session_link.hpp"
 
 namespace hedgr::runtime::worker {
 
 /**
- * @brief Everything one deployment read needs, copied so it never reads state.
+ * @brief Fills the event with the deployment's snapshot, or with its failure.
  *
- * The token is the same one the session's own worker holds, presented on a
- * second connection. That is what keeps this read off the session's transport:
- * a deployment that answers slowly costs this read its own connection rather
- * than stalling the session's refresh loop, and the session loop is what keeps
- * the workspace's latency honest.
+ * The connection is the session's, so there is no connect or resume here: the
+ * read is one call for the tenant counts and the roster, and the whole result
+ * travels in the event, which is what keeps the frame loop the only writer.
+ *
+ * A refusal fills the snapshot's own failure, because that is the field the
+ * pane draws, and names the read that failed. It is not retried here: the retry
+ * is the window's cadence, and a read that retried would hide the deployment's
+ * state behind a second one.
  */
-struct deployment_job final {
-    /** @brief Where to connect and how. */
-    session::transport::session_options options;
-
-    /** @brief The pair this read is on behalf of, used to tag the event. */
-    model::domain::session_key key;
-
-    /** @brief The bearer token a sign-in produced. Wiped when the read ends. */
-    std::string token;
-
-    /** @brief The principal the token was issued to, for the transport. */
-    std::string principal;
-};
-
-/**
- * @brief Reads one deployment and posts the snapshot as an event.
- *
- * Connects, presents the session's token, asks for the tenant counts and the
- * roster, and closes. Nothing here reads or writes a state table: the whole
- * result travels as one event, so the frame loop remains the only writer.
- *
- * The read is short-lived on purpose. A failed read is reported as a snapshot
- * carrying its own failure rather than retried here, because the retry is the
- * window's cadence and a worker that retried would hide the deployment's state
- * behind a second one.
- *
- * @pre Run on an executor thread. Never call this from the frame loop.
- */
-HEDGR_RUNTIME_EXPORT void
-spawn_deployment_read(boost::asio::io_context& context, deployment_job job,
-                      model::command::event_queue& events);
+HEDGR_RUNTIME_EXPORT void run_deployment_read(
+    hedgr::session::transport::session_link& link,
+    model::event::event& answer);
 
 }
 

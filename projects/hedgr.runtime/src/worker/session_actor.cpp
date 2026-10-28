@@ -144,8 +144,8 @@ void session_actor::fail_reads(std::vector<read_request>& reads,
     const auto sentence = reason.empty() ? unknown_read_failure_message
                                          : reason;
     for (const auto& request : reads) {
-        auto fact = read_event(request, options_.key, options_.tenant_id);
-        fact.message = std::string{sentence};
+        auto fact = read_failed(request, options_.key, options_.tenant_id,
+            sentence);
         push(std::move(fact));
     }
     reads.clear();
