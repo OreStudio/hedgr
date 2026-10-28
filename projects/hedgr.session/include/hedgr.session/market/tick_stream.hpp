@@ -23,6 +23,7 @@
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_client.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include "ores.nats/domain/wire_codec.hpp"
 #include "ores.nats/service/subscription.hpp"
 #include <cstdint>
 #include <functional>
@@ -69,6 +70,17 @@ using tick_handler = std::function<void(const tick&)>;
  */
 [[nodiscard]] HEDGR_SESSION_EXPORT std::optional<tick>
 decode_tick(const std::vector<std::byte>& payload);
+
+/**
+ * @brief Decodes one tick payload with @p codec.
+ *
+ * A stream built for one deployment uses that deployment's format rather than
+ * the process-wide default, so two sessions of different formats decode their
+ * own ticks correctly.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::optional<tick>
+decode_tick(const std::vector<std::byte>& payload,
+    const ores::nats::wire_codec& codec);
 
 /**
  * @brief The deployment's live prices for one party, on one subscription.
@@ -141,6 +153,13 @@ public:
     }
 
 private:
+    /**
+     * @brief The deployment's format, fixed for the stream's life.
+     *
+     * Before the client so the constructor can read the options before they
+     * are moved into it.
+     */
+    ores::nats::wire_codec codec_;
     transport::session_client client_;
     std::string token_;
     std::string principal_;

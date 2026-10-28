@@ -57,10 +57,10 @@ std::optional<std::string> canonical_series_uri(std::string_view oresmd_uri) {
     return *written;
 }
 
-std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
+std::optional<tick> decode_tick(const std::vector<std::byte>& payload,
+    const ores::nats::wire_codec& codec) {
     const auto decoded =
-        ores::nats::default_wire_codec()
-            .decode<ores::marketdata::messaging::market_tick>(payload);
+        codec.decode<ores::marketdata::messaging::market_tick>(payload);
     if (!decoded)
         return std::nullopt;
 
@@ -82,10 +82,17 @@ std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
         .value = value};
 }
 
+std::optional<tick> decode_tick(const std::vector<std::byte>& payload) {
+    return decode_tick(payload, ores::nats::default_wire_codec());
+}
+
 market_tick_stream::market_tick_stream(transport::session_options options,
     std::string token, std::string principal, std::string tenant_id,
     std::string party_id)
-    : client_(std::move(options))
+    : codec_(options.wire_format == "json"
+              ? ores::nats::wire_format::json
+              : ores::nats::wire_format::msgpack)
+    , client_(std::move(options))
     , token_(std::move(token))
     , principal_(std::move(principal))
     , tenant_id_(std::move(tenant_id))
@@ -149,9 +156,9 @@ bool market_tick_stream::subscribe(tick_handler handler) {
                 party_id_);
         auto warned = std::make_shared<std::atomic<bool>>(false);
         auto subscription = client_.subscribe(subject,
-            [handler = std::move(handler), warned,
-                subject](ores::nats::message msg) {
-                if (auto tick = decode_tick(msg.data)) {
+            [handler = std::move(handler), warned, subject,
+                codec = codec_](ores::nats::message msg) {
+                if (auto tick = decode_tick(msg.data, codec)) {
                     handler(*tick);
                 } else if (!warned->exchange(true)) {
                     BOOST_LOG_SEV(lg(), ores::logging::warn)

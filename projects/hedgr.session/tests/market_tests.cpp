@@ -159,13 +159,19 @@ std::string quote_uri_of(std::string_view series_uri, std::string_view point) {
     return *written;
 }
 
-std::vector<std::byte> tick_payload(std::string quote_uri) {
+std::vector<std::byte> tick_payload(std::string quote_uri,
+    const ores::nats::wire_codec& codec) {
     ores::marketdata::messaging::market_tick payload;
     payload.oresmd_uri = std::move(quote_uri);
     payload.value = "1.5";
     payload.observation_time = std::chrono::system_clock::time_point{
         std::chrono::seconds{1'700'000'000}};
-    return ores::nats::default_wire_codec().encode(payload);
+    return codec.encode(payload);
+}
+
+std::vector<std::byte> tick_payload(std::string quote_uri) {
+    return tick_payload(std::move(quote_uri),
+        ores::nats::default_wire_codec());
 }
 
 }
@@ -284,4 +290,26 @@ TEST_CASE("a catalogue row carries the series' own id, provider and party",
     REQUIRE(second.oresmd_uri == row.oresmd_uri);
     REQUIRE(second.party_id == row.party_id);
     REQUIRE(second.provider_code == "bloomberg");
+}
+
+TEST_CASE("a tick is decoded with its deployment's wire format", "[tick]") {
+    using hedgr::session::market::decode_tick;
+    const ores::nats::wire_codec msgpack{ores::nats::wire_format::msgpack};
+    const ores::nats::wire_codec json{ores::nats::wire_format::json};
+    const char* quote =
+        "oresmd://fx/GBP?type=quote&instrument=fx_spot&quote=rate&ccy=USD";
+
+    const auto packed = tick_payload(quote, msgpack);
+    const auto text = tick_payload(quote, json);
+
+    const auto from_packed = decode_tick(packed, msgpack);
+    REQUIRE(from_packed.has_value());
+    CHECK(from_packed->value == 1.5);
+    const auto from_text = decode_tick(text, json);
+    REQUIRE(from_text.has_value());
+    CHECK(from_text->value == 1.5);
+
+    /* The other format's bytes are not this format's tick. */
+    CHECK_FALSE(decode_tick(packed, json).has_value());
+    CHECK_FALSE(decode_tick(text, msgpack).has_value());
 }

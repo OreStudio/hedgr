@@ -320,6 +320,11 @@ one. Measure: none. The step produces the counter.
 
 ### 2. The actor takes over the tick stream
 
+> **Status: started.** The codec half is in: `market_tick_stream` holds its
+> deployment's format and decodes through it, and `decode_tick` has a
+> codec-taking overload tested against msgpack and JSON. The thread, command
+> vector and `session_link` move follow.
+
 `market_stream` becomes `session_actor`: the same thread, `connect`, `resume`,
 subscription, `tick_sink` and ring, now over `session_link`, with the
 single-threaded `io_context` and a command vector that accepts `set_watch`,
