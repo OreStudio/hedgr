@@ -20,6 +20,7 @@
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <boost/asio/awaitable.hpp>
@@ -71,8 +72,8 @@ using hedgr::model::command::event_queue;
  * holds elsewhere, and a copy left in a finished coroutine's frame is a copy
  * nobody is tracking.
  */
-boost::asio::awaitable<void> run_deployment(deployment_job job,
-    event_queue& events) {
+boost::asio::awaitable<void> run_deployment(transport::session_link& link,
+    deployment_job job, event_queue& events) {
     const auto key = job.key;
 
     co_await boost::asio::post(co_await boost::asio::this_coro::executor,
@@ -84,15 +85,14 @@ boost::asio::awaitable<void> run_deployment(deployment_job job,
 
     domain::deployment_snapshot snapshot;
 
-    transport::session_client client(job.options);
-    if (const auto connected = client.connect(); !connected) {
+    if (const auto connected = link.connect(); !connected) {
         snapshot.failure = describe(connected.error());
         snapshot.failing_read = "connect";
-    } else if (const auto resumed = client.resume(job.token, job.principal);
+    } else if (const auto resumed = link.resume(job.token, job.principal);
         !resumed) {
         snapshot.failure = describe(resumed.error());
         snapshot.failing_read = "resume";
-    } else if (const auto read = client.deployment(); !read) {
+    } else if (const auto read = link.deployment(); !read) {
         snapshot.failure = describe(read.error());
         snapshot.failing_read = "deployment";
     } else {
@@ -135,12 +135,20 @@ boost::asio::awaitable<void> run_deployment(deployment_job job,
     events.push(std::move(fact));
 }
 
+boost::asio::awaitable<void> run_deployment_with_client(deployment_job job,
+    event_queue& events) {
+    transport::session_client client(job.options);
+    transport::session_client_link link(client);
+    co_await run_deployment(link, std::move(job), events);
+}
+
 }
 
 void spawn_deployment_read(boost::asio::io_context& context,
     deployment_job job, event_queue& events) {
     boost::asio::co_spawn(context,
-        run_deployment(std::move(job), events), boost::asio::detached);
+        run_deployment_with_client(std::move(job), events),
+        boost::asio::detached);
 }
 
 }

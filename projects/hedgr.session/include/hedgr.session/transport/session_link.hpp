@@ -70,6 +70,9 @@ public:
     /** @brief One image of the tenant, by its identifier. */
     [[nodiscard]] virtual result<session_client::image_content> image_by_id(
         std::string_view image_id) const = 0;
+
+    /** @brief The deployment's tenant counts and roster. */
+    [[nodiscard]] virtual result<deployment_read> deployment() const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -112,6 +115,10 @@ public:
     [[nodiscard]] result<session_client::image_content> image_by_id(
         std::string_view image_id) const override {
         return client_.image_by_id(image_id);
+    }
+
+    [[nodiscard]] result<deployment_read> deployment() const override {
+        return client_.deployment();
     }
 
 private:
