@@ -32,6 +32,7 @@ set(files
     "worker/deadline_wait.cpp"
     "worker/session_worker.cpp"
     "worker/term_structure_worker.cpp"
+    "worker/read_request.cpp"
 )
 
 # The headers are listed for the install and IDE targets.
@@ -73,4 +74,5 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_sink.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/deadline_wait.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/read_request.hpp"
 )

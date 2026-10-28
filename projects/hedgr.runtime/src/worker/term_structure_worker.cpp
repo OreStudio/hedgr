@@ -19,6 +19,7 @@
  */
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include <algorithm>
 #include <iterator>
 #include <limits>
@@ -104,21 +105,19 @@ void run_term_structure_read(session::transport::session_link& link,
 
 void spawn_term_structure_read(boost::asio::io_context& context,
     term_structure_job job, model::command::event_queue& events) {
-    const auto key = job.key;
-    const auto label = job.label;
-    const auto ids = job.member_ids;
-    const auto tenors = job.member_tenors;
+    const read_request request = term_request{.key = job.key,
+        .label = job.label,
+        .member_ids = job.member_ids,
+        .member_tenors = job.member_tenors};
 
-    model::event::event fact;
-    fact.kind = model::event::event_kind::term_structure;
-    fact.instance_id = job.session.instance_id;
-    fact.account_id = job.session.account_id;
-    fact.curve_key = key;
-    fact.curve_label = label;
+    auto fact = read_event(request,
+        model::domain::session_key{job.session.instance_id,
+            job.session.account_id},
+        job.session.tenant_id);
 
-    auto work = [ids, tenors](session::transport::session_link& link,
+    auto work = [request](session::transport::session_link& link,
                     model::event::event& answer) {
-        run_term_structure_read(link, ids, tenors, answer);
+        run_read(link, request, answer);
     };
     boost::asio::co_spawn(context,
         run_session_read_on_link(std::move(job.session), std::move(fact),
