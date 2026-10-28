@@ -19,14 +19,12 @@
  */
 #include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.model/event/event.hpp"
-#include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "ores.platform/time/datetime.hpp"
 #include <algorithm>
 #include <chrono>
 #include <exception>
 #include <string>
-#include <utility>
 
 namespace hedgr::runtime::worker {
 
@@ -80,22 +78,4 @@ void run_crm_read(session::transport::session_link& link,
     }
 }
 
-void spawn_crm_read(boost::asio::io_context& context, crm_job job,
-    model::command::event_queue& events) {
-    const read_request request = crm_rates_request{.party_id = job.party_id,
-        .crm_name = job.crm_name,
-        .reciprocal = job.reciprocal};
-    auto fact = read_event(request,
-        model::domain::session_key{job.session.instance_id,
-            job.session.account_id},
-        job.session.tenant_id);
-    auto work = [request](session::transport::session_link& link,
-                    model::event::event& answer) {
-        run_read(link, request, answer);
-    };
-    boost::asio::co_spawn(context,
-        run_session_read_on_link(std::move(job.session), std::move(fact),
-            std::move(work), events),
-        boost::asio::detached);
-}
 }

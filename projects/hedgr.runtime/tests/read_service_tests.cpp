@@ -89,6 +89,16 @@ struct fixture final {
         browser.session = domain::session_key{instance_id, account_id};
         series_browser = windows.insert(browser);
         windows.bind_session(series_browser, session);
+
+        domain::window_spec matrix;
+        matrix.id = "crm-matrix";
+        matrix.kind = domain::window_kind::crm_matrix;
+        matrix.session = domain::session_key{instance_id, account_id};
+        matrix.state = domain::crm_matrix_state{.party_id = "p-1",
+            .crm_name = "majors",
+            .reciprocal = false};
+        crm_matrix = windows.insert(matrix);
+        windows.bind_session(crm_matrix, session);
     }
 
     ~fixture() { pool.stop(); }
@@ -103,6 +113,7 @@ struct fixture final {
     state::session_handle session;
     state::window_handle command_centre;
     state::window_handle series_browser;
+    state::window_handle crm_matrix;
     hedgr::session::transport::session_options seed;
     hedgr::runtime::async::executor pool{1};
     hedgr::model::state::series_table series;
@@ -345,6 +356,47 @@ TEST_CASE("the currency image map is handed to the session's actor",
         request_id::currency_image_map(tenant_id)));
 }
 
+TEST_CASE("a CRM batch is handed to the session's actor", "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    const auto refused = f.reads.start(
+        {service::read_kind::crm_batch, f.crm_matrix});
+    CHECK_FALSE(refused.has_value());
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request =
+        std::get_if<hedgr::runtime::worker::crm_rates_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->party_id == "p-1");
+    CHECK(request->crm_name == "majors");
+    CHECK_FALSE(request->reciprocal);
+
+    const auto* batch = f.reads.crm().get(instance_id, account_id, "p-1",
+        "majors", false);
+    REQUIRE(batch != nullptr);
+    CHECK(batch->reading);
+}
+
+TEST_CASE("the CRM names are handed to the session's actor",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    hedgr::model::command::command cmd;
+    cmd.kind = hedgr::model::command::command_kind::load_crm_names;
+    cmd.instance_id = instance_id;
+    cmd.account_id = account_id;
+    cmd.party_id = "p-1";
+    f.reads.load_crm_names(cmd);
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request =
+        std::get_if<hedgr::runtime::worker::crm_names_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->party_id == "p-1");
+}
+
 TEST_CASE("a read the actor refuses leaves nothing in flight",
     "[reads][actor]") {
     fixture f;
@@ -368,6 +420,13 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
     CHECK(f.submitted.empty());
     CHECK(f.reads.pending().empty());
     CHECK(f.reads.currency_images().get(tenant_id) == nullptr);
+
+    static_cast<void>(f.reads.start(
+        {service::read_kind::crm_batch, f.crm_matrix}));
+
+    CHECK(f.submitted.empty());
+    CHECK(f.reads.crm().get(instance_id, account_id, "p-1", "majors", false)
+        == nullptr);
 }
 
 TEST_CASE("a read the session cannot make is refused without a mark",

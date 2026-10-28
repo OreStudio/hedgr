@@ -17,7 +17,9 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
+#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "fake_link.hpp"
 #include <boost/asio/co_spawn.hpp>
