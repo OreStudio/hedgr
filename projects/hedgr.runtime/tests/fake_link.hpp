@@ -42,6 +42,7 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<std::string> names;
     std::vector<client::currency_image> images;
     client::image_content image;
+    session::transport::deployment_read deployment_read;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -49,6 +50,7 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> names_error;
     std::optional<session::transport::session_error> images_error;
     std::optional<session::transport::session_error> image_error;
+    std::optional<session::transport::session_error> deployment_error;
 
     mutable int connects = 0;
     mutable int resumes = 0;
@@ -106,6 +108,14 @@ struct fake_session_link final : session::transport::session_link {
         if (image_error)
             return std::unexpected(*image_error);
         return image;
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::deployment_read>
+    deployment() const override {
+        if (deployment_error)
+            return std::unexpected(*deployment_error);
+        return deployment_read;
     }
 };
 
