@@ -73,6 +73,32 @@ void tick_sink::on_tick(const session::market::tick& tick) {
     }
 }
 
+void tick_sink::set_watch(std::span<const watch_target> wanted) {
+    std::lock_guard lock(mu_);
+
+    const auto wanted_series = [&](model::state::series_handle series) {
+        return std::ranges::any_of(wanted, [series](const watch_target& target) {
+            return target.series == series;
+        });
+    };
+    std::erase_if(series_, [&](const auto& entry) {
+        return !wanted_series(entry.second.series());
+    });
+
+    for (const auto& target : wanted) {
+        const auto held = std::ranges::find_if(series_,
+            [&](const auto& entry) {
+                return entry.second.series() == target.series;
+            });
+        if (held != series_.end()) {
+            if (held->first == target.canonical_uri)
+                continue;
+            series_.erase(held);
+        }
+        series_.try_emplace(target.canonical_uri, target.series, ring_);
+    }
+}
+
 std::size_t tick_sink::watched() const {
     std::lock_guard lock(mu_);
     return series_.size();
