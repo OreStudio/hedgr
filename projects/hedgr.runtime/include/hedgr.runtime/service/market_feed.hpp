@@ -173,12 +173,14 @@ private:
     };
 
     /**
-     * @brief Makes the stream watch @p series exactly when it is wanted.
+     * @brief Makes the stream watch exactly the series this session wants.
      *
-     * Idempotent. Starts the session's catalogue read when it has none, and the
-     * refusal of that read is added to @p refusals.
+     * Idempotent. Builds the whole wanted set and hands it to the stream once,
+     * so the stream applies a level rather than a sequence of edits. Starts
+     * the session's catalogue read when it has none, and the refusal of that
+     * read is added to @p refusals.
      */
-    void reconcile(market_stream_entry& entry, model::state::series_handle series,
+    void reconcile(market_stream_entry& entry,
         std::vector<refusal>& refusals);
 
     /** @brief Whether @p series should be watched on @p entry's stream. */
