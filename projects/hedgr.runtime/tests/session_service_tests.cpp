@@ -71,10 +71,6 @@ public:
         return 0;
     }
 
-    bool take_reconnected() override {
-        return false;
-    }
-
     bool submit_read(worker::read_request request) override {
         if (!state_->accept_reads)
             return false;

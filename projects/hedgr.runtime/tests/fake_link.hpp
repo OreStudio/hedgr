@@ -21,10 +21,13 @@
 #define HEDGR_RUNTIME_TESTS_FAKE_LINK_HPP
 
 #include "hedgr.session/transport/session_link.hpp"
+#include <atomic>
+#include <chrono>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace hedgr::testing {
@@ -69,8 +72,20 @@ struct fake_session_link final : session::transport::session_link {
     mutable int names_calls = 0;
     mutable int image_calls = 0;
     mutable int tail_calls = 0;
+    mutable std::atomic<int> pings{0};
     bool connected = false;
     bool authenticated = false;
+
+    /**
+     * @brief Whether a liveness request answers.
+     *
+     * Atomic because the actor asks on its own thread while the test flips it,
+     * which is how an outage and its recovery are scripted.
+     */
+    std::atomic<bool> ping_answers{true};
+
+    /** @brief How long a liveness request takes, to stand in for a slow one. */
+    std::chrono::milliseconds ping_delay{};
 
     [[nodiscard]] session::transport::result<void> connect() override {
         ++connects;
@@ -101,6 +116,17 @@ struct fake_session_link final : session::transport::session_link {
 
     [[nodiscard]] bool is_authenticated() const noexcept override {
         return authenticated;
+    }
+
+    [[nodiscard]] session::transport::result<void> ping() const override {
+        ++pings;
+        if (ping_delay.count() > 0)
+            std::this_thread::sleep_for(ping_delay);
+        if (!ping_answers)
+            return std::unexpected(session::transport::session_error{
+                .code = session::transport::session_errc::timeout,
+                .message = "the liveness request timed out"});
+        return {};
     }
 
     [[nodiscard]] ores::nats::service::subscription subscribe(

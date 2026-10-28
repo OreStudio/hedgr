@@ -134,6 +134,23 @@ enum class event_kind : std::uint8_t {
      * as a condition so the operator sees why the control went back.
      */
     session_party_refused = 21,
+    /**
+     * @brief A session's connection stopped answering.
+     *
+     * Emitted once by the session's actor, on the first liveness request that
+     * fails, and not again until the connection answers. The session stays
+     * signed in: the actor keeps asking and rebuilds the connection itself, so
+     * the frame loop reports the outage rather than tearing the session down.
+     */
+    link_lost = 22,
+    /**
+     * @brief A session's connection answered again.
+     *
+     * The first liveness request to succeed after @c link_lost. What the pair
+     * missed while the connection was down is gone, so the frame loop seeds
+     * every series the session watches again.
+     */
+    link_restored = 23,
 };
 
 /** @brief The canonical text of an event kind, for logs. */

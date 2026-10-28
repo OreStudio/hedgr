@@ -83,9 +83,6 @@ public:
     /** @brief Replaces @p out with the closed buckets waiting for the frame. */
     virtual std::size_t drain(std::vector<model::state::series_bucket>& out) = 0;
 
-    /** @brief Whether the feed reconnected since the last call. */
-    virtual bool take_reconnected() = 0;
-
     /**
      * @brief Asks the feed to run one read on the session's connection.
      *

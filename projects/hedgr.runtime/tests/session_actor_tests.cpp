@@ -426,6 +426,144 @@ TEST_CASE("a read is answered on the connection the actor was given",
     CHECK(link->resumes == 1);
 }
 
+namespace {
+
+/** @brief Options for an actor driven by @p link, writing to @p events. */
+hedgr::runtime::worker::session_actor_options fake_options(
+    std::shared_ptr<hedgr::testing::fake_session_link> link,
+    hedgr::model::command::event_queue& events) {
+    hedgr::runtime::worker::session_actor_options options;
+    options.options.wire_format = "json";
+    options.token = "token";
+    options.principal = "principal";
+    options.tenant_id = "tenant";
+    options.party_id = "party";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+    options.link = std::move(link);
+    return options;
+}
+
+/** @brief Everything the actor pushed, waiting up to @p timeout. */
+std::vector<hedgr::model::event::event> next_events(
+    hedgr::model::command::event_queue& events,
+    std::chrono::milliseconds timeout = std::chrono::seconds{10}) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto got = events.drain();
+        if (!got.empty())
+            return got;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    return {};
+}
+
+/** @brief Waits for @p done, or gives up after ten seconds. */
+template <class Predicate>
+bool wait_until(Predicate done) {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (done())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    return done();
+}
+
+}
+
+TEST_CASE("an outage is reported once and its recovery once",
+    "[market_stream][liveness]") {
+    using namespace std::chrono;
+    using hedgr::model::event::event_kind;
+    using hedgr::runtime::worker::session_actor;
+    using fake_link = hedgr::testing::fake_session_link;
+
+    auto link = std::make_shared<fake_link>();
+    link->ping_answers = false;
+    hedgr::model::command::event_queue events;
+    auto options = fake_options(link, events);
+    options.ping_interval = milliseconds{1};
+    options.failures_before_reconnect = 0;
+
+    session_actor actor(std::move(options));
+    actor.start();
+
+    const auto lost = next_events(events);
+    REQUIRE(lost.size() == 1);
+    CHECK(lost[0].kind == event_kind::link_lost);
+    CHECK(lost[0].instance_id == "i-1");
+    CHECK(lost[0].account_id == "a-1");
+
+    /*
+     * The link keeps failing: the outage is reported once and not once per
+     * liveness request, however many of them fail while it lasts.
+     */
+    std::this_thread::sleep_for(milliseconds{50});
+    CHECK(events.drain().empty());
+
+    link->ping_answers = true;
+    const auto restored = next_events(events);
+    REQUIRE(restored.size() == 1);
+    CHECK(restored[0].kind == event_kind::link_restored);
+
+    std::this_thread::sleep_for(milliseconds{50});
+    CHECK(events.drain().empty());
+
+    actor.request_stop();
+    CHECK(wait_until([&actor] { return actor.finished(); }));
+}
+
+TEST_CASE("a run of failed liveness requests rebuilds the connection",
+    "[market_stream][liveness]") {
+    using namespace std::chrono;
+    using hedgr::runtime::worker::session_actor;
+    using fake_link = hedgr::testing::fake_session_link;
+
+    auto link = std::make_shared<fake_link>();
+    link->ping_answers = false;
+    hedgr::model::command::event_queue events;
+    auto options = fake_options(link, events);
+    options.ping_interval = milliseconds{1};
+    options.failures_before_reconnect = 3;
+
+    session_actor actor(std::move(options));
+    actor.start();
+
+    CHECK(wait_until([&link] { return link->disconnects >= 1; }));
+    CHECK(wait_until([&link] { return link->connects >= 2; }));
+
+    actor.request_stop();
+    CHECK(wait_until([&actor] { return actor.finished(); }));
+}
+
+TEST_CASE("a stop does not wait for a liveness request in flight",
+    "[market_stream][liveness]") {
+    using namespace std::chrono;
+    using hedgr::runtime::worker::session_actor;
+    using fake_link = hedgr::testing::fake_session_link;
+
+    auto link = std::make_shared<fake_link>();
+    link->ping_delay = milliseconds{300};
+    hedgr::model::command::event_queue events;
+    auto options = fake_options(link, events);
+    options.ping_interval = milliseconds{1};
+    options.failures_before_reconnect = 0;
+
+    session_actor actor(std::move(options));
+    actor.start();
+    REQUIRE(wait_until([&link] { return link->pings.load() >= 1; }));
+
+    const auto asked = steady_clock::now();
+    actor.request_stop();
+    CHECK(steady_clock::now() - asked < milliseconds{100});
+
+    /* The thread leaves only once the request it is inside returns. */
+    CHECK(wait_until([&actor] { return actor.finished(); }));
+    CHECK(steady_clock::now() - asked >= milliseconds{200});
+}
+
 TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
     constexpr std::int64_t second = 1'000'000'000;
     tick_sink sink;

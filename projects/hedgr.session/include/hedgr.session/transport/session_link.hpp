@@ -61,6 +61,17 @@ public:
     /** @brief Whether the connection has a resumed session. */
     [[nodiscard]] virtual bool is_authenticated() const noexcept = 0;
 
+    /**
+     * @brief Asks the deployment whether it is there, and answers or fails.
+     *
+     * The liveness request, and the one read that needs no credential: it is
+     * the deployment's bootstrap status, which a broker with no services
+     * behind it cannot answer. A closed connection fails it outright and an
+     * unanswered one fails it at the transport's timeout, so a caller learns
+     * the link is gone from the failure rather than from a flag.
+     */
+    [[nodiscard]] virtual result<void> ping() const = 0;
+
     /** @brief Subscribes to @p subject, replacing any previous one. */
     [[nodiscard]] virtual ores::nats::service::subscription subscribe(
         std::string_view subject,
@@ -141,6 +152,12 @@ public:
 
     [[nodiscard]] bool is_authenticated() const noexcept override {
         return client_.is_authenticated();
+    }
+
+    [[nodiscard]] result<void> ping() const override {
+        if (const auto answer = client_.bootstrap_status(); !answer)
+            return std::unexpected(answer.error());
+        return {};
     }
 
     [[nodiscard]] ores::nats::service::subscription subscribe(
