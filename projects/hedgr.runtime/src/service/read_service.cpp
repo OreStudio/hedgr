@@ -19,8 +19,6 @@
  */
 #include "hedgr.runtime/service/read_service.hpp"
 #include "hedgr.runtime/manager/connection_options.hpp"
-#include "hedgr.runtime/worker/crm_names_worker.hpp"
-#include "hedgr.runtime/worker/crm_worker.hpp"
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
@@ -350,10 +348,9 @@ void read_service::start_crm_names_read(std::string_view instance_id,
     auto read = session_read_for(instance_id, account_id, read_gate::signed_in);
     if (!read)
         return;
-    worker::crm_names_job job;
-    job.session = std::move(*read);
-    job.party_id = std::string{party_id};
-    worker::spawn_crm_names_read(pool_, std::move(job), events_);
+    if (!submit_read(*read,
+            worker::crm_names_request{.party_id = std::string{party_id}}))
+        return;
 }
 
 void read_service::start_crm_read(
@@ -368,19 +365,17 @@ void read_service::start_crm_read(
         spec.session->account_id, read_gate::signed_in);
     if (!read)
         return;
-    worker::crm_job job;
-    job.session = std::move(*read);
-    job.party_id = state->party_id;
-    job.crm_name = state->crm_name;
-    job.reciprocal = state->reciprocal;
-    if (const auto* current = crm_.get(job.session.instance_id,
-            job.session.account_id, state->party_id, state->crm_name,
-            state->reciprocal);
+    if (const auto* current = crm_.get(read->instance_id, read->account_id,
+            state->party_id, state->crm_name, state->reciprocal);
         current != nullptr && current->reading)
         return;
-    crm_.begin(job.session.instance_id, job.session.account_id,
-        state->party_id, state->crm_name, state->reciprocal);
-    worker::spawn_crm_read(pool_, std::move(job), events_);
+    const worker::crm_rates_request request{.party_id = state->party_id,
+        .crm_name = state->crm_name,
+        .reciprocal = state->reciprocal};
+    if (!submit_read(*read, request))
+        return;
+    crm_.begin(read->instance_id, read->account_id, state->party_id,
+        state->crm_name, state->reciprocal);
 }
 
 void read_service::pump_crm_reads() {

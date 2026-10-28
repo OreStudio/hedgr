@@ -20,28 +20,12 @@
 #ifndef HEDGR_RUNTIME_WORKER_CRM_NAMES_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_CRM_NAMES_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
-#include <boost/asio/io_context.hpp>
-#include <string>
+#include <string_view>
 
 namespace hedgr::runtime::worker {
-
-/** @brief One read of a party's enabled CRM names. */
-struct crm_names_job final {
-    /** @brief The signed-in session the read runs under. */
-    session_read session;
-
-    /** @brief The party whose CRM names are read. */
-    std::string party_id;
-};
-
-/** @brief Reads the CRM names and posts them as a crm_names event. */
-HEDGR_RUNTIME_EXPORT void spawn_crm_names_read(
-    boost::asio::io_context& context, crm_names_job job,
-    model::command::event_queue& events);
 
 /** @brief Fills the event with a party's CRM names, or with the failure. */
 HEDGR_RUNTIME_EXPORT void run_crm_names_read(

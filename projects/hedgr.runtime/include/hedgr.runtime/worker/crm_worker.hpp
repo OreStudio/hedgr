@@ -20,47 +20,20 @@
 #ifndef HEDGR_RUNTIME_WORKER_CRM_WORKER_HPP
 #define HEDGR_RUNTIME_WORKER_CRM_WORKER_HPP
 
-#include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
-#include <boost/asio/io_context.hpp>
 #include <cstdint>
-#include <string>
 #include <string_view>
 
 namespace hedgr::runtime::worker {
 
-/** @brief One read of a party's cross-rates batch. */
-struct crm_job final {
-    /** @brief The signed-in session the read runs under. */
-    session_read session;
-
-    /** @brief The party whose matrix is read. */
-    std::string party_id;
-
-    /** @brief One CRM to scope to, or empty for every enabled CRM. */
-    std::string crm_name;
-
-    /** @brief Whether to ask the deployment for reciprocal backfill. */
-    bool reciprocal = false;
-};
-
-/**
- * @brief Reads one CRM batch and posts its cells as a crm_rates event.
- *
- * The read is one get_crm_rates call on a worker connection. The runtime's
- * pump decides when it runs, once per batch however many windows show it.
- */
-HEDGR_RUNTIME_EXPORT void spawn_crm_read(boost::asio::io_context& context,
-    crm_job job, model::command::event_queue& events);
-
 /**
  * @brief Turns one CRM batch answer into the event's fields.
  *
- * Separated from the spawn so the mapping can be driven against a fake link:
- * the cells, their newest as-of, the latency and the conventions are all filled
- * here, and a failed batch becomes the event's message.
+ * The mapping is driven against a fake link: the cells, their newest as-of,
+ * the latency and the conventions are all filled here, and a failed batch
+ * becomes the event's message.
  */
 HEDGR_RUNTIME_EXPORT void run_crm_read(
     hedgr::session::transport::session_link& link, std::string_view party,
