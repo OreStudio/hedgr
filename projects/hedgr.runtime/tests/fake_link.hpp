@@ -21,6 +21,7 @@
 #define HEDGR_RUNTIME_TESTS_FAKE_LINK_HPP
 
 #include "hedgr.session/transport/session_link.hpp"
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -43,6 +44,7 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<client::currency_image> images;
     client::image_content image;
     session::transport::deployment_read deployment_read;
+    std::map<std::string, std::vector<session::transport::market_point>> tails;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -51,12 +53,14 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> images_error;
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
+    std::optional<session::transport::session_error> tail_error;
 
     mutable int connects = 0;
     mutable int resumes = 0;
     mutable int crm_calls = 0;
     mutable int names_calls = 0;
     mutable int image_calls = 0;
+    mutable int tail_calls = 0;
 
     [[nodiscard]] session::transport::result<void> connect() override {
         ++connects;
@@ -116,6 +120,20 @@ struct fake_session_link final : session::transport::session_link {
         if (deployment_error)
             return std::unexpected(*deployment_error);
         return deployment_read;
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::market_series_read>
+    market_series_tail(std::string_view series_id,
+        std::size_t) const override {
+        ++tail_calls;
+        if (tail_error)
+            return std::unexpected(*tail_error);
+        session::transport::market_series_read read;
+        if (const auto found = tails.find(std::string{series_id});
+            found != tails.end())
+            read.points = found->second;
+        return read;
     }
 };
 

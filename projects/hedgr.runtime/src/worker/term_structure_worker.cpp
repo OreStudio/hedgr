@@ -60,6 +60,48 @@ build_term_curves(const pillar_history& by_term, std::size_t max_history) {
     return curves;
 }
 
+void run_term_structure_read(session::transport::session_link& link,
+    std::span<const std::string> ids, std::span<const std::string> tenors,
+    model::event::event& answer) {
+    /*
+     * A curve is the object as it stood at an instant. A pillar may be
+     * published at a slightly different time from its neighbours, so the
+     * curves are rebuilt by carrying each term's last value forward to
+     * every instant: the newest curve is complete, and the history is a
+     * continuous curve at each step rather than a handful of segments.
+     *
+     * The newest max_history points per pillar are enough. An instant
+     * among the newest max_history overall has fewer than max_history
+     * newer instants, so each pillar's value at it is within that tail.
+     * The read is of a span of ticks, so the tail is cut here.
+     */
+    constexpr std::uint32_t max_history = 20;
+    pillar_history by_term;
+    for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
+        const auto read = link.market_series_tail(ids[i], max_history);
+        if (!read) {
+            /*
+             * A failed pillar is not a curve with no observations. Saying
+             * so keeps an expired session, a refused read and a genuinely
+             * empty series from all reading as the same thing.
+             */
+            answer.message = read.error().message.empty()
+                ? read.error().detail : read.error().message;
+            return;
+        }
+        const auto tail = read->points.size() > max_history
+            ? read->points.size() - max_history : std::size_t{0};
+        for (const auto& point : std::span(read->points).subspan(tail)) {
+            const auto tenor = tenors[i].empty() ? point.term : tenors[i];
+            by_term[tenor][point.at_ns] = point.value;
+        }
+    }
+
+    answer.term_curves = build_term_curves(by_term, max_history);
+    if (answer.term_curves.empty())
+        answer.message = "the curve's tenors hold no observations";
+}
+
 void spawn_term_structure_read(boost::asio::io_context& context,
     term_structure_job job, model::command::event_queue& events) {
     const auto key = job.key;
@@ -74,48 +116,12 @@ void spawn_term_structure_read(boost::asio::io_context& context,
     fact.curve_key = key;
     fact.curve_label = label;
 
-    auto work = [ids, tenors](session::transport::session_client& client,
+    auto work = [ids, tenors](session::transport::session_link& link,
                     model::event::event& answer) {
-        /*
-         * A curve is the object as it stood at an instant. A pillar may be
-         * published at a slightly different time from its neighbours, so the
-         * curves are rebuilt by carrying each term's last value forward to
-         * every instant: the newest curve is complete, and the history is a
-         * continuous curve at each step rather than a handful of segments.
-         *
-         * The newest max_history points per pillar are enough. An instant
-         * among the newest max_history overall has fewer than max_history
-         * newer instants, so each pillar's value at it is within that tail.
-         * The read is of a span of ticks, so the tail is cut here.
-         */
-        constexpr std::uint32_t max_history = 20;
-        pillar_history by_term;
-        for (std::size_t i = 0; i < ids.size() && i < tenors.size(); ++i) {
-            const auto read = client.market_series_tail(ids[i], max_history);
-            if (!read) {
-                /*
-                 * A failed pillar is not a curve with no observations. Saying
-                 * so keeps an expired session, a refused read and a genuinely
-                 * empty series from all reading as the same thing.
-                 */
-                answer.message = read.error().message.empty()
-                    ? read.error().detail : read.error().message;
-                return;
-            }
-            const auto tail = read->points.size() > max_history
-                ? read->points.size() - max_history : std::size_t{0};
-            for (const auto& point : std::span(read->points).subspan(tail)) {
-                const auto tenor = tenors[i].empty() ? point.term : tenors[i];
-                by_term[tenor][point.at_ns] = point.value;
-            }
-        }
-
-        answer.term_curves = build_term_curves(by_term, max_history);
-        if (answer.term_curves.empty())
-            answer.message = "the curve's tenors hold no observations";
+        run_term_structure_read(link, ids, tenors, answer);
     };
     boost::asio::co_spawn(context,
-        run_session_read(std::move(job.session), std::move(fact),
+        run_session_read_on_link(std::move(job.session), std::move(fact),
             std::move(work), events),
         boost::asio::detached);
 }

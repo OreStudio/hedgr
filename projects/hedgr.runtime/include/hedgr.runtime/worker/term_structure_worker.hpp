@@ -24,10 +24,12 @@
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include <boost/asio/io_context.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -60,6 +62,12 @@ build_term_curves(const pillar_history& by_term, std::size_t max_history);
 HEDGR_RUNTIME_EXPORT void
 spawn_term_structure_read(boost::asio::io_context& context,
     term_structure_job job, model::command::event_queue& events);
+
+/** @brief Fills the event's curves from each member's tail, or its failure. */
+HEDGR_RUNTIME_EXPORT void run_term_structure_read(
+    hedgr::session::transport::session_link& link,
+    std::span<const std::string> ids, std::span<const std::string> tenors,
+    model::event::event& answer);
 
 }
 
