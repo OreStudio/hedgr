@@ -82,6 +82,14 @@ void session_actor::unwatch(model::state::series_handle series) {
     cv_.notify_all();
 }
 
+void session_actor::set_watch(std::span<const watch_target> wanted) {
+    {
+        std::lock_guard lock(mu_);
+        new_watch_ = std::vector<watch_target>(wanted.begin(), wanted.end());
+    }
+    cv_.notify_all();
+}
+
 bool session_actor::take_reconnected() {
     return reconnected_.exchange(false, std::memory_order_acq_rel);
 }
@@ -118,6 +126,7 @@ void session_actor::run() {
     while (true) {
         std::vector<command> queued;
         std::optional<std::string> token;
+        std::optional<std::vector<watch_target>> watch;
         {
             std::unique_lock lock(mu_);
             /*
@@ -130,7 +139,7 @@ void session_actor::run() {
             const bool live = stream.connected() && stream.subscribed();
             const auto ready = [this]() {
                 return stopping_ || !commands_.empty()
-                    || new_token_.has_value();
+                    || new_watch_.has_value() || new_token_.has_value();
             };
             if (live)
                 cv_.wait(lock, ready);
@@ -139,6 +148,7 @@ void session_actor::run() {
             if (stopping_)
                 break;
             queued.swap(commands_);
+            watch.swap(new_watch_);
             token.swap(new_token_);
         }
 
@@ -150,6 +160,8 @@ void session_actor::run() {
             else
                 sink->unwatch(item.series);
         }
+        if (watch)
+            sink->set_watch(*watch);
 
         if (!stream.connected()) {
             if (!stream.connect()) {

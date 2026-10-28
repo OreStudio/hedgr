@@ -110,6 +110,9 @@ public:
     /** @brief Stops watching one series. Thread safe. */
     void unwatch(model::state::series_handle series) override;
 
+    /** @brief Makes the given set the whole watch list. Thread safe. */
+    void set_watch(std::span<const watch_target> wanted) override;
+
     /**
      * @brief Copies the closed buckets waiting for the frame loop.
      *
@@ -161,6 +164,7 @@ private:
     std::mutex mu_;
     std::condition_variable cv_;
     std::vector<command> commands_;
+    std::optional<std::vector<watch_target>> new_watch_;
     std::optional<std::string> new_token_;
     bool stopping_ = false;
 
