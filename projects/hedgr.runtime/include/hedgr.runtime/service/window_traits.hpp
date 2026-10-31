@@ -30,8 +30,18 @@ namespace hedgr::runtime::service {
 
 /** @brief What a window's refresh asks the runtime to read. */
 enum class read_kind : std::uint8_t {
-    /** @brief Nothing real yet: an event carrying the window id comes back. */
-    placeholder,
+    /**
+     * @brief Nothing: the window draws the live tables, so it has no read.
+     *
+     * Kinds without a read are the ones whose content is already in the model -
+     * the workspace, the accounts list, the notice, the grid, the instance
+     * manager - so a refresh has nothing to ask a deployment for. They used to
+     * keep the one second default cadence and have every refresh answered with
+     * an event that carried the window id and nothing else, which kept the
+     * command channel busy at three hundred commands a second on a full desk
+     * and told the frame loop nothing it did not already have.
+     */
+    none,
     deployment,
     market_catalogue,
     market_points,
@@ -119,6 +129,12 @@ consteval bool every_kind_has_its_row(
  *   rebind brings it due now.
  * - A CRM matrix's cadence belongs to its batch, which pump_crm_reads keeps,
  *   so an open and a refresh park the window's own deadline.
+ * - A kind with no read has no cadence and no deadline: the workspace, the
+ *   accounts list, the notice, the grid and the instance manager all draw what
+ *   the model already holds, so there is nothing for a refresh to ask of a
+ *   deployment. A zero cadence says so in the saved spec, and every moment
+ *   parks the deadline, which is what stops the interface asking for a refresh
+ *   it can only answer with an empty event.
  */
 constexpr std::array<window_traits, model::domain::window_kind_count>
 make_window_trait_table() {
@@ -128,11 +144,11 @@ make_window_trait_table() {
     return {{
         /* kind              cadence  on_open   on_focus  on_refresh      on_rebind  refresh_read                reads_on_open */
         {chart,            2s,      parked,   parked,   parked,         parked,    read_kind::market_points,    false},
-        {grid,             1s,      due_now,  due_now,  after_cadence,  due_now,   read_kind::placeholder,      false},
-        {notice,           1s,      due_now,  due_now,  after_cadence,  due_now,   read_kind::placeholder,      false},
-        {instance_manager, 1s,      due_now,  due_now,  after_cadence,  due_now,   read_kind::placeholder,      false},
-        {accounts,         1s,      due_now,  due_now,  after_cadence,  due_now,   read_kind::placeholder,      false},
-        {workspace,        1s,      due_now,  due_now,  after_cadence,  due_now,   read_kind::placeholder,      false},
+        {grid,             0s,      parked,   parked,   parked,         parked,    read_kind::none,             false},
+        {notice,           0s,      parked,   parked,   parked,         parked,    read_kind::none,             false},
+        {instance_manager, 0s,      parked,   parked,   parked,         parked,    read_kind::none,             false},
+        {accounts,         0s,      parked,   parked,   parked,         parked,    read_kind::none,             false},
+        {workspace,        0s,      parked,   parked,   parked,         parked,    read_kind::none,             false},
         {command_centre,   30s,     due_now,  due_now,  after_cadence,  due_now,   read_kind::deployment,       false},
         {series_browser,   60s,     due_now,  due_now,  after_cadence,  due_now,   read_kind::market_catalogue, false},
         {term_structure,   30s,     parked,   parked,   after_cadence,  due_now,   read_kind::term_structure,   true},

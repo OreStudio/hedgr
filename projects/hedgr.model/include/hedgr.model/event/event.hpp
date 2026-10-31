@@ -49,8 +49,6 @@ enum class event_kind : std::uint8_t {
     session_authenticated = 1,
     /** @brief The attempt failed; code and message say why. */
     session_failed = 2,
-    /** @brief A window's data was refreshed and is ready to draw. */
-    window_data = 4,
     /** @brief A probe finished, whatever it found. */
     probe_result = 5,
     /**
@@ -332,7 +330,13 @@ struct event final {
      */
     std::string parties;
 
-    /** @brief The payload, for window_data. */
+    /**
+     * @brief Free text an event carries, where it has one.
+     *
+     * A session's events put the principal or the failure's detail here, and
+     * the store's put the sealed master key. Nothing is read out of it by kind:
+     * a handler that receives an event it did not ask for ignores the field.
+     */
     std::string payload;
 
     /** @brief What the broker answered, for probe_result. */

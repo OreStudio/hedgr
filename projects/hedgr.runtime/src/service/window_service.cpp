@@ -289,6 +289,7 @@ void window_service::ensure_instance_manager_window() {
     domain::window_spec spec;
     spec.id = "instance-manager";
     spec.kind = domain::window_kind::instance_manager;
+    spec.cadence = traits_of(spec.kind).cadence;
 
     /*
      * No session, and never one: the Instance Manager is the root of the
@@ -297,9 +298,13 @@ void window_service::ensure_instance_manager_window() {
      */
     spec.session = std::nullopt;
 
-    /* The handle is discarded on purpose: nothing binds to this window and its
-     * stable id is how everything else finds it. */
-    static_cast<void>(windows_.insert(spec));
+    /*
+     * The handle is kept because the deadline has to be written with it. Its
+     * stable id is how everything else finds the window; nothing binds to it.
+     */
+    const auto handle = windows_.insert(spec);
+    windows_.set_next_refresh_ns(handle,
+        deadline_for(traits_of(spec.kind).on_open, spec.cadence));
 }
 
 bool window_service::show_existing(std::string_view window_id) {
