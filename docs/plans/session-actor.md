@@ -797,19 +797,37 @@ not shown, because the tables key by instance and account, not by attempt.
 
 ## What cannot be verified without a live deployment
 
+**What the live check has shown, on 2026-10-31.** Run against the
+`jolly_knuth` deployment on this host (broker `localhost:20805`, mTLS, monitor
+`localhost:20806`), signing in as `super_admin`, with the actor constructed
+directly by `hedgr.runtime.tests "[live-probe]"`:
+
+- a real mTLS connect, a real IAM sign-in and the tick subscription all ran on
+  **one** connection: `connz` read 25 before, 26 for the whole session, and 25
+  again once it signed out. The step's measurement is one connection per
+  session, and that is what the broker saw;
+- the sign-in answered with the system tenant and a party, and the actor stopped
+  cleanly on `request_logout`, which is the path a user's sign-out takes;
+- the token's stated lifetime was 1800 s, so the actor armed its refresh at
+  1440 s, as designed.
+
+The probe is a hidden test case (`[.live-probe]`) with the command line in its
+comment, so the check can be repeated without a rebuild.
+
+What the same check has **not** covered, and why:
+
 - cnats's reconnect behavior against a real broker restart: that subscriptions
   restore, how long it keeps trying, and that the ping succeeds on the restored
   connection. Step 3 is tested over a fake link that scripts those answers. The
-  fake proves the actor's logic, not cnats's.
-- That a request and a subscription callback may use one `natsConnection` from
-  two threads. cnats documents its connection as thread safe, and the stream
-  already subscribes while the pool reads on other connections, so one connection
-  with both is new in this process (inferred).
-- Token refresh against the real IAM with the real lifetime.
-- The tick subscription's permissions, and the connection count on the broker.
-  The live check is the broker's connection list, before and after, with a desk
-  of 100 windows, then a stopped broker for 30 s and for 3 minutes.
-- TLS. The step 4 and 6 tests use no transport.
+  fake proves the actor's logic, not cnats's. Restarting a deployment's broker
+  was not done: it would take the operator's services down with it.
+- Token refresh against the real IAM with the real lifetime: the refresh is at
+  1440 s, so the check needs a session held open for 24 minutes. The armed
+  deadline was observed; the refresh itself was not.
+- A desk of 100 windows, and a stopped broker for 30 s and for 3 minutes. The
+  probe signs in one session with no windows.
+- TLS, which the probe did exercise (mTLS against the deployment's own CA and
+  `ores.shell` client certificate), unlike the step 4 and 6 tests.
 - Thread counts. They were read from code, not counted on a running process.
 
 ## How each step is checked

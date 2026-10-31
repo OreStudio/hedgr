@@ -462,7 +462,13 @@ bool session_actor::sign_in(transport::session_link& link) {
 
     BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Session '" << key.instance_id << "' / '" << key.account_id
-        << "' is authenticated as party '" << facts_.party_id << "'";
+        << "' is authenticated as party '" << facts_.party_id << "'; its token "
+           "lasts "
+        << facts_.lifetime_s << " s and is refreshed in "
+        << std::chrono::duration_cast<std::chrono::seconds>(
+               refresh_delay_for(facts_.lifetime_s))
+               .count()
+        << " s";
     return true;
 }
 
