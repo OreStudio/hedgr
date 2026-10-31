@@ -133,8 +133,13 @@ Follow-ups noticed while building the Instances panel, both done:
   "HEDGR." uses the system bold face, so a host without it shows regular weight.
 - Done: the probe service's deadline wiring is tested against the backoff rule
   (`probe_backoff_tests.cpp`), the tick identity parse is tested, and a tick read
-  inside the silence window is tested through `spawn_market_read`
-  (`tick_silence_tests.cpp`).
+  inside the silence window is tested by driving the read directly over the fake
+  link (`tick_silence_tests.cpp`), since a market read no longer has a spawn of
+  its own to go through.
+- Done: the session actor's steps 3, 4 and 5 have landed — liveness with
+  `link_lost`/`link_restored` and the reseed, every read on the actor's one
+  connection, and the deletion of `session_task.hpp`. Step 6, supervision into
+  the actor, is the next one, and the plan gates it on a live check.
 - `docs/review/README.md` status cells are not updated. Older unreviewed items: the
   series table decisions D1 to D7, the session actor decisions D1 to D6, the wording of
   PR #63.

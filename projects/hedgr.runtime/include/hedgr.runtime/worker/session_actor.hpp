@@ -88,6 +88,16 @@ struct session_actor_options final {
      * back something this process acts on rather than waits behind.
      */
     std::size_t failures_before_reconnect = 13;
+
+    /**
+     * @brief How many reads may wait before the newest is refused.
+     *
+     * The service admits one read per request id, so the queue is bounded by
+     * the windows that read; this is the hard backstop for a caller that gets
+     * that wrong, and it holds an answer event for the refusal so the caller's
+     * in-flight mark is cleared rather than left set.
+     */
+    std::size_t max_queued_reads = 256;
 };
 
 /**
@@ -170,10 +180,10 @@ public:
     /**
      * @brief Queues one read for this session's connection. Thread safe.
      *
-     * True when it was queued, and then an answer event follows: the read's
+     * True when it was accepted, and then an answer event follows: the read's
      * own answer when the connection is signed in, or its failure when the
-     * actor stops before running it. False means the actor is stopping and
-     * nothing was queued.
+     * actor stops before running it or the queue is already full. False means
+     * the actor is stopping, and then nothing was queued and nothing answered.
      */
     bool submit_read(read_request request) override;
 

@@ -327,6 +327,41 @@ TEST_CASE("asking a stream to stop does not wait for its connect",
     CHECK(finished_at - asked >= seconds{1});
 }
 
+TEST_CASE("a read past the queue's capacity is answered and not queued",
+    "[market_stream][reads]") {
+    using hedgr::model::command::event_queue;
+    using hedgr::model::event::event_kind;
+    using hedgr::runtime::worker::image_request;
+    using hedgr::runtime::worker::session_actor;
+    using hedgr::runtime::worker::session_actor_options;
+
+    event_queue events;
+    session_actor_options options;
+    options.options.wire_format = "json";
+    options.token = "token";
+    options.principal = "principal";
+    options.tenant_id = "tenant";
+    options.party_id = "party";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+    options.max_queued_reads = 1;
+
+    /*
+     * The actor is never started, so nothing drains the queue: the second read
+     * finds it full and is refused with the answer the frame loop needs.
+     */
+    session_actor actor(std::move(options));
+    REQUIRE(actor.submit_read(image_request{.image_id = "img-1"}));
+    CHECK(events.drain().empty());
+
+    REQUIRE(actor.submit_read(image_request{.image_id = "img-2"}));
+    const auto refused = events.drain();
+    REQUIRE(refused.size() == 1);
+    CHECK(refused[0].kind == event_kind::image_loaded);
+    CHECK(refused[0].image_id == "img-2");
+    CHECK_FALSE(refused[0].message.empty());
+}
+
 TEST_CASE("a read queued on a stream that stops is answered once",
     "[market_stream][reads]") {
     using namespace std::chrono;
