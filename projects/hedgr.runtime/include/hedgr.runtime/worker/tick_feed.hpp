@@ -57,6 +57,18 @@ public:
     virtual void set_token(std::string token) = 0;
 
     /**
+     * @brief Asks the session to act as another party.
+     *
+     * The transport belongs to the feed, so the frame loop cannot make the
+     * call itself: it leaves the choice here and the answer arrives as an
+     * event, like everything else that happens on the connection. The base
+     * does nothing, so a feed that has no transport keeps compiling.
+     */
+    virtual void select_party(std::string party_id) {
+        static_cast<void>(party_id);
+    }
+
+    /**
      * @brief Watches one series, keeping its ticks.
      *
      * @p canonical_uri is the series' URI as the codec writes it, which is what
