@@ -102,12 +102,11 @@ void push_failure(event_queue& events, const domain::session_key& key,
  *
  * The whole lifecycle of one session, and the only place a credential is ever
  * held. Nothing here reads or writes a state table: every outcome leaves as an
- * event.
+ * event. The connection is the caller's, which is the seam a test scripts.
  */
-boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
-    std::shared_ptr<std::stop_source> stop) {
+boost::asio::awaitable<void> run_session(transport::session_link& link,
+    session_job job, event_queue& events, std::shared_ptr<std::stop_source> stop) {
     const auto key = job.key;
-    transport::session_client client(job.options);
     auto status = domain::session_status::connecting;
 
     push_status(events, key, job.attempt, status);
@@ -125,7 +124,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         << "Session worker starting for '" << key.instance_id << "' / '"
         << key.account_id << "'";
 
-    if (const auto connected = client.connect(); !connected) {
+    if (const auto connected = link.connect(); !connected) {
         /*
          * No retry. A connect failure is a broker that is not answering, a
          * certificate that is not trusted or a prefix that is wrong, and none
@@ -197,7 +196,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
         }
 
         if (status != domain::session_status::failed) {
-            auto answer = client.authenticate(job.credential.principal,
+            auto answer = link.authenticate(job.credential.principal,
                 job.credential.password);
 
             /*
@@ -318,7 +317,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                          * is the login flow's single-use exchange and the
                          * instance refuses a normal session token there.
                          */
-                        const auto selected = client.switch_party(wanted);
+                        const auto selected = link.switch_party(wanted);
                         if (!selected) {
                             BOOST_LOG_SEV(lg(), ores::logging::warn)
                                 << "Acting as party '" << wanted << "' for '"
@@ -337,7 +336,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                             refused.message = selected.error().message;
                             events.push(std::move(refused));
                         } else {
-                            const auto& current = client.account();
+                            const auto& current = link.account();
                             token = current.token;
                             principal = current.principal;
                             party_id = current.party_id;
@@ -393,7 +392,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                             << "Proactive token refresh triggered for '"
                             << key.account_id << "' on '" << key.instance_id
                             << "'";
-                        const auto refreshed = client.refresh();
+                        const auto refreshed = link.refresh();
                         if (!refreshed) {
                             BOOST_LOG_SEV(lg(), ores::logging::warn)
                                 << "Token refresh for '" << key.account_id
@@ -409,7 +408,7 @@ boost::asio::awaitable<void> run_session(session_job job, event_queue& events,
                         }
 
                         lifetime_s = *refreshed;
-                        token = client.account().token;
+                        token = link.account().token;
 
                         auto refreshed_fact = for_key(key, job.attempt);
                         refreshed_fact.kind =
@@ -485,10 +484,28 @@ void party_switch::disarm() {
     waker_.reset();
 }
 
+namespace {
+
+/** @brief Runs one session on a client this coroutine's frame owns. */
+boost::asio::awaitable<void> run_session_with_client(session_job job,
+    event_queue& events, std::shared_ptr<std::stop_source> stop) {
+    transport::session_client client(job.options);
+    transport::session_client_link link(client);
+    co_await run_session(link, std::move(job), events, std::move(stop));
+}
+
+}
+
+boost::asio::awaitable<void> run_session_on_link(transport::session_link& link,
+    session_job job, event_queue& events,
+    std::shared_ptr<std::stop_source> stop) {
+    co_await run_session(link, std::move(job), events, std::move(stop));
+}
+
 void spawn_session(boost::asio::io_context& context, session_job job,
     event_queue& events, std::shared_ptr<std::stop_source> stop) {
     boost::asio::co_spawn(context,
-        run_session(std::move(job), events, std::move(stop)),
+        run_session_with_client(std::move(job), events, std::move(stop)),
         boost::asio::detached);
 }
 

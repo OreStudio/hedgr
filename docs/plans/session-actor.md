@@ -283,15 +283,17 @@ by the broker's own connection list on a live deployment.
 
 ### 1. The seam, and tests for the workers
 
-> **Status: started.** `session_link` and `session_client_link` exist with
-> `connect`, `resume`, both CRM reads, CRM names, the two image reads, the
-> deployment read, the series tail, the catalogue, points/history and the
-> provider list. The CRM, image, image-map, CRM-names, term-structure and market
-> workers map through `run_*_read(link, …)` and are tested against one shared
-> fake, including failed connects, refusals, failed pillars and a failed points
-> read; the deployment and market workers own their client in a wrapper
-> coroutine. The rest of the call surface (authenticate, refresh, logout, ping,
-> subscribe) and the session worker follow.
+> **Status: done.** `session_link` and `session_client_link` carry the whole
+> surface: `connect`, `resume`, `ping` (the anonymous `bootstrap_status`),
+> `authenticate`, `select_party`, `switch_party`, `refresh`, `logout`,
+> `account`, `subscribe`, both CRM reads, CRM names, the two image reads, the
+> deployment read, the series tail, the catalogue, points and history (with the
+> tick timeout) and the provider list. Every read worker maps through
+> `run_*_read(link, …)`, and the session worker itself runs on the seam through
+> `run_session_on_link`, which is what finally gives it tests: a sign-in
+> scripted by the fake link, its status events, its attempt and token, and a
+> refused sign-in that reports and stops. The workers keep their client in a
+> wrapper coroutine, which is the only thing behind the seam today.
 
 Add `session_link`, an interface of the calls the workers and the actor make:
 `connect`, `resume`, `authenticate`, `refresh`, `logout`, `is_connected`,
@@ -516,6 +518,15 @@ to 3 when step 6 deletes the session worker. The 7 are `session_worker.cpp:115`,
 
 ### 6. Supervision moves into the actor
 
+> **Status: the seam it needs is in.** Step 1 now carries the sign-in calls on
+> `session_link`, and `session_worker.cpp` runs on that seam through
+> `run_session_on_link`, so the worker it deletes is the one the fake link can
+> already drive: a scripted sign-in, its status events, its token, and a refused
+> sign-in. What this step still does — creating the actor at the connect command,
+> moving the sealed-credential open and the wipe into it, the refresh deadline
+> with backoff, the logout, and the removal of `market_feed`'s open/close — is
+> not started.
+
 The actor takes `sign_in` as its first command, so it is created at the connect
 command, not at authentication. `session_worker.cpp` is deleted. Its sealed
 credential open, sign-in, wipe and event construction move intact. The refresh
@@ -689,6 +700,12 @@ not shown, because the tables key by instance and account, not by attempt.
   a strand on the shared pool, no new threads, at the cost that a 30 s read
   occupies a pool thread that other sessions need. Alternative: thread plus
   condition variable, the shape `market_stream` has, with a hand-written backoff.
+  Decided, against the recommendation: the third. `session_actor` runs one
+  thread with a condition variable and hand-written timing — one `steady_clock`
+  deadline for the liveness request, a 1 s wait between connect attempts — and
+  no `io_context`. The thread count is the same either way, so this does not
+  need the ADR 2 amendment the `io_context` version would, and the backoff it
+  gives up is not used until step 6's refresh.
 - **D2. Wire format.** One per process, which deletes the per-instance field and
   lets Hedgr use `market_data_client` for the market reads (C-12). Or one codec
   per actor, which keeps the field but means Hedgr writes its own typed request
@@ -696,12 +713,20 @@ not shown, because the tables key by instance and account, not by attempt.
   `default_wire_codec()` internally (`market_data_client.cpp:60,82`,
   `request_helpers.hpp:51,69,90`). Recommended: per actor, with prerequisite B's
   guard until the first release that needs it. The user decides whether two
-  formats in one desk is a feature.
+  formats in one desk is a feature. Taken as recommended: the actor builds one
+  codec from its instance row and hands it to the stream, so a desk can hold two
+  formats at once. The reads no longer build clients, so the per-read write of
+  the process-wide codec that C-5 named is gone; the session worker, the probe
+  and the policy read still build clients, and prerequisite B's guard still
+  covers them.
 - **D3. Concurrency of reads on one session.** Serial is simple and a slow
   request delays the others on that session, including a refresh that falls
   due. A bounded K in flight on the same connection is possible if cnats allows
   concurrent requests on one connection (inferred, not read). Recommended:
-  serial, measure the queue wait, revisit.
+  serial, measure the queue wait, revisit. Taken: reads are serial on the
+  actor's thread. The queue wait is not measured yet, and the two cases known to
+  hold the connection are a curve read (one round trip per member) and a tick
+  read (bounded by `tick_read_timeout`).
 - **D4. Liveness.** The request, which is `bootstrap_status` (anonymous, so it
   proves broker and IAM and not the token), the interval, 10 s proposed, and
   whether a lost link shows to the operator as a new `session_status` or only as
@@ -712,9 +737,12 @@ not shown, because the tables key by instance and account, not by attempt.
 - **D5. Exit.** Join, as today. Or bounded wait then detach, which needs
   prerequisite F. And whether the actor logs out on app exit. `logout` takes a
   request timeout of up to 30 s, so logging out on exit would make exit slower
-  than it is.
+  than it is. Not decided: the actor joins today, and nothing logs out on exit.
+  Step 6 decides both, because it is the step that owns the credential.
 - **D6. Whether to ask for the upstream connection state now** or after step 3
-  shows how much the workaround misses.
+  shows how much the workaround misses. Deferred: step 3's liveness covers the
+  gap, and nothing has been run against a broker that dies, so there is no
+  evidence yet about what the workaround misses.
 
 ## What cannot be verified without a live deployment
 

@@ -64,6 +64,23 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
     std::optional<session::transport::session_error> tail_error;
+    std::optional<session::transport::session_error> authenticate_error;
+    std::optional<session::transport::session_error> refresh_error;
+    std::optional<session::transport::session_error> logout_error;
+    std::optional<session::transport::session_error> party_error;
+
+    /** @brief What a sign-in answers, and what every later call reads. */
+    session::transport::session_account account_value;
+
+    /** @brief The principal and secret the last sign-in presented. */
+    std::string last_principal;
+    std::string last_password;
+
+    mutable int authentications = 0;
+    mutable int selections = 0;
+    mutable int switches = 0;
+    mutable int refreshes = 0;
+    mutable int logouts = 0;
 
     mutable int connects = 0;
     mutable int resumes = 0;
@@ -133,6 +150,59 @@ struct fake_session_link final : session::transport::session_link {
         std::string_view,
         ores::nats::message_handler) const override {
         throw std::logic_error("the fake link cannot subscribe");
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::session_account>
+    authenticate(std::string_view principal, std::string_view password) override {
+        ++authentications;
+        last_principal = std::string{principal};
+        last_password = std::string{password};
+        if (authenticate_error)
+            return std::unexpected(*authenticate_error);
+        authenticated = true;
+        account_value.principal = std::string{principal};
+        return account_value;
+    }
+
+    [[nodiscard]] session::transport::result<void> select_party(
+        std::string_view party_id) override {
+        ++selections;
+        if (party_error)
+            return std::unexpected(*party_error);
+        account_value.party_id = std::string{party_id};
+        return {};
+    }
+
+    [[nodiscard]] session::transport::result<void> switch_party(
+        std::string_view party_id) override {
+        ++switches;
+        if (party_error)
+            return std::unexpected(*party_error);
+        account_value.party_id = std::string{party_id};
+        account_value.token = "switched-token";
+        return {};
+    }
+
+    [[nodiscard]] session::transport::result<int> refresh() override {
+        ++refreshes;
+        if (refresh_error)
+            return std::unexpected(*refresh_error);
+        account_value.token = "refreshed-token";
+        return account_value.access_lifetime_s;
+    }
+
+    [[nodiscard]] session::transport::result<void> logout() override {
+        ++logouts;
+        if (logout_error)
+            return std::unexpected(*logout_error);
+        authenticated = false;
+        return {};
+    }
+
+    [[nodiscard]] const session::transport::session_account& account()
+        const override {
+        return account_value;
     }
 
     [[nodiscard]] session::transport::result<std::vector<client::crm_rate>>
