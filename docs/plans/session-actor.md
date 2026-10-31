@@ -689,6 +689,12 @@ not shown, because the tables key by instance and account, not by attempt.
   a strand on the shared pool, no new threads, at the cost that a 30 s read
   occupies a pool thread that other sessions need. Alternative: thread plus
   condition variable, the shape `market_stream` has, with a hand-written backoff.
+  Decided, against the recommendation: the third. `session_actor` runs one
+  thread with a condition variable and hand-written timing — one `steady_clock`
+  deadline for the liveness request, a 1 s wait between connect attempts — and
+  no `io_context`. The thread count is the same either way, so this does not
+  need the ADR 2 amendment the `io_context` version would, and the backoff it
+  gives up is not used until step 6's refresh.
 - **D2. Wire format.** One per process, which deletes the per-instance field and
   lets Hedgr use `market_data_client` for the market reads (C-12). Or one codec
   per actor, which keeps the field but means Hedgr writes its own typed request
@@ -696,12 +702,20 @@ not shown, because the tables key by instance and account, not by attempt.
   `default_wire_codec()` internally (`market_data_client.cpp:60,82`,
   `request_helpers.hpp:51,69,90`). Recommended: per actor, with prerequisite B's
   guard until the first release that needs it. The user decides whether two
-  formats in one desk is a feature.
+  formats in one desk is a feature. Taken as recommended: the actor builds one
+  codec from its instance row and hands it to the stream, so a desk can hold two
+  formats at once. The reads no longer build clients, so the per-read write of
+  the process-wide codec that C-5 named is gone; the session worker, the probe
+  and the policy read still build clients, and prerequisite B's guard still
+  covers them.
 - **D3. Concurrency of reads on one session.** Serial is simple and a slow
   request delays the others on that session, including a refresh that falls
   due. A bounded K in flight on the same connection is possible if cnats allows
   concurrent requests on one connection (inferred, not read). Recommended:
-  serial, measure the queue wait, revisit.
+  serial, measure the queue wait, revisit. Taken: reads are serial on the
+  actor's thread. The queue wait is not measured yet, and the two cases known to
+  hold the connection are a curve read (one round trip per member) and a tick
+  read (bounded by `tick_read_timeout`).
 - **D4. Liveness.** The request, which is `bootstrap_status` (anonymous, so it
   proves broker and IAM and not the token), the interval, 10 s proposed, and
   whether a lost link shows to the operator as a new `session_status` or only as
@@ -712,9 +726,12 @@ not shown, because the tables key by instance and account, not by attempt.
 - **D5. Exit.** Join, as today. Or bounded wait then detach, which needs
   prerequisite F. And whether the actor logs out on app exit. `logout` takes a
   request timeout of up to 30 s, so logging out on exit would make exit slower
-  than it is.
+  than it is. Not decided: the actor joins today, and nothing logs out on exit.
+  Step 6 decides both, because it is the step that owns the credential.
 - **D6. Whether to ask for the upstream connection state now** or after step 3
-  shows how much the workaround misses.
+  shows how much the workaround misses. Deferred: step 3's liveness covers the
+  gap, and nothing has been run against a broker that dies, so there is no
+  evidence yet about what the workaround misses.
 
 ## What cannot be verified without a live deployment
 

@@ -140,9 +140,10 @@ Follow-ups noticed while building the Instances panel, both done:
   `link_lost`/`link_restored` and the reseed, every read on the actor's one
   connection, and the deletion of `session_task.hpp`. Step 6, supervision into
   the actor, is the next one, and the plan gates it on a live check.
-- `docs/review/README.md` status cells are not updated. Older unreviewed items: the
-  series table decisions D1 to D7, the session actor decisions D1 to D6, the wording of
-  PR #63.
+- `docs/review/README.md` status cells are partly updated: the session actor's
+  decisions D1 to D6 now record where each came out, and the SR-6 and C-5 notes
+  say what they stand on. Still open: the series table decisions D1 to D7 and the
+  wording of PR #63.
 - The operator's old `imgui.ini` layout was never copied to `.cache/hedgr/imgui.ini`.
   Old dock nodes may carry the hidden-tab-bar flag.
 
