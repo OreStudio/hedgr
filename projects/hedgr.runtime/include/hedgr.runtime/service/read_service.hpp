@@ -37,7 +37,6 @@
 #include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_options.hpp"
-#include <boost/asio/io_context.hpp>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -82,8 +81,7 @@ public:
      * @param submit the session's actors. Empty means no read is run on one,
      * which is what a test that only drives the tables asks for.
      */
-    read_service(boost::asio::io_context& pool,
-        model::command::event_queue& events,
+    read_service(model::command::event_queue& events,
         const model::state::instance_table& instances,
         const model::state::account_table& accounts,
         const model::state::session_table& sessions,
@@ -326,7 +324,6 @@ private:
     void start_crm_names_read(std::string_view instance_id,
         std::string_view account_id, std::string_view party_id);
 
-    boost::asio::io_context& pool_;
     model::command::event_queue& events_;
     const model::state::instance_table& instances_;
     const model::state::account_table& accounts_;

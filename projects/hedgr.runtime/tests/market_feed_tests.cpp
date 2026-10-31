@@ -73,6 +73,8 @@ using hedgr::model::event::event_kind;
 using hedgr::model::state::series_bucket;
 using hedgr::model::state::series_handle;
 using hedgr::runtime::manager::instance_manager;
+using hedgr::runtime::worker::read_failed;
+using hedgr::runtime::worker::read_request;
 using hedgr::runtime::worker::session_actor_options;
 using hedgr::runtime::worker::tick_feed;
 using hedgr::runtime::worker::watch_target;
@@ -151,10 +153,20 @@ struct feed_state final {
     std::vector<std::pair<series_handle, std::string>> watches;
     std::vector<series_handle> unwatches;
     std::vector<std::string> tokens;
+    std::vector<read_request> reads;
     int stops = 0;
     bool finished = false;
     bool destroyed = false;
     std::vector<series_bucket> waiting;
+
+    /**
+     * @brief Where a read this fake is asked for is answered.
+     *
+     * The manager's event queue, so the fake stands in for an actor the way an
+     * unreachable deployment would answer: every read fails, which is what the
+     * feed's tests used to get from a real connection to a refused port.
+     */
+    std::function<void(event)> answer;
 };
 
 class fake_feed final : public tick_feed {
@@ -209,6 +221,22 @@ public:
         return out.size();
     }
 
+    /**
+     * @brief Answers every read with the failure an unreachable instance gives.
+     *
+     * The feed's tests used to get this from a real read to a refused port; a
+     * read now goes through the session's actor, so the fake stands in for one
+     * whose connection is not there.
+     */
+    bool submit_read(read_request request) override {
+        if (!state_->answer)
+            return false;
+        state_->reads.push_back(request);
+        state_->answer(read_failed(request, state_->options.key,
+            state_->options.tenant_id, "the instance is not reachable"));
+        return true;
+    }
+
 private:
     std::shared_ptr<feed_state> state_;
     std::vector<watch_target> watching_;
@@ -235,6 +263,9 @@ struct world final {
                 -> std::unique_ptr<tick_feed> {
                 auto state = std::make_shared<feed_state>();
                 state->options = std::move(options);
+                state->answer = [this](event fact) {
+                    manager->events().push(std::move(fact));
+                };
                 feeds.push_back(state);
                 return std::make_unique<fake_feed>(state);
             });

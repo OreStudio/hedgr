@@ -17,9 +17,9 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+#include "fake_link.hpp"
 #include "hedgr.runtime/worker/tick_silence.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
-#include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <string>
@@ -76,19 +76,20 @@ TEST_CASE("a tick read inside the silence window reports the wait",
         std::chrono::steady_clock::now().time_since_epoch()).count();
     worker::market_silence().note("silent-wiring", true, now);
 
-    boost::asio::io_context pool;
-    model::command::event_queue events;
-    worker::market_job job;
-    job.key = model::domain::session_key{"silent-wiring", "a"};
-    job.series_id = "s";
-    worker::spawn_market_read(pool, std::move(job), events);
-    pool.run_for(std::chrono::milliseconds(100));
+    /*
+     * The window is checked before the connection is touched, so a link that
+     * answers nothing stands in for one that is not answering.
+     */
+    hedgr::testing::fake_session_link link;
+    const worker::read_request request =
+        worker::market_points_request{.series_id = "s"};
+    auto fact = worker::read_event(request,
+        model::domain::session_key{"silent-wiring", "a"}, {});
+    worker::run_market_read(link, request, fact);
 
-    const auto got = events.drain();
-    REQUIRE(got.size() == 1);
-    CHECK(got[0].kind == model::event::event_kind::series_points);
-    CHECK(got[0].series_id == "s");
-    CHECK(got[0].message.find("not asked again") != std::string::npos);
+    CHECK(fact.kind == model::event::event_kind::series_points);
+    CHECK(fact.series_id == "s");
+    CHECK(fact.message.find("not asked again") != std::string::npos);
 
     /* Leave no window behind for another test using the shared rule. */
     worker::market_silence().note("silent-wiring", false, now);

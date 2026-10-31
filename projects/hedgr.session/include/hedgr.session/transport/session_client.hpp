@@ -26,6 +26,7 @@
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
 #include "hedgr.session/transport/session_options.hpp"
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -525,8 +526,8 @@ public:
     [[nodiscard]] result<market_series_read>
     market_series_ticks(std::string_view series_id, std::int64_t from_ns,
         std::int64_t to_ns,
-        const hedgr::model::domain::market_series_identity& identity = {})
-        const;
+        const hedgr::model::domain::market_series_identity& identity = {},
+        std::chrono::milliseconds timeout = {}) const;
 
     /**
      * @brief Reads the first load of a series: its newest ticks for a chart.
@@ -537,12 +538,14 @@ public:
      *
      * @pre the session is authenticated.
      * @param series_id the series' key.
+     * @param timeout how long the call may take, or zero for the session's own
+     * request timeout. A chart read asks for less than the session's.
      * @return the points oldest first, or why they could not be read.
      */
     [[nodiscard]] result<market_series_read>
     market_series_points(std::string_view series_id,
-        const hedgr::model::domain::market_series_identity& identity = {})
-        const;
+        const hedgr::model::domain::market_series_identity& identity = {},
+        std::chrono::milliseconds timeout = {}) const;
 
     /**
      * @brief Reads at least @p count of a series' newest ticks, if it has them.
@@ -567,13 +570,15 @@ public:
      * @param series_id the series' key.
      * @param from_ns the earliest instant wanted, epoch nanoseconds.
      * @param to_ns the end of the span, exclusive, epoch nanoseconds.
+     * @param timeout how long the call may take, or zero for the session's own
+     * request timeout.
      * @return the points oldest first, or why they could not be read.
      */
     [[nodiscard]] result<market_series_read>
     market_series_history(std::string_view series_id, std::int64_t from_ns,
         std::int64_t to_ns,
-        const hedgr::model::domain::market_series_identity& identity = {})
-        const;
+        const hedgr::model::domain::market_series_identity& identity = {},
+        std::chrono::milliseconds timeout = {}) const;
 
     /**
      * @brief The full wire name of one of this instance's subjects.
