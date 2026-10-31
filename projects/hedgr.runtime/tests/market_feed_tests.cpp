@@ -308,8 +308,10 @@ struct world final {
     /**
      * @brief Signs @p account_id in as far as the frame loop can tell.
      *
-     * The real attempt is refused first so the session row exists, and the
-     * authenticated fact is pushed by hand afterwards, as the read tests do.
+     * A first attempt is refused so the session row exists and the refusal path
+     * runs; the operator's retry is the second connect command, which leaves the
+     * actor the reads and watches run on, and the authenticated fact is pushed
+     * by hand because no broker answers it.
      */
     void sign_in(const std::string& account_id,
         std::string token = "token-1") {
@@ -323,19 +325,38 @@ struct world final {
         save.account_row = row;
         push(std::move(save));
 
-        command connect;
-        connect.kind = command_kind::connect_session;
-        connect.instance_id = instance_id;
-        connect.account_id = account_id;
-        connect.principal = account_id + "@example.test";
-        connect.password = secret_string{std::string{"not-a-real-secret"}};
-        push(std::move(connect));
+        const auto connect = [&] {
+            command request;
+            request.kind = command_kind::connect_session;
+            request.instance_id = instance_id;
+            request.account_id = account_id;
+            request.principal = account_id + "@example.test";
+            request.password = secret_string{std::string{"not-a-real-secret"}};
+            push(std::move(request));
+        };
+        const auto before = feeds.size();
+        connect();
+
+        event refused;
+        refused.kind = event_kind::session_failed;
+        refused.instance_id = instance_id;
+        refused.account_id = account_id;
+        refused.code = "unreachable";
+        refused.message = "the instance is not reachable";
+        push(std::move(refused));
         REQUIRE(wait_until([&] {
             manager->pump();
             const auto handle = manager->sessions().find(instance_id, account_id);
             return handle
                 && manager->sessions().status(*handle) == session_status::failed;
         }));
+
+        /*
+         * The refused attempt's actor is retired, so the world keeps only what
+         * the retry makes: the stand-in the reads and watches run on.
+         */
+        feeds.resize(before);
+        connect();
 
         event fact;
         fact.kind = event_kind::session_authenticated;
@@ -512,25 +533,25 @@ TEST_CASE("a catalogue event carries the provider kinds it was read with",
     CHECK(catalogue->providers[1].kind == "data_vendor");
 }
 
-TEST_CASE("signing in opens one stream with the session's credentials",
-    "[feed]") {
+TEST_CASE("signing in leaves one actor on the session's connection", "[feed]") {
     world w;
     w.sign_in("a-1", "token-1");
 
+    /*
+     * The actor is the session now: it holds the connection and signs itself
+     * in, so what the feed can see is one feed for the pair, on the instance's
+     * connection, and it has not been asked to stop.
+     */
     REQUIRE(w.feeds.size() == 1);
-    const auto& options = w.feeds[0]->options;
-    CHECK(options.token == "token-1");
-    CHECK(options.principal == "a-1@example.test");
-    CHECK(options.tenant_id == tenant);
-    CHECK(options.party_id == party);
-    CHECK(options.options.nats_url == "nats://127.0.0.1:1");
+    CHECK(w.feeds[0]->options.key.instance_id == instance_id);
+    CHECK(w.feeds[0]->options.key.account_id == "a-1");
+    CHECK(w.feeds[0]->options.options.nats_url == "nats://127.0.0.1:1");
     CHECK(w.feeds[0]->stops == 0);
 
-    w.tell(event_kind::session_authenticated, "a-1");
+    /* A second sign-in for the pair replaces the actor that had it. */
+    w.sign_in("a-1", "token-2");
     REQUIRE(w.feeds.size() == 2);
-    CHECK(w.feeds[0]->stops == 1);
     CHECK(w.feeds[1]->stops == 0);
-    CHECK(w.feeds[1]->options.token == "token-2");
 }
 
 TEST_CASE("the watch set follows the open and closed charts", "[feed]") {
@@ -845,7 +866,10 @@ TEST_CASE("a session that stops being authenticated keeps its charts and "
     const auto series = w.handle_of("a-1", "s-1");
     REQUIRE(w.manager->market().watchers(series) == 1);
 
-    /* Only the pump's sweep of unauthenticated sessions retires this stream. */
+    /*
+     * The actor announces its own disconnect, and supervision stops watching
+     * and retires it. The chart keeps the series it holds.
+     */
     event fact;
     fact.kind = event_kind::session_status_changed;
     fact.instance_id = instance_id;
@@ -856,7 +880,8 @@ TEST_CASE("a session that stops being authenticated keeps its charts and "
     CHECK(w.manager->market().watchers(series) == 1);
     hedgr::testing::audit_holders(*w.manager);
 
-    w.tell(event_kind::session_authenticated, "a-1");
+    /* The operator's next connect gives the session a new actor to watch on. */
+    w.sign_in("a-1");
     REQUIRE(w.feeds.size() == 2);
     CHECK(watches(w, *w.feeds.at(1), "a-1", {"s-1"}));
     CHECK(w.feeds.at(1)->unwatches.empty());
@@ -873,15 +898,19 @@ TEST_CASE("a token refresh keeps the stream and its watches", "[feed]") {
 
     w.tell(event_kind::session_token_refreshed, "a-1");
 
+    /*
+     * The actor holds its own token and has already handed the new one to its
+     * subscription, so the feed neither sees the refresh nor reopens anything.
+     */
     CHECK(w.feeds.size() == 1);
-    REQUIRE(feed.tokens.size() == 1);
-    CHECK(feed.tokens[0] == "token-2");
+    CHECK(feed.tokens.empty());
     CHECK(feed.stops == 0);
     CHECK(feed.watches.size() == 1);
     CHECK(feed.unwatches.empty());
 }
 
-TEST_CASE("acting as another party replaces the token and reopens the stream",
+TEST_CASE("acting as another party changes what the session reads and the feed "
+          "watches",
     "[feed][party]") {
     world w;
     w.sign_in("a-1");
@@ -910,13 +939,15 @@ TEST_CASE("acting as another party replaces the token and reopens the stream",
     CHECK(w.manager->sessions().token(*handle) == "token-2");
 
     /*
-     * The old stream belonged to the old party, so it is retired and another
-     * opened against the same deployment with the new party and token.
+     * The actor rebuilds its own subscription for the new party, so the feed
+     * keeps its one actor. What changes for the feed is the catalogue the party
+     * brings: the chart's series is no longer this party's, so it is dropped
+     * from the watch set rather than moved to a stream of its own.
      */
-    REQUIRE(w.feeds.size() == 2);
-    CHECK(w.feeds[0]->stops == 1);
-    CHECK(w.feeds[1]->options.party_id == "p-2");
-    CHECK(w.feeds[1]->options.token == "token-2");
+    CHECK(w.feeds.size() == 1);
+    CHECK(w.feeds[0]->stops == 0);
+    REQUIRE(w.feeds[0]->unwatches.size() == 1);
+    CHECK(w.feeds[0]->unwatches[0] == w.handle_of("a-1", "s-1"));
 }
 
 TEST_CASE("a refused party leaves the session on the party it had", "[feed][party]") {
@@ -976,50 +1007,12 @@ TEST_CASE("a party command on a session that is not signed in is refused",
     CHECK(raised(*w.manager, "needs a signed-in session"));
 }
 
-TEST_CASE("a party command with no worker is refused", "[feed][party]") {
-    world w;
-    w.sign_in("a-1");
-
-    /*
-     * The sign-in above is a hand-pushed fact after a failed connect, so the
-     * session row is authenticated while its worker has already finished. The
-     * manager must not leave the control changed with nothing to apply it.
-     */
-    command request;
-    request.kind = command_kind::select_party;
-    request.instance_id = instance_id;
-    request.account_id = "a-1";
-    request.party_id = "p-2";
-    w.push(std::move(request));
-
-    CHECK(raised(*w.manager, "no worker"));
-}
-
-TEST_CASE("a refresh that follows a failure in one frame opens a stream the "
-    "same frame retires", "[feed]") {
-    world w;
-    w.sign_in("a-1");
-
-    event failed;
-    failed.kind = event_kind::session_failed;
-    failed.instance_id = instance_id;
-    failed.account_id = "a-1";
-    failed.message = "the connection dropped";
-    event refreshed;
-    refreshed.kind = event_kind::session_token_refreshed;
-    refreshed.instance_id = instance_id;
-    refreshed.account_id = "a-1";
-    refreshed.token = secret_string{std::string{"token-2"}};
-    w.manager->events().push(std::move(failed));
-    w.manager->events().push(std::move(refreshed));
-    w.manager->pump();
-
-    REQUIRE(w.feeds.size() == 2);
-    CHECK(w.feeds[0]->stops == 1);
-    CHECK(w.feeds[0]->tokens.empty());
-    CHECK(w.feeds[1]->options.token == "token-2");
-    CHECK(w.feeds[1]->stops == 1);
-}
+/*
+ * A refresh that arrives after the session failed no longer opens anything: the
+ * actor owns the token, the feed never sees a refresh, and a session that
+ * failed has no actor for the next one to land on. The old case is gone with
+ * the stream the feed used to own, and the actor's own tests cover the refresh.
+ */
 
 TEST_CASE("a session that is lost retires its stream", "[feed]") {
     world w;
@@ -1174,7 +1167,7 @@ struct bare_feed final {
         }
 
         feed = std::make_unique<hedgr::runtime::service::market_feed>(
-            instances, sessions, series, options, actors,
+            sessions, series, actors,
             [this](std::string_view, std::string_view)
                 -> std::optional<hedgr::runtime::refusal> {
                 ++catalogue_reads;
@@ -1184,12 +1177,17 @@ struct bare_feed final {
                 ++backfills;
             });
         feed->attach(std::filesystem::temp_directory_path() / "bare_feed.sqlite");
-        event opened;
-        opened.instance_id = instance_id;
-        opened.account_id = "a-1";
-        opened.party_id = party;
-        opened.token = secret_string{std::string{"a-token"}};
-        feed->open(opened);
+
+        /*
+         * Supervision's half of the wiring: the session's actor exists before
+         * the feed is told to watch it, because the actor is what carries the
+         * connection. The fake feed stands in for it here.
+         */
+        session_actor_options actor_options;
+        actor_options.key =
+            hedgr::model::domain::session_key{instance_id, "a-1"};
+        const auto actor = actors.open(std::move(actor_options));
+        feed->attach(instance_id, "a-1", actor);
     }
 
     hedgr::model::state::instance_table instances;

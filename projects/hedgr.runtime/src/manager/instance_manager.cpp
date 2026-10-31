@@ -24,7 +24,7 @@
 #include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/seed/seeder.hpp"
 #include "hedgr.runtime/service/window_traits.hpp"
-#include "hedgr.runtime/worker/session_worker.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/crypto/secret_box.hpp"
 #include "hedgr.store/sqlite/error.hpp"
@@ -99,18 +99,7 @@ constexpr std::size_t probe_thread_count = 2;
 instance_manager::instance_manager(std::size_t pool_threads,
     worker::tick_feed_factory market_feeds)
     : pool_(pool_threads), probe_pool_(probe_thread_count)
-    , session_service_(events_, std::move(market_feeds))
-    , market_feed_(catalogue_.instances(), sessions_, series_, seed_options_,
-          session_service_,
-          [this](std::string_view instance_id, std::string_view account_id) {
-              return read_service_.start_market_catalogue_read(instance_id,
-                  account_id);
-          },
-          [this](std::string_view instance_id, std::string_view account_id,
-                 std::string_view series_id) {
-              read_service_.start_market_backfill(instance_id, account_id,
-                  series_id);
-          }) {
+    , session_service_(events_, std::move(market_feeds)) {
 }
 
 instance_manager::~instance_manager() {
@@ -124,17 +113,11 @@ void instance_manager::raise(model_state::condition_key key,
 }
 
 void instance_manager::stop() noexcept {
-    if (!started_ && running_.empty() && probe_service_.idle())
+    if (!started_ && session_service_.size() == 0 && probe_service_.idle())
         return;
 
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Stopping the runtime";
 
-    for (auto& [key, source] : running_) {
-        if (source)
-            source->request_stop();
-    }
-    running_.clear();
-    party_switches_.clear();
     catalogue_rereads_.clear();
     attempts_.clear();
     market_feed_.cancel();
@@ -446,16 +429,11 @@ void instance_manager::handle(command::command& cmd) {
         break;
     case command::command_kind::shutdown:
         /*
-         * Every worker is asked to stop and the manager stops being started,
-         * but the pool stays up: pump() may still be called, and the frame loop
-         * owns the decision about when there are no more frames.
+         * Every session's actor is asked to stop and the manager stops being
+         * started, but the pool stays up: pump() may still be called, and the
+         * frame loop owns the decision about when there are no more frames.
          */
-        for (auto& [key, source] : running_) {
-            if (source)
-                source->request_stop();
-        }
-        running_.clear();
-        party_switches_.clear();
+        session_service_.cancel();
         catalogue_rereads_.clear();
 
         /*
@@ -594,7 +572,7 @@ void instance_manager::do_connect_session(const command::command& cmd) {
      * through this thread.
      */
     auto blob = std::move(sealed).value();
-    start_stored_connect(cmd, std::move(blob.value()));
+    start_session_for(cmd, {}, std::move(blob.value()));
 }
 
 const domain::instance* instance_manager::wire_format_holder(
@@ -631,133 +609,40 @@ void instance_manager::start_session_for(const command::command& cmd,
         handle = sessions_.insert(cmd.instance_id, cmd.account_id);
     sessions_.set_status(*handle, domain::session_status::connecting);
 
-    transport::session_options options =
-        connection_options_for(*instance_row, seed_options_, database_->path());
+    /*
+     * The actor is created here, at the connect command, and owns the session
+     * from its first byte: the connection, the sign-in, the token and its
+     * refresh. The credential travels in its options and exists for exactly one
+     * attempt, because the actor wipes it the moment the sign-in resolves.
+     */
+    worker::session_actor_options options;
+    options.options = connection_options_for(*instance_row, seed_options_,
+        database_->path());
+    options.key = domain::session_key{cmd.instance_id, cmd.account_id};
+    options.credential = std::move(credential);
+    options.sealed_credential = std::move(sealed_credential);
 
-    worker::session_job job;
-    job.options = std::move(options);
-    job.key = domain::session_key{cmd.instance_id, cmd.account_id};
-    job.credential = std::move(credential);
+    /*
+     * A stored credential travels sealed, with the password that opens it, and
+     * the actor opens it on its own thread: the derivation is half a second of
+     * deliberate work that must not happen on the frame loop. The password is
+     * copied out of the held secret here, so the actor's copy dies with the
+     * attempt and the held copy survives for the next one.
+     */
+    if (!options.sealed_credential.empty())
+        options.master_password = lock_service_.master_password();
 
     const auto attempt_key = running_key(cmd.instance_id, cmd.account_id);
     const auto attempt = ++next_attempt_;
     attempts_[attempt_key] = attempt;
-    job.attempt = attempt;
+    options.attempt = attempt;
 
     /*
-     * The worker owns the transport, and with it the only way to select a
-     * party. The frame loop leaves the choice here and wakes the worker, which
-     * is why the switch is made before the spawn and replaced with the worker.
+     * A second connect for a pair asks for a fresh attempt; the service stops
+     * the actor it already holds for the pair, so the events of the one being
+     * replaced cannot arrive for the connection this call is about to open.
      */
-    job.party = std::make_shared<worker::party_switch>();
-    party_switches_[attempt_key] = job.party;
-
-    /*
-     * A stored credential travels sealed, with the password that opens it, and
-     * the worker opens it on its own thread. The password is copied out of the
-     * held secret here and moved into the job, so the job's copy is wiped when
-     * the worker is done with it and the held copy survives for the next
-     * attempt.
-     */
-    if (!sealed_credential.empty()) {
-        job.sealed_credential = std::move(sealed_credential);
-        job.master_password = lock_service_.master_password();
-    }
-
-    const auto key = running_key(cmd.instance_id, cmd.account_id);
-    if (const auto previous = running_.find(key); previous != running_.end()) {
-        /*
-         * A second connect for a pair that is already running asks for a fresh
-         * attempt, so the one in flight is told to stop and left to finish on
-         * its own: without this its events would arrive for the connection this
-         * call is about to replace.
-         */
-        if (previous->second)
-            previous->second->request_stop();
-    }
-    auto source = std::make_shared<std::stop_source>();
-    running_[key] = source;
-
-    /*
-     * The credential travels no further than this call. The worker copies it
-     * into the attempt and wipes it the moment the sign-in resolves, so there
-     * is no second place a secret could be read from.
-     */
-    worker::spawn_session(pool_.context(), std::move(job), events_, std::move(source));
-}
-
-void instance_manager::start_stored_connect(const command::command& cmd,
-    std::string sealed) {
-    /*
-     * The password is copied out of the held secret once, here, and moved into
-     * the coroutine. The coroutine wipes its copy when it ends, so this is the
-     * second and last copy that exists: the interface never sees one, the
-     * session table never holds one, and no event carries one.
-     */
-    auto password = lock_service_.master_password();
-
-    const auto instance_id = cmd.instance_id;
-    const auto account_id = cmd.account_id;
-    const auto principal = cmd.principal;
-
-    boost::asio::co_spawn(pool_.context(),
-        [this, instance_id, account_id, principal,
-            sealed = std::move(sealed), password = std::move(password)]() mutable
-        -> boost::asio::awaitable<void> {
-            /*
-             * Handed to the pool before anything slow happens. The spawn above
-             * may have come from the frame loop, and the derivation below is
-             * half a second of deliberate work that must not happen there.
-             */
-            co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-                boost::asio::use_awaitable);
-
-            auto opened = store_crypto::secret_box::open(password.view(), sealed);
-
-            /*
-             * The sealed value is wiped whatever happened: it is still a secret
-             * in the only sense that matters, because the master password opens
-             * it, and an allocation handed back with a credential still in it is
-             * a credential left for the next claimant.
-             */
-            std::fill(sealed.begin(), sealed.end(), '\0');
-            sealed.clear();
-            sealed.shrink_to_fit();
-
-            /*
-             * The password dies here. The derivation is over and nothing below
-             * needs it, so it does not stay in this frame while the command is
-             * built. @c co_return rather than a fall through, so the wipe is on
-             * the success path too and not only the failure one.
-             */
-            password.clear();
-
-            if (!opened) {
-                report_store_failure(instance_id, account_id,
-                    std::format("the stored credential for account {} could not "
-                                "be opened ({})",
-                        account_id, store_crypto::to_string(opened.error().code)));
-                co_return;
-            }
-
-            command::command retry;
-            retry.kind = command::command_kind::connect_session;
-            retry.instance_id = instance_id;
-            retry.account_id = account_id;
-            retry.principal = principal;
-
-            /*
-             * The one place a decrypted secret is written outside the worker.
-             * It is moved straight into a command, which is where a password an
-             * operator typed would have travelled, and the buffer that held it
-             * is wiped before this frame ends: the only copy left is the
-             * command's, and the worker wipes that the moment the sign-in
-             * resolves.
-             */
-            retry.password = domain::secret_string{std::move(opened).value()};
-            commands_.push(std::move(retry));
-        },
-        boost::asio::detached);
+    static_cast<void>(session_service_.open(std::move(options)));
 }
 
 void instance_manager::report_store_failure(const std::string& instance_id,
@@ -771,8 +656,13 @@ void instance_manager::report_store_failure(const std::string& instance_id,
 }
 
 void instance_manager::do_disconnect_session(const command::command& cmd) {
-    stop_session(running_key(cmd.instance_id, cmd.account_id));
-    market_feed_.close(cmd.instance_id, cmd.account_id);
+    /*
+     * A sign-out is the one stop that says goodbye: the instance is asked to
+     * drop the token, best effort, because a token nobody will use again is
+     * still a credential.
+     */
+    session_service_.sign_out(cmd.instance_id, cmd.account_id);
+    market_feed_.detach(cmd.instance_id, cmd.account_id);
 
     const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
     if (!handle)
@@ -805,18 +695,17 @@ void instance_manager::do_select_party(const command::command& cmd) {
     }
 
     /*
-     * The choice is handed to the session's own worker, which holds the
-     * transport. A session with no worker left has nothing to ask, and saying
-     * so is better than leaving the control changed and nothing happening.
+     * The choice is handed to the session's own actor, which owns the
+     * transport. A session with no actor left has nothing to ask, and saying so
+     * is better than leaving the control changed and nothing happening.
      */
-    const auto found = party_switches_.find(
-        running_key(cmd.instance_id, cmd.account_id));
-    if (found == party_switches_.end() || !found->second) {
+    const auto actor = session_service_.feed(cmd.instance_id, cmd.account_id);
+    if (actor == nullptr) {
         raise({model_state::condition_source::session, cmd.account_id},
-            "the session has no worker to act as another party");
+            "the session has no connection to act as another party");
         return;
     }
-    found->second->request(cmd.party_id);
+    actor->select_party(cmd.party_id);
 }
 
 void instance_manager::do_refresh_window(const command::command& cmd) {
@@ -862,8 +751,10 @@ void instance_manager::complete_catalogue(service::catalogue_effect effect) {
             if (sessions_.instance_id(session) != gone.instance_id)
                 continue;
 
-            stop_session(running_key(sessions_.instance_id(session),
-                sessions_.account_id(session)));
+            retire_session(sessions_.instance_id(session),
+                sessions_.account_id(session));
+            market_feed_.detach(sessions_.instance_id(session),
+                sessions_.account_id(session));
 
             /*
              * The window stays open and loses its session. Closing it would take
@@ -884,8 +775,8 @@ void instance_manager::complete_catalogue(service::catalogue_effect effect) {
          * pair, so the row to stop is looked up by the pair rather than walked
          * for.
          */
-        stop_session(running_key(gone.instance_id, gone.account_id));
-        market_feed_.close(gone.instance_id, gone.account_id);
+        retire_session(gone.instance_id, gone.account_id);
+        market_feed_.detach(gone.instance_id, gone.account_id);
         window_service_.unbind(*session);
         sessions_.remove(*session);
     }
@@ -1006,6 +897,18 @@ void instance_manager::apply(const event::event& ev) {
     switch (ev.kind) {
     case event::event_kind::session_status_changed:
         sessions_.set_status(*handle, ev.status);
+
+        /*
+         * A session the actor says has ended has no actor worth keeping. The
+         * actor announces its own disconnect and failure, and the feed stops
+         * watching either way: a chart keeps its series and the next connect
+         * gives the session a new actor to watch them on.
+         */
+        if (ev.status == domain::session_status::disconnected
+            || ev.status == domain::session_status::failed) {
+            market_feed_.detach(ev.instance_id, ev.account_id);
+            retire_session(ev.instance_id, ev.account_id);
+        }
         break;
     case event::event_kind::session_authenticated:
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
@@ -1014,7 +917,14 @@ void instance_manager::apply(const event::event& ev) {
         sessions_.set_parties(*handle, ev.parties);
         sessions_.set_mode(*handle, ev.mode);
         sessions_.set_status(*handle, domain::session_status::authenticated);
-        market_feed_.open(ev);
+
+        /*
+         * The feed starts watching here and not at the connect: a watch needs
+         * the session's party, and until the sign-in answers there is none. The
+         * actor itself exists already, and has since the connect command.
+         */
+        market_feed_.attach(ev.instance_id, ev.account_id,
+            session_service_.feed(ev.instance_id, ev.account_id));
         read_service_.start_currency_image_map(ev);
 
         /*
@@ -1048,24 +958,22 @@ void instance_manager::apply(const event::event& ev) {
     case event::event_kind::session_token_refreshed:
         /*
          * A refresh replaces the credential, not the session. Reads that start
-         * from here on take the new token, and the tick stream keeps it for
-         * its next resume. The stream itself stays, with its subscription and
-         * its open buckets.
+         * from here on take the new token, and the actor has already handed it
+         * to its own subscription, so nothing here touches the feed.
          */
         sessions_.set_token(*handle, ev.token);
-        market_feed_.retoken_or_open(ev);
         break;
     case event::event_kind::session_party_changed:
         /*
          * The session now acts as another party, so the token IAM just issued
-         * is the one every read must carry, and the stream, which was opened
-         * for the old party, is reopened for the new one. The catalogue is
-         * party-scoped too, so it is read again rather than filtered.
+         * is the one every read must carry. The actor has reopened its own
+         * subscription for the new party; the catalogue is party-scoped, so it
+         * is read again rather than filtered.
          */
         sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
             ev.party_id, ev.token);
         sessions_.set_tenant_id(*handle, ev.tenant_id);
-        market_feed_.open(ev);
+        market_feed_.refresh_watches(ev.instance_id, ev.account_id);
         if (read_service_.market_catalogue_pending(ev.instance_id,
                 ev.account_id))
             catalogue_rereads_.insert(
@@ -1121,14 +1029,14 @@ void instance_manager::apply(const event::event& ev) {
         break;
     case event::event_kind::session_failed: {
         sessions_.set_status(*handle, domain::session_status::failed);
-        market_feed_.close(ev.instance_id, ev.account_id);
+
         /*
-         * The worker has finished, so there is nobody left to apply a party
-         * choice to. Forgetting the switch here is what makes the next one
-         * refused rather than silently kept.
+         * The actor has reported its own end, so the feed stops watching it and
+         * the actor itself is left to finish: its thread exits on its own, and
+         * the service reaps it.
          */
-        party_switches_.erase(
-            running_key(ev.instance_id, ev.account_id));
+        market_feed_.detach(ev.instance_id, ev.account_id);
+        retire_session(ev.instance_id, ev.account_id);
 
         /*
          * The sentence a person reads stays first and the code follows it in
@@ -1180,20 +1088,14 @@ std::expected<void, std::string> instance_manager::save_windows() {
     return {};
 }
 
-void instance_manager::stop_session(const std::string& window_or_session_id) {
+void instance_manager::retire_session(std::string_view instance_id,
+    std::string_view account_id) {
     /*
-     * The name of the argument is the interface's: what this stops is the
-     * worker registered under the given key, which is the joined session key.
-     * Requesting a stop the worker has already observed is a no-op, so a
-     * disconnect after a shutdown is safe.
+     * Requesting a stop the actor has already observed is a no-op, and an actor
+     * this pair never had is nothing to stop, so a teardown after a shutdown is
+     * safe.
      */
-    const auto found = running_.find(window_or_session_id);
-    if (found == running_.end())
-        return;
-    if (found->second)
-        found->second->request_stop();
-    running_.erase(found);
-    party_switches_.erase(window_or_session_id);
+    session_service_.retire(instance_id, account_id);
 }
 
 }

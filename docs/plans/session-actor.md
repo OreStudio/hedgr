@@ -518,23 +518,32 @@ to 3 when step 6 deletes the session worker. The 7 are `session_worker.cpp:115`,
 
 ### 6. Supervision moves into the actor
 
-> **Status: pieces 1 and 2 are in.** The actor's options carry the attempt, a
-> typed credential, a sealed credential and the master password that opens it;
-> given either credential the actor runs connect, open, authenticate, wipe and
-> report, then the loop it already had, with a refresh deadline at four fifths of
-> the lifetime retried with a backoff until the token really expires (SR-15), and
-> `select_party` as a command that moves the session's party and rebuilds the
-> subscription. Eight cases over the fake link pin that, and the path the tick
-> feed uses — a token and the facts of a session already signed in — is unchanged.
+> **Status: done, and not yet run against a live deployment.** Supervision now
+> creates a @c session_actor at the connect command and stops it instead of
+> holding a @c stop_source; the actor opens the sealed credential or takes the
+> typed one, signs in, wipes, reports, refreshes at four fifths of the lifetime
+> with a backoff until the token really expires (SR-15), applies a party change
+> as a command, and signs out best effort on a user's disconnect (SR-24). The
+> session's only connection is the actor's: reads, ticks, the lifecycle and the
+> logout all run on it.
 >
-> What remains is the half that depends on a live check: supervision creating the
-> actor at the connect command and stopping it instead of holding a stop source
-> (piece 3), `market_feed` losing `open`, `retoken_or_open`, `close` and its
-> unauthenticated sweep in favour of `attach`/`detach` (piece 4), the logout on
-> stop, and the deletion of `session_worker.{hpp,cpp}` and `party_switch` with the
-> worker's two tests moved to the actor (piece 5). Until those land, the
-> application runs the actor exactly as it did before this step: one connection for
-> reads and ticks, and a second one, from the session worker, for the lifecycle.
+> `market_feed` lost `open`, `retoken_or_open` and `close` and its per-frame
+> sweep of sessions that are not authenticated, which is what would have retired
+> a session mid-sign-in; it now takes the actor once, on the authenticated fact,
+> and drops it on a disconnect, a failure or a removal. It works out the watch
+> set again after a party change, because the party is one of the three things
+> that decide a series' want.
+>
+> `session_worker.{hpp,cpp}`, `party_switch` and `deadline_wait` are deleted, and
+> the tests that drove them moved: the worker's two sign-in cases are the
+> actor's, and the read tests drive a stand-in actor, because a session's reads
+> now always run on one. The feed's tests that pinned the stream-per-sign-in
+> lifecycle are gone with the lifecycle.
+>
+> What has not been done is the live check this step was gated on: one connection
+> per session in the broker's connection list, a broker restart and its
+> recovery, a refresh against the real IAM, and a sign-out that logs out. Every
+> figure here is from a fake link and the suite.
 
 The actor takes `sign_in` as its first command, so it is created at the connect
 command, not at authentication. `session_worker.cpp` is deleted. Its sealed

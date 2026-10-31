@@ -45,10 +45,13 @@
 #include "hedgr.runtime/async/executor.hpp"
 #include "hedgr.runtime/manager/instance_manager.hpp"
 #include "hedgr.runtime/worker/probe_worker.hpp"
-#include "hedgr.runtime/worker/session_worker.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
+#include "hedgr.runtime/worker/session_actor.hpp"
+#include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.store/sqlite/database.hpp"
+#include "fake_link.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
@@ -92,6 +95,8 @@ using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::catalogue_state;
 using hedgr::model::state::condition_source;
+using hedgr::model::state::series_bucket;
+using hedgr::model::state::series_handle;
 using hedgr::model::state::window_handle;
 using hedgr::runtime::async::executor;
 using hedgr::runtime::manager::instance_manager;
@@ -250,6 +255,87 @@ void push_command(instance_manager& manager, command request) {
 }
 
 /**
+ * @brief The pair and tenant the read tests sign a session in as.
+ *
+ * Declared here rather than beside the read tests because the stand-in actor
+ * below answers a read's failure with the session's tenant, and the reads that
+ * are keyed by tenant need the one the session has.
+ */
+constexpr auto read_instance = "inst-refused";
+constexpr auto read_account = "ident-1";
+constexpr auto read_tenant = "tenant-1";
+
+/**
+ * @brief A stand-in for a session's actor, which answers every read with a
+ * failure.
+ *
+ * A session's reads run on its actor, and every actor a test could start for
+ * real would need a broker. This one answers each read with the failure an
+ * unreachable deployment gives, which is what these tests used to get from a
+ * connection to a refused port. It never reports a lifecycle event: the tests
+ * that use it say what the session did by pushing the fact themselves.
+ */
+class unreachable_actor final : public hedgr::runtime::worker::tick_feed {
+public:
+    explicit unreachable_actor(
+        hedgr::runtime::worker::session_actor_options options,
+        std::string tenant_id)
+        : options_(std::move(options)), tenant_id_(std::move(tenant_id)) {}
+
+    void request_stop() override {}
+
+    [[nodiscard]] bool finished() const noexcept override {
+        return stopped_;
+    }
+
+    void set_token(std::string) override {}
+
+    void watch(series_handle, std::string) override {}
+
+    void unwatch(series_handle) override {}
+
+    std::size_t drain(std::vector<series_bucket>&) override {
+        return 0;
+    }
+
+    bool submit_read(
+        hedgr::runtime::worker::read_request request) override {
+        if (options_.events == nullptr)
+            return false;
+        /*
+         * A real actor names the tenant its sign-in answered with. The stand-in
+         * is given it instead, because the fabricated sign-in is pushed at the
+         * frame loop and never reaches the actor.
+         */
+        options_.events->push(hedgr::runtime::worker::read_failed(request,
+            options_.key, tenant_id_, "the instance is not reachable"));
+        return true;
+    }
+
+private:
+    hedgr::runtime::worker::session_actor_options options_;
+    std::string tenant_id_;
+    bool stopped_ = false;
+};
+
+/**
+ * @brief The factory that makes @c unreachable_actor sessions for a manager.
+ *
+ * @param tenant_id the tenant a read's failure names, which defaults to the one
+ * the read tests sign a session in as: the reads that are keyed by tenant
+ * rather than by session need the session's own tenant in the answer.
+ */
+[[nodiscard]] hedgr::runtime::worker::tick_feed_factory
+unreachable_actors(std::string tenant_id = read_tenant) {
+    return [tenant_id = std::move(tenant_id)](
+               hedgr::runtime::worker::session_actor_options options)
+               -> std::unique_ptr<hedgr::runtime::worker::tick_feed> {
+        return std::make_unique<unreachable_actor>(std::move(options),
+            tenant_id);
+    };
+}
+
+/**
  * @brief An instance nothing listens on, added by command.
  *
  * Port one is reserved and nothing binds it, so a connect to it is refused
@@ -269,8 +355,8 @@ void add_unreachable_instance(instance_manager& manager, std::string id,
     push_command(manager, save);
 }
 
-/** @brief Runs the worker's sign-in to its refusal, leaving the session failed. */
-void refuse_sign_in(instance_manager& manager, const std::string& instance_id,
+/** @brief The command the interface pushes to connect one pair. */
+[[nodiscard]] command connect_request(const std::string& instance_id,
     const std::string& account_id) {
     command connect;
     connect.kind = command_kind::connect_session;
@@ -278,30 +364,48 @@ void refuse_sign_in(instance_manager& manager, const std::string& instance_id,
     connect.account_id = account_id;
     connect.principal = "alice@example.test";
     connect.password = secret_string{std::string{"not-a-real-secret"}};
-    push_command(manager, connect);
+    return connect;
+}
 
-    const auto refused = wait_until([&] {
-        manager.pump();
-        const auto handle = manager.sessions().find(instance_id, account_id);
-        return handle
-            && manager.sessions().status(*handle) == session_status::failed;
-    }, std::chrono::seconds(10));
-    REQUIRE(refused);
+/**
+ * @brief Runs a sign-in to its refusal, leaving the session failed.
+ *
+ * The connect command creates the session row and its actor; the refusal is
+ * then pushed as the fact the frame loop would see, because these tests run on
+ * a stand-in actor rather than on a connection to a broker.
+ */
+void refuse_sign_in(instance_manager& manager, const std::string& instance_id,
+    const std::string& account_id) {
+    push_command(manager, connect_request(instance_id, account_id));
+
+    event refused;
+    refused.kind = event_kind::session_failed;
+    refused.instance_id = instance_id;
+    refused.account_id = account_id;
+    refused.code = "unreachable";
+    refused.message = "the instance is not reachable";
+    manager.events().push(std::move(refused));
+    manager.pump();
+
+    const auto handle = manager.sessions().find(instance_id, account_id);
+    REQUIRE(handle.has_value());
+    REQUIRE(manager.sessions().status(*handle) == session_status::failed);
 }
 
 /**
  * @brief Signs @p account_id in on an unreachable instance, as far as the
  * frame loop can tell.
  *
- * The worker's own sign-in is refused, and only then is the authenticated fact
- * pushed by hand: pushing it earlier would let the refusal land on top of it.
- * Every read the session starts afterwards connects to the same refused port,
- * so it fails fast and its answer exercises the real event path.
+ * The first attempt is refused, and then a second connect command is what the
+ * operator's retry would be: it leaves a live actor for the pair, which is
+ * what every read runs on. The authenticated fact is pushed by hand after it,
+ * because there is no broker to answer the sign-in.
  */
 void sign_in_unreachable(instance_manager& manager,
     const std::string& instance_id, const std::string& account_id,
     std::string token = "a-token-nobody-checks", std::string tenant_id = {}) {
     refuse_sign_in(manager, instance_id, account_id);
+    push_command(manager, connect_request(instance_id, account_id));
 
     event fact;
     fact.kind = event_kind::session_authenticated;
@@ -369,7 +473,7 @@ constexpr std::int64_t parked_deadline = std::numeric_limits<std::int64_t>::max(
  * with its session key but no session.
  */
 void save_wall_signed_in(const temporary_database& database) {
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     add_unreachable_instance(manager, "inst-refused");
     command save_account;
@@ -440,7 +544,7 @@ TEST_CASE("spawn runs a coroutine on the pool", "[runtime]") {
 TEST_CASE("start opens the store and seeds one development instance", "[runtime]") {
     const temporary_database database("seed");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     const auto started = manager.start(database.path(), seed_options());
 
     REQUIRE(started.has_value());
@@ -473,14 +577,14 @@ TEST_CASE("starting twice leaves one instance", "[runtime]") {
     const temporary_database database("idempotent");
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         REQUIRE(manager.instances().size() == 1);
     }
 
     /* A second manager over the same file must not seed a second instance. */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
     REQUIRE(reopened.windows().find("instance-manager").has_value());
@@ -491,7 +595,7 @@ TEST_CASE("a save_instance command adds a row and replaces it in place",
     "[runtime]") {
     const temporary_database database("save-instance");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     command request;
@@ -518,7 +622,7 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
     const temporary_database database("remove-instance");
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
         command save;
@@ -556,7 +660,7 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
     }
 
     /* The cascade has to be in the store, not only in the tables. */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.instances().size() == 1);
     REQUIRE(reopened.accounts().size() == 2);
@@ -567,7 +671,7 @@ TEST_CASE("a remove_instance command takes the instance's accounts with it",
 TEST_CASE("start creates both roots and is idempotent", "[runtime]") {
     const temporary_database database("roots");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     /* One instance was seeded, so there is one tree per tree kind plus the
@@ -598,7 +702,7 @@ TEST_CASE("start creates both roots and is idempotent", "[runtime]") {
     manager.stop();
 
     /* Both roots are in the store, not only in the table. */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.folders().size() == 3);
     REQUIRE(reopened.folders().root(folder_tree::instances, "").has_value());
@@ -612,7 +716,7 @@ TEST_CASE("start gives an already-stored instance its accounts root",
     const temporary_database database("missing-root");
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
         /* A second instance is stored with its root, as a normal save does. */
@@ -632,7 +736,7 @@ TEST_CASE("start gives an already-stored instance its accounts root",
      * root and must not create a second one. This is the same convergence the
      * first start relies on, reached from a store rather than from memory.
      */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.folders().size() == 5);
     REQUIRE(reopened.folders().root(folder_tree::accounts, "inst-epsilon")
@@ -643,7 +747,7 @@ TEST_CASE("start gives an already-stored instance its accounts root",
 TEST_CASE("adding an instance creates its accounts root", "[runtime]") {
     const temporary_database database("instance-root");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     REQUIRE(manager.folders().size() == 3);
 
@@ -672,7 +776,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
     const temporary_database database("remove-folders");
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
         command save;
@@ -712,7 +816,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
         manager.stop();
     }
 
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.folders().size() == 3);
     reopened.stop();
@@ -721,7 +825,7 @@ TEST_CASE("removing an instance removes its accounts folders", "[runtime]") {
 TEST_CASE("a root folder cannot be removed or re-parented", "[runtime]") {
     const temporary_database database("root-refused");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     /* The one instance the fresh store was seeded with owns the second root. */
@@ -769,7 +873,7 @@ TEST_CASE("a root folder cannot be removed or re-parented", "[runtime]") {
 TEST_CASE("a folder is refused when it would contain itself", "[runtime]") {
     const temporary_database database("folder-cycle");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     command parent;
@@ -814,7 +918,7 @@ TEST_CASE("a folder is refused when it would contain itself", "[runtime]") {
 TEST_CASE("a label is attached, listed and detached by command", "[runtime]") {
     const temporary_database database("labels");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     command save;
@@ -865,7 +969,7 @@ TEST_CASE("a label is attached, listed and detached by command", "[runtime]") {
     manager.stop();
 
     /* The label is in the store even though its attachment was removed. */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.labels().size() == 1);
     REQUIRE(reopened.labellings().size() == 0);
@@ -876,7 +980,7 @@ TEST_CASE("a chart window is opened by command and closed by command",
     "[runtime]") {
     const temporary_database database("window");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     REQUIRE(manager.windows().size() == 1);
 
@@ -916,7 +1020,7 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     "[runtime]") {
     const temporary_database database("session-failed");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     command save;
@@ -944,17 +1048,20 @@ TEST_CASE("a session_failed event records the sentence a person reads",
     REQUIRE(manager.sessions().find("inst-refused", "ident-1").has_value());
 
     /*
-     * Let the worker's own attempt land first, so the event below is applied
-     * after it and the assertion is about this event rather than about the
-     * race between the two.
+     * The attempt's refusal, as the frame loop sees it. The event below is the
+     * second one, and the sentence it carries is the one the session keeps.
      */
-    const auto settled = wait_until([&manager] {
-        manager.pump();
-        const auto handle = manager.sessions().find("inst-refused", "ident-1");
-        return handle
-            && manager.sessions().status(*handle) == session_status::failed;
-    }, std::chrono::seconds(10));
-    REQUIRE(settled);
+    event refused;
+    refused.kind = event_kind::session_failed;
+    refused.instance_id = "inst-refused";
+    refused.account_id = "ident-1";
+    refused.code = "unreachable";
+    refused.message = "the instance is not reachable";
+    manager.events().push(std::move(refused));
+    manager.pump();
+    const auto settled = manager.sessions().find("inst-refused", "ident-1");
+    REQUIRE(settled.has_value());
+    REQUIRE(manager.sessions().status(*settled) == session_status::failed);
 
     event fact;
     fact.kind = event_kind::session_failed;
@@ -978,6 +1085,10 @@ TEST_CASE("an instance whose certificate cannot be opened names the file",
     "[runtime]") {
     const temporary_database database("tls-file");
 
+    /*
+     * A real actor, because this test is about what a real connect reports
+     * when the certificate it was given cannot be opened.
+     */
     instance_manager manager;
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
@@ -1048,7 +1159,7 @@ TEST_CASE("an instance whose certificate cannot be opened names the file",
 TEST_CASE("a probe against a refused port reports unreachable", "[runtime]") {
     const temporary_database database("probe-unreachable");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-refused");
@@ -1127,6 +1238,10 @@ TEST_CASE("a failure that is neither fault keeps its own short headline",
 TEST_CASE("a probe leaves the session table untouched", "[runtime]") {
     const temporary_database database("probe-isolation");
 
+    /*
+     * A real actor, because this test measures what a probe does to a session
+     * whose own connect attempt is settling against a refused port.
+     */
     instance_manager manager;
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
@@ -1188,7 +1303,7 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
     "[runtime]") {
     const temporary_database database("probe-backoff");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-refused");
@@ -1274,7 +1389,7 @@ TEST_CASE("a failed probe backs off and an answered one returns to the cadence",
 TEST_CASE("a probe result for a removed instance is dropped", "[runtime]") {
     const temporary_database database("probe-removed");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-gone");
@@ -1315,7 +1430,7 @@ TEST_CASE("probe_all moves every deadline and never doubles a probe in flight",
     "[runtime]") {
     const temporary_database database("probe-all");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-a");
@@ -1384,7 +1499,7 @@ TEST_CASE("probe_all moves every deadline and never doubles a probe in flight",
 TEST_CASE("a change of reachability raises one named signal", "[runtime]") {
     const temporary_database database("probe-signal");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     static_cast<void>(hedgr::model::signal::bus().drain());
@@ -1450,7 +1565,7 @@ TEST_CASE("a change of reachability raises one named signal", "[runtime]") {
 TEST_CASE("removing a folder re-homes what is under it", "[runtime]") {
     const temporary_database database("folder-rehome");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     const auto seeded = *manager.instances().rows().begin();
@@ -1492,7 +1607,7 @@ TEST_CASE("a second request for one accounts window focuses the first",
     "[runtime]") {
     const temporary_database database("accounts-window");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     const auto seeded = *manager.instances().rows().begin();
 
@@ -1538,7 +1653,7 @@ TEST_CASE("an accounts window reopens rather than being made again",
     "[runtime]") {
     const temporary_database database("accounts-reopen");
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     const auto seeded = *manager.instances().rows().begin();
 
@@ -1567,7 +1682,7 @@ TEST_CASE("a shortcut is saved, ordered and removed by command", "[runtime]") {
     std::string seeded_id;
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         REQUIRE(manager.shortcuts().size() == 0);
         seeded_id = manager.instances().rows()[0].id;
@@ -1610,7 +1725,7 @@ TEST_CASE("a shortcut is saved, ordered and removed by command", "[runtime]") {
     }
 
     /* The bar is read back from the store in the order it was left in. */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.shortcuts().size() == 2);
 
@@ -1632,7 +1747,7 @@ TEST_CASE("removing a target takes its shortcuts with it", "[runtime]") {
     std::string seeded_id;
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         seeded_id = manager.instances().rows()[0].id;
 
@@ -1691,7 +1806,7 @@ TEST_CASE("removing a target takes its shortcuts with it", "[runtime]") {
      * The cascade is in the store and not only in the table, so the entries do
      * not come back when the process does.
      */
-    instance_manager reopened;
+    instance_manager reopened(0, unreachable_actors());
     REQUIRE(reopened.start(database.path(), seed_options()).has_value());
     REQUIRE(reopened.shortcuts().size() == 1);
     REQUIRE(reopened.shortcuts().rows()[0].id == "sc-manager");
@@ -1701,7 +1816,7 @@ TEST_CASE("removing a target takes its shortcuts with it", "[runtime]") {
 TEST_CASE("two sessions on two instances open their own windows",
     "[windows]") {
     const temporary_database database("multi-session");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     REQUIRE(manager.last_error().empty());
 
@@ -1770,7 +1885,7 @@ TEST_CASE("two sessions on two instances open their own windows",
 TEST_CASE("a failed catalogue read leaves the session signed in",
     "[runtime]") {
     const temporary_database database("market-read-failed");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-refused");
@@ -1809,7 +1924,7 @@ TEST_CASE("a failed catalogue read leaves the session signed in",
 TEST_CASE("a read in flight at sign-out does not refuse reads after sign-in",
     "[runtime]") {
     const temporary_database database("read-across-sign-out");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-refused");
@@ -1878,7 +1993,7 @@ TEST_CASE("a read in flight at sign-out does not refuse reads after sign-in",
 TEST_CASE("windows over one CRM matrix share its reads and its cadence",
     "[crm]") {
     const temporary_database database("crm-cadence");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     add_unreachable_instance(manager, "inst-refused");
@@ -1944,7 +2059,7 @@ TEST_CASE("a restored wall is rebound by the sign-in it was saved against",
     const temporary_database database("rebind-wall");
     save_wall_signed_in(database);
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     REQUIRE(manager.windows().size() == 6);
 
@@ -2016,7 +2131,7 @@ TEST_CASE("a restored window reopened by command is rebound and reads at once",
     const temporary_database database("reopen-restored");
     save_wall_signed_in(database);
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     /*
@@ -2103,7 +2218,7 @@ TEST_CASE("a restored window reopened by command is rebound and reads at once",
 TEST_CASE("each window kind opens with its own cadence and deadline",
     "[windows]") {
     const temporary_database database("kind-cadence");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     /*
@@ -2177,7 +2292,7 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
 
 TEST_CASE("a refresh of a window with no read asks for nothing", "[windows]") {
     const temporary_database database("no-read-refresh");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
 
     push_command(manager, open_window(window_kind::notice, "inst-1", "acct-1"));
@@ -2204,7 +2319,7 @@ TEST_CASE("a refresh of a window with no read asks for nothing", "[windows]") {
 TEST_CASE("a wall the store refuses to save is a standing condition",
     "[windows]") {
     const temporary_database database("wall-refused");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     REQUIRE(manager.save_windows().has_value());
     REQUIRE(manager.last_error().empty());
@@ -2259,10 +2374,6 @@ enum class read_scenario {
     authenticated_without_token,
     authenticated,
 };
-
-constexpr auto read_instance = "inst-refused";
-constexpr auto read_account = "ident-1";
-constexpr auto read_tenant = "tenant-1";
 
 /** @brief One store, one unreachable instance, and a session in @p scenario. */
 void set_up_read_scenario(instance_manager& manager, read_scenario scenario) {
@@ -2408,7 +2519,7 @@ TEST_CASE("a read starter refuses a session that cannot read and starts one that
             CAPTURE(starter.name, static_cast<int>(scenario), expected);
 
             const temporary_database database("read-preamble");
-            instance_manager manager;
+            instance_manager manager(0, unreachable_actors());
             REQUIRE(manager.start(database.path(), seed_options()).has_value());
             set_up_read_scenario(manager, scenario);
 
@@ -2434,7 +2545,7 @@ TEST_CASE("the currency image map is read for a token and refused without one",
     for (const bool with_token : {true, false}) {
         CAPTURE(with_token);
         const temporary_database database("image-map-preamble");
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         set_up_read_scenario(manager, with_token
             ? read_scenario::authenticated
@@ -2549,7 +2660,7 @@ void sign_in_at(instance_manager& manager, const std::string& url) {
 TEST_CASE("a points answer fills the table and frees the series for the next read",
     "[runtime][reads]") {
     const temporary_database database("points-answer");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     set_up_read_scenario(manager, read_scenario::authenticated);
 
@@ -2606,7 +2717,7 @@ TEST_CASE("a points answer fills the table and frees the series for the next rea
 TEST_CASE("a points answer for a series nobody holds is dropped and counted",
     "[runtime][reads]") {
     const temporary_database database("points-unheld");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     set_up_read_scenario(manager, read_scenario::authenticated);
 
@@ -2654,7 +2765,7 @@ TEST_CASE("an image is read once and not asked for again while in flight or afte
     "[runtime][reads]") {
     const temporary_database database("image-dedup");
     connection_counter counter;
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     sign_in_at(manager, counter.url());
     settle(manager, counter);
@@ -2689,7 +2800,7 @@ TEST_CASE("an image is read once and not asked for again while in flight or afte
 TEST_CASE("a term structure whose member lists differ is never read",
     "[runtime][reads]") {
     const temporary_database database("term-structure-mismatch");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     set_up_read_scenario(manager, read_scenario::authenticated);
 
@@ -2723,7 +2834,7 @@ TEST_CASE("a failed currency image map is read again on refresh and a ready one 
     "[runtime][reads]") {
     const temporary_database database("image-map-retry");
     connection_counter counter;
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     sign_in_at(manager, counter.url());
     settle(manager, counter);
@@ -2789,7 +2900,7 @@ TEST_CASE("a failed currency image map is read again on refresh and a ready one 
 TEST_CASE("a deployment snapshot lands on the session row and frees the next read",
     "[runtime][reads]") {
     const temporary_database database("deployment-snapshot");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     set_up_read_scenario(manager, read_scenario::authenticated);
 
@@ -2909,7 +3020,7 @@ void hold_format(instance_manager& manager, const std::string& id,
 TEST_CASE("a connect that would change the wire format of a live session is refused",
     "[runtime][wire]") {
     const temporary_database database("wire-refused");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     hold_format(manager, "inst-live", "json");
 
@@ -2929,7 +3040,7 @@ TEST_CASE("a connect that would change the wire format of a live session is refu
 
 TEST_CASE("two live sessions may share a wire format", "[runtime][wire]") {
     const temporary_database database("wire-same");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     hold_format(manager, "inst-live", "json");
 
@@ -2948,7 +3059,7 @@ TEST_CASE("two live sessions may share a wire format", "[runtime][wire]") {
 
 TEST_CASE("a session that failed no longer holds the wire format", "[runtime][wire]") {
     const temporary_database database("wire-failed");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     add_formatted_instance(manager, "inst-live", "Holder", "json", refused_url);
     refuse_sign_in(manager, "inst-live", "ident-inst-live");
@@ -2971,7 +3082,7 @@ TEST_CASE("disconnecting or removing the holder releases the wire format",
     for (const bool remove_instance : {false, true}) {
         CAPTURE(remove_instance);
         const temporary_database database("wire-released");
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         hold_format(manager, "inst-live", "json");
 
@@ -3005,7 +3116,7 @@ TEST_CASE("disconnecting or removing the holder releases the wire format",
 TEST_CASE("a probe waits while a live session holds another wire format",
     "[runtime][wire]") {
     const temporary_database database("wire-probe");
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     hold_format(manager, "inst-live", "json");
 
@@ -3048,7 +3159,7 @@ TEST_CASE("each chart keeps its own view across a restart", "[windows]") {
     const chart_view hourly{.span_ns = hour, .style = chart_style::line};
 
     {
-        instance_manager manager;
+        instance_manager manager(0, unreachable_actors());
         REQUIRE(manager.start(database.path(), seed_options()).has_value());
         add_unreachable_instance(manager, "inst-refused");
         command save_account;
@@ -3071,40 +3182,56 @@ TEST_CASE("each chart keeps its own view across a restart", "[windows]") {
         manager.stop();
     }
 
-    instance_manager manager;
+    instance_manager manager(0, unreachable_actors());
     REQUIRE(manager.start(database.path(), seed_options()).has_value());
     CHECK(view_of(manager, "chart:inst-refused:ident-1:s-1") == daily);
     CHECK(view_of(manager, "chart:inst-refused:ident-1:s-2") == hourly);
     manager.stop();
 }
 
-TEST_CASE("a party switch holds the last request and wakes the armed wait",
+TEST_CASE("a party change reaches the session's actor and comes back as an "
+          "event",
     "[runtime][session][party]") {
-    using hedgr::runtime::worker::party_switch;
-
-    party_switch choice;
-    CHECK_FALSE(choice.take().has_value());
-
-    const auto first = std::make_shared<std::stop_source>();
-    choice.arm(first);
-    CHECK_FALSE(first->stop_requested());
-    choice.request("party-one");
-    CHECK(first->stop_requested());
-    const auto taken = choice.take();
-    REQUIRE(taken.has_value());
-    CHECK(*taken == "party-one");
-    CHECK_FALSE(choice.take().has_value());
-    choice.disarm();
+    using hedgr::runtime::worker::session_actor;
+    using hedgr::runtime::worker::session_actor_options;
 
     /*
-     * A request that lands before the worker arms its next wait still wakes
-     * that wait, which is the race the arm call exists to close.
+     * The frame loop's half of a party change: the request is left on the feed
+     * and the feed's own thread applies it. The other half - what the actor does
+     * with it - is driven over the fake link in the actor's own cases.
      */
-    choice.request("party-two");
-    const auto second = std::make_shared<std::stop_source>();
-    choice.arm(second);
-    CHECK(second->stop_requested());
-    const auto next = choice.take();
-    REQUIRE(next.has_value());
-    CHECK(*next == "party-two");
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value.token = "token-1";
+    link->account_value.party_id = "party-1";
+    link->account_value.access_lifetime_s = 1800;
+
+    hedgr::model::command::event_queue events;
+    session_actor_options options;
+    options.options.wire_format = "json";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+    options.link = link;
+    options.token = "token-1";
+    options.principal = "ops";
+    options.tenant_id = "tenant-1";
+    options.party_id = "party-1";
+    options.ping_interval = std::chrono::seconds{30};
+
+    session_actor actor(std::move(options));
+    actor.start();
+    actor.select_party("party-2");
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    bool changed = false;
+    while (!changed && std::chrono::steady_clock::now() < deadline) {
+        for (const auto& ev : events.drain())
+            changed = changed
+                || ev.kind == event_kind::session_party_changed;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    actor.request_stop();
+    while (!actor.finished())
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    CHECK(changed);
+    CHECK(link->switches == 1);
 }

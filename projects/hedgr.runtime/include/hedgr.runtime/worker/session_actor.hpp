@@ -184,6 +184,16 @@ public:
      */
     void request_stop() override;
 
+    /**
+     * @brief Asks the thread to sign out and then exit.
+     *
+     * A sign-out is the operator's, so the instance is told to drop the token
+     * before the connection closes, best effort. Anything else that stops an
+     * actor - a teardown, a failure, the process going away - uses
+     * @c request_stop and says nothing to the instance.
+     */
+    void request_logout() override;
+
     /** @brief Whether the thread has closed the connection and is exiting. */
     [[nodiscard]] bool finished() const noexcept override {
         return finished_.load(std::memory_order_acquire);
@@ -346,6 +356,14 @@ private:
     std::optional<std::string> new_party_;
     std::vector<read_request> reads_;
     bool stopping_ = false;
+
+    /**
+     * @brief Whether the stop in progress is a sign-out.
+     *
+     * Atomic because the frame thread sets it and the actor's thread reads it
+     * on the way out, without taking the mutex the stop path already holds.
+     */
+    std::atomic<bool> logout_on_stop_{false};
 
     std::atomic<bool> finished_{false};
 };

@@ -52,14 +52,10 @@ constexpr std::string_view unlisted_series_message =
 
 }
 
-market_feed::market_feed(const model::state::instance_table& instances,
-    const model::state::session_table& sessions,
-    model::state::series_table& series,
-    const session::transport::session_options& seed,
-    session_service& actors, catalogue_read read_catalogue,
-    backfill_read read_backfill)
-    : instances_(instances), sessions_(sessions), series_(series),
-      seed_(seed), actors_(actors),
+market_feed::market_feed(const model::state::session_table& sessions,
+    model::state::series_table& series, session_service& actors,
+    catalogue_read read_catalogue, backfill_read read_backfill)
+    : sessions_(sessions), series_(series), actors_(actors),
       read_catalogue_(std::move(read_catalogue)),
       read_backfill_(std::move(read_backfill)) {
 }
@@ -67,56 +63,44 @@ market_feed::market_feed(const model::state::instance_table& instances,
 void market_feed::attach(std::filesystem::path database_path) {
     database_path_ = std::move(database_path);
 }
-void market_feed::open(const model::event::event& ev) {
-    close(ev.instance_id, ev.account_id);
-    if (!is_open())
-        return;
-    const auto instance = instances_.find(ev.instance_id);
-    if (!instance)
+
+void market_feed::attach(std::string_view instance_id,
+    std::string_view account_id, std::shared_ptr<worker::tick_feed> stream) {
+    if (!is_open() || stream == nullptr)
         return;
 
-    worker::session_actor_options options;
-    options.options = connection_options_for(*instances_.get(*instance),
-        seed_, database_path_);
-    options.token = std::string{ev.token.view()};
-    options.principal = ev.payload;
-    options.tenant_id = ev.tenant_id;
-    options.party_id = ev.party_id;
-    options.key = domain::session_key{ev.instance_id, ev.account_id};
-
-    auto stream = actors_.open(std::move(options));
-
+    /*
+     * The entry is the feed's own bookkeeping: which series it has told the
+     * actor to watch, whether the full pass after a sign-in has run, and the
+     * actor it says it to. The actor is held here so an idle pump costs no key
+     * building; the session service holds its own reference, so a retired
+     * actor lives until its thread has finished.
+     */
     market_stream_entry entry;
-    entry.instance_id = ev.instance_id;
-    entry.account_id = ev.account_id;
+    entry.instance_id = std::string{instance_id};
+    entry.account_id = std::string{account_id};
     entry.stream = std::move(stream);
-    if (const auto session = sessions_.find(ev.instance_id, ev.account_id))
+    if (const auto session = sessions_.find(instance_id, account_id))
         entry.session = *session;
-    market_streams_.insert_or_assign(
-        running_key(ev.instance_id, ev.account_id), std::move(entry));
+    market_streams_.insert_or_assign(running_key(instance_id, account_id),
+        std::move(entry));
     BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Market tick stream opened for '" << ev.instance_id << "' / '"
-        << ev.account_id << "' in party '" << ev.party_id << "'";
+        << "Market feed watching '" << instance_id << "' / '" << account_id
+        << "'";
 }
 
-void market_feed::retoken_or_open(const model::event::event& ev) {
-    if (const auto stream = market_streams_.find(
-            running_key(ev.instance_id, ev.account_id));
-        stream != market_streams_.end() && stream->second.stream) {
-        stream->second.stream->set_token(std::string{ev.token.view()});
-    } else {
-        open(ev);
-    }
-}
-
-void market_feed::close(std::string_view instance_id,
+void market_feed::detach(std::string_view instance_id,
     std::string_view account_id) {
-    const auto key = running_key(instance_id, account_id);
-    const auto found = market_streams_.find(key);
+    market_streams_.erase(running_key(instance_id, account_id));
+}
+
+void market_feed::refresh_watches(std::string_view instance_id,
+    std::string_view account_id) {
+    const auto found = market_streams_.find(running_key(instance_id,
+        account_id));
     if (found == market_streams_.end())
         return;
-    actors_.retire(instance_id, account_id);
-    market_streams_.erase(found);
+    found->second.needs_pass = true;
 }
 
 void market_feed::link_restored(std::string_view instance_id,
@@ -201,6 +185,9 @@ bool market_feed::wanted(const market_stream_entry& entry,
 
 void market_feed::reconcile(market_stream_entry& entry,
     std::vector<refusal>& refusals) {
+    if (!entry.stream)
+        return;
+
     std::vector<worker::watch_target> targets;
     std::vector<model::state::series_handle> watching;
     for (const auto series :
@@ -236,6 +223,8 @@ void market_feed::reconcile(market_stream_entry& entry,
         targets.push_back(
             {.series = series, .canonical_uri = std::move(*canonical)});
     }
+    if (!entry.stream)
+        return;
     entry.stream->set_watch(targets);
     entry.watched = std::move(watching);
 }
@@ -246,25 +235,14 @@ void market_feed::forget(model::state::series_handle series) {
         const auto watching = std::ranges::find(entry.watched, series);
         if (watching == entry.watched.end())
             continue;
-        entry.stream->unwatch(series);
+        if (entry.stream)
+            entry.stream->unwatch(series);
         entry.watched.erase(watching);
     }
 }
 
 std::vector<refusal> market_feed::pump() {
     std::vector<refusal> refusals;
-
-    for (auto it = market_streams_.begin(); it != market_streams_.end();) {
-        const auto session = it->second.session;
-        if (sessions_.contains(session)
-            && sessions_.status(session)
-                == domain::session_status::authenticated) {
-            ++it;
-            continue;
-        }
-        actors_.retire(it->second.instance_id, it->second.account_id);
-        it = market_streams_.erase(it);
-    }
 
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
@@ -290,6 +268,8 @@ std::vector<refusal> market_feed::pump() {
     const auto now = steady_now_ns();
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
+        if (!entry.stream)
+            continue;
         entry.stream->drain(buckets_);
         for (const auto& bucket : buckets_) {
             const auto applied = series_.append(bucket.series, bucket.level,

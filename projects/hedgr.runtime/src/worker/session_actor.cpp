@@ -141,6 +141,11 @@ void session_actor::request_stop() {
     cv_.notify_all();
 }
 
+void session_actor::request_logout() {
+    logout_on_stop_.store(true, std::memory_order_release);
+    request_stop();
+}
+
 void session_actor::stop() {
     request_stop();
     if (thread_.joinable())
@@ -787,6 +792,22 @@ void session_actor::run() {
      * strand whatever mark the caller set when it submitted it.
      */
     answer_stranded_reads();
+
+    /*
+     * A sign-out is the operator's, so the instance is told to drop the token
+     * before the connection goes, best effort. Nothing else that stops an actor
+     * says goodbye: a teardown, a failure and the process going away all leave
+     * the instance to expire the token on its own.
+     */
+    if (logout_on_stop_.load(std::memory_order_acquire) && !session_failed
+        && stream && stream->connected()) {
+        if (const auto signed_out = link.logout(); !signed_out) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Signing out of '" << options_.key.instance_id << "' / '"
+                << options_.key.account_id << "' was refused: "
+                << signed_out.error().message;
+        }
+    }
 
     if (stream)
         stream->disconnect();

@@ -50,6 +50,15 @@ public:
     /** @brief Asks the feed to close and exit, without waiting for it. */
     virtual void request_stop() = 0;
 
+    /**
+     * @brief Asks the feed to sign out and then stop.
+     *
+     * The one stop that says goodbye to the instance: a user's sign-out drops
+     * the token at the deployment rather than only in this process (SR-24). The
+     * base asks for a plain stop, so a feed with no connection needs no more.
+     */
+    virtual void request_logout() { request_stop(); }
+
     /** @brief Whether the feed has closed and may be destroyed without a wait. */
     [[nodiscard]] virtual bool finished() const noexcept = 0;
 

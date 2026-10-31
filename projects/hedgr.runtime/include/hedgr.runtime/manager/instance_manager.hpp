@@ -57,10 +57,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace hedgr::runtime::worker {
-class party_switch;
-}
-
 namespace hedgr::runtime::manager {
 
 /**
@@ -428,16 +424,6 @@ private:
                            std::string sealed_credential = {});
 
     /**
-     * @brief Opens the account's stored credential off the frame loop.
-     *
-     * Derives the key on the pool and, when it opens, starts the session from
-     * there. Every failure comes back as an event, so the frame loop never
-     * waits on the derivation and never sees the plaintext.
-     */
-    void start_stored_connect(const model::command::command& cmd,
-                              std::string sealed);
-
-    /**
      * @brief Posts the fact that a store operation was refused.
      *
      * Used by the paths that run on the pool, which must not touch the state
@@ -448,7 +434,14 @@ private:
                               const std::string& account_id,
                               std::string message);
 
-    void stop_session(const std::string& window_or_session_id);
+    /**
+     * @brief Stops and forgets one session's actor, without saying goodbye.
+     *
+     * A teardown: the session row is going, or the process is, so the instance
+     * is not asked to drop a token nobody will use again.
+     */
+    void retire_session(std::string_view instance_id,
+                        std::string_view account_id);
 
     async::executor pool_;
 
@@ -471,18 +464,6 @@ private:
     model::command::event_queue events_;
 
     std::unique_ptr<store::sqlite::database> database_;
-
-    std::unordered_map<std::string, std::shared_ptr<std::stop_source>> running_;
-
-    /**
-     * @brief Where each live session's party choice is left for its worker.
-     *
-     * Keyed by the same running key as @c running_, because a party belongs to
-     * the worker that owns the transport. A session with no worker has no
-     * entry, and a choice sent to one is refused rather than kept.
-     */
-    std::unordered_map<std::string, std::shared_ptr<worker::party_switch>>
-        party_switches_;
 
     /**
      * @brief Pairs whose catalogue must be read again after a party change.
@@ -546,7 +527,16 @@ private:
             return session_service_.submit_read(instance_id, account_id,
                 request);
         }};
-    service::market_feed market_feed_;
+    service::market_feed market_feed_{sessions_, series_, session_service_,
+        [this](std::string_view instance_id, std::string_view account_id) {
+            return read_service_.start_market_catalogue_read(instance_id,
+                account_id);
+        },
+        [this](std::string_view instance_id, std::string_view account_id,
+               std::string_view series_id) {
+            read_service_.start_market_backfill(instance_id, account_id,
+                series_id);
+        }};
 };
 
 }

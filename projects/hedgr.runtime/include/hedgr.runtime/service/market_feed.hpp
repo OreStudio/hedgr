@@ -42,26 +42,26 @@ namespace hedgr::runtime::service {
 class session_service;
 
 /**
- * @brief The live price feed of every authenticated session.
+ * @brief The live price feed of every signed-in session.
  *
- * One stream per session, in a map keyed by the session's running key. The
- * stream owns the connection and its thread. This class owns the watch set,
- * asks for the catalogue and the backfill, and drains closed buckets into the
- * series table. It runs on the frame thread and is the only writer of the
- * buckets it applies. The NATS dispatch thread and the stream thread never
- * reach a member of it.
+ * One feed entry per session, keyed by the session's running key. The actor
+ * owns the connection and its thread; this class owns the watch set, asks for
+ * the catalogue and the backfill, and drains closed buckets into the series
+ * table. It runs on the frame thread and is the only writer of the buckets it
+ * applies. The NATS dispatch thread and the actor's thread never reach a member
+ * of it.
  *
  * The windows hold the series they show, and the table counts those holders.
  * A series is wanted when it has a holder, its catalogue lists it, and it is
  * the session's party's. The feed reads the table's change list for the rows
  * whose state may have flipped and does a full pass over a session's held rows
- * only when its stream opens, so a desk where nothing changed costs it the
+ * only when its session attaches, so a desk where nothing changed costs it the
  * drain and nothing else.
  *
- * Supervision decides when a stream exists and calls @c open, @c retoken_or_open
- * and @c close. This class never reads a session's status to decide that
- * except in @c pump, where a session that is no longer authenticated loses its
- * stream whatever supervision did.
+ * Supervision decides when a session is watched and calls @c attach and
+ * @c detach. This class never reads a session's status to decide that: an actor
+ * is legitimately connecting long before it is signed in, so a feed that
+ * retired what was not yet authenticated would retire a session mid-sign-in.
  *
  * Holds no reference to the manager. The tables it reads are passed in as
  * const references, the series table it appends to as a reference, the actors
@@ -82,35 +82,49 @@ public:
      * @param actors the session's actors, which this feed plots on and does
      * not own.
      */
-    market_feed(const model::state::instance_table& instances,
-        const model::state::session_table& sessions,
-        model::state::series_table& series,
-        const session::transport::session_options& seed,
-        session_service& actors, catalogue_read read_catalogue,
-        backfill_read read_backfill);
+    market_feed(const model::state::session_table& sessions,
+        model::state::series_table& series, session_service& actors,
+        catalogue_read read_catalogue, backfill_read read_backfill);
 
     /** @brief Records where the store is, which a stream's options need. */
     void attach(std::filesystem::path database_path);
 
-    /** @brief Opens the live stream for one authenticated session. */
-    void open(const model::event::event& ev);
+    /**
+     * @brief Starts watching a session whose actor has signed in.
+     *
+     * The actor is passed in rather than looked up per frame: a lookup builds
+     * the pair's joined key, and an idle desk must cost this feed the drain and
+     * nothing else. The actor owns the connection and its thread; the feed owns
+     * the watch set, and the session service keeps its own reference so a
+     * retired actor lives until its thread has finished.
+     */
+    void attach(std::string_view instance_id, std::string_view account_id,
+        std::shared_ptr<worker::tick_feed> stream);
 
     /**
-     * @brief Hands a refreshed token to the session's stream, or opens one.
+     * @brief Stops watching a session whose actor is going away.
      *
-     * A refresh replaces the credential and nothing else, so a stream that
-     * exists keeps its subscription and its open buckets.
+     * Called by supervision on a sign-out, a failed attempt and a removal, so
+     * a session that is gone cannot keep a watch set.
      */
-    void retoken_or_open(const model::event::event& ev);
+    void detach(std::string_view instance_id, std::string_view account_id);
 
-    /** @brief Stops and forgets one session's live stream. */
-    void close(std::string_view instance_id, std::string_view account_id);
+    /**
+     * @brief Makes the next pump work out the session's watch set again.
+     *
+     * A party change moves every series' want: the session's party is one of
+     * the three things that decide it, and the catalogue that arrives with the
+     * new party is another. Without this the old party's series would stay
+     * watched until something else changed.
+     */
+    void refresh_watches(std::string_view instance_id,
+        std::string_view account_id);
 
     /**
      * @brief Seeds every series the session watches again.
      *
      * Called when the session's connection answers after an outage, because the
-     * ticks published while it was down are gone. A session with no stream, or
+     * ticks published while it was down are gone. A session with no entry, or
      * a series the table no longer names, costs nothing.
      */
     void link_restored(
@@ -141,10 +155,8 @@ public:
     }
 
 private:
-    const model::state::instance_table& instances_;
     const model::state::session_table& sessions_;
     model::state::series_table& series_;
-    const session::transport::session_options& seed_;
 
     /** @brief The actors this feed plots on. It does not own them. */
     session_service& actors_;
@@ -158,13 +170,10 @@ private:
     }
 
     /**
-     * @brief One authenticated session's live prices.
+     * @brief One watched session.
      *
      * The actor owns the connection and its thread; the feed owns the watch
-     * set, the backfill and the drain into the model. Keyed by the session's
-     * running key. The actor is held here because the feed asks it for
-     * buckets every frame, and the session service holds it too, so a retired
-     * actor stays alive until its thread has finished.
+     * set, the backfill and the drain into the model.
      */
     struct market_stream_entry final {
         std::string instance_id;

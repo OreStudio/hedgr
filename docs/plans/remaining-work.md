@@ -143,14 +143,19 @@ Follow-ups noticed while building the Instances panel, both done:
   inside the silence window is tested by driving the read directly over the fake
   link (`tick_silence_tests.cpp`), since a market read no longer has a spawn of
   its own to go through.
-- Done: the session actor's steps 3, 4 and 5 have landed — liveness with
-  `link_lost`/`link_restored` and the reseed, every read on the actor's one
-  connection, and the deletion of `session_task.hpp`. Step 6, supervision into
-  the actor, is the next one, and the plan gates it on a live check.
+- Done: **the session actor's step 6 has landed** — supervision creates the actor
+  at the connect command, the actor owns the whole lifecycle (sign-in, sealed
+  credential, refresh with a backoff until expiry, party change, logout on a
+  sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
+  A session now has one connection for reads, ticks, the lifecycle and the
+  logout. The live check the plan names has **not** been run: one connection per
+  session on the broker, recovery from a broker restart, a refresh against the
+  real IAM, and a sign-out that logs out. Run it before this is trusted on a
+  desk.
 - `docs/review/README.md` status cells are partly updated: the session actor's
-  decisions D1 to D6 now record where each came out, and the SR-6 and C-5 notes
-  say what they stand on. Still open: the series table decisions D1 to D7 and the
-  wording of PR #63.
+  decisions D1 to D6 now record where each came out, and the SR-6, C-5, SR-15,
+  SR-24 and SR-12 notes say what they stand on. Still open: the series table
+  decisions D1 to D7 and the wording of PR #63.
 - Done: **SR-12 is closed.** A window kind with no read has a zero cadence and a
   parked deadline at all four moments, so an idle desk no longer sends a refresh
   per such window per second for an event that named the window and carried
