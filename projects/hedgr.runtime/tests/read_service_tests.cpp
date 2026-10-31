@@ -136,13 +136,21 @@ struct fixture final {
     /** @brief Whether the session refuses the next read, as a stopped one would. */
     bool refuse_reads = false;
 
-    service::read_service reads{pool.context(), events, instances, accounts,
+    service::read_service reads{events, instances, accounts,
         sessions, windows, series, seed,
         [this](std::string_view, std::string_view,
                const hedgr::runtime::worker::read_request& request) {
             if (refuse_reads)
                 return false;
             submitted.push_back(request);
+            /*
+             * The session's actor answers every read it accepts, so this one
+             * does too: with the failure an unreachable instance gives. A test
+             * that drains the queue sees the answer the frame loop would.
+             */
+            events.push(hedgr::runtime::worker::read_failed(request,
+                domain::session_key{instance_id, account_id}, tenant_id,
+                "the instance is not reachable"));
             return true;
         }};
 };
@@ -445,6 +453,55 @@ TEST_CASE("a curve read is handed to the session's actor", "[reads][actor]") {
         != nullptr);
 }
 
+TEST_CASE("a catalogue read is handed to the session's actor",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    static_cast<void>(f.reads.start(
+        {service::read_kind::market_catalogue, f.series_browser}));
+
+    REQUIRE(f.submitted.size() == 1);
+    CHECK(std::holds_alternative<
+        hedgr::runtime::worker::catalogue_request>(f.submitted[0]));
+    CHECK(f.reads.pending().contains(
+        request_id::catalogue(instance_id, account_id)));
+}
+
+TEST_CASE("a points read is handed to the session's actor", "[reads][actor]") {
+    fixture f;
+    f.open();
+
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request = std::get_if<
+        hedgr::runtime::worker::market_points_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->series_id == "s-1");
+    CHECK(f.reads.pending().contains(
+        request_id::points(instance_id, account_id, "s-1")));
+}
+
+TEST_CASE("a history read is handed to the session's actor with its span",
+    "[reads][actor]") {
+    fixture f;
+    f.open();
+    static_cast<void>(seed_backfill(f));
+
+    f.reads.load_history(history_command(hour));
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request = std::get_if<
+        hedgr::runtime::worker::market_history_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->series_id == "s-1");
+    CHECK(request->from_ns == base + 1999 * second - hour);
+    CHECK(request->to_ns > request->from_ns);
+    CHECK(f.reads.pending().contains(
+        request_id::history(instance_id, account_id, "s-1")));
+}
+
 TEST_CASE("a read the actor refuses leaves nothing in flight",
     "[reads][actor]") {
     fixture f;
@@ -569,12 +626,11 @@ TEST_CASE("a longer period starts one read of the depth it needs",
         request_id::history(instance_id, account_id, "s-1")));
     CHECK(f.series.history(row).reading);
 
-    /* The refused port answers at once, naming the range it was asked for. */
-    std::vector<event::event> answers;
-    while (answers.empty()) {
-        answers = f.events.drain();
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
+    /*
+     * The answer names the range the read was asked for, whether the actor ran
+     * it or refused it, because the answer is built from the request.
+     */
+    const auto answers = f.events.drain();
     REQUIRE(answers.size() == 1);
     CHECK(answers[0].kind == event::event_kind::series_history);
     CHECK(answers[0].history_from_ns == base + 1999 * second - hour);
@@ -771,18 +827,14 @@ namespace {
 
 namespace worker = hedgr::runtime::worker;
 
-[[nodiscard]] worker::market_job points_job() {
-    worker::market_job job;
-    job.series_id = "s-1";
-    return job;
+[[nodiscard]] worker::read_request points_job() {
+    return worker::market_points_request{.series_id = "s-1"};
 }
 
-[[nodiscard]] worker::market_job history_job() {
-    auto job = points_job();
-    job.history = true;
-    job.history_from_ns = 5;
-    job.history_to_ns = 9;
-    return job;
+[[nodiscard]] worker::read_request history_job() {
+    return worker::market_history_request{.series_id = "s-1",
+        .from_ns = 5,
+        .to_ns = 9};
 }
 
 [[nodiscard]] event::event read_fact(int points, std::string message = {}) {

@@ -401,18 +401,25 @@ bounded by one interval plus the request timeout.
 
 ### 4. Reads move onto the actor, one kind at a time
 
-> **Status: started.** `session_service` holds the map from a session to its
-> actor and `submit_read`; the feed asks it for the actor instead of making one.
-> The actor queues what it is given, runs it on its own link and pushes the
-> answer, and a connect that fails or a stop answers every read already queued
-> with its failure, so a caller's mark is never stranded. Images, the currency
-> image map, CRM names, the CRM batch, the deployment and the term structure are
-> converted: their per-read connection and their spawn functions are gone, and a
-> read that does not run answers where its handlers look — the message, and for
-> the deployment the snapshot's own failure, which is the field its pane draws.
-> A curve read holds the session's connection for one round trip per member, as
-> D3 said it would; only the market reads still open their own, and they are
-> entangled with the reseed of step 3 and the feed's watch.
+> **Status: done.** `session_service` holds the map from a session to its actor
+> and `submit_read`; the feed asks it for the actor instead of making one. The
+> actor queues what it is given, runs it on its own link and pushes the answer,
+> and a connect that fails or a stop answers every read already queued with its
+> failure, so a caller's mark is never stranded. All nine kinds are converted —
+> images, the currency image map, CRM names, the CRM batch, the deployment, the
+> term structure, the catalogue, a series' first load and its history — so no
+> read in `hedgr.runtime` opens a connection, `read_service` no longer holds the
+> pool, and every per-read spawn function is deleted. A read that does not run
+> answers where its handlers look: the message, and for the deployment the
+> snapshot's own failure, which is the field its pane draws.
+>
+> Two consequences worth naming. A curve read holds the session's connection for
+> one round trip per member, as D3 said it would. A chart's tick read keeps its
+> own 8 s bound, which is now a parameter of the link's two tick calls rather
+> than a shortened request timeout on a connection that no longer exists.
+>
+> Only the probe and the password policy read still build a client of their own,
+> and neither is a session read.
 
 > **The request shape is a typed variant.** `read_request =
 > std::variant<image_request, image_map_request, crm_names_request,
@@ -474,6 +481,15 @@ gone, after deployment 58, after term structure 98, after the catalogue read
 all of them. Charts add only their one-off backfills.
 
 ### 5. Delete the per-read connection code
+
+> **Status: most of it landed with step 4.** The `connect` and `resume` blocks in
+> `market_worker.cpp` and `deployment_worker.cpp` are gone with their reads, so
+> are the token copy in `read_service.cpp`, every per-read spawn function, and
+> the pool `read_service` held. What is left is the type those blocks shared:
+> `run_session_read` and `run_session_read_on_link` now have no production
+> caller, and `session_read` survives only as the gate's answer in
+> `read_service`. Deleting both, and with them the token and connection fields
+> the gate still fills, is the whole of the remaining diff.
 
 Delete `run_session_read` (`session_task.hpp:58-77`), the `connect` and `resume`
 blocks in `market_worker.cpp` and `deployment_worker.cpp`, `session_read::token`,

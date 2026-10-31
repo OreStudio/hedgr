@@ -143,29 +143,19 @@ TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
 
 namespace {
 
-model::event::event market_read(fake_link& link, worker::market_job job) {
-    boost::asio::io_context context;
-    model::command::event_queue events;
-    boost::asio::co_spawn(context,
-        worker::run_market_read(link, std::move(job), events),
-        boost::asio::detached);
-    context.run();
-    const auto got = events.drain();
-    return got.empty() ? model::event::event{} : got.front();
+model::event::event market_read(fake_link& link, worker::read_request request) {
+    auto fact = worker::read_event(request,
+        model::domain::session_key{"market-i", "a"}, {});
+    worker::run_market_read(link, request, fact);
+    return fact;
 }
 
-worker::market_job catalogue_job() {
-    worker::market_job job;
-    job.catalogue = true;
-    job.key = model::domain::session_key{"market-i", "a"};
-    return job;
+worker::read_request catalogue_request() {
+    return worker::catalogue_request{};
 }
 
-worker::market_job points_job() {
-    worker::market_job job;
-    job.key = model::domain::session_key{"market-i", "a"};
-    job.series_id = "s-1";
-    return job;
+worker::read_request points_request() {
+    return worker::market_points_request{.series_id = "s-1"};
 }
 
 }
@@ -177,7 +167,7 @@ TEST_CASE("a catalogue read carries its series and providers", "[link][market]")
     link.providers.push_back(model::domain::market_provider_row{
         .code = "bloomberg", .name = "Bloomberg", .kind = "data_vendor"});
 
-    const auto fact = market_read(link, catalogue_job());
+    const auto fact = market_read(link, catalogue_request());
     CHECK(fact.kind == model::event::event_kind::series_catalogue);
     REQUIRE(fact.series.size() == 1);
     CHECK(fact.series[0].label == "FX EUR/USD");
@@ -192,7 +182,7 @@ TEST_CASE("a points read carries its points", "[link][market]") {
         session::market_point{.at_ns = 10, .value = 1.5},
         session::market_point{.at_ns = 20, .value = 1.6}};
 
-    const auto fact = market_read(link, points_job());
+    const auto fact = market_read(link, points_request());
     CHECK(fact.kind == model::event::event_kind::series_points);
     REQUIRE(fact.points.size() == 2);
     CHECK(fact.points[1].value == 1.6);
@@ -204,7 +194,7 @@ TEST_CASE("a failed points read becomes the event's message", "[link][market]") 
         .code = session::session_errc::read_refused,
         .message = "the read was refused"};
 
-    const auto fact = market_read(link, points_job());
+    const auto fact = market_read(link, points_request());
     CHECK(fact.points.empty());
     CHECK(fact.message == "the read was refused");
 }

@@ -23,6 +23,7 @@
 #include "hedgr.runtime/worker/deployment_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
+#include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/term_structure_worker.hpp"
 
 namespace hedgr::runtime::worker {
@@ -77,6 +78,18 @@ model::event::event read_event(const read_request& request,
                        fact.curve_key = value.key;
                        fact.curve_label = value.label;
                    },
+                   [&](const catalogue_request&) {
+                       fact.kind = event::event_kind::series_catalogue;
+                   },
+                   [&](const market_points_request& value) {
+                       fact.kind = event::event_kind::series_points;
+                       fact.series_id = value.series_id;
+                   },
+                   [&](const market_history_request& value) {
+                       fact.kind = event::event_kind::series_history;
+                       fact.series_id = value.series_id;
+                       fact.history_from_ns = value.from_ns;
+                   },
                },
         request);
     return fact;
@@ -121,6 +134,15 @@ void run_read(hedgr::session::transport::session_link& link,
                    [&](const term_request& value) {
                        run_term_structure_read(link, value.member_ids,
                            value.member_tenors, answer);
+                   },
+                   [&](const catalogue_request&) {
+                       run_market_read(link, request, answer);
+                   },
+                   [&](const market_points_request&) {
+                       run_market_read(link, request, answer);
+                   },
+                   [&](const market_history_request&) {
+                       run_market_read(link, request, answer);
                    },
                },
         request);

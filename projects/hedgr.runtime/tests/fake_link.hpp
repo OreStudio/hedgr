@@ -205,7 +205,8 @@ struct fake_session_link final : session::transport::session_link {
     [[nodiscard]] session::transport::result<
         session::transport::market_series_read>
     market_series_points(std::string_view,
-        const hedgr::model::domain::market_series_identity&) const override {
+        const hedgr::model::domain::market_series_identity&,
+        std::chrono::milliseconds) const override {
         if (points_error)
             return std::unexpected(*points_error);
         return points_read;
@@ -214,7 +215,8 @@ struct fake_session_link final : session::transport::session_link {
     [[nodiscard]] session::transport::result<
         session::transport::market_series_read>
     market_series_history(std::string_view, std::int64_t, std::int64_t,
-        const hedgr::model::domain::market_series_identity&) const override {
+        const hedgr::model::domain::market_series_identity&,
+        std::chrono::milliseconds) const override {
         if (points_error)
             return std::unexpected(*points_error);
         return points_read;

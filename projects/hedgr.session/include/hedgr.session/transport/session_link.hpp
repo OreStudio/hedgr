@@ -22,6 +22,7 @@
 
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_client.hpp"
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string_view>
@@ -109,16 +110,24 @@ public:
     [[nodiscard]] virtual result<std::vector<market_series_summary>>
     market_series() const = 0;
 
-    /** @brief The first load of one series: its newest ticks. */
+    /**
+     * @brief The first load of one series: its newest ticks.
+     *
+     * @p timeout bounds the call, because a chart's read must not hold the
+     * session's connection for the whole request timeout: a service that is
+     * not answering is a chart that is not drawing either.
+     */
     [[nodiscard]] virtual result<market_series_read> market_series_points(
         std::string_view series_id,
-        const hedgr::model::domain::market_series_identity& identity) const = 0;
+        const hedgr::model::domain::market_series_identity& identity,
+        std::chrono::milliseconds timeout) const = 0;
 
-    /** @brief One series' ticks over a span. */
+    /** @brief One series' ticks over a span, bounded by @p timeout. */
     [[nodiscard]] virtual result<market_series_read> market_series_history(
         std::string_view series_id, std::int64_t from_ns,
         std::int64_t to_ns,
-        const hedgr::model::domain::market_series_identity& identity) const = 0;
+        const hedgr::model::domain::market_series_identity& identity,
+        std::chrono::milliseconds timeout) const = 0;
 
     /** @brief Every market data provider and its kind. */
     [[nodiscard]] virtual result<
@@ -208,17 +217,17 @@ public:
 
     [[nodiscard]] result<market_series_read> market_series_points(
         std::string_view series_id,
-        const hedgr::model::domain::market_series_identity& identity)
-        const override {
-        return client_.market_series_points(series_id, identity);
+        const hedgr::model::domain::market_series_identity& identity,
+        std::chrono::milliseconds timeout) const override {
+        return client_.market_series_points(series_id, identity, timeout);
     }
 
     [[nodiscard]] result<market_series_read> market_series_history(
         std::string_view series_id, std::int64_t from_ns, std::int64_t to_ns,
-        const hedgr::model::domain::market_series_identity& identity)
-        const override {
+        const hedgr::model::domain::market_series_identity& identity,
+        std::chrono::milliseconds timeout) const override {
         return client_.market_series_history(series_id, from_ns, to_ns,
-            identity);
+            identity, timeout);
     }
 
     [[nodiscard]] result<

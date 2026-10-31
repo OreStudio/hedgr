@@ -239,3 +239,62 @@ TEST_CASE("a request that could not run answers where its handlers look",
     CHECK(names.message == "no link");
     CHECK(names.party_id == "p-1");
 }
+
+TEST_CASE("a catalogue request names its event", "[read]") {
+    const worker::read_request request = worker::catalogue_request{};
+
+    const auto fact = worker::read_event(request, key(), "t-1");
+    CHECK(fact.kind == model::event::event_kind::series_catalogue);
+    CHECK(fact.series_id.empty());
+}
+
+TEST_CASE("a points request names its series", "[read]") {
+    const worker::read_request request =
+        worker::market_points_request{.series_id = "s-1"};
+
+    const auto fact = worker::read_event(request, key(), "t-1");
+    CHECK(fact.kind == model::event::event_kind::series_points);
+    CHECK(fact.series_id == "s-1");
+}
+
+TEST_CASE("a history request carries its span", "[read]") {
+    const worker::read_request request = worker::market_history_request{
+        .series_id = "s-1", .from_ns = 5, .to_ns = 9};
+
+    const auto fact = worker::read_event(request, key(), "t-1");
+    CHECK(fact.kind == model::event::event_kind::series_history);
+    CHECK(fact.series_id == "s-1");
+    CHECK(fact.history_from_ns == 5);
+}
+
+TEST_CASE("a points read fills the event's points", "[read][market]") {
+    fake_link link;
+    link.points_read.points = {
+        session::market_point{.at_ns = 10, .value = 1.5},
+        session::market_point{.at_ns = 20, .value = 1.6}};
+
+    const worker::read_request request =
+        worker::market_points_request{.series_id = "s-1"};
+    auto fact = worker::read_event(request, key(), "t-1");
+    worker::run_read(link, request, fact);
+
+    CHECK(fact.kind == model::event::event_kind::series_points);
+    REQUIRE(fact.points.size() == 2);
+    CHECK(fact.points[1].value == 1.6);
+    CHECK(fact.message.empty());
+}
+
+TEST_CASE("a history read asks for the span the request carries",
+    "[read][market]") {
+    fake_link link;
+    link.points_read.points = {session::market_point{.at_ns = 10, .value = 1.0}};
+
+    const worker::read_request request = worker::market_history_request{
+        .series_id = "s-1", .from_ns = 5, .to_ns = 9};
+    auto fact = worker::read_event(request, key(), "t-1");
+    worker::run_read(link, request, fact);
+
+    CHECK(fact.kind == model::event::event_kind::series_history);
+    CHECK(fact.history_from_ns == 5);
+    CHECK(fact.points.size() == 1);
+}

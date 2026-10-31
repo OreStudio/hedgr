@@ -20,10 +20,12 @@
 #ifndef HEDGR_RUNTIME_WORKER_READ_REQUEST_HPP
 #define HEDGR_RUNTIME_WORKER_READ_REQUEST_HPP
 
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.session/transport/session_link.hpp"
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -78,6 +80,40 @@ struct term_request final {
     std::vector<std::string> member_tenors;
 };
 
+/** @brief The series the deployment publishes, and their providers. */
+struct catalogue_request final {
+};
+
+/** @brief One series' newest ticks, for a chart's first load. */
+struct market_points_request final {
+    /** @brief The series' key. */
+    std::string series_id;
+
+    /**
+     * @brief The typed identity the catalogue gave this series.
+     *
+     * The read names the series by this rather than listing the deployment's
+     * identities first. Empty when the catalogue did not carry one, and the
+     * read then falls back to the list.
+     */
+    model::domain::market_series_identity identity;
+};
+
+/** @brief One series' ticks over a span the chart planned. */
+struct market_history_request final {
+    /** @brief The series' key. */
+    std::string series_id;
+
+    /** @brief The typed identity the catalogue gave this series. */
+    model::domain::market_series_identity identity;
+
+    /** @brief The earliest instant wanted, epoch nanoseconds. */
+    std::int64_t from_ns = 0;
+
+    /** @brief The end of the span, exclusive, epoch nanoseconds. */
+    std::int64_t to_ns = 0;
+};
+
 /**
  * @brief One read a session asks for, carrying every input it needs.
  *
@@ -87,13 +123,12 @@ struct term_request final {
  * holds a value, a log can name it, and the actor that runs it needs nothing
  * from the caller's frame.
  *
- * The alternatives are the reads that already have a mapping from an open
- * connection to an event, @c run_read. Term structure and the market reads join
- * as the groups that convert them land, because until then their read functions
- * own their own connection.
+ * Every read a window makes is here, so the actor's connection carries the
+ * whole of what a session asks for and no read opens a connection of its own.
  */
 using read_request = std::variant<image_request, image_map_request,
-    crm_names_request, crm_rates_request, deployment_request, term_request>;
+    crm_names_request, crm_rates_request, deployment_request, term_request,
+    catalogue_request, market_points_request, market_history_request>;
 
 /**
  * @brief The event a request will answer with, before the read runs.

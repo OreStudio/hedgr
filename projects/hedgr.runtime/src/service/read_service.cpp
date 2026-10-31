@@ -73,17 +73,16 @@ constexpr std::chrono::milliseconds crm_cadence{5000};
 
 }
 
-read_service::read_service(boost::asio::io_context& pool,
-    model::command::event_queue& events,
+read_service::read_service(model::command::event_queue& events,
     const model::state::instance_table& instances,
     const model::state::account_table& accounts,
     const model::state::session_table& sessions,
     const model::state::window_table& windows,
     model::state::series_table& series,
     const session::transport::session_options& seed, read_submit submit)
-    : pool_(pool), events_(events), instances_(instances),
-      accounts_(accounts), sessions_(sessions), windows_(windows),
-      seed_(seed), submit_(std::move(submit)), market_(series) {
+    : events_(events), instances_(instances), accounts_(accounts),
+      sessions_(sessions), windows_(windows), seed_(seed),
+      submit_(std::move(submit)), market_(series) {
 }
 
 void read_service::attach(std::filesystem::path database_path) {
@@ -265,16 +264,14 @@ std::optional<refusal> read_service::launch_market_read(
     if (pending_.contains(id))
         return std::nullopt;
 
-    worker::market_job job;
-    job.options = std::move(read.options);
-    job.key = domain::session_key{read.instance_id, read.account_id};
-    job.token = std::move(read.token);
-    job.principal = std::move(read.principal);
-    job.catalogue = catalogue;
-    job.series_id = std::string{series_id};
-    if (!catalogue)
-        job.identity = catalogue_identity(market_, read.instance_id,
-            read.account_id, series_id);
+    const worker::read_request request = catalogue
+        ? worker::read_request{worker::catalogue_request{}}
+        : worker::read_request{worker::market_points_request{
+              .series_id = std::string{series_id},
+              .identity = catalogue_identity(market_, read.instance_id,
+                  read.account_id, series_id)}};
+    if (!submit_read(read, request))
+        return std::nullopt;
 
     pending_.mark(id);
     if (catalogue)
@@ -289,7 +286,6 @@ std::optional<refusal> read_service::launch_market_read(
         << "'"
         << (catalogue ? std::string{}
                       : std::format(" series '{}'", series_id));
-    worker::spawn_market_read(pool_, std::move(job), events_);
     return std::nullopt;
 }
 
@@ -487,16 +483,12 @@ void read_service::start_market_backfill(std::string_view instance_id,
         return;
     }
 
-    worker::market_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{std::string{instance_id},
-        std::string{account_id}};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
-    job.catalogue = false;
-    job.series_id = std::string{series_id};
-    job.identity = catalogue_identity(market_, instance_id, account_id,
-        series_id);
+    const worker::market_points_request request{.series_id =
+            std::string{series_id},
+        .identity = catalogue_identity(market_, instance_id, account_id,
+            series_id)};
+    if (!submit_read(*read, request))
+        return;
 
     pending_.mark(id);
     BOOST_LOG_SEV(lg(), ores::logging::info)
@@ -504,7 +496,6 @@ void read_service::start_market_backfill(std::string_view instance_id,
         << instance_id << "' / '" << account_id << "': first load reads the "
         << "ticks of a span widened until it holds "
         << domain::market_first_load_min_points << " points";
-    worker::spawn_market_read(pool_, std::move(job), events_);
 }
 
 void read_service::load_history(const model::command::command& cmd) {
@@ -540,17 +531,13 @@ void read_service::load_history(const model::command::command& cmd) {
         return;
     }
 
-    worker::market_job job;
-    job.options = std::move(read->options);
-    job.key = domain::session_key{cmd.instance_id, cmd.account_id};
-    job.token = std::move(read->token);
-    job.principal = std::move(read->principal);
-    job.series_id = cmd.series_id;
-    job.identity = catalogue_identity(market_, cmd.instance_id,
-        cmd.account_id, cmd.series_id);
-    job.history = true;
-    job.history_from_ns = plan->from_ns;
-    job.history_to_ns = plan->to_ns;
+    const worker::market_history_request request{.series_id = cmd.series_id,
+        .identity = catalogue_identity(market_, cmd.instance_id,
+            cmd.account_id, cmd.series_id),
+        .from_ns = plan->from_ns,
+        .to_ns = plan->to_ns};
+    if (!submit_read(*read, request))
+        return;
 
     pending_.mark(id);
     market_.begin_history(*held);
@@ -561,7 +548,6 @@ void read_service::load_history(const model::command::command& cmd) {
         << " held_oldest_at_ns=" << plan->to_ns
         << " from_ns=" << plan->from_ns << " max_ticks="
         << domain::market_tick_ceiling;
-    worker::spawn_market_read(pool_, std::move(job), events_);
 }
 
 void read_service::load_crm_names(const model::command::command& cmd) {

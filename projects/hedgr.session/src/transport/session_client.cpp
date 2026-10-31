@@ -1419,7 +1419,17 @@ series_identity(ores::nats::service::nats_client& nats,
 result<market_series_read>
 session_client::market_series_ticks(std::string_view series_id,
     std::int64_t from_ns, std::int64_t to_ns,
-    const hedgr::model::domain::market_series_identity& identity) const {
+    const hedgr::model::domain::market_series_identity& identity,
+    std::chrono::milliseconds requested_timeout) const {
+    /*
+     * A chart's read is bounded by the caller's timeout and not by the
+     * session's, because a service that is not answering must not hold the
+     * session's connection for the whole request timeout. Zero means the
+     * session's own, which is what a read of the tail asks for.
+     */
+    const auto request_timeout = requested_timeout.count() > 0
+        ? requested_timeout
+        : options_.request_timeout;
     if (!is_connected()) {
         return fail(session_errc::closed,
             "a tick read needs an open connection to the instance");
@@ -1464,8 +1474,8 @@ session_client::market_series_ticks(std::string_view series_id,
                     {.name = field.name, .text = field.text});
             }
         } else {
-            auto listed = series_identity(client(), series_id,
-                options_.request_timeout);
+            auto listed =
+                series_identity(client(), series_id, request_timeout);
             if (!listed)
                 return std::unexpected(std::move(listed.error()));
             request_identity = std::move(*listed);
@@ -1485,8 +1495,7 @@ session_client::market_series_ticks(std::string_view series_id,
 
         const auto reply = ores::nats::service::authenticated_request_and_decode<
             get_series_ticks_response>(client(),
-            get_series_ticks_request::nats_subject, request,
-            options_.request_timeout);
+            get_series_ticks_request::nats_subject, request, request_timeout);
         if (!reply) {
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "The tick answer for series '" << series_id
@@ -1538,11 +1547,12 @@ namespace {
 
 result<market_series_read>
 session_client::market_series_points(std::string_view series_id,
-    const hedgr::model::domain::market_series_identity& identity) const {
+    const hedgr::model::domain::market_series_identity& identity,
+    std::chrono::milliseconds timeout) const {
     const tick_fetch fetch
-        = [this, series_id, &identity](const tick_span& span) {
+        = [this, series_id, &identity, timeout](const tick_span& span) {
               return market_series_ticks(series_id, span.from_ns, span.to_ns,
-                  identity);
+                  identity, timeout);
           };
     return read_first_load(fetch, clock_now_ns());
 }
@@ -1560,11 +1570,12 @@ session_client::market_series_tail(std::string_view series_id,
 result<market_series_read>
 session_client::market_series_history(std::string_view series_id,
     std::int64_t from_ns, std::int64_t to_ns,
-    const hedgr::model::domain::market_series_identity& identity) const {
+    const hedgr::model::domain::market_series_identity& identity,
+    std::chrono::milliseconds timeout) const {
     const tick_fetch fetch
-        = [this, series_id, &identity](const tick_span& span) {
+        = [this, series_id, &identity, timeout](const tick_span& span) {
               return market_series_ticks(series_id, span.from_ns, span.to_ns,
-                  identity);
+                  identity, timeout);
           };
     return read_tick_span(fetch, tick_span{from_ns, to_ns}, to_ns, 1);
 }
