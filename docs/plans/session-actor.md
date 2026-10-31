@@ -518,14 +518,23 @@ to 3 when step 6 deletes the session worker. The 7 are `session_worker.cpp:115`,
 
 ### 6. Supervision moves into the actor
 
-> **Status: the seam it needs is in.** Step 1 now carries the sign-in calls on
-> `session_link`, and `session_worker.cpp` runs on that seam through
-> `run_session_on_link`, so the worker it deletes is the one the fake link can
-> already drive: a scripted sign-in, its status events, its token, and a refused
-> sign-in. What this step still does — creating the actor at the connect command,
-> moving the sealed-credential open and the wipe into it, the refresh deadline
-> with backoff, the logout, and the removal of `market_feed`'s open/close — is
-> not started.
+> **Status: pieces 1 and 2 are in.** The actor's options carry the attempt, a
+> typed credential, a sealed credential and the master password that opens it;
+> given either credential the actor runs connect, open, authenticate, wipe and
+> report, then the loop it already had, with a refresh deadline at four fifths of
+> the lifetime retried with a backoff until the token really expires (SR-15), and
+> `select_party` as a command that moves the session's party and rebuilds the
+> subscription. Eight cases over the fake link pin that, and the path the tick
+> feed uses — a token and the facts of a session already signed in — is unchanged.
+>
+> What remains is the half that depends on a live check: supervision creating the
+> actor at the connect command and stopping it instead of holding a stop source
+> (piece 3), `market_feed` losing `open`, `retoken_or_open`, `close` and its
+> unauthenticated sweep in favour of `attach`/`detach` (piece 4), the logout on
+> stop, and the deletion of `session_worker.{hpp,cpp}` and `party_switch` with the
+> worker's two tests moved to the actor (piece 5). Until those land, the
+> application runs the actor exactly as it did before this step: one connection for
+> reads and ticks, and a second one, from the session worker, for the lifecycle.
 
 The actor takes `sign_in` as its first command, so it is created at the connect
 command, not at authentication. `session_worker.cpp` is deleted. Its sealed
