@@ -88,6 +88,15 @@ public:
     /** @brief Stops a session's actor, keeping it until it has finished. */
     void retire(std::string_view instance_id, std::string_view account_id);
 
+    /**
+     * @brief Signs a session out and stops its actor.
+     *
+     * The one stop that says goodbye: the actor asks the instance to drop the
+     * token before it closes, best effort, because the operator asked to sign
+     * out and a token nobody will use again is still a credential (SR-24).
+     */
+    void sign_out(std::string_view instance_id, std::string_view account_id);
+
     /** @brief Stops every actor and forgets them all. */
     void cancel();
 

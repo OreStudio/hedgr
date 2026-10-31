@@ -143,17 +143,26 @@ Follow-ups noticed while building the Instances panel, both done:
   inside the silence window is tested by driving the read directly over the fake
   link (`tick_silence_tests.cpp`), since a market read no longer has a spawn of
   its own to go through.
-- Done: the session actor's steps 3, 4 and 5 have landed — liveness with
-  `link_lost`/`link_restored` and the reseed, every read on the actor's one
-  connection, and the deletion of `session_task.hpp`. Step 6, supervision into
-  the actor, is the next one, and the plan gates it on a live check.
+- Done: **the session actor's step 6 has landed** — supervision creates the actor
+  at the connect command, the actor owns the whole lifecycle (sign-in, sealed
+  credential, refresh with a backoff until expiry, party change, logout on a
+  sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
+  A session now has one connection for reads, ticks, the lifecycle and the
+  logout.
+- Done: **the step 6 live check, in part.** Against the `jolly_knuth` deployment
+  on this host, a real mTLS sign-in as `super_admin` held **one** connection for
+  the whole session and gave it back on the sign-out (the broker's list read 25,
+  26, 25), and the refresh was armed at 1440 s of the token's 1800 s. Still
+  unchecked: a real broker restart, and the refresh itself, which is 24 minutes
+  out. `hedgr.runtime.tests "[live-probe]"` repeats the probe with `HEDGR_LIVE_*`
+  set, as its comment says.
 - Done: **`docs/review/README.md` status cells are current.** The session actor's
   decisions D1 to D6 and the series table's D1 to D7 each record where they came
   out — D1, D2, D3, D5 and D6 as recommended, D4 still undecided, D7 not done
-  and its trigger unfired — and the SR-6, C-5 and SR-12 notes say what they
-  stand on. Bundle 7's wording is corrected: the history read that bundle and
-  #63 built through the observation endpoint has since been replaced by the
-  ticks call, and the record now says so.
+  and its trigger unfired — and the SR-6, C-5, SR-12, SR-15 and SR-24 notes say
+  what they stand on. Bundle 7's wording is corrected: the history read that
+  bundle and #63 built through the observation endpoint has since been replaced
+  by the ticks call, and the record now says so.
 - Done: **SR-12 is closed.** A window kind with no read has a zero cadence and a
   parked deadline at all four moments, so an idle desk no longer sends a refresh
   per such window per second for an event that named the window and carried

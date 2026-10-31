@@ -518,14 +518,32 @@ to 3 when step 6 deletes the session worker. The 7 are `session_worker.cpp:115`,
 
 ### 6. Supervision moves into the actor
 
-> **Status: the seam it needs is in.** Step 1 now carries the sign-in calls on
-> `session_link`, and `session_worker.cpp` runs on that seam through
-> `run_session_on_link`, so the worker it deletes is the one the fake link can
-> already drive: a scripted sign-in, its status events, its token, and a refused
-> sign-in. What this step still does — creating the actor at the connect command,
-> moving the sealed-credential open and the wipe into it, the refresh deadline
-> with backoff, the logout, and the removal of `market_feed`'s open/close — is
-> not started.
+> **Status: done, and not yet run against a live deployment.** Supervision now
+> creates a @c session_actor at the connect command and stops it instead of
+> holding a @c stop_source; the actor opens the sealed credential or takes the
+> typed one, signs in, wipes, reports, refreshes at four fifths of the lifetime
+> with a backoff until the token really expires (SR-15), applies a party change
+> as a command, and signs out best effort on a user's disconnect (SR-24). The
+> session's only connection is the actor's: reads, ticks, the lifecycle and the
+> logout all run on it.
+>
+> `market_feed` lost `open`, `retoken_or_open` and `close` and its per-frame
+> sweep of sessions that are not authenticated, which is what would have retired
+> a session mid-sign-in; it now takes the actor once, on the authenticated fact,
+> and drops it on a disconnect, a failure or a removal. It works out the watch
+> set again after a party change, because the party is one of the three things
+> that decide a series' want.
+>
+> `session_worker.{hpp,cpp}`, `party_switch` and `deadline_wait` are deleted, and
+> the tests that drove them moved: the worker's two sign-in cases are the
+> actor's, and the read tests drive a stand-in actor, because a session's reads
+> now always run on one. The feed's tests that pinned the stream-per-sign-in
+> lifecycle are gone with the lifecycle.
+>
+> What has not been done is the live check this step was gated on: one connection
+> per session in the broker's connection list, a broker restart and its
+> recovery, a refresh against the real IAM, and a sign-out that logs out. Every
+> figure here is from a fake link and the suite.
 
 The actor takes `sign_in` as its first command, so it is created at the connect
 command, not at authentication. `session_worker.cpp` is deleted. Its sealed
@@ -779,19 +797,37 @@ not shown, because the tables key by instance and account, not by attempt.
 
 ## What cannot be verified without a live deployment
 
+**What the live check has shown, on 2026-10-31.** Run against the
+`jolly_knuth` deployment on this host (broker `localhost:20805`, mTLS, monitor
+`localhost:20806`), signing in as `super_admin`, with the actor constructed
+directly by `hedgr.runtime.tests "[live-probe]"`:
+
+- a real mTLS connect, a real IAM sign-in and the tick subscription all ran on
+  **one** connection: `connz` read 25 before, 26 for the whole session, and 25
+  again once it signed out. The step's measurement is one connection per
+  session, and that is what the broker saw;
+- the sign-in answered with the system tenant and a party, and the actor stopped
+  cleanly on `request_logout`, which is the path a user's sign-out takes;
+- the token's stated lifetime was 1800 s, so the actor armed its refresh at
+  1440 s, as designed.
+
+The probe is a hidden test case (`[.live-probe]`) with the command line in its
+comment, so the check can be repeated without a rebuild.
+
+What the same check has **not** covered, and why:
+
 - cnats's reconnect behavior against a real broker restart: that subscriptions
   restore, how long it keeps trying, and that the ping succeeds on the restored
   connection. Step 3 is tested over a fake link that scripts those answers. The
-  fake proves the actor's logic, not cnats's.
-- That a request and a subscription callback may use one `natsConnection` from
-  two threads. cnats documents its connection as thread safe, and the stream
-  already subscribes while the pool reads on other connections, so one connection
-  with both is new in this process (inferred).
-- Token refresh against the real IAM with the real lifetime.
-- The tick subscription's permissions, and the connection count on the broker.
-  The live check is the broker's connection list, before and after, with a desk
-  of 100 windows, then a stopped broker for 30 s and for 3 minutes.
-- TLS. The step 4 and 6 tests use no transport.
+  fake proves the actor's logic, not cnats's. Restarting a deployment's broker
+  was not done: it would take the operator's services down with it.
+- Token refresh against the real IAM with the real lifetime: the refresh is at
+  1440 s, so the check needs a session held open for 24 minutes. The armed
+  deadline was observed; the refresh itself was not.
+- A desk of 100 windows, and a stopped broker for 30 s and for 3 minutes. The
+  probe signs in one session with no windows.
+- TLS, which the probe did exercise (mTLS against the deployment's own CA and
+  `ores.shell` client certificate), unlike the step 4 and 6 tests.
 - Thread counts. They were read from code, not counted on a running process.
 
 ## How each step is checked

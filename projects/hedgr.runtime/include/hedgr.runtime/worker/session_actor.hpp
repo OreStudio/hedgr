@@ -21,17 +21,20 @@
 #define HEDGR_RUNTIME_WORKER_SESSION_ACTOR_HPP
 
 #include "hedgr.model/command/channel.hpp"
+#include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/worker/tick_feed.hpp"
 #include "hedgr.runtime/worker/tick_sink.hpp"
+#include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,10 +48,51 @@ namespace hedgr::runtime::worker {
 /** @brief What one session's tick stream needs to connect. */
 struct session_actor_options final {
     session::transport::session_options options;
+
+    /*
+     * The facts a signed-in session runs on. A caller that has already signed
+     * in fills them in with what the instance answered, which is the shape the
+     * tick feed was first written for. A caller that has not fills in a
+     * credential instead, and the actor signs in and fills these from the
+     * answer, so a session has one connection from its first byte.
+     */
     std::string token;
     std::string principal;
     std::string tenant_id;
     std::string party_id;
+
+    /**
+     * @brief The credential to sign in with, when the actor signs itself in.
+     *
+     * A credential typed at the prompt travels here. It is wiped the moment
+     * `authenticate` returns, so it lives for exactly one attempt.
+     */
+    model::domain::credential credential;
+
+    /**
+     * @brief A stored credential, still sealed, for the actor to open.
+     *
+     * Either this or @c credential is filled, never both. The key derivation
+     * behind opening it is half a second of deliberate work, which is the
+     * reason it belongs on the actor's thread rather than the frame loop's.
+     */
+    std::string sealed_credential;
+
+    /**
+     * @brief The master password @c sealed_credential may be opened with.
+     *
+     * Required when @c sealed_credential is set and ignored otherwise, so the
+     * two cannot disagree about which secret is being used.
+     */
+    model::domain::secret_string master_password;
+
+    /**
+     * @brief Which attempt at this session this actor is.
+     *
+     * Every fact it posts carries this number, so the frame loop can tell a
+     * stopped actor's last words from the actor that replaced it.
+     */
+    std::uint64_t attempt = 0;
 
     /** @brief The session this actor belongs to, which its reads name. */
     model::domain::session_key key;
@@ -140,6 +184,16 @@ public:
      */
     void request_stop() override;
 
+    /**
+     * @brief Asks the thread to sign out and then exit.
+     *
+     * A sign-out is the operator's, so the instance is told to drop the token
+     * before the connection closes, best effort. Anything else that stops an
+     * actor - a teardown, a failure, the process going away - uses
+     * @c request_stop and says nothing to the instance.
+     */
+    void request_logout() override;
+
     /** @brief Whether the thread has closed the connection and is exiting. */
     [[nodiscard]] bool finished() const noexcept override {
         return finished_.load(std::memory_order_acquire);
@@ -152,6 +206,16 @@ public:
      * stays, and so do the open buckets.
      */
     void set_token(std::string token) override;
+
+    /**
+     * @brief Asks the session to act as another party. Thread safe.
+     *
+     * Queued as a command rather than applied here, because the transport is
+     * the actor thread's: the frame loop leaves the choice and the answer comes
+     * back as an event. A request that arrives before the sign-in has finished
+     * waits for it, and a newer request replaces one not yet taken.
+     */
+    void select_party(std::string party_id) override;
 
     /**
      * @brief Watches one series, keeping its ticks.
@@ -210,9 +274,31 @@ private:
         std::string canonical_uri;
     };
 
+    /**
+     * @brief What the session runs on once it is signed in.
+     *
+     * Filled from the caller's options in the pre-authenticated path, and from
+     * the instance's answer when the actor signs itself in. The actor thread
+     * owns it; nothing else reads it.
+     */
+    struct facts final {
+        std::string token;
+        std::string principal;
+        std::string tenant_id;
+        std::string tenant_name;
+        std::string party_id;
+        std::string party_name;
+
+        /** @brief How long the token lasts, as the instance stated it. */
+        int lifetime_s = 0;
+    };
+
     void run();
     void stop();
     void wait_for_retry();
+
+    /** @brief Connects, signs in, and reports the outcome. False on failure. */
+    bool sign_in(session::transport::session_link& link);
 
     /** @brief Runs @p reads on @p link and pushes each answer. */
     void answer_reads(std::vector<read_request>& reads,
@@ -221,14 +307,45 @@ private:
     /** @brief Pushes a failed answer for each of @p reads, then clears it. */
     void fail_reads(std::vector<read_request>& reads, std::string_view reason);
 
+    /**
+     * @brief Answers every read still queued with the stop's failure.
+     *
+     * A caller that submitted a read marked it in flight, and only an answer
+     * clears that mark, so a stop that dropped the queue would leave the
+     * caller waiting for an answer that is never coming.
+     */
+    void answer_stranded_reads();
+
     /** @brief Pushes @p fact when the actor has a queue to push it to. */
     void push(model::event::event fact) const;
 
     /** @brief Pushes a fact about this session that is not a read's answer. */
     void emit(model::event::event_kind kind) const;
 
+    /** @brief Reports a move in the session's lifecycle. */
+    void push_status(model::domain::session_status status) const;
+
+    /** @brief Reports a refused sign-in, keeping the sentence and cause apart. */
+    void push_failure(const session::transport::session_error& error) const;
+
+    /** @brief Reports what the instance answered to a sign-in. */
+    void push_authenticated(const session::transport::session_account& account)
+        const;
+
+    /** @brief Reports a replaced token. */
+    void push_token_refreshed() const;
+
+    /** @brief Reports the party the session now acts as. */
+    void push_party_changed() const;
+
+    /** @brief Reports a refused party change. */
+    void push_party_refused(const session::transport::session_error& error) const;
+
     session_actor_options options_;
     std::shared_ptr<tick_sink> sink_;
+
+    /** @brief The facts the connection runs on. The actor thread's. */
+    facts facts_;
 
     std::thread thread_;
     std::mutex mu_;
@@ -236,8 +353,17 @@ private:
     std::vector<command> commands_;
     std::optional<std::vector<watch_target>> new_watch_;
     std::optional<std::string> new_token_;
+    std::optional<std::string> new_party_;
     std::vector<read_request> reads_;
     bool stopping_ = false;
+
+    /**
+     * @brief Whether the stop in progress is a sign-out.
+     *
+     * Atomic because the frame thread sets it and the actor's thread reads it
+     * on the way out, without taking the mutex the stop path already holds.
+     */
+    std::atomic<bool> logout_on_stop_{false};
 
     std::atomic<bool> finished_{false};
 };

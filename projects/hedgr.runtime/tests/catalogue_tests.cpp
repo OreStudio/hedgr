@@ -303,19 +303,38 @@ struct world final {
 
     /** @brief Signs @p account_id in as far as the frame loop can tell. */
     void sign_in(const std::string& instance_id, const std::string& account_id) {
-        command connect;
-        connect.kind = command_kind::connect_session;
-        connect.instance_id = instance_id;
-        connect.account_id = account_id;
-        connect.principal = account_id + "@example.test";
-        connect.password = secret_string{std::string{"not-a-real-secret"}};
-        push(std::move(connect));
+        const auto connect = [&] {
+            command request;
+            request.kind = command_kind::connect_session;
+            request.instance_id = instance_id;
+            request.account_id = account_id;
+            request.principal = account_id + "@example.test";
+            request.password = secret_string{std::string{"not-a-real-secret"}};
+            push(std::move(request));
+        };
+        const auto before = feeds.size();
+        connect();
+
+        event refused;
+        refused.kind = event_kind::session_failed;
+        refused.instance_id = instance_id;
+        refused.account_id = account_id;
+        refused.code = "unreachable";
+        refused.message = "the instance is not reachable";
+        push(std::move(refused));
         REQUIRE(wait_until([&] {
             manager->pump();
             const auto handle = manager->sessions().find(instance_id, account_id);
             return handle
                 && manager->sessions().status(*handle) == session_status::failed;
         }));
+
+        /*
+         * The refused attempt's actor is retired, so the world keeps only what
+         * the retry makes: the stand-in the reads and watches run on.
+         */
+        feeds.resize(before);
+        connect();
 
         event fact;
         fact.kind = event_kind::session_authenticated;

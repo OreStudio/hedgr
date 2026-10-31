@@ -27,6 +27,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
@@ -624,4 +626,430 @@ TEST_CASE("watch changes and ticks interleave safely", "[market_stream]") {
         fx += bucket.series == fx_handle;
     CHECK(fx >= 1999);
     CHECK(sink.ticks() >= 2000);
+}
+
+namespace {
+
+using hedgr::model::command::event_queue;
+using hedgr::model::event::event_kind;
+using hedgr::runtime::worker::session_actor;
+using hedgr::runtime::worker::session_actor_options;
+
+/** @brief The account a deployment answers a sign-in with. */
+hedgr::session::transport::session_account account_value() {
+    hedgr::session::transport::session_account value;
+    value.token = "token-1";
+    value.tenant_id = "tenant-1";
+    value.tenant_name = "Tenant";
+    value.party_id = "party-1";
+    value.party_name = "Party";
+    value.principal = "ops";
+    value.access_lifetime_s = 1800;
+    value.parties = {{.id = "party-1", .name = "Party"}};
+    return value;
+}
+
+/** @brief Options for an actor that signs itself in over @p link. */
+session_actor_options signing_in_options(
+    std::shared_ptr<hedgr::testing::fake_session_link> link,
+    event_queue& events) {
+    session_actor_options options;
+    options.options.wire_format = "json";
+    options.key = hedgr::model::domain::session_key{"i-1", "a-1"};
+    options.events = &events;
+    options.link = std::move(link);
+    options.credential =
+        hedgr::model::domain::credential{"ops", "hunter2"};
+    options.attempt = 7;
+    /* The liveness interval the tests do not exercise is left long, so a ping
+     * does not arrive in the middle of what a case is reading. */
+    options.ping_interval = std::chrono::seconds{30};
+    return options;
+}
+
+/** @brief Everything the actor pushed until @p done held, or ten seconds. */
+template <class Predicate>
+std::vector<hedgr::model::event::event> events_until(event_queue& events,
+    Predicate done) {
+    std::vector<hedgr::model::event::event> got;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{10};
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (auto& ev : events.drain())
+            got.push_back(std::move(ev));
+        if (done(got))
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    return got;
+}
+
+/** @brief The first event of @p kind, or an empty event. */
+hedgr::model::event::event first_of(
+    const std::vector<hedgr::model::event::event>& events, event_kind kind) {
+    for (const auto& ev : events) {
+        if (ev.kind == kind)
+            return ev;
+    }
+    return {};
+}
+
+bool any_of(const std::vector<hedgr::model::event::event>& events,
+    event_kind kind) {
+    return first_of(events, kind).kind == kind;
+}
+
+/** @brief Asks @p actor to stop and waits for its thread, or fails the test. */
+void stop(session_actor& actor) {
+    actor.request_stop();
+    REQUIRE(wait_until([&actor] { return actor.finished(); }));
+}
+
+}
+
+TEST_CASE("a session signs itself in and reports what the instance answered",
+    "[market_stream][sign_in]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_authenticated);
+    });
+
+    /* The credential the operator typed is the one that reached the instance. */
+    CHECK(link->connects == 1);
+    CHECK(link->authentications == 1);
+    CHECK(link->last_principal == "ops");
+    CHECK(link->last_password == "hunter2");
+
+    const auto authenticated = first_of(facts, event_kind::session_authenticated);
+    REQUIRE(authenticated.kind == event_kind::session_authenticated);
+    CHECK(authenticated.instance_id == "i-1");
+    CHECK(authenticated.account_id == "a-1");
+    CHECK(authenticated.attempt == 7);
+    CHECK(authenticated.token.view() == "token-1");
+    CHECK(authenticated.tenant_id == "tenant-1");
+    CHECK(authenticated.tenant_name == "Tenant");
+    CHECK(authenticated.party_id == "party-1");
+    CHECK(authenticated.party_name == "Party");
+    CHECK(authenticated.payload == "ops");
+
+    /* The lifecycle is reported: connecting first, authenticated after. */
+    REQUIRE(facts.size() >= 2);
+    CHECK(facts.front().kind == event_kind::session_status_changed);
+    CHECK(facts.front().status == hedgr::model::domain::session_status::connecting);
+    const auto signed_in = first_of(facts, event_kind::session_status_changed);
+    REQUIRE(signed_in.kind == event_kind::session_status_changed);
+
+    stop(actor);
+
+    const auto after = next_events(events);
+    const auto disconnected = first_of(after, event_kind::session_status_changed);
+    REQUIRE(disconnected.kind == event_kind::session_status_changed);
+    CHECK(disconnected.status
+        == hedgr::model::domain::session_status::disconnected);
+}
+
+TEST_CASE("a refused password is reported once and the session stops",
+    "[market_stream][sign_in]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+    link->authenticate_error = hedgr::session::transport::session_error{
+        .code = hedgr::session::transport::session_errc::authentication_rejected,
+        .message = "wrong password",
+    };
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_failed);
+    });
+
+    const auto failed = first_of(facts, event_kind::session_failed);
+    REQUIRE(failed.kind == event_kind::session_failed);
+    CHECK(failed.code == "authentication_rejected");
+    CHECK(failed.message == "wrong password");
+    CHECK(failed.attempt == 7);
+    CHECK_FALSE(any_of(facts, event_kind::session_authenticated));
+
+    /* A refused sign-in ends the attempt: nothing retries it behind the
+     * operator's back. */
+    REQUIRE(wait_until([&actor] { return actor.finished(); }));
+    CHECK(link->authentications == 1);
+}
+
+TEST_CASE("a stored credential that will not open is reported as a refused "
+          "sign-in",
+    "[market_stream][sign_in]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+
+    event_queue events;
+    auto options = signing_in_options(link, events);
+    options.credential = {};
+    options.sealed_credential = "not a sealed credential";
+    options.master_password = hedgr::model::domain::secret_string{"hunter2"};
+
+    session_actor actor(std::move(options));
+    actor.start();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_failed);
+    });
+
+    const auto failed = first_of(facts, event_kind::session_failed);
+    REQUIRE(failed.kind == event_kind::session_failed);
+    CHECK(failed.code == "authentication_rejected");
+    CHECK(failed.message == "the stored credential could not be opened");
+    CHECK(failed.payload.starts_with("secret_box:"));
+
+    /* Nothing was presented to the instance: the secret never got that far. */
+    CHECK(link->authentications == 0);
+    REQUIRE(wait_until([&actor] { return actor.finished(); }));
+}
+
+TEST_CASE("the actor refreshes the token at four fifths of its life",
+    "[market_stream][sign_in][refresh]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+    /* One second of life, so the deadline is eight hundred milliseconds out. */
+    link->account_value.access_lifetime_s = 1;
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_token_refreshed);
+    });
+
+    const auto refreshed = first_of(facts, event_kind::session_token_refreshed);
+    REQUIRE(refreshed.kind == event_kind::session_token_refreshed);
+    CHECK(refreshed.token.view() == "refreshed-token");
+    CHECK(refreshed.tenant_id == "tenant-1");
+    CHECK(refreshed.party_id == "party-1");
+    CHECK(link->refreshes == 1);
+    CHECK_FALSE(any_of(facts, event_kind::session_failed));
+
+    stop(actor);
+}
+
+TEST_CASE("a refresh that fails once is retried and the session lives",
+    "[market_stream][sign_in][refresh]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+    link->account_value.access_lifetime_s = 1;
+    link->refresh_error = hedgr::session::transport::session_error{
+        .code = hedgr::session::transport::session_errc::timeout,
+        .message = "the instance did not answer",
+    };
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+
+    /* The first attempt fails; the instance comes back before the retry. */
+    REQUIRE(wait_until([&link] { return link->refreshes >= 1; }));
+    link->refresh_error.reset();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_token_refreshed);
+    });
+    CHECK(any_of(facts, event_kind::session_token_refreshed));
+    CHECK_FALSE(any_of(facts, event_kind::session_failed));
+    CHECK(link->refreshes >= 1);
+
+    stop(actor);
+}
+
+TEST_CASE("a refresh that fails until the token expires ends the session",
+    "[market_stream][sign_in][refresh]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+    link->account_value.access_lifetime_s = 1;
+    link->refresh_error = hedgr::session::transport::session_error{
+        .code = hedgr::session::transport::session_errc::timeout,
+        .message = "the instance did not answer",
+    };
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_failed);
+    });
+    const auto failed = first_of(facts, event_kind::session_failed);
+    REQUIRE(failed.kind == event_kind::session_failed);
+    CHECK(failed.message == "the instance did not answer");
+    /* At least one retry: a single failure does not end a valid session. */
+    CHECK(link->refreshes >= 2);
+    REQUIRE(wait_until([&actor] { return actor.finished(); }));
+}
+
+TEST_CASE("the actor acts as the party it was asked for and reports the new "
+          "token",
+    "[market_stream][sign_in][party]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+    REQUIRE(wait_until([&events] {
+        for (const auto& ev : events.drain()) {
+            if (ev.kind == event_kind::session_authenticated)
+                return true;
+        }
+        return false;
+    }));
+
+    actor.select_party("party-2");
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_party_changed);
+    });
+
+    const auto changed = first_of(facts, event_kind::session_party_changed);
+    REQUIRE(changed.kind == event_kind::session_party_changed);
+    CHECK(changed.party_id == "party-2");
+    CHECK(changed.token.view() == "switched-token");
+    CHECK(changed.tenant_id == "tenant-1");
+    CHECK(link->switches == 1);
+
+    stop(actor);
+}
+
+TEST_CASE("a party the instance refuses is reported and the session keeps its "
+          "own",
+    "[market_stream][sign_in][party]") {
+    auto link = std::make_shared<hedgr::testing::fake_session_link>();
+    link->account_value = account_value();
+    link->party_error = hedgr::session::transport::session_error{
+        .code = hedgr::session::transport::session_errc::not_authenticated,
+        .message = "the principal may not act as that party",
+    };
+
+    event_queue events;
+    session_actor actor(signing_in_options(link, events));
+    actor.start();
+    REQUIRE(wait_until([&events] {
+        for (const auto& ev : events.drain()) {
+            if (ev.kind == event_kind::session_authenticated)
+                return true;
+        }
+        return false;
+    }));
+
+    actor.select_party("party-2");
+    const auto facts = events_until(events, [](const auto& all) {
+        return any_of(all, event_kind::session_party_refused);
+    });
+
+    const auto refused = first_of(facts, event_kind::session_party_refused);
+    REQUIRE(refused.kind == event_kind::session_party_refused);
+    CHECK(refused.code == "not_authenticated");
+    CHECK(refused.message == "the principal may not act as that party");
+    CHECK_FALSE(any_of(facts, event_kind::session_party_changed));
+
+    stop(actor);
+}
+
+/**
+ * @brief The live check the plan names: a real sign-in on a real deployment.
+ *
+ * Hidden (`[.]`) because it needs a deployment, mTLS material and a credential,
+ * and a suite that needs those is a suite that fails on a machine without them.
+ * Run it by name, with the deployment's own values:
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20805 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.jolly_knuth \
+ *     HEDGR_LIVE_CA=<checkout>/build/keys/nats/ca.crt \
+ *     HEDGR_LIVE_CERT=<checkout>/build/keys/nats/ores.shell.crt \
+ *     HEDGR_LIVE_KEY=<checkout>/build/keys/nats/ores.shell.key \
+ *     HEDGR_LIVE_PRINCIPAL=super_admin \
+ *     HEDGR_LIVE_PASSWORD=... \
+ *     hedgr.runtime.tests "[live-probe]"
+ *
+ * While it runs, the broker's connection list says what the step is for:
+ * `curl -s http://localhost:<monitor port>/connz | jq .num_connections` goes up
+ * by one for the whole session and back down when it signs out.
+ */
+TEST_CASE("live probe: a real sign-in on a real deployment", "[.live-probe]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX");
+    const auto* ca = std::getenv("HEDGR_LIVE_CA");
+    const auto* cert = std::getenv("HEDGR_LIVE_CERT");
+    const auto* key = std::getenv("HEDGR_LIVE_KEY");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    hedgr::model::command::event_queue events;
+    session_actor_options options;
+    options.options.nats_url = url;
+    options.options.subject_prefix = prefix != nullptr ? prefix : "";
+    options.options.wire_format = "msgpack";
+    if (ca != nullptr)
+        options.options.tls_ca = ca;
+    if (cert != nullptr)
+        options.options.tls_cert = cert;
+    if (key != nullptr)
+        options.options.tls_key = key;
+    options.key = hedgr::model::domain::session_key{"inst-live", "acct-live"};
+    options.events = &events;
+    options.credential = hedgr::model::domain::credential{principal, password};
+    options.attempt = 1;
+    options.ping_interval = std::chrono::seconds{30};
+
+    session_actor actor(std::move(options));
+    actor.start();
+
+    std::vector<hedgr::model::event::event> facts;
+    bool authenticated = false;
+    bool failed = false;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds{20};
+    while (std::chrono::steady_clock::now() < deadline) {
+        for (auto& ev : events.drain()) {
+            facts.push_back(std::move(ev));
+            authenticated = authenticated
+                || facts.back().kind == event_kind::session_authenticated;
+            failed = failed
+                || facts.back().kind == event_kind::session_failed;
+        }
+        if (authenticated || failed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+
+    for (const auto& ev : facts) {
+        if (ev.kind == event_kind::session_status_changed)
+            continue;
+        std::printf("event %s tenant=%s party=%s principal=%s message=%s\n",
+            std::string{hedgr::model::event::to_string(ev.kind)}.c_str(),
+            ev.tenant_id.c_str(), ev.party_id.c_str(), ev.payload.c_str(),
+            ev.message.c_str());
+    }
+    std::printf("authenticated=%d failed=%d\n", authenticated ? 1 : 0,
+        failed ? 1 : 0);
+    std::fflush(stdout);
+
+    /* A pause in which the sockets can be counted from outside. */
+    std::this_thread::sleep_for(std::chrono::seconds{6});
+
+    actor.request_logout();
+    const auto stopped = std::chrono::steady_clock::now()
+        + std::chrono::seconds{15};
+    while (!actor.finished() && std::chrono::steady_clock::now() < stopped)
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    std::printf("finished=%d\n", actor.finished() ? 1 : 0);
+    CHECK(authenticated);
 }

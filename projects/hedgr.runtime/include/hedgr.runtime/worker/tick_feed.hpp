@@ -50,11 +50,32 @@ public:
     /** @brief Asks the feed to close and exit, without waiting for it. */
     virtual void request_stop() = 0;
 
+    /**
+     * @brief Asks the feed to sign out and then stop.
+     *
+     * The one stop that says goodbye to the instance: a user's sign-out drops
+     * the token at the deployment rather than only in this process (SR-24). The
+     * base asks for a plain stop, so a feed with no connection needs no more.
+     */
+    virtual void request_logout() { request_stop(); }
+
     /** @brief Whether the feed has closed and may be destroyed without a wait. */
     [[nodiscard]] virtual bool finished() const noexcept = 0;
 
     /** @brief The token the next resume uses. */
     virtual void set_token(std::string token) = 0;
+
+    /**
+     * @brief Asks the session to act as another party.
+     *
+     * The transport belongs to the feed, so the frame loop cannot make the
+     * call itself: it leaves the choice here and the answer arrives as an
+     * event, like everything else that happens on the connection. The base
+     * does nothing, so a feed that has no transport keeps compiling.
+     */
+    virtual void select_party(std::string party_id) {
+        static_cast<void>(party_id);
+    }
 
     /**
      * @brief Watches one series, keeping its ticks.

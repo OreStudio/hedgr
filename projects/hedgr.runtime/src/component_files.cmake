@@ -30,8 +30,6 @@ set(files
     "worker/session_actor.cpp"
     "worker/tick_sink.cpp"
     "worker/probe_worker.cpp"
-    "worker/deadline_wait.cpp"
-    "worker/session_worker.cpp"
     "worker/term_structure_worker.cpp"
     "worker/read_request.cpp"
 )
@@ -73,7 +71,5 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_actor.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_feed.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/tick_sink.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/deadline_wait.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/session_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/read_request.hpp"
 )

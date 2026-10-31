@@ -92,6 +92,16 @@ void session_service::retire(std::string_view instance_id,
     actors_.erase(found);
 }
 
+void session_service::sign_out(std::string_view instance_id,
+    std::string_view account_id) {
+    const auto found = actors_.find(running_key(instance_id, account_id));
+    if (found == actors_.end())
+        return;
+    found->second->request_logout();
+    retiring_.push_back(std::move(found->second));
+    actors_.erase(found);
+}
+
 void session_service::cancel() {
     for (auto& [key, actor] : actors_) {
         static_cast<void>(key);
