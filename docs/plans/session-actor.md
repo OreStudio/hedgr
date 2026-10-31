@@ -561,6 +561,39 @@ session worker that has no direct tests today (no test file references
 Measure: long-lived connections per session 2 to 1, and per session threads
 (actor plus `market_stream`) 2 to 1.
 
+**How this lands, in the five pieces it decomposes into.** The pieces are listed
+because the move cannot land in halves: a session whose sign-in lives in the
+worker and whose reads live in the actor has two connections, which is the
+problem rather than the solution. So the branch is one change, split only for
+review.
+
+1. **The actor's options carry the attempt.** `session_actor_options` gains the
+   typed `credential`, the `sealed_credential` and `master_password` pair, the
+   `attempt`, and the party the session should act as. `party_switch` is
+   deleted rather than moved: the actor already has a command vector and a
+   condition variable, so a party change is a command, and the stop-source
+   waker the worker needed goes with it.
+2. **The actor runs the lifecycle.** `run()` becomes: connect the link, open the
+   sealed credential or take the typed one, `authenticate`, wipe, push
+   `session_authenticated` or `session_failed`, then the loop it has today plus
+   a refresh deadline (4/5 of the lifetime, backoff until expiry) and the party
+   command. `logout` runs in the stop path, best effort, and the token dies with
+   the actor. The tick stream is built after the sign-in, because the tenant and
+   party it subscribes with are the answer's, not the caller's.
+3. **Supervision creates the actor at the connect command.**
+   `instance_manager` opens a `session_actor` through `session_service` where it
+   used to spawn a session worker, and keeps its `attempts_` bookkeeping. The
+   stop path asks the actor to stop instead of holding a `stop_source`, and
+   `session_service::reap` takes the place of the pooled coroutine ending.
+4. **`market_feed` follows instead of owning.** It keeps its watch bookkeeping
+   and its per-frame reconcile, but `open`/`retoken_or_open`/`close` become
+   `attach(key, feed)` and `detach(key)`, called by supervision when the actor
+   exists and when it is retired. The per-frame sweep of sessions that are not
+   authenticated goes with them: the actor is legitimately connecting before it
+   is authenticated, so that sweep would retire a session mid-sign-in.
+5. **`session_worker.cpp` and `session_worker.hpp` are deleted**, and their
+   tests move to the actor (`run_session_on_link`'s two cases are the model).
+
 ### 7. `session_service`
 
 The class already exists, holding the actor map from step 4, so this moves
