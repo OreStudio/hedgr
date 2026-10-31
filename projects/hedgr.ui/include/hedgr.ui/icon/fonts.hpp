@@ -74,11 +74,27 @@ HEDGR_UI_EXPORT void load_ui_fonts(float base_size_px);
     const std::filesystem::path& source_root);
 
 /**
- * @brief The bold weight of the base face, or the base face when there is none.
+ * @brief Where the bundled bold monospace file is, by the same rule.
  *
- * Found beside the base face on disk, so a value in bold is the same family as
- * the caption above it. Hedgr ships no font files and this adds none: a desk
- * without the bold file draws values in the regular weight.
+ * A separate lookup rather than a second name inside @c mono_font_path,
+ * because the two files are loaded separately and either can be the one that
+ * is missing.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT std::filesystem::path mono_bold_font_path(
+    const std::filesystem::path& exe_dir,
+    const std::filesystem::path& source_root);
+
+/**
+ * @brief The bold weight of the bundled monospace, or the best substitute.
+ *
+ * The bundled JetBrains Mono Bold is preferred, because it is the one weight
+ * that is guaranteed to be there: the intro's wordmark, a table's captions and
+ * a tab's badge count are all set in this face, and a host with no bold of its
+ * own would otherwise draw every one of them at the regular weight with nothing
+ * to show that they were meant to stand out. Where the package is missing the
+ * bold file, the host's bold weight of the base face is used, and where there
+ * is none of that either the base face is returned, so a caller never has to
+ * check.
  */
 [[nodiscard]] HEDGR_UI_EXPORT ImFont* bold_font();
 

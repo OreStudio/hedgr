@@ -33,6 +33,7 @@
 namespace {
 
 constexpr const char* bundled_mono_file = "JetBrainsMono-Regular.ttf";
+constexpr const char* bundled_mono_bold_file = "JetBrainsMono-Bold.ttf";
 
 /**
  * @brief The directory holding the running executable.
@@ -103,22 +104,34 @@ std::filesystem::path instance_icon_directory_path() {
 }
 
 /**
- * @brief Where the bundled monospace face lives, under @p exe_dir or @p root.
+ * @brief Where a bundled face lives, under @p exe_dir or @p root.
  *
  * Installed beside the library under share/hedgr.ui/fonts, as the icon sheet
- * is, or, for a run out of the source tree, in its assets directory.
+ * is, or, for a run out of the source tree, in its assets directory. Both
+ * weights of the monospace are looked up by this one rule, which is what keeps
+ * a bold run the same family as the caption beside it.
  */
-std::filesystem::path find_mono_font(
-    const std::filesystem::path& exe_dir, const std::filesystem::path& root) {
+std::filesystem::path find_bundled_font(const std::filesystem::path& exe_dir,
+    const std::filesystem::path& root, const char* file) {
     std::vector<std::filesystem::path> candidates;
     if (!exe_dir.empty()) {
         candidates.push_back(exe_dir.parent_path() / "share" / "hedgr.ui"
-            / "fonts" / bundled_mono_file);
-        candidates.push_back(exe_dir / "fonts" / bundled_mono_file);
+            / "fonts" / file);
+        candidates.push_back(exe_dir / "fonts" / file);
     }
     if (!root.empty())
-        candidates.push_back(root / "assets" / "fonts" / bundled_mono_file);
+        candidates.push_back(root / "assets" / "fonts" / file);
     return first_existing(candidates);
+}
+
+std::filesystem::path find_mono_font(
+    const std::filesystem::path& exe_dir, const std::filesystem::path& root) {
+    return find_bundled_font(exe_dir, root, bundled_mono_file);
+}
+
+std::filesystem::path find_mono_bold_font(
+    const std::filesystem::path& exe_dir, const std::filesystem::path& root) {
+    return find_bundled_font(exe_dir, root, bundled_mono_bold_file);
 }
 
 /**
@@ -257,7 +270,15 @@ namespace {
 
 ImFont* numeric_font_instance = nullptr;
 ImFont* mono_font_instance = nullptr;
-ImFont* bold_font_instance = nullptr;
+
+/*
+ * Two bold faces, because the bundled one is preferred and the host's is only
+ * a fallback. Keeping them apart means the getter can tell which is which with
+ * one pointer comparison rather than a second filesystem probe per frame, and
+ * a package that ships without the bold file still draws emphasis.
+ */
+ImFont* bundled_bold_font_instance = nullptr;
+ImFont* host_bold_font_instance = nullptr;
 
 }
 
@@ -290,10 +311,19 @@ ImFont* bold_font() {
      * Checked against the current atlas because the pointer outlives the
      * context that loaded it, and a test process creates several.
      */
-    if (bold_font_instance != nullptr
-        && io.Fonts->Fonts.contains(bold_font_instance))
-        return bold_font_instance;
+    const auto live = [&io](ImFont* font) {
+        return font != nullptr && io.Fonts->Fonts.contains(font);
+    };
+    if (live(bundled_bold_font_instance))
+        return bundled_bold_font_instance;
+    if (live(host_bold_font_instance))
+        return host_bold_font_instance;
     return io.Fonts->Fonts.empty() ? nullptr : io.Fonts->Fonts[0];
+}
+
+std::filesystem::path mono_bold_font_path(const std::filesystem::path& exe_dir,
+    const std::filesystem::path& source_root) {
+    return find_mono_bold_font(exe_dir, source_root);
 }
 
 void load_ui_fonts(float base_size_px) {
@@ -328,7 +358,7 @@ void load_ui_fonts(float base_size_px) {
     if (!bold.empty()) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Loaded the bold font from " << bold.string();
-        bold_font_instance =
+        host_bold_font_instance =
             io.Fonts->AddFontFromFileTTF(bold.string().c_str(), base_size_px);
     }
 
@@ -347,6 +377,29 @@ void load_ui_fonts(float base_size_px) {
     } else {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "The bundled monospace font is missing; menus use the base font";
+    }
+
+    /*
+     * The bold weight of that same face, which is the emphasis face everywhere:
+     * the intro's wordmark, a caption in a table and a tab's badge count all ask
+     * for it. Shipping it removes the dependence on the host having a bold of
+     * its own, where a host without one draws the emphasis at regular weight and
+     * the reader cannot tell that anything was meant to stand out.
+     */
+    const auto mono_bold = find_mono_bold_font(executable_directory(), ".");
+    if (!mono_bold.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Loaded the bold monospace font from " << mono_bold.string();
+        bundled_bold_font_instance = io.Fonts->AddFontFromFileTTF(
+            mono_bold.string().c_str(), base_size_px);
+    } else if (host_bold_font_instance == nullptr) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The bundled bold font is missing and so is a bold of the base "
+               "face; emphasis is drawn at the regular weight";
+    } else {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The bundled bold font is missing; emphasis uses the host's "
+               "bold weight";
     }
 
     const auto numeric = mono.empty() ? numeric_font_path()
@@ -389,11 +442,17 @@ void load_ui_fonts(float base_size_px) {
     /*
      * The tab labels and the menus are set in the monospace, and a window's
      * title begins with its icon, so the monospace carries the icons as well.
-     * Each face gets its own rectangles because a glyph belongs to one font.
+     * The bold weight carries them too, because a caption or a badge may be
+     * asked for in a string that begins with an icon, and a run of text is one
+     * string in one face. Each face gets its own rectangles because a glyph
+     * belongs to one font.
      */
     std::vector<ImFont*> faces{font};
     if (mono_font_instance != nullptr && mono_font_instance != font)
         faces.push_back(mono_font_instance);
+    if (bundled_bold_font_instance != nullptr
+        && bundled_bold_font_instance != font)
+        faces.push_back(bundled_bold_font_instance);
 
     /*
      * A fixed advance width for every icon is what makes an icon-only toolbar
