@@ -147,10 +147,13 @@ Follow-ups noticed while building the Instances panel, both done:
   `link_lost`/`link_restored` and the reseed, every read on the actor's one
   connection, and the deletion of `session_task.hpp`. Step 6, supervision into
   the actor, is the next one, and the plan gates it on a live check.
-- `docs/review/README.md` status cells are partly updated: the session actor's
-  decisions D1 to D6 now record where each came out, and the SR-6 and C-5 notes
-  say what they stand on. Still open: the series table decisions D1 to D7 and the
-  wording of PR #63.
+- Done: **`docs/review/README.md` status cells are current.** The session actor's
+  decisions D1 to D6 and the series table's D1 to D7 each record where they came
+  out — D1, D2, D3, D5 and D6 as recommended, D4 still undecided, D7 not done
+  and its trigger unfired — and the SR-6, C-5 and SR-12 notes say what they
+  stand on. Bundle 7's wording is corrected: the history read that bundle and
+  #63 built through the observation endpoint has since been replaced by the
+  ticks call, and the record now says so.
 - Done: **SR-12 is closed.** A window kind with no read has a zero cadence and a
   parked deadline at all four moments, so an idle desk no longer sends a refresh
   per such window per second for an event that named the window and carried

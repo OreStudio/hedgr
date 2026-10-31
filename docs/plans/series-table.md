@@ -1036,33 +1036,55 @@ replaces it with the measured figure.
 
 ## Open decisions
 
+Each decision below records where it came out, so a reader does not have to
+compare the recommendation against the code to learn which one won.
+
 - **D1. Ring layout.** Recommended: a sliding window over a contiguous buffer with
   25 percent slack, so every span is one pointer and a count. The alternative is a
   pure ring with two draw segments, which is smaller by 25 percent and spreads
   wrap handling over three consumers. Needs the user's choice only if memory is the
-  tighter constraint than code.
+  tighter constraint than code. **Taken as recommended:** `series_ring` is a
+  sliding window over a buffer of capacity plus 25 percent, with the newest
+  points moved to the front once per slack appends, so a span is one pointer and
+  a count for all three consumers.
 - **D2. Resident budget.** The value, and whether it is bytes or a count of rows.
   Recommended: bytes, defaulting to 256 MiB, which holds about 400 full series.
   Watched rows are never evicted, so the budget only bounds history nobody is
-  looking at.
+  looking at. **Taken as recommended:** `series_default_budget` is 256 MiB of
+  ring buffers, `set_budget` takes bytes, and `evict_to_budget` skips watched
+  rows.
 - **D3. A backfill answer for a series nobody holds.** Recommended: drop it and
   count it, so a slow read cannot grow the table. Today it is stored for any id.
   The visible change: closing a chart while its backfill is in flight and
-  reopening it shows nothing until the next backfill.
+  reopening it shows nothing until the next backfill. **Taken as recommended:**
+  an answer is applied through a row's handle and a stale handle is refused, and
+  the two answer kinds (`series_points`, `series_history`) log the drop and count
+  it in `unheld_points`. Closing a chart mid-backfill and reopening it therefore
+  waits for the next backfill, as the decision said it would.
 - **D4. Composite series.** Whether a chart of a series with a coordinate is
   meant to work, and so whether the live ring mixing terms is a bug to fix now.
   The plan assumes it is not in scope and reserves the key part for the actor
   plan's step 8. This is a correctness question that the code cannot answer.
+  **Still undecided:** nothing was added for it, and the live check that would
+  show the interleaving has not been run.
 - **D5. Merge by bucket (MS-7).** The new seed merge keys by bucket id. Today a
   backfilled and a live bucket of one second both survive (`market_table.cpp:103-120`).
   Recommended: accept the fix. It changes what a chart shows right after a reseed.
+  **Taken as recommended:** `series_table::seed` collapses the answer by bucket
+  and merges by bucket id with the held point winning, so a reseed replaces a
+  live bucket instead of adding a second one.
 - **D6. `chart_state::max_points`.** Dead and persisted. Recommended: leave it. A
-  store migration for no behavior is not worth a step.
+  store migration for no behavior is not worth a step. **Taken as recommended:**
+  the field is still in `chart_state` and still round-trips through the store; no
+  migration was written.
 - **D7. Incremental candles and EMA.** Not planned. Make them incremental only if
   the step 4 benchmark shows the once-a-second O(points) rebuild across hundreds
   of charts costing a visible fraction of a frame, which would also need the
   feed's second boundaries to align across series (inferred for a synthetic feed,
-  not known).
+  not known). **Not done, and the trigger has not fired:** `update_chart_plot`
+  rebuilds only when the plot key changes, so the rebuild happens once per
+  change and not once per frame, and no benchmark has been taken to say whether
+  even that costs a visible fraction of a frame.
 
 ## What cannot be verified without a live deployment
 
