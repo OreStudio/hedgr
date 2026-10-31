@@ -18,7 +18,6 @@
  *
  */
 #include "hedgr.runtime/service/read_service.hpp"
-#include "hedgr.runtime/manager/connection_options.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
@@ -41,7 +40,6 @@ namespace event = hedgr::model::event;
 namespace model_state = hedgr::model::state;
 
 using condition_source = model_state::condition_source;
-using manager::connection_options_for;
 using support::lg;
 using support::steady_now_ns;
 
@@ -74,14 +72,10 @@ constexpr std::chrono::milliseconds crm_cadence{5000};
 }
 
 read_service::read_service(model::command::event_queue& events,
-    const model::state::instance_table& instances,
-    const model::state::account_table& accounts,
     const model::state::session_table& sessions,
     const model::state::window_table& windows,
-    model::state::series_table& series,
-    const session::transport::session_options& seed, read_submit submit)
-    : events_(events), instances_(instances), accounts_(accounts),
-      sessions_(sessions), windows_(windows), seed_(seed),
+    model::state::series_table& series, read_submit submit)
+    : events_(events), sessions_(sessions), windows_(windows),
       submit_(std::move(submit)), market_(series) {
 }
 
@@ -126,7 +120,7 @@ std::optional<refusal> read_service::start(const read_request& request) {
     return std::nullopt;
 }
 
-std::optional<worker::session_read> read_service::session_read_for(
+std::optional<read_service::read_session> read_service::session_read_for(
     model::state::session_handle session, read_gate gate) const {
     if (!is_open())
         return std::nullopt;
@@ -134,27 +128,21 @@ std::optional<worker::session_read> read_service::session_read_for(
         && sessions_.status(session) != domain::session_status::authenticated)
         return std::nullopt;
 
-    worker::session_read read;
-    read.token = std::string{sessions_.token(session)};
-    if (read.token.empty() && gate != read_gate::signed_in)
+    /*
+     * The gate still asks whether the session holds a token, because a session
+     * with none cannot be resumed on the actor either. The token itself is not
+     * copied: the actor holds it, and this class only names the pair.
+     */
+    if (sessions_.token(session).empty() && gate != read_gate::signed_in)
         return std::nullopt;
 
-    read.instance_id = std::string{sessions_.instance_id(session)};
-    read.account_id = std::string{sessions_.account_id(session)};
-    read.tenant_id = std::string{sessions_.tenant_id(session)};
-    const auto instance = instances_.find(read.instance_id);
-    if (!instance)
-        return std::nullopt;
-
-    const auto account = accounts_.find(read.account_id);
-    read.principal =
-        account ? accounts_.get(*account)->principal : std::string{};
-    read.options = connection_options_for(*instances_.get(*instance),
-        seed_, database_path_);
-    return read;
+    return read_session{
+        .instance_id = std::string{sessions_.instance_id(session)},
+        .account_id = std::string{sessions_.account_id(session)},
+        .tenant_id = std::string{sessions_.tenant_id(session)}};
 }
 
-std::optional<worker::session_read> read_service::session_read_for(
+std::optional<read_service::read_session> read_service::session_read_for(
     std::string_view instance_id, std::string_view account_id,
     read_gate gate) const {
     const auto session = sessions_.find(instance_id, account_id);
@@ -163,7 +151,7 @@ std::optional<worker::session_read> read_service::session_read_for(
     return session_read_for(*session, gate);
 }
 
-bool read_service::submit_read(const worker::session_read& read,
+bool read_service::submit_read(const read_session& read,
     worker::read_request request) {
     return submit_ && submit_(read.instance_id, read.account_id, request);
 }
@@ -256,7 +244,7 @@ std::optional<refusal> read_service::start_market_catalogue_read(
 }
 
 std::optional<refusal> read_service::launch_market_read(
-    worker::session_read read, std::string_view series_id) {
+    read_session read, std::string_view series_id) {
     const bool catalogue = series_id.empty();
     const auto id = catalogue
         ? request_id::catalogue(read.instance_id, read.account_id)

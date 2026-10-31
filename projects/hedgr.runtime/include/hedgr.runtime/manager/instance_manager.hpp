@@ -539,8 +539,8 @@ private:
     service::window_service window_service_{sessions_, series_};
     service::lock_service lock_service_{pool_.context(), commands_, events_, catalogue_.accounts()};
     service::session_service session_service_{events_};
-    service::read_service read_service_{events_,
-        catalogue_.instances(), catalogue_.accounts(), sessions_, window_service_.windows(), series_, seed_options_,
+    service::read_service read_service_{events_, sessions_,
+        window_service_.windows(), series_,
         [this](std::string_view instance_id, std::string_view account_id,
                const worker::read_request& request) {
             return session_service_.submit_read(instance_id, account_id,

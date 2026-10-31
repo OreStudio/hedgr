@@ -136,8 +136,7 @@ struct fixture final {
     /** @brief Whether the session refuses the next read, as a stopped one would. */
     bool refuse_reads = false;
 
-    service::read_service reads{events, instances, accounts,
-        sessions, windows, series, seed,
+    service::read_service reads{events, sessions, windows, series,
         [this](std::string_view, std::string_view,
                const hedgr::runtime::worker::read_request& request) {
             if (refuse_reads)
