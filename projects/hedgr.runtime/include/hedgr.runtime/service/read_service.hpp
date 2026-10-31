@@ -35,8 +35,6 @@
 #include "hedgr.runtime/service/pending_reads.hpp"
 #include "hedgr.runtime/service/window_service.hpp"
 #include "hedgr.runtime/worker/read_request.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
-#include "hedgr.session/transport/session_options.hpp"
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -53,10 +51,9 @@ namespace hedgr::runtime::service {
  * Owns the market, currency image, image, term structure and CRM tables with
  * the in-flight mark of every read that has no row of its own to say it is
  * running. A starter checks the session, marks the read and asks the session's
- * actor to run it, which answers with one event; a read that still runs on a
- * connection of its own is spawned as a coroutine on the pool, and the
- * coroutine only fetches and pushes an event. @c apply writes the answer on
- * the frame thread, so neither the pool nor the actor ever touches a table.
+ * actor to run it, which answers with one event; @c apply writes the answer on
+ * the frame thread, so the actor never touches a table and this class never
+ * holds a connection.
  *
  * The catalogue and the CRM batches are scheduled here too: a batch owns its
  * deadline, and the @c crm_rates answer is what moves it.
@@ -82,13 +79,9 @@ public:
      * which is what a test that only drives the tables asks for.
      */
     read_service(model::command::event_queue& events,
-        const model::state::instance_table& instances,
-        const model::state::account_table& accounts,
         const model::state::session_table& sessions,
         const model::state::window_table& windows,
-        model::state::series_table& series,
-        const session::transport::session_options& seed,
-        read_submit submit = {});
+        model::state::series_table& series, read_submit submit = {});
 
     /**
      * @brief Records where the store is, which is what opens the reads.
@@ -257,18 +250,24 @@ private:
         token_only,
     };
 
+    /** @brief The session a read runs on: which deployment, and as whom. */
+    struct read_session final {
+        std::string instance_id;
+        std::string account_id;
+        std::string tenant_id;
+    };
+
     /**
-     * @brief The identity, token and connection a read on @p session presents.
+     * @brief The session a read on @p session would run on.
      *
-     * Empty when the session fails @p gate or its instance row is gone. Every
-     * refusal is silent: a window over a session that cannot read draws its own
-     * session-loss state.
+     * Empty when the session fails @p gate. Every refusal is silent: a window
+     * over a session that cannot read draws its own session-loss state.
      */
-    [[nodiscard]] std::optional<worker::session_read> session_read_for(
+    [[nodiscard]] std::optional<read_session> session_read_for(
         model::state::session_handle session, read_gate gate) const;
 
     /** @brief The same, for the session signed in as one instance and account. */
-    [[nodiscard]] std::optional<worker::session_read> session_read_for(
+    [[nodiscard]] std::optional<read_session> session_read_for(
         std::string_view instance_id, std::string_view account_id,
         read_gate gate) const;
 
@@ -279,7 +278,7 @@ private:
      * the read's mark is set only after this says true, so a read that could
      * not be started is not left marked.
      */
-    [[nodiscard]] bool submit_read(const worker::session_read& read,
+    [[nodiscard]] bool submit_read(const read_session& read,
         worker::read_request request);
 
     [[nodiscard]] bool is_open() const noexcept {
@@ -308,7 +307,7 @@ private:
 
     /** @brief Starts a catalogue read (empty series) or a points read. */
     [[nodiscard]] std::optional<refusal> launch_market_read(
-        worker::session_read read, std::string_view series_id);
+        read_session read, std::string_view series_id);
 
     /** @brief Asks for one series' points, on the window's session. */
     [[nodiscard]] std::optional<refusal>
@@ -325,11 +324,8 @@ private:
         std::string_view account_id, std::string_view party_id);
 
     model::command::event_queue& events_;
-    const model::state::instance_table& instances_;
-    const model::state::account_table& accounts_;
     const model::state::session_table& sessions_;
     const model::state::window_table& windows_;
-    const session::transport::session_options& seed_;
     read_submit submit_;
     std::filesystem::path database_path_;
 

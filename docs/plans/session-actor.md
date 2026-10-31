@@ -482,14 +482,21 @@ all of them. Charts add only their one-off backfills.
 
 ### 5. Delete the per-read connection code
 
-> **Status: most of it landed with step 4.** The `connect` and `resume` blocks in
-> `market_worker.cpp` and `deployment_worker.cpp` are gone with their reads, so
-> are the token copy in `read_service.cpp`, every per-read spawn function, and
-> the pool `read_service` held. What is left is the type those blocks shared:
-> `run_session_read` and `run_session_read_on_link` now have no production
-> caller, and `session_read` survives only as the gate's answer in
-> `read_service`. Deleting both, and with them the token and connection fields
-> the gate still fills, is the whole of the remaining diff.
+> **Status: done.** The `connect` and `resume` blocks in `market_worker.cpp` and
+> `deployment_worker.cpp` went with their reads in step 4, so did the token copy
+> in `read_service.cpp`, every per-read spawn function and the pool
+> `read_service` held. This step deleted the type they shared:
+> `session_task.hpp` is gone with `run_session_read`, `run_session_read_on_link`
+> and `session_read`. The gate still asks whether the session holds a token,
+> because a session with none cannot be resumed on the actor either, but it no
+> longer copies it: `read_service::session_read_for` returns the pair and its
+> tenant, and the service no longer takes the instance and account tables or the
+> seed options at all.
+>
+> A client is built in four places now: `session_worker.cpp:110`,
+> `session_actor.cpp:180`, `probe_worker.cpp:185` and `policy_worker.cpp:103` —
+> three once step 6 deletes the session worker. `read_service`, `market_worker`
+> and `deployment_worker` build none.
 
 Delete `run_session_read` (`session_task.hpp:58-77`), the `connect` and `resume`
 blocks in `market_worker.cpp` and `deployment_worker.cpp`, `session_read::token`,

@@ -17,14 +17,9 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#include "hedgr.model/command/channel.hpp"
 #include "hedgr.runtime/worker/crm_worker.hpp"
-#include "hedgr.runtime/worker/session_task.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include "fake_link.hpp"
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
-#include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <optional>
 
@@ -83,60 +78,6 @@ TEST_CASE("a refused CRM batch becomes the event's message", "[crm][link]") {
     worker::run_crm_read(link, "p", "majors", false, fact);
     CHECK(fact.crm_cells.empty());
     CHECK(fact.message == "the rates were refused");
-}
-
-TEST_CASE("a link that cannot connect posts the failure and stops there",
-    "[crm][link]") {
-    fake_link link;
-    link.connect_error = session::session_error{
-        .code = session::session_errc::unreachable,
-        .message = "no broker"};
-
-    boost::asio::io_context context;
-    model::command::event_queue events;
-    model::event::event fact;
-    bool worked = false;
-    auto work = [&worked](session::session_link&,
-                    model::event::event&) { worked = true; };
-    boost::asio::co_spawn(context,
-        worker::run_session_read(link, worker::session_read{}, fact, work,
-            events),
-        boost::asio::detached);
-    context.run();
-
-    const auto got = events.drain();
-    REQUIRE(got.size() == 1);
-    CHECK(got[0].message == "no broker");
-    CHECK_FALSE(worked);
-    CHECK(link.crm_calls == 0);
-}
-
-TEST_CASE("a link that cannot resume posts the failure and stops there",
-    "[crm][link]") {
-    fake_link link;
-    link.resume_error = session::session_error{
-        .code = session::session_errc::session_expired,
-        .message = "the token is dead"};
-
-    boost::asio::io_context context;
-    model::command::event_queue events;
-    model::event::event fact;
-    bool worked = false;
-    auto work = [&worked](session::session_link&,
-                    model::event::event&) { worked = true; };
-    boost::asio::co_spawn(context,
-        worker::run_session_read(link, worker::session_read{}, fact, work,
-            events),
-        boost::asio::detached);
-    context.run();
-
-    const auto got = events.drain();
-    REQUIRE(got.size() == 1);
-    CHECK(got[0].message == "the token is dead");
-    CHECK_FALSE(worked);
-    CHECK(link.connects == 1);
-    CHECK(link.resumes == 1);
-    CHECK(link.crm_calls == 0);
 }
 
 TEST_CASE("a CRM as-of reads in OreStudio's wire shape", "[crm]") {
