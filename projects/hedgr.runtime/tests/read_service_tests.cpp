@@ -136,7 +136,7 @@ struct fixture final {
     /** @brief Whether the session refuses the next read, as a stopped one would. */
     bool refuse_reads = false;
 
-    service::read_service reads{events, sessions, windows, series,
+    service::read_service reads{sessions, windows, series,
         [this](std::string_view, std::string_view,
                const hedgr::runtime::worker::read_request& request) {
             if (refuse_reads)
@@ -312,7 +312,7 @@ TEST_CASE("exactly the six answering events name a read", "[reads][registry]") {
     for (const auto other : {kind::session_status_changed,
              kind::session_authenticated, kind::session_failed,
              kind::probe_result, kind::crm_names, kind::crm_rates,
-             kind::term_structure, kind::window_data}) {
+             kind::term_structure}) {
         CHECK_FALSE(request_id::answered_by(answer_of(other)).has_value());
     }
 }

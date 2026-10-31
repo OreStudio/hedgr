@@ -71,11 +71,10 @@ constexpr std::chrono::milliseconds crm_cadence{5000};
 
 }
 
-read_service::read_service(model::command::event_queue& events,
-    const model::state::session_table& sessions,
+read_service::read_service(const model::state::session_table& sessions,
     const model::state::window_table& windows,
     model::state::series_table& series, read_submit submit)
-    : events_(events), sessions_(sessions), windows_(windows),
+    : sessions_(sessions), windows_(windows),
       submit_(std::move(submit)), market_(series) {
 }
 
@@ -102,20 +101,13 @@ std::optional<refusal> read_service::start(const read_request& request) {
                 chart->series_id);
         }
         return std::nullopt;
-    case read_kind::placeholder: {
+    case read_kind::none:
         /*
-         * A refresh has nothing real to ask for yet, so the request is turned
-         * into an event carrying the window id and nothing else, which is
-         * enough to exercise the path from a command through the event
-         * channel and back into apply(). The real handler replaces the
-         * payload, not the shape.
+         * The window draws what the model already holds, so a refresh has
+         * nothing to ask a deployment for and raising an event would only tell
+         * the frame loop that a window it is already drawing is still there.
          */
-        event::event fact;
-        fact.kind = event::event_kind::window_data;
-        fact.payload = std::string{windows_.id(request.window)};
-        events_.push(std::move(fact));
         return std::nullopt;
-    }
     }
     return std::nullopt;
 }

@@ -1140,13 +1140,6 @@ void instance_manager::apply(const event::event& ev) {
                 : std::format("{} ({})", ev.message, ev.code));
         break;
     }
-    case event::event_kind::window_data:
-        /*
-         * Nothing to do: the deadline was already moved when the request was
-         * made, and the payload is the window id. A real data handler lands
-         * here when there is a data protocol to hand it.
-         */
-        break;
     case event::event_kind::probe_result:
         /*
          * Never reached: a probe result is applied above, before the session

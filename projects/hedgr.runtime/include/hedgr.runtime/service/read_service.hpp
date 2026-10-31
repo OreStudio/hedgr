@@ -77,9 +77,13 @@ public:
     /**
      * @param submit the session's actors. Empty means no read is run on one,
      * which is what a test that only drives the tables asks for.
+     *
+     * There is no event queue: every read this service starts is answered
+     * through the actor it was handed to, and the one event the queue used to
+     * carry - a window id with nothing in it, for kinds that have no read - is
+     * gone with the kinds' cadences.
      */
-    read_service(model::command::event_queue& events,
-        const model::state::session_table& sessions,
+    read_service(const model::state::session_table& sessions,
         const model::state::window_table& windows,
         model::state::series_table& series, read_submit submit = {});
 
@@ -323,7 +327,6 @@ private:
     void start_crm_names_read(std::string_view instance_id,
         std::string_view account_id, std::string_view party_id);
 
-    model::command::event_queue& events_;
     const model::state::session_table& sessions_;
     const model::state::window_table& windows_;
     read_submit submit_;

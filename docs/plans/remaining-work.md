@@ -144,6 +144,13 @@ Follow-ups noticed while building the Instances panel, both done:
   decisions D1 to D6 now record where each came out, and the SR-6 and C-5 notes
   say what they stand on. Still open: the series table decisions D1 to D7 and the
   wording of PR #63.
+- Done: **SR-12 is closed.** A window kind with no read has a zero cadence and a
+  parked deadline at all four moments, so an idle desk no longer sends a refresh
+  per such window per second for an event that named the window and carried
+  nothing. `read_kind::placeholder`, that event (`window_data`) and
+  `read_service`'s event-queue reference went with it, and the instance-manager
+  window — built outside the traits table — now takes its cadence and deadline
+  from the table.
 - The operator's old `imgui.ini` layout was never copied to `.cache/hedgr/imgui.ini`.
   Old dock nodes may carry the hidden-tab-bar flag.
 

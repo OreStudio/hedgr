@@ -1994,8 +1994,14 @@ TEST_CASE("a restored wall is rebound by the sign-in it was saved against",
         *manager.windows().find("command-centre:inst-refused:ident-1")) == 0);
     CHECK(manager.windows().next_refresh_ns(
         *manager.windows().find("terms:inst-refused:ident-1:curve-1")) == 0);
+
+    /*
+     * The workspace draws the live tables, so its rebind has nothing to ask
+     * for and leaves the deadline parked, as an open and a refresh do.
+     */
     CHECK(manager.windows().next_refresh_ns(
-        *manager.windows().find("workspace:inst-refused:ident-1")) == 0);
+        *manager.windows().find("workspace:inst-refused:ident-1"))
+        == parked_deadline);
 
     /* A chart is fed by the stream, so the rebind parks its deadline. */
     CHECK(manager.windows().next_refresh_ns(
@@ -2105,7 +2111,8 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
      * parked deadline is one the frame loop never reaches, so the kind is
      * fed some other way or reads on open, and a manual refresh still reads.
      * The chart's two-second cadence is listed as it is, although nothing
-     * polls on it once the deadline is parked.
+     * polls on it once the deadline is parked. A kind with no read has no
+     * cadence at all, and is parked at every moment.
      */
     struct expectation final {
         window_kind kind;
@@ -2116,12 +2123,12 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
     };
     const std::vector<expectation> expected{
         {window_kind::chart, "s-1", std::chrono::seconds{2}, true, true},
-        {window_kind::grid, {}, std::chrono::seconds{1}, false, false},
-        {window_kind::notice, {}, std::chrono::seconds{1}, false, false},
-        {window_kind::instance_manager, {}, std::chrono::seconds{1}, false,
-            false},
-        {window_kind::accounts, {}, std::chrono::seconds{1}, false, false},
-        {window_kind::workspace, {}, std::chrono::seconds{1}, false, false},
+        {window_kind::grid, {}, std::chrono::milliseconds{0}, true, true},
+        {window_kind::notice, {}, std::chrono::milliseconds{0}, true, true},
+        {window_kind::instance_manager, {}, std::chrono::milliseconds{0}, true,
+            true},
+        {window_kind::accounts, {}, std::chrono::milliseconds{0}, true, true},
+        {window_kind::workspace, {}, std::chrono::milliseconds{0}, true, true},
         {window_kind::command_centre, {}, std::chrono::seconds{30}, false,
             false},
         {window_kind::series_browser, {}, std::chrono::seconds{60}, false,
@@ -2164,6 +2171,32 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
         }
     }
     REQUIRE(manager.windows().size() == expected.size());
+
+    manager.stop();
+}
+
+TEST_CASE("a refresh of a window with no read asks for nothing", "[windows]") {
+    const temporary_database database("no-read-refresh");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    push_command(manager, open_window(window_kind::notice, "inst-1", "acct-1"));
+    const auto window = find_window_of_kind(manager, window_kind::notice);
+    REQUIRE(window.has_value());
+    const std::string id{manager.windows().id(*window)};
+
+    /*
+     * The window draws the live tables, so a refresh can only be answered with
+     * an event that named it and carried nothing: that event is what this
+     * checks is gone, while the deadline stays where the frame loop cannot
+     * reach it.
+     */
+    static_cast<void>(manager.events().drain());
+    for (int i = 0; i < 3; ++i)
+        push_command(manager, refresh(id));
+    for (const auto& ev : manager.events().drain())
+        CHECK(ev.payload != id);
+    CHECK(manager.windows().next_refresh_ns(*window) == parked_deadline);
 
     manager.stop();
 }
