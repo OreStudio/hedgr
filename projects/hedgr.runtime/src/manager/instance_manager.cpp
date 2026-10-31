@@ -1086,6 +1086,33 @@ void instance_manager::apply(const event::event& ev) {
             ev.message.empty() ? "the instance refused that party"
                                : ev.message);
         break;
+    case event::event_kind::link_lost: {
+        /*
+         * The session stays signed in: the actor keeps asking and rebuilds the
+         * connection itself. What the operator needs is the line in the bar,
+         * because an outage that is only in the log is invisible on a desk that
+         * draws its last numbers whether or not anything is still arriving.
+         */
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' lost its connection";
+        conditions_.raise({model_state::condition_source::session,
+                              running_key(ev.instance_id, ev.account_id)},
+            model_state::condition_severity::warning,
+            "the connection to the instance was lost; the session is "
+            "reconnecting",
+            steady_now_ns());
+        break;
+    }
+    case event::event_kind::link_restored: {
+        const auto key = running_key(ev.instance_id, ev.account_id);
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' answered again";
+        conditions_.clear({model_state::condition_source::session, key});
+        market_feed_.link_restored(ev.instance_id, ev.account_id);
+        break;
+    }
     case event::event_kind::deployment_snapshot:
         sessions_.set_deployment(*handle, ev.deployment);
         BOOST_LOG_SEV(lg(), ores::logging::debug)

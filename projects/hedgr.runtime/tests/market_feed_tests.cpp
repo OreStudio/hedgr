@@ -153,7 +153,6 @@ struct feed_state final {
     std::vector<std::string> tokens;
     int stops = 0;
     bool finished = false;
-    bool reconnected = false;
     bool destroyed = false;
     std::vector<series_bucket> waiting;
 };
@@ -208,10 +207,6 @@ public:
         out.clear();
         out.swap(state_->waiting);
         return out.size();
-    }
-
-    bool take_reconnected() override {
-        return std::exchange(state_->reconnected, false);
     }
 
 private:
@@ -615,7 +610,7 @@ TEST_CASE("watching a series seeds its history by a backfill", "[feed]") {
     }));
 }
 
-TEST_CASE("a reconnect seeds every watched series again", "[feed]") {
+TEST_CASE("a restored link seeds every watched series again", "[feed]") {
     world w;
     w.sign_in("a-1");
     w.set_catalogue("a-1", {row("s-1")});
@@ -627,13 +622,43 @@ TEST_CASE("a reconnect seeds every watched series again", "[feed]") {
     const auto series = w.handle_of("a-1", "s-1");
     const auto first = w.manager->market().version(series);
 
-    w.feeds.at(0)->reconnected = true;
-    w.manager->pump();
+    /*
+     * The actor reports the recovery as an event; the frame loop is what seeds
+     * the series again, so the read a window shows after an outage is the one
+     * this path starts.
+     */
+    event restored;
+    restored.kind = event_kind::link_restored;
+    restored.instance_id = instance_id;
+    restored.account_id = "a-1";
+    w.manager->events().push(restored);
     CHECK(wait_until([&] {
         w.manager->pump();
         return w.manager->market().version(series) != first;
     }));
     CHECK(w.feeds.at(0)->watches.size() == 1);
+}
+
+TEST_CASE("a restored link seeds nothing for a session with no stream",
+    "[feed]") {
+    world w;
+    w.sign_in("a-1");
+    w.set_catalogue("a-1", {row("s-1")});
+    w.open_chart("a-1", "s-1");
+    REQUIRE(wait_until([&] {
+        w.manager->pump();
+        return w.settled("a-1", "s-1");
+    }));
+
+    const auto before = w.feeds.at(0)->watches.size();
+    event restored;
+    restored.kind = event_kind::link_restored;
+    restored.instance_id = instance_id;
+    restored.account_id = "nobody-signed-in";
+    w.manager->events().push(restored);
+    w.manager->pump();
+
+    CHECK(w.feeds.at(0)->watches.size() == before);
 }
 
 TEST_CASE("a drained bucket lands in the series it names", "[feed]") {

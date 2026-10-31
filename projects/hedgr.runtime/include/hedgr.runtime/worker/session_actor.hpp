@@ -29,6 +29,7 @@
 #include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <memory>
@@ -68,6 +69,25 @@ struct session_actor_options final {
      * are driven without a broker. The link must outlive the actor's thread.
      */
     std::shared_ptr<session::transport::session_link> link;
+
+    /**
+     * @brief How long the actor waits between liveness requests.
+     *
+     * Ten seconds by default (D4). The request is one anonymous read, so a
+     * hundred idle sessions cost ten requests a second, and a stopped broker is
+     * noticed within one interval plus the request timeout.
+     */
+    std::chrono::milliseconds ping_interval{10'000};
+
+    /**
+     * @brief How many liveness requests may fail before the connection is
+     * rebuilt.
+     *
+     * Thirteen intervals of ten seconds outlasts the window cnats spends
+     * reconnecting on its own, which is what makes a broker that is not coming
+     * back something this process acts on rather than waits behind.
+     */
+    std::size_t failures_before_reconnect = 13;
 };
 
 /**
@@ -148,14 +168,6 @@ public:
     }
 
     /**
-     * @brief Whether the stream reconnected since the last call.
-     *
-     * The caller seeds history again for every watched series, because the
-     * ticks published while the connection was down are gone.
-     */
-    bool take_reconnected() override;
-
-    /**
      * @brief Queues one read for this session's connection. Thread safe.
      *
      * True when it was queued, and then an answer event follows: the read's
@@ -202,6 +214,9 @@ private:
     /** @brief Pushes @p fact when the actor has a queue to push it to. */
     void push(model::event::event fact) const;
 
+    /** @brief Pushes a fact about this session that is not a read's answer. */
+    void emit(model::event::event_kind kind) const;
+
     session_actor_options options_;
     std::shared_ptr<tick_sink> sink_;
 
@@ -215,7 +230,6 @@ private:
     bool stopping_ = false;
 
     std::atomic<bool> finished_{false};
-    std::atomic<bool> reconnected_{false};
 };
 
 }

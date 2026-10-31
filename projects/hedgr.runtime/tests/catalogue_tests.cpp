@@ -189,7 +189,6 @@ public:
         out.clear();
         return 0;
     }
-    bool take_reconnected() override { return false; }
 
 private:
     std::shared_ptr<feed_state> state_;

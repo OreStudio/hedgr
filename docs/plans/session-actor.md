@@ -356,11 +356,17 @@ per second per idle session fall from 10 (`market_stream.cpp:124`) to 0.
 
 ### 3. Liveness, loss and reseed (SR-6)
 
-> **Status: the seam it needs is in.** The actor runs on the `session_link` its
-> options carry, opening one of its own only when it was given none, so the
-> loop can be driven over the fake link. One test does that today: a read
-> queued before the thread starts is answered on the scripted connection, which
-> is opened once. The liveness itself is not written.
+> **Status: done.** `session_link::ping` is the deployment's anonymous
+> `bootstrap_status` read, sent every `ping_interval` (10 s) while idle and
+> after any wake that missed one. The first failure emits `link_lost` once and
+> not once per request; the first success after it emits `link_restored` once.
+> `failures_before_reconnect` (13, which outlasts cnats's own window) rebuilds
+> the connection: `disconnect`, then the actor's `connect` and `resume`. The
+> frame loop raises a status-bar condition on `link_lost` and clears it on
+> `link_restored`, and `market_feed::link_restored` starts one backfill per
+> watched series. `take_reconnected`, `reconnected_` and `ever_connected` are
+> deleted. Tested over the fake link, which scripts the answers and can make a
+> request slow enough to prove `request_stop` does not wait for it.
 
 The actor sends `ping` every interval while idle and on any wake after a gap,
 and treats a timeout or `closed` as loss. It emits `link_lost` once, keeps its
@@ -577,17 +583,17 @@ token itself. Nothing restarts. The subscription does not present the JWT, so a
 refresh needs no resubscribe (SR-5, already fixed in `market_feed.cpp:108`).
 
 **Link loss.** See step 3. While the link is lost, reads that arrive are queued
-up to a cap and answered with a failure if the loss outlasts the request
-timeout, so no mark is stranded. If cnats gives up, which is its reconnect limit
+and answered with a failure when a connect attempt fails or the actor stops, so
+no mark is stranded. If cnats gives up, which is its reconnect limit
 (inferred 60 attempts 2 s apart from cnats's defaults, since Hedgr's client sets
 none, `client.cpp:555-590`), the connection is closed and `is_connected()`
 without prerequisite D still answers true. The ping then fails forever, and
-after N consecutive failures (a constant, so ping interval times N exceeds
-cnats's window) the actor tears the client down and reconnects: `connect`, then
-`resume` with the token it holds. That works while the token is valid and a
-refresh can then be issued. It cannot work after the token expired, because the
-password is gone, and the actor emits `session_failed` and the operator signs in
-again. This is deliberate.
+after `failures_before_reconnect` consecutive failures (13 by default, so ping
+interval times N exceeds cnats's window) the actor tears the client down and
+reconnects: `connect`, then `resume` with the token it holds. That works while
+the token is valid and a refresh can then be issued. It cannot work after the
+token expired, because the password is gone, and the actor emits
+`session_failed` and the operator signs in again. This is deliberate.
 
 **Reconnect and reseed.** On `link_restored` the frame thread starts one backfill
 per watched series and marks every polling window due now. The backfill merges
@@ -676,7 +682,10 @@ not shown, because the tables key by instance and account, not by attempt.
 - **D4. Liveness.** The request, which is `bootstrap_status` (anonymous, so it
   proves broker and IAM and not the token), the interval, 10 s proposed, and
   whether a lost link shows to the operator as a new `session_status` or only as
-  a status-bar condition. A new status touches the UI.
+  a status-bar condition. A new status touches the UI. Decided: the request and
+  the 10 s interval as proposed, and a status-bar condition rather than a new
+  status, because a session that is reconnecting is still a session and a new
+  status would have to be handled by every surface that switches on one.
 - **D5. Exit.** Join, as today. Or bounded wait then detach, which needs
   prerequisite F. And whether the actor logs out on app exit. `logout` takes a
   request timeout of up to 30 s, so logging out on exit would make exit slower

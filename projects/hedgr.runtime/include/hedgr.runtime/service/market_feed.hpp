@@ -107,6 +107,16 @@ public:
     void close(std::string_view instance_id, std::string_view account_id);
 
     /**
+     * @brief Seeds every series the session watches again.
+     *
+     * Called when the session's connection answers after an outage, because the
+     * ticks published while it was down are gone. A session with no stream, or
+     * a series the table no longer names, costs nothing.
+     */
+    void link_restored(
+        std::string_view instance_id, std::string_view account_id);
+
+    /**
      * @brief Applies the watch changes, drains buckets and applies them.
      * @return the catalogue reads that were refused, for the facade to raise.
      */

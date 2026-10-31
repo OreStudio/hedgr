@@ -114,10 +114,6 @@ void session_actor::set_watch(std::span<const watch_target> wanted) {
     cv_.notify_all();
 }
 
-bool session_actor::take_reconnected() {
-    return reconnected_.exchange(false, std::memory_order_acq_rel);
-}
-
 bool session_actor::submit_read(read_request request) {
     {
         std::lock_guard lock(mu_);
@@ -154,6 +150,14 @@ void session_actor::fail_reads(std::vector<read_request>& reads,
 void session_actor::push(model::event::event fact) const {
     if (options_.events != nullptr)
         options_.events->push(std::move(fact));
+}
+
+void session_actor::emit(model::event::event_kind kind) const {
+    model::event::event fact;
+    fact.kind = kind;
+    fact.instance_id = options_.key.instance_id;
+    fact.account_id = options_.key.account_id;
+    push(std::move(fact));
 }
 
 void session_actor::wait_for_retry() {
@@ -194,7 +198,20 @@ void session_actor::run() {
     const auto on_tick = [sink](const session::market::tick& tick) {
         sink->on_tick(tick);
     };
-    bool ever_connected = false;
+
+    /*
+     * Liveness. The deployment answers a liveness request while it is there,
+     * and a request that fails is the only sign of an outage this process has:
+     * cnats reconnects underneath, and its own flag stays true. The first
+     * failure is reported once, the first success after it once, and a run of
+     * failures long enough to outlast cnats rebuilds the connection here.
+     */
+    const auto ping_interval = options_.ping_interval.count() > 0
+        ? options_.ping_interval
+        : std::chrono::milliseconds{10'000};
+    auto next_ping = std::chrono::steady_clock::now();
+    bool lost = false;
+    std::size_t failures = 0;
 
     while (true) {
         std::vector<command> queued;
@@ -205,10 +222,11 @@ void session_actor::run() {
             std::unique_lock lock(mu_);
             /*
              * A live stream sleeps until there is something to do: a watch
-             * change, a new token, a read or a stop. Only a stream that is not
-             * yet connected or subscribed wakes on the retry cadence, because
-             * that is the state a connect or a subscribe has to be tried again
-             * from. An idle session therefore costs no wakes.
+             * change, a new token, a read, a liveness request or a stop. Only
+             * a stream that is not yet connected or subscribed wakes on the
+             * retry cadence, because that is the state a connect or a
+             * subscribe has to be tried again from. An idle session therefore
+             * costs no wakes beyond the liveness interval.
              *
              * A read waits for the connection rather than being refused by it:
              * the session is authenticated when the read is asked for, so the
@@ -225,14 +243,16 @@ void session_actor::run() {
              * reads its windows ask for.
              */
             const bool live = stream.connected() && stream.subscribed();
+            const bool due =
+                stream.connected() && std::chrono::steady_clock::now() >= next_ping;
             const auto ready = [this]() {
                 return stopping_ || !commands_.empty()
                     || new_watch_.has_value() || new_token_.has_value()
                     || !reads_.empty();
             };
-            if (live)
-                cv_.wait(lock, ready);
-            else
+            if (live && !due)
+                cv_.wait_until(lock, next_ping, ready);
+            else if (!live)
                 cv_.wait_for(lock, std::chrono::milliseconds{100}, ready);
             if (stopping_)
                 break;
@@ -256,6 +276,36 @@ void session_actor::run() {
         if (!reads.empty())
             answer_reads(reads, link);
 
+        if (stream.connected() && std::chrono::steady_clock::now() >= next_ping) {
+            const auto sent = std::chrono::steady_clock::now();
+            const auto answer = link.ping();
+            next_ping = sent + ping_interval;
+            if (!answer) {
+                ++failures;
+                if (!lost) {
+                    lost = true;
+                    emit(model::event::event_kind::link_lost);
+                }
+                if (options_.failures_before_reconnect != 0
+                    && failures >= options_.failures_before_reconnect) {
+                    /*
+                     * cnats has had its own turn at reconnecting. Building the
+                     * connection again is what lets a broker that went away and
+                     * came back be picked up on this attempt rather than on a
+                     * refresh an hour from now.
+                     */
+                    stream.disconnect();
+                    failures = 0;
+                }
+            } else {
+                failures = 0;
+                if (lost) {
+                    lost = false;
+                    emit(model::event::event_kind::link_restored);
+                }
+            }
+        }
+
         if (!stream.connected()) {
             if (!stream.connect()) {
                 std::vector<read_request> refused;
@@ -267,9 +317,6 @@ void session_actor::run() {
                 wait_for_retry();
                 continue;
             }
-            if (ever_connected)
-                reconnected_.store(true, std::memory_order_release);
-            ever_connected = true;
         }
 
         if (!stream.subscribed() && !stream.subscribe(on_tick))

@@ -65,6 +65,10 @@ std::string_view to_string(event_kind value) noexcept {
         return "session_party_refused";
     case event_kind::master_sealed:
         return "master_sealed";
+    case event_kind::link_lost:
+        return "link_lost";
+    case event_kind::link_restored:
+        return "link_restored";
     }
     return "unknown";
 }

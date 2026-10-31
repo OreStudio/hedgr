@@ -119,6 +119,27 @@ void market_feed::close(std::string_view instance_id,
     market_streams_.erase(found);
 }
 
+void market_feed::link_restored(std::string_view instance_id,
+    std::string_view account_id) {
+    const auto found = market_streams_.find(running_key(instance_id, account_id));
+    if (found == market_streams_.end())
+        return;
+
+    /*
+     * The ticks published while the connection was down are gone, so every
+     * series this session watches is read again. A backfill merges with the
+     * live buckets and never replaces a newer one, so a reseed that was not
+     * needed costs a read and corrupts nothing.
+     */
+    for (const auto series : found->second.watched) {
+        const auto named = series_.key_of(series);
+        if (!named)
+            continue;
+        read_backfill_(named->instance_id, named->account_id,
+            named->series_id);
+    }
+}
+
 bool market_feed::wanted(const market_stream_entry& entry,
     model::state::series_handle series, std::vector<refusal>& refusals) {
     if (series_.watchers(series) == 0)
@@ -269,14 +290,6 @@ std::vector<refusal> market_feed::pump() {
     const auto now = steady_now_ns();
     for (auto& [key, entry] : market_streams_) {
         static_cast<void>(key);
-        if (entry.stream->take_reconnected()) {
-            for (const auto series : entry.watched) {
-                const auto named = *series_.key_of(series);
-                read_backfill_(named.instance_id, named.account_id,
-                    named.series_id);
-            }
-        }
-
         entry.stream->drain(buckets_);
         for (const auto& bucket : buckets_) {
             const auto applied = series_.append(bucket.series, bucket.level,
