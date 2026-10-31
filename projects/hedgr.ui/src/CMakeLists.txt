@@ -82,12 +82,16 @@ add_custom_command(TARGET ${lib_target_name} POST_BUILD
 
 install(FILES ${icon_sheet} DESTINATION share/hedgr.ui)
 
-# The menus' monospace face (JetBrains Mono, SIL OFL 1.1) and its licence go the
-# same way, under share/hedgr.ui/fonts, where the loader looks beside the icon
-# sheet. A missing file only costs the menus their face; the loader falls back to
-# the base font.
+# The menus' monospace face (JetBrains Mono, SIL OFL 1.1) in both its weights, and
+# its licence, go the same way, under share/hedgr.ui/fonts, where the loader looks
+# beside the icon sheet. Both weights ship because the bold one is the emphasis
+# face everywhere: without it a host whose system has no bold draws the intro's
+# wordmark and the numeric emphasis at the regular weight, and nothing tells the
+# reader that the emphasis was meant to be there. A missing file still only costs
+# that face; the loader falls back to the base font.
 set(mono_font_files
     "${CMAKE_SOURCE_DIR}/assets/fonts/JetBrainsMono-Regular.ttf"
+    "${CMAKE_SOURCE_DIR}/assets/fonts/JetBrainsMono-Bold.ttf"
     "${CMAKE_SOURCE_DIR}/assets/fonts/JetBrainsMono-OFL.txt")
 add_custom_command(TARGET ${lib_target_name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory

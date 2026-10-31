@@ -129,8 +129,15 @@ Follow-ups noticed while building the Instances panel, both done:
   `theme::begin_frame_with_tab_font()`, which makes the tab face the default for
   that call and restores the base face before any window body draws.
 - The reference's menu bar mode switcher and window controls are not built.
-- Monospace font: JetBrains Mono Regular is bundled. A bold weight is not; the intro's
-  "HEDGR." uses the system bold face, so a host without it shows regular weight.
+- Done: **the bold monospace weight ships.** JetBrains Mono Bold is bundled
+  beside the Regular and found by the same lookup, and it is the emphasis face
+  everywhere: the intro's wordmark, a table's captions and a tab's badge count.
+  It is preferred over the host's own bold, which used to be the only source and
+  could be absent, in which case emphasis drew at the regular weight with nothing
+  to show that it was meant to stand out. The host's bold of the base face stays
+  as the fallback when a package carries no bold file. Two tests: the file is
+  found by the same rule as the Regular in both install layouts, and a painted
+  frame shows the bold covering more of the page than the Regular.
 - Done: the probe service's deadline wiring is tested against the backoff rule
   (`probe_backoff_tests.cpp`), the tick identity parse is tested, and a tick read
   inside the silence window is tested by driving the read directly over the fake

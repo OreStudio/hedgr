@@ -950,17 +950,25 @@ TEST_CASE("the bundled monospace is found beside the executable or in the source
     fs::remove_all(root);
     fs::create_directories(root / "bin");
     CHECK(icon::mono_font_path(root / "bin", root).empty());
+    CHECK(icon::mono_bold_font_path(root / "bin", root).empty());
 
     fs::create_directories(root / "assets" / "fonts");
     std::ofstream(root / "assets" / "fonts" / "JetBrainsMono-Regular.ttf") << "x";
+    std::ofstream(root / "assets" / "fonts" / "JetBrainsMono-Bold.ttf") << "x";
     CHECK(icon::mono_font_path(root / "bin", root)
         == root / "assets" / "fonts" / "JetBrainsMono-Regular.ttf");
+    CHECK(icon::mono_bold_font_path(root / "bin", root)
+        == root / "assets" / "fonts" / "JetBrainsMono-Bold.ttf");
 
     fs::create_directories(root / "share" / "hedgr.ui" / "fonts");
     std::ofstream(root / "share" / "hedgr.ui" / "fonts"
         / "JetBrainsMono-Regular.ttf") << "x";
+    std::ofstream(root / "share" / "hedgr.ui" / "fonts"
+        / "JetBrainsMono-Bold.ttf") << "x";
     CHECK(icon::mono_font_path(root / "bin", root)
         == root / "share" / "hedgr.ui" / "fonts" / "JetBrainsMono-Regular.ttf");
+    CHECK(icon::mono_bold_font_path(root / "bin", root)
+        == root / "share" / "hedgr.ui" / "fonts" / "JetBrainsMono-Bold.ttf");
     fs::remove_all(root);
 }
 
@@ -1003,6 +1011,73 @@ TEST_CASE("the shipped monospace loads, is its own face, and sets the menu "
         + 2.0f * theme::menu_label_padding_x;
     CHECK(width == Catch::Approx(expected));
     CHECK(width != Catch::Approx(in_base));
+}
+
+TEST_CASE("the shipped bold loads and is a face of its own",
+    "[menu_bar][fonts]") {
+    headless_imgui imgui;
+    hedgr::ui::icon::load_ui_fonts(15.0f);
+    theme::apply_theme();
+    ImFont* const base = ImGui::GetIO().Fonts->Fonts[0];
+    ImFont* const regular = hedgr::ui::icon::mono_font();
+    ImFont* const bold = hedgr::ui::icon::bold_font();
+    REQUIRE(bold != nullptr);
+    REQUIRE(bold != base);
+    REQUIRE(bold != regular);
+
+    /* The bold face is monospaced like its regular weight. */
+    const auto advance = [](ImFont* font, char c) {
+        const char text[2] = {c, '\0'};
+        return font->CalcTextSizeA(15.0f, FLT_MAX, 0.0f, text).x;
+    };
+    CHECK(advance(bold, 'I') == Catch::Approx(advance(bold, 'W')));
+
+    /* Emphasis does not take over the numbers' face, which stays regular. */
+    CHECK(hedgr::ui::icon::numeric_font() != bold);
+}
+
+TEST_CASE("the shipped bold covers more of the page than the regular does",
+    "[menu_bar][fonts]") {
+    headless_imgui imgui;
+    hedgr::ui::icon::load_ui_fonts(40.0f);
+    theme::apply_theme();
+
+    /*
+     * Both weights are drawn into one frame and painted once, because the atlas
+     * is uploaded on the first frame only: a second raster created after that
+     * frame would have no texture pages to sample and would see a blank page.
+     * The weight then shows as the ink, which is what a reader sees, rather
+     * than as the metrics, which round to the same box at small sizes.
+     */
+    constexpr int width = 280;
+    constexpr int height = 140;
+    constexpr int regular_top = 6;
+    constexpr int bold_top = 70;
+    hedgr::testing::software_raster raster(width, height);    for (int i = 0; i < 3; ++i) {
+        ImGui::NewFrame();
+        ImDrawList* const list = ImGui::GetBackgroundDrawList();
+        list->AddText(hedgr::ui::icon::mono_font(), 40.0f,
+            ImVec2(8.0f, static_cast<float>(regular_top)), IM_COL32_WHITE, "HHHH");
+        list->AddText(hedgr::ui::icon::bold_font(), 40.0f,
+            ImVec2(8.0f, static_cast<float>(bold_top)), IM_COL32_WHITE, "HHHH");
+        ImGui::Render();
+        raster.update_textures();
+    }
+    raster.draw(*ImGui::GetDrawData(), IM_COL32(0, 0, 0, 255));
+
+    const auto ink = [&](int from, int to) {
+        float total = 0.0f;
+        for (int y = from; y < to; ++y)
+            for (int x = 0; x < width; ++x) {
+                const ImVec4 pixel = raster.pixel(x, y);
+                total += pixel.x + pixel.y + pixel.z;
+            }
+        return total;
+    };
+    const float regular_ink = ink(regular_top, bold_top);
+    const float bold_ink = ink(bold_top, height);
+    REQUIRE(regular_ink > 0.0f);
+    CHECK(bold_ink > regular_ink);
 }
 
 TEST_CASE("the desk's dock tabs are set in the monospace, the windows' bodies "
