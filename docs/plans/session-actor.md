@@ -283,15 +283,17 @@ by the broker's own connection list on a live deployment.
 
 ### 1. The seam, and tests for the workers
 
-> **Status: started.** `session_link` and `session_client_link` exist with
-> `connect`, `resume`, both CRM reads, CRM names, the two image reads, the
-> deployment read, the series tail, the catalogue, points/history and the
-> provider list. The CRM, image, image-map, CRM-names, term-structure and market
-> workers map through `run_*_read(link, …)` and are tested against one shared
-> fake, including failed connects, refusals, failed pillars and a failed points
-> read; the deployment and market workers own their client in a wrapper
-> coroutine. The rest of the call surface (authenticate, refresh, logout, ping,
-> subscribe) and the session worker follow.
+> **Status: done.** `session_link` and `session_client_link` carry the whole
+> surface: `connect`, `resume`, `ping` (the anonymous `bootstrap_status`),
+> `authenticate`, `select_party`, `switch_party`, `refresh`, `logout`,
+> `account`, `subscribe`, both CRM reads, CRM names, the two image reads, the
+> deployment read, the series tail, the catalogue, points and history (with the
+> tick timeout) and the provider list. Every read worker maps through
+> `run_*_read(link, …)`, and the session worker itself runs on the seam through
+> `run_session_on_link`, which is what finally gives it tests: a sign-in
+> scripted by the fake link, its status events, its attempt and token, and a
+> refused sign-in that reports and stops. The workers keep their client in a
+> wrapper coroutine, which is the only thing behind the seam today.
 
 Add `session_link`, an interface of the calls the workers and the actor make:
 `connect`, `resume`, `authenticate`, `refresh`, `logout`, `is_connected`,
@@ -515,6 +517,15 @@ to 3 when step 6 deletes the session worker. The 7 are `session_worker.cpp:115`,
 `tick_stream.cpp`.
 
 ### 6. Supervision moves into the actor
+
+> **Status: the seam it needs is in.** Step 1 now carries the sign-in calls on
+> `session_link`, and `session_worker.cpp` runs on that seam through
+> `run_session_on_link`, so the worker it deletes is the one the fake link can
+> already drive: a scripted sign-in, its status events, its token, and a refused
+> sign-in. What this step still does — creating the actor at the connect command,
+> moving the sealed-credential open and the wipe into it, the refresh deadline
+> with backoff, the logout, and the removal of `market_feed`'s open/close — is
+> not started.
 
 The actor takes `sign_in` as its first command, so it is created at the connect
 command, not at authentication. `session_worker.cpp` is deleted. Its sealed

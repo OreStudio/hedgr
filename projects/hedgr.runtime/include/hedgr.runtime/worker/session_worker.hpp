@@ -23,6 +23,7 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/domain/secret.hpp"
 #include "hedgr.model/domain/session.hpp"
+#include "hedgr.session/transport/session_link.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include "hedgr.runtime/export.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -141,6 +142,22 @@ spawn_session(boost::asio::io_context& context,
               session_job job,
               model::command::event_queue& events,
               std::shared_ptr<std::stop_source> stop);
+
+/**
+ * @brief Runs one session's lifecycle over a link the caller owns.
+ *
+ * The spawn builds a client and hands its link here, which is what lets a test
+ * put a fake behind it and script the sign-in, the refresh and the party
+ * switch. The credential handling is the same either way: the sealed copy is
+ * opened, the plaintext is used once and wiped, and the master password is
+ * dropped as soon as it has done its job.
+ *
+ * @pre Run on an executor thread. Never call this from the frame loop.
+ */
+HEDGR_RUNTIME_EXPORT boost::asio::awaitable<void> run_session_on_link(
+    hedgr::session::transport::session_link& link, session_job job,
+    model::command::event_queue& events,
+    std::shared_ptr<std::stop_source> stop);
 
 }
 

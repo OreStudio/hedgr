@@ -73,6 +73,48 @@ public:
      */
     [[nodiscard]] virtual result<void> ping() const = 0;
 
+    /**
+     * @brief Signs in with a principal and a password over the connection.
+     *
+     * The token the answer carries is held by the implementation and presented
+     * on every later authenticated call, so a worker never handles it beyond
+     * the event it reports.
+     */
+    [[nodiscard]] virtual result<session_account> authenticate(
+        std::string_view principal, std::string_view password) = 0;
+
+    /**
+     * @brief Scopes a just-signed-in session to one party.
+     *
+     * The login flow's single-use exchange, which only accepts the narrowly
+     * scoped token a sign-in issued.
+     */
+    [[nodiscard]] virtual result<void> select_party(
+        std::string_view party_id) = 0;
+
+    /** @brief Moves a live session to another party. */
+    [[nodiscard]] virtual result<void> switch_party(
+        std::string_view party_id) = 0;
+
+    /**
+     * @brief Replaces the held token without the password.
+     *
+     * @return the lifetime of the new token in seconds, or why the instance
+     * refused.
+     */
+    [[nodiscard]] virtual result<int> refresh() = 0;
+
+    /**
+     * @brief Signs out, dropping the token whatever the instance says.
+     *
+     * A sign-out is a state rather than an event: this process holds no
+     * credential afterwards even when the request cannot be delivered.
+     */
+    [[nodiscard]] virtual result<void> logout() = 0;
+
+    /** @brief What the instance last answered about this session. */
+    [[nodiscard]] virtual const session_account& account() const = 0;
+
     /** @brief Subscribes to @p subject, replacing any previous one. */
     [[nodiscard]] virtual ores::nats::service::subscription subscribe(
         std::string_view subject,
@@ -167,6 +209,33 @@ public:
         if (const auto answer = client_.bootstrap_status(); !answer)
             return std::unexpected(answer.error());
         return {};
+    }
+
+    [[nodiscard]] result<session_account> authenticate(
+        std::string_view principal, std::string_view password) override {
+        return client_.authenticate(principal, password);
+    }
+
+    [[nodiscard]] result<void> select_party(
+        std::string_view party_id) override {
+        return client_.select_party(party_id);
+    }
+
+    [[nodiscard]] result<void> switch_party(
+        std::string_view party_id) override {
+        return client_.switch_party(party_id);
+    }
+
+    [[nodiscard]] result<int> refresh() override {
+        return client_.refresh();
+    }
+
+    [[nodiscard]] result<void> logout() override {
+        return client_.logout();
+    }
+
+    [[nodiscard]] const session_account& account() const override {
+        return client_.account();
     }
 
     [[nodiscard]] ores::nats::service::subscription subscribe(
