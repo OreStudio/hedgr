@@ -48,6 +48,17 @@ constexpr std::string_view stopped_read_message =
 constexpr std::string_view unknown_read_failure_message =
     "the read did not run: the session's connection is not open";
 
+/**
+ * @brief The answer a read gets when the queue is already full.
+ *
+ * The caller is told the read did not run rather than left waiting for an
+ * answer that was never queued, and the answer is pushed here so the mark the
+ * caller sets when it submits is cleared by the frame loop as usual.
+ */
+constexpr std::string_view full_queue_message =
+    "the read did not run: the session has more reads waiting than it will "
+    "hold";
+
 }
 
 session_actor::session_actor(session_actor_options options)
@@ -115,11 +126,25 @@ void session_actor::set_watch(std::span<const watch_target> wanted) {
 }
 
 bool session_actor::submit_read(read_request request) {
+    bool full = false;
     {
         std::lock_guard lock(mu_);
         if (stopping_)
             return false;
-        reads_.push_back(std::move(request));
+        full = reads_.size() >= options_.max_queued_reads;
+        if (!full)
+            reads_.push_back(std::move(request));
+    }
+
+    /*
+     * A refused read is still answered, because the caller marks it in flight
+     * the moment this says it was accepted and only an answer clears the mark.
+     * It is not queued, so the answer is the one built here.
+     */
+    if (full) {
+        push(read_failed(request, options_.key, options_.tenant_id,
+            full_queue_message));
+        return true;
     }
     cv_.notify_all();
     return true;
