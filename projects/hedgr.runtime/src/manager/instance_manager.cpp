@@ -124,7 +124,6 @@ void instance_manager::stop() noexcept {
     BOOST_LOG_SEV(lg(), ores::logging::info) << "Stopping the runtime";
 
     catalogue_rereads_.clear();
-    attempts_.clear();
     market_feed_.cancel();
     read_service_.clear();
 
@@ -576,17 +575,17 @@ void instance_manager::complete_open(service::open_outcome outcome) {
 }
 
 void instance_manager::complete_session(service::session_effect effect) {
+    for (const auto& change : effect.conditions) {
+        if (change.clear) {
+            conditions_.clear(change.key);
+            continue;
+        }
+        conditions_.raise(change.key, change.severity, change.message,
+            steady_now_ns());
+    }
+
     for (auto& refused : effect.refusals)
         raise(std::move(refused.key), std::move(refused.message));
-
-    /*
-     * A connect that got as far as an attempt is remembered by the pair, which
-     * is what lets a fact from an attempt that has been replaced be told apart
-     * from news about the one that is live now.
-     */
-    if (effect.attempted)
-        attempts_[running_key(effect.attempted->instance_id,
-            effect.attempted->account_id)] = effect.attempted->number;
 
     for (const auto session : effect.unbind)
         window_service_.unbind(session);
@@ -594,8 +593,64 @@ void instance_manager::complete_session(service::session_effect effect) {
     for (const auto& watched : effect.detach)
         market_feed_.detach(watched.instance_id, watched.account_id);
 
+    for (const auto& watched : effect.attach)
+        market_feed_.attach(watched.instance_id, watched.account_id,
+            session_service_.feed(watched.instance_id, watched.account_id));
+
+    for (const auto& watched : effect.refresh_watches)
+        market_feed_.refresh_watches(watched.instance_id, watched.account_id);
+
+    for (const auto& read : effect.reads)
+        start_session_read(read);
+
+    /*
+     * The landing surface is decided by the fact and not by the click that
+     * asked for it: a super administrator's session belongs to the system
+     * tenant, and that is known only once IAM has answered. Opening it here
+     * also means a refused sign-in leaves no window behind.
+     */
+    for (const auto& landing : effect.open)
+        complete_open(window_service_.open_landing(landing.instance_id,
+            landing.account_id, landing.kind));
+
+    for (const auto& rebound : effect.rebind)
+        window_service_.rebind(rebound.instance_id, rebound.account_id,
+            rebound.session);
+
+    if (effect.link_restored)
+        market_feed_.link_restored(effect.link_restored->instance_id,
+            effect.link_restored->account_id);
+
     if (effect.save_windows)
         static_cast<void>(save_windows());
+}
+
+void instance_manager::start_session_read(
+    const service::session_effect::read_start& read) {
+    switch (read.what) {
+    case service::session_effect::read_start::kind::currency_image_map:
+        read_service_.start_currency_image_map(read.instance_id,
+            read.account_id, read.tenant_id);
+        return;
+    case service::session_effect::read_start::kind::market_catalogue:
+        /*
+         * The catalogue is party-scoped, so a party change reads it again
+         * rather than filtering what the old party's read brought. A read
+         * already in flight holds the pending mark and would swallow this one,
+         * so the pair is remembered and the read is started when that answer
+         * lands.
+         */
+        if (read_service_.market_catalogue_pending(read.instance_id,
+                read.account_id)) {
+            catalogue_rereads_.insert(
+                running_key(read.instance_id, read.account_id));
+            return;
+        }
+        if (auto refused = read_service_.start_market_catalogue_read(
+                read.instance_id, read.account_id))
+            raise(std::move(refused->key), std::move(refused->message));
+        return;
+    }
 }
 
 void instance_manager::apply(const event::event& ev) {
@@ -607,9 +662,9 @@ void instance_manager::apply(const event::event& ev) {
      * ride on the event.
      *
      * A probe's fact is about an instance and not about a session, so it is
-     * applied before the session lookup below: routing it through a session
-     * key would drop it, because an instance nobody has signed in to has no
-     * session to find.
+     * applied here rather than by the session service: routing it through a
+     * session key would drop it, because an instance nobody has signed in to
+     * has no session to find.
      */
     if (ev.kind == event::event_kind::probe_result) {
         probe_service_.apply_probe_result(ev);
@@ -629,8 +684,8 @@ void instance_manager::apply(const event::event& ev) {
 
     /*
      * A store fact is about the whole store and not about a session, so it is
-     * applied before the session lookup for the same reason a probe result is:
-     * an unlock has no session to be found by.
+     * applied here for the same reason a probe result is: an unlock has no
+     * session to be found by.
      */
     if (service::is_lock_event(ev.kind)) {
         const auto effect = lock_service_.apply(ev);
@@ -645,11 +700,11 @@ void instance_manager::apply(const event::event& ev) {
     }
 
     /*
-     * A read's answer is applied before the session lookup. The caches it
-     * fills are keyed by name rather than by the session row, and the answer
-     * is the only thing that clears the read's in-flight mark: dropping it
-     * because the operator signed out meanwhile would leave the read marked as
-     * running, and refuse it again after the next sign-in.
+     * A read's answer is applied here rather than by the session service. The
+     * caches it fills are keyed by name rather than by the session row, and the
+     * answer is the only thing that clears the read's in-flight mark: dropping
+     * it because the operator signed out meanwhile would leave the read marked
+     * as running, and refuse it again after the next sign-in.
      */
     if (read_service_.apply(ev)) {
         /*
@@ -668,207 +723,14 @@ void instance_manager::apply(const event::event& ev) {
     }
 
     /*
-     * A fact from a sign-in attempt that has since been replaced is not news
-     * about the session that is live now. The stopped worker may still be
-     * finishing, and its disconnect would otherwise land on top of the newer
-     * worker's authenticated state.
+     * Everything left is a fact about one session, and the session service owns
+     * it: the row, the attempt, the actor, and what the fact means for them.
+     * What the rest of the interface has to do about it - a landing window, a
+     * rebind, a read, a line in the bar - comes back described, and is
+     * performed by @c complete_session.
      */
-    if (ev.attempt != 0) {
-        const auto current = attempts_.find(
-            running_key(ev.instance_id, ev.account_id));
-        if (current == attempts_.end() || current->second != ev.attempt)
-            return;
-    }
-
-    const auto handle = sessions_.find(ev.instance_id, ev.account_id);
-
-    /*
-     * A session that is gone is not an error: a worker that was asked to stop
-     * may still have one event in flight, and the frame loop applying it to a
-     * row that no longer exists would address whoever occupies the slot next.
-     */
-    if (!handle)
-        return;
-
-    switch (ev.kind) {
-    case event::event_kind::session_status_changed:
-        sessions_.set_status(*handle, ev.status);
-
-        /*
-         * A session the actor says has ended has no actor worth keeping. The
-         * actor announces its own disconnect and failure, and the feed stops
-         * watching either way: a chart keeps its series and the next connect
-         * gives the session a new actor to watch them on.
-         */
-        if (ev.status == domain::session_status::disconnected
-            || ev.status == domain::session_status::failed) {
-            market_feed_.detach(ev.instance_id, ev.account_id);
-            retire_session(ev.instance_id, ev.account_id);
-        }
-        break;
-    case event::event_kind::session_authenticated:
-        sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
-            ev.party_id, ev.token);
-        sessions_.set_tenant_id(*handle, ev.tenant_id);
-        sessions_.set_parties(*handle, ev.parties);
-        sessions_.set_mode(*handle, ev.mode);
-        sessions_.set_status(*handle, domain::session_status::authenticated);
-
-        /*
-         * The feed starts watching here and not at the connect: a watch needs
-         * the session's party, and until the sign-in answers there is none. The
-         * actor itself exists already, and has since the connect command.
-         */
-        market_feed_.attach(ev.instance_id, ev.account_id,
-            session_service_.feed(ev.instance_id, ev.account_id));
-        read_service_.start_currency_image_map(ev);
-
-        /*
-         * Stamped here rather than by the worker, so the time says when the
-         * frame loop accepted the sign-in and every session's clock reading
-         * comes from one clock. A re-authentication of a pair that already had
-         * a session restamps it, which is what makes the workspace show the age
-         * of the connection it is actually looking at.
-         */
-        sessions_.set_opened_at_ns(*handle, steady_now_ns());
-
-        /*
-         * The landing surface is decided by the fact and not by the click that
-         * asked for it: a super administrator's session belongs to the system
-         * tenant, and that is known only once IAM has answered. Opening it here
-         * also means a refused sign-in leaves no window behind.
-         */
-        complete_open(window_service_.open_landing(ev.instance_id,
-            ev.account_id,
-            sessions_.mode(*handle) == domain::session_mode::system_administration
-                ? domain::window_kind::command_centre
-                : domain::window_kind::workspace));
-
-        /*
-         * Every other window the wall restored was saved against this same
-         * pair and is still unbound. Binding them here is what makes a
-         * restored series browser or chart live on the sign-in that owns it.
-         */
-        window_service_.rebind(ev.instance_id, ev.account_id, *handle);
-        break;
-    case event::event_kind::session_token_refreshed:
-        /*
-         * A refresh replaces the credential, not the session. Reads that start
-         * from here on take the new token, and the actor has already handed it
-         * to its own subscription, so nothing here touches the feed.
-         */
-        sessions_.set_token(*handle, ev.token);
-        break;
-    case event::event_kind::session_party_changed:
-        /*
-         * The session now acts as another party, so the token IAM just issued
-         * is the one every read must carry. The actor has reopened its own
-         * subscription for the new party; the catalogue is party-scoped, so it
-         * is read again rather than filtered.
-         */
-        sessions_.set_account_result(*handle, ev.tenant_name, ev.party_name,
-            ev.party_id, ev.token);
-        sessions_.set_tenant_id(*handle, ev.tenant_id);
-        market_feed_.refresh_watches(ev.instance_id, ev.account_id);
-        if (read_service_.market_catalogue_pending(ev.instance_id,
-                ev.account_id))
-            catalogue_rereads_.insert(
-                running_key(ev.instance_id, ev.account_id));
-        if (auto refused = read_service_.start_market_catalogue_read(
-                ev.instance_id, ev.account_id))
-            raise(std::move(refused->key), std::move(refused->message));
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Session '" << ev.instance_id << "' / '" << ev.account_id
-            << "' now acts as party '" << ev.party_id << "'";
-        break;
-    case event::event_kind::session_party_refused:
-        /*
-         * The session keeps its old party and token; the control that asked
-         * goes back to what the session says, and the bar carries the reason.
-         */
-        raise({model_state::condition_source::session, ev.account_id},
-            ev.message.empty() ? "the instance refused that party"
-                               : ev.message);
-        break;
-    case event::event_kind::link_lost: {
-        /*
-         * The session stays signed in: the actor keeps asking and rebuilds the
-         * connection itself. What the operator needs is the line in the bar,
-         * because an outage that is only in the log is invisible on a desk that
-         * draws its last numbers whether or not anything is still arriving.
-         */
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "Session '" << ev.instance_id << "' / '" << ev.account_id
-            << "' lost its connection";
-        conditions_.raise({model_state::condition_source::session,
-                              running_key(ev.instance_id, ev.account_id)},
-            model_state::condition_severity::warning,
-            "the connection to the instance was lost; the session is "
-            "reconnecting",
-            steady_now_ns());
-        break;
-    }
-    case event::event_kind::link_restored: {
-        const auto key = running_key(ev.instance_id, ev.account_id);
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Session '" << ev.instance_id << "' / '" << ev.account_id
-            << "' answered again";
-        conditions_.clear({model_state::condition_source::session, key});
-        market_feed_.link_restored(ev.instance_id, ev.account_id);
-        break;
-    }
-    case event::event_kind::deployment_snapshot:
-        sessions_.set_deployment(*handle, ev.deployment);
-        BOOST_LOG_SEV(lg(), ores::logging::debug)
-            << "Applied a deployment snapshot for '" << ev.instance_id
-            << "' / '" << ev.account_id << "'";
-        break;
-    case event::event_kind::session_failed: {
-        sessions_.set_status(*handle, domain::session_status::failed);
-
-        /*
-         * The actor has reported its own end, so the feed stops watching it and
-         * the actor itself is left to finish: its thread exits on its own, and
-         * the service reaps it.
-         */
-        market_feed_.detach(ev.instance_id, ev.account_id);
-        retire_session(ev.instance_id, ev.account_id);
-
-        /*
-         * The sentence a person reads stays first and the code follows it in
-         * brackets, so the tooltip carries both: the sentence says who to ask,
-         * the code says what to tell them.
-         */
-        sessions_.set_last_error(*handle, ev.code.empty()
-                ? ev.message
-                : std::format("{} ({})", ev.message, ev.code));
-        break;
-    }
-    case event::event_kind::probe_result:
-        /*
-         * Never reached: a probe result is applied above, before the session
-         * lookup. The case exists so that adding it to the enum without a
-         * handler would have been a compile error rather than a silent drop.
-         */
-        break;
-    case event::event_kind::store_unlocked:
-    case event::event_kind::master_sealed:
-    case event::event_kind::store_lock_failed:
-    case event::event_kind::password_policy_fetched:
-    case event::event_kind::series_catalogue:
-    case event::event_kind::crm_names:
-    case event::event_kind::crm_rates:
-    case event::event_kind::term_structure:
-    case event::event_kind::image_loaded:
-    case event::event_kind::currency_image_map:
-    case event::event_kind::series_points:
-    case event::event_kind::series_history:
-        /*
-         * Never reached either, and for the same reason: each is applied above,
-         * because none of them needs the session row.
-         */
-        break;
-    }
+    if (auto effect = session_service_.apply(ev))
+        complete_session(std::move(*effect));
 }
 
 std::expected<void, std::string> instance_manager::save_windows() {

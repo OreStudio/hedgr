@@ -104,8 +104,7 @@ const model::domain::instance* session_service::wire_format_holder(
 }
 
 void session_service::start(const model::command::command& cmd,
-    model::domain::credential credential, std::string sealed_credential,
-    session_effect& effect) {
+    model::domain::credential credential, std::string sealed_credential) {
     const auto instance = deps_->instances.find(cmd.instance_id);
     if (!instance)
         return;
@@ -147,8 +146,7 @@ void session_service::start(const model::command::command& cmd,
 
     const auto attempt = ++next_attempt_;
     options.attempt = attempt;
-    effect.attempted = session_effect::attempt{cmd.instance_id,
-        cmd.account_id, attempt};
+    attempts_[running_key(cmd.instance_id, cmd.account_id)] = attempt;
 
     /*
      * A second connect for a pair asks for a fresh attempt; opening stops the
@@ -238,7 +236,7 @@ session_effect session_service::connect(const model::command::command& cmd) {
         start(cmd,
             model::domain::credential{cmd.principal,
                 std::string{cmd.password.view()}},
-            {}, effect);
+            {});
         return effect;
     }
 
@@ -290,7 +288,7 @@ session_effect session_service::connect(const model::command::command& cmd) {
     }
 
     auto blob = std::move(sealed).value();
-    start(cmd, {}, std::move(blob.value()), effect);
+    start(cmd, {}, std::move(blob.value()));
     return effect;
 }
 
@@ -365,6 +363,224 @@ session_effect session_service::select_party(
     return effect;
 }
 
+std::optional<session_effect> session_service::apply(
+    const model::event::event& ev) {
+    /*
+     * Without a catalogue there are no sessions to apply anything to, and the
+     * events a test drives its reads with are not about a session at all.
+     */
+    if (!deps_)
+        return std::nullopt;
+
+    /*
+     * A fact from a sign-in attempt that has since been replaced is not news
+     * about the session that is live now. The actor of the old attempt may
+     * still be finishing, and its disconnect would otherwise land on top of the
+     * newer sign-in.
+     */
+    if (ev.attempt != 0) {
+        const auto current = attempts_.find(
+            running_key(ev.instance_id, ev.account_id));
+        if (current == attempts_.end() || current->second != ev.attempt)
+            return std::nullopt;
+    }
+
+    const auto handle = deps_->sessions.find(ev.instance_id, ev.account_id);
+
+    /*
+     * A session that is gone is not an error: an actor that was asked to stop
+     * may still have one event in flight, and applying it to a row that no
+     * longer exists would address whoever occupies the slot next.
+     */
+    if (!handle)
+        return std::nullopt;
+
+    session_effect effect;
+    switch (ev.kind) {
+    case model::event::event_kind::session_status_changed:
+        deps_->sessions.set_status(*handle, ev.status);
+
+        /*
+         * A session the actor says has ended has no actor worth keeping. The
+         * actor announces its own disconnect and failure, so it is retired
+         * here; the feed stops watching either way, because a chart keeps its
+         * series and the next connect gives the session a new actor to watch
+         * them on.
+         */
+        if (ev.status == model::domain::session_status::disconnected
+            || ev.status == model::domain::session_status::failed) {
+            effect.detach.push_back({ev.instance_id, ev.account_id});
+            retire(ev.instance_id, ev.account_id);
+        }
+        break;
+    case model::event::event_kind::session_authenticated:
+        deps_->sessions.set_account_result(*handle, ev.tenant_name,
+            ev.party_name, ev.party_id, ev.token);
+        deps_->sessions.set_tenant_id(*handle, ev.tenant_id);
+        deps_->sessions.set_parties(*handle, ev.parties);
+        deps_->sessions.set_mode(*handle, ev.mode);
+        deps_->sessions.set_status(*handle,
+            model::domain::session_status::authenticated);
+
+        /*
+         * The feed starts watching here and not at the connect: a watch needs
+         * the session's party, and until the sign-in answers there is none. The
+         * actor itself exists already, and has since the connect command.
+         */
+        effect.attach.push_back({ev.instance_id, ev.account_id});
+
+        /*
+         * The flags fall back to the drawn ones until the tenant's map answers,
+         * which is why the read is asked for as soon as there is a tenant.
+         */
+        effect.reads.push_back(
+            {session_effect::read_start::kind::currency_image_map,
+                ev.instance_id, ev.account_id, ev.tenant_id});
+
+        /*
+         * Stamped here rather than by the actor, so the time says when the
+         * frame loop accepted the sign-in and every session's clock reading
+         * comes from one clock. A re-authentication of a pair that already had
+         * a session restamps it, which is what makes the workspace show the age
+         * of the connection it is actually looking at.
+         */
+        deps_->sessions.set_opened_at_ns(*handle, support::steady_now_ns());
+
+        /*
+         * The landing surface is decided by the fact and not by the click that
+         * asked for it: a super administrator's session belongs to the system
+         * tenant, and that is known only once IAM has answered. Opening it here
+         * also means a refused sign-in leaves no window behind.
+         */
+        effect.open.push_back({ev.instance_id, ev.account_id,
+            deps_->sessions.mode(*handle)
+                    == model::domain::session_mode::system_administration
+                ? model::domain::window_kind::command_centre
+                : model::domain::window_kind::workspace});
+
+        /*
+         * Every other window the wall restored was saved against this same
+         * pair and is still unbound. Binding them here is what makes a restored
+         * series browser or chart live on the sign-in that owns it.
+         */
+        effect.rebind.push_back({ev.instance_id, ev.account_id, *handle});
+        break;
+    case model::event::event_kind::session_token_refreshed:
+        /*
+         * A refresh replaces the credential, not the session. Reads that start
+         * from here on take the new token, and the actor has already handed it
+         * to its own subscription, so nothing here touches the feed.
+         */
+        deps_->sessions.set_token(*handle, ev.token);
+        break;
+    case model::event::event_kind::session_party_changed:
+        /*
+         * The session now acts as another party, so the token IAM just issued
+         * is the one every read must carry. The actor has reopened its own
+         * subscription for the new party; the catalogue is party-scoped, so it
+         * is read again rather than filtered.
+         */
+        deps_->sessions.set_account_result(*handle, ev.tenant_name,
+            ev.party_name, ev.party_id, ev.token);
+        deps_->sessions.set_tenant_id(*handle, ev.tenant_id);
+        effect.refresh_watches.push_back({ev.instance_id, ev.account_id});
+        effect.reads.push_back(
+            {session_effect::read_start::kind::market_catalogue, ev.instance_id,
+                ev.account_id, {}});
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' now acts as party '" << ev.party_id << "'";
+        break;
+    case model::event::event_kind::session_party_refused:
+        /*
+         * The session keeps its old party and token; the control that asked
+         * goes back to what the session says, and the bar carries the reason.
+         */
+        effect.refusals.push_back(refusal{
+            {model::state::condition_source::session, ev.account_id},
+            ev.message.empty() ? "the instance refused that party"
+                               : ev.message});
+        break;
+    case model::event::event_kind::link_lost: {
+        /*
+         * The session stays signed in: the actor keeps asking and rebuilds the
+         * connection itself. What the operator needs is the line in the bar,
+         * because an outage that is only in the log is invisible on a desk that
+         * draws its last numbers whether or not anything is still arriving.
+         */
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' lost its connection";
+        effect.conditions.push_back({
+            {model::state::condition_source::session,
+                running_key(ev.instance_id, ev.account_id)},
+            false, model::state::condition_severity::warning,
+            "the connection to the instance was lost; the session is "
+            "reconnecting"});
+        break;
+    }
+    case model::event::event_kind::link_restored:
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Session '" << ev.instance_id << "' / '" << ev.account_id
+            << "' answered again";
+        effect.conditions.push_back({
+            {model::state::condition_source::session,
+                running_key(ev.instance_id, ev.account_id)},
+            true, model::state::condition_severity::warning, {}});
+        effect.link_restored =
+            session_effect::watched{ev.instance_id, ev.account_id};
+        break;
+    case model::event::event_kind::deployment_snapshot:
+        deps_->sessions.set_deployment(*handle, ev.deployment);
+        BOOST_LOG_SEV(lg(), ores::logging::debug)
+            << "Applied a deployment snapshot for '" << ev.instance_id
+            << "' / '" << ev.account_id << "'";
+        break;
+    case model::event::event_kind::session_failed:
+        deps_->sessions.set_status(*handle,
+            model::domain::session_status::failed);
+
+        /*
+         * The actor has reported its own end, so the feed stops watching it and
+         * the actor itself is left to finish: its thread exits on its own, and
+         * the service reaps it.
+         */
+        effect.detach.push_back({ev.instance_id, ev.account_id});
+        retire(ev.instance_id, ev.account_id);
+
+        /*
+         * The sentence a person reads stays first and the code follows it in
+         * brackets, so the tooltip carries both: the sentence says who to ask,
+         * the code says what to tell them.
+         */
+        deps_->sessions.set_last_error(*handle,
+            ev.code.empty() ? ev.message
+                            : std::format("{} ({})", ev.message, ev.code));
+        break;
+    case model::event::event_kind::probe_result:
+    case model::event::event_kind::store_unlocked:
+    case model::event::event_kind::master_sealed:
+    case model::event::event_kind::store_lock_failed:
+    case model::event::event_kind::password_policy_fetched:
+    case model::event::event_kind::series_catalogue:
+    case model::event::event_kind::series_points:
+    case model::event::event_kind::series_history:
+    case model::event::event_kind::currency_image_map:
+    case model::event::event_kind::image_loaded:
+    case model::event::event_kind::term_structure:
+    case model::event::event_kind::crm_rates:
+    case model::event::event_kind::crm_names:
+        /*
+         * Each is about the deployment or a window rather than about a session,
+         * and is applied by the service that owns it before this one is asked.
+         * The cases are listed so that a new kind is a compile error here
+         * rather than a silent drop.
+         */
+        return std::nullopt;
+    }
+    return effect;
+}
+
 std::shared_ptr<worker::tick_feed>
 session_service::open(worker::session_actor_options options) {
     options.events = &events_;
@@ -417,6 +633,13 @@ void session_service::sign_out(std::string_view instance_id,
 }
 
 void session_service::cancel() {
+    /*
+     * Nothing is left to tell apart once every actor is going: a fact that was
+     * already in flight is about a session that is being stopped anyway, and
+     * the attempts are forgotten with the connections they numbered.
+     */
+    attempts_.clear();
+
     for (auto& [key, actor] : actors_) {
         static_cast<void>(key);
         actor->request_stop();
