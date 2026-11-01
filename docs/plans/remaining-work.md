@@ -149,13 +149,24 @@ Follow-ups noticed while building the Instances panel, both done:
   sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
   A session now has one connection for reads, ticks, the lifecycle and the
   logout.
+- Blocked: **every authenticated request in this build throws**, so the refresh
+  live check cannot pass until the environment is refreshed. `hedgr.session.tests
+  "[.live-refresh-now]"` reproduces it in nine seconds: `nats_client`'s
+  authenticated request throws `std::bad_alloc`, first inside the
+  `get_my_parties` read that `authenticate` swallows, so a sign-in looks fine
+  while every read and every refresh fails. The cause is an ABI skew: Hedgr
+  compiles against the OreStudio headers in `ores_dev_brave_hopper` (HEAD
+  2026-11-01) and links that tree's pre-built libraries, the newest of which is
+  2026-10-20, and OreStudio's `c16c7fd5` (2026-10-27) added a member to
+  `ores::nats::service::nats_client`, which `session_client` holds by value. Needs
+  the OreStudio libraries rebuilt from the current tree, then a Hedgr relink; the
+  tree is read-only to this workspace, so it is the operator's.
 - Done: **the step 6 live check, in part.** Against the `jolly_knuth` deployment
   on this host, a real mTLS sign-in as `super_admin` held **one** connection for
   the whole session and gave it back on the sign-out (the broker's list read 25,
   26, 25), and the refresh was armed at 1440 s of the token's 1800 s. Still
-  unchecked: a real broker restart, and the refresh itself, which is 24 minutes
-  out. `hedgr.runtime.tests "[live-probe]"` repeats the probe with `HEDGR_LIVE_*`
-  set, as its comment says.
+  unchecked: a real broker restart. `hedgr.runtime.tests "[live-probe]"` repeats
+  the probe with `HEDGR_LIVE_*` set, as its comment says.
 - Done: **`docs/review/README.md` status cells are current.** The session actor's
   decisions D1 to D6 and the series table's D1 to D7 each record where they came
   out — D1, D2, D3, D5 and D6 as recommended, D4 still undecided, D7 not done

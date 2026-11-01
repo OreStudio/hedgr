@@ -822,8 +822,42 @@ directly by `hedgr.runtime.tests "[live-probe]"`:
 - the token's stated lifetime was 1800 s, so the actor armed its refresh at
   1440 s, as designed.
 
+Note that `jolly_knuth` and `swift_curie` refused `super_admin` on 2026-11-01
+(`invalid_credentials`), so the checks were repeated against `prime_origin`
+(broker `localhost:20005`, monitor `localhost:20006`), which signs it in.
+
 The probe is a hidden test case (`[.live-probe]`) with the command line in its
 comment, so the check can be repeated without a rebuild.
+
+**What the refresh check has shown, on 2026-11-01, and what it found instead.**
+A second hidden test, `hedgr.runtime.tests "[.live-refresh]"`, holds a real
+session open until the refresh fires. Run against `prime_origin` (broker
+`localhost:20005`, mTLS, monitor `localhost:20006`, `super_admin`) it waited
+1560 s and saw the refresh **armed and retried**: the actor sent the request at
+1440 s and retried with the 1 s doubling-to-30 s backoff, seven attempts in the
+log, holding its one connection throughout (`conns` went 27 to 28 and stayed).
+Every attempt failed with `protocol_error`, whose low-level cause is
+`std::bad_alloc`.
+
+The cause is not the refresh. Every *authenticated request* in this build
+throws, from `nats_client::do_authenticated_request` itself: the first one is
+the `get_my_parties` read inside `authenticate`, which swallows its failure, so
+a sign-in succeeds while every read and every refresh fails. The reason is an
+ABI skew in the environment: Hedgr compiles against the OreStudio headers in
+`/home/marco/Development/OreStudio/ores_dev_brave_hopper` (HEAD 2026-11-01) but
+links the pre-built libraries in that tree's
+`build/output/linux-clang-release-ninja/publish/lib`, the newest of which is
+2026-10-20. OreStudio commit `c16c7fd5` (2026-10-27, "[nats] Renew a session
+once when its token is refused") added a member to
+`ores::nats::service::nats_client`, which `session_client` holds **by value**,
+so Hedgr's object is smaller than the library's and every member the library
+reads past that point is garbage — here a `std::string` whose size field reads
+as a pointer.
+
+So the refresh check cannot be finished until the OreStudio libraries are
+rebuilt from the tree Hedgr compiles against, and Hedgr relinked. `hedgr.session.tests
+"[.live-refresh-now]"` is the nine-second reproduction: sign in, call
+`refresh()` at once, and assert the lifetime came back.
 
 What the same check has **not** covered, and why:
 
@@ -832,9 +866,9 @@ What the same check has **not** covered, and why:
   connection. Step 3 is tested over a fake link that scripts those answers. The
   fake proves the actor's logic, not cnats's. Restarting a deployment's broker
   was not done: it would take the operator's services down with it.
-- Token refresh against the real IAM with the real lifetime: the refresh is at
-  1440 s, so the check needs a session held open for 24 minutes. The armed
-  deadline was observed; the refresh itself was not.
+- Token refresh against the real IAM with the real lifetime: see above. The
+  armed deadline and the retry policy were observed; the request itself cannot
+  succeed in this environment.
 - A desk of 100 windows, and a stopped broker for 30 s and for 3 minutes. The
   probe signs in one session with no windows.
 - TLS, which the probe did exercise (mTLS against the deployment's own CA and
