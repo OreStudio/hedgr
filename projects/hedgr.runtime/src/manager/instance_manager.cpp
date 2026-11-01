@@ -98,8 +98,13 @@ constexpr std::size_t probe_thread_count = 2;
 
 instance_manager::instance_manager(std::size_t pool_threads,
     worker::tick_feed_factory market_feeds)
-    : pool_(pool_threads), probe_pool_(probe_thread_count)
-    , session_service_(events_, std::move(market_feeds)) {
+    : pool_(pool_threads), probe_pool_(probe_thread_count) {
+    /*
+     * The service is built from its member initialiser, which is what hands it
+     * the tables and the lock getters, so a test's factory is installed here
+     * rather than in the initialiser list. Nothing has opened an actor yet.
+     */
+    session_service_.set_factory(std::move(market_feeds));
 }
 
 instance_manager::~instance_manager() {
@@ -277,7 +282,7 @@ void instance_manager::pump() {
             return connection_options_for(row, seed_options_, database_->path());
         },
         [this](const domain::instance& row) {
-            return wire_format_holder(row) == nullptr;
+            return session_service_.wire_format_allows(row);
         });
     read_service_.pump_crm_reads();
 
@@ -364,7 +369,7 @@ void instance_manager::handle(command::command& cmd) {
         complete_catalogue(catalogue_.apply(cmd));
         break;
     case command::command_kind::connect_session:
-        do_connect_session(cmd);
+        complete_session(session_service_.connect(cmd));
         break;
     case command::command_kind::store_credential:
         if (auto refused = lock_service_.store_credential(cmd))
@@ -377,10 +382,10 @@ void instance_manager::handle(command::command& cmd) {
         read_service_.load_term_structure(cmd);
         break;
     case command::command_kind::disconnect_session:
-        do_disconnect_session(cmd);
+        complete_session(session_service_.disconnect(cmd));
         break;
     case command::command_kind::select_party:
-        do_select_party(cmd);
+        complete_session(session_service_.select_party(cmd));
         break;
     case command::command_kind::open_window:
         complete_open(window_service_.open(cmd));
@@ -466,185 +471,6 @@ void instance_manager::handle(command::command& cmd) {
     }
 }
 
-void instance_manager::do_connect_session(const command::command& cmd) {
-    BOOST_LOG_SEV(lg(), ores::logging::info)
-        << "Sign-in requested for '" << cmd.account_id << "' on '"
-        << cmd.instance_id << "'";
-
-    /*
-     * Both ids arrive as text from the interface, so both are resolved here:
-     * the instance's row is read for the connection settings, and the account
-     * has to exist, because its identity is also what a stored credential is
-     * looked up by.
-     */
-    const auto instance = catalogue_.instances().find(cmd.instance_id);
-    if (!instance) {
-        raise({condition_source::session, cmd.account_id},
-            std::format("cannot connect: no instance {}",
-                cmd.instance_id));
-        return;
-    }
-    const auto* instance_row = catalogue_.instances().get(*instance);
-
-    if (!catalogue_.accounts().find(cmd.account_id)) {
-        raise({condition_source::session, cmd.account_id},
-            std::format("cannot connect: no account {}",
-                cmd.account_id));
-        return;
-    }
-
-    /*
-     * Before the password is remembered or a derivation is started: a refusal
-     * starts nothing, and an operator who is told to disconnect another
-     * session first should not also find a credential saved for an attempt
-     * that never ran.
-     */
-    if (const auto* holder = wire_format_holder(*instance_row)) {
-        raise({condition_source::session, cmd.account_id},
-            std::format(
-                "cannot connect to {}: it uses the {} wire format, but {} is "
-                "signed in using {}, and this process speaks one wire format at "
-                "a time; disconnect {} first",
-                instance_row->name, instance_row->wire_format, holder->name,
-                holder->wire_format, holder->name));
-        return;
-    }
-
-    /*
-     * A credential typed for this attempt wins over a stored one. The operator
-     * who has just filled in a password prompt is asking for that password to
-     * be used, and quietly preferring the remembered one would make the prompt
-     * a lie.
-     */
-    if (!cmd.password.empty()) {
-        if (cmd.remember && lock_service_.store_lock() == domain::store_lock::unlocked) {
-            lock_service_.remember(cmd.account_id,
-                std::string{cmd.password.view()});
-        } else if (cmd.remember) {
-            BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "Not remembering the password for '" << cmd.account_id
-                << "': the store is not unlocked";
-        }
-        start_session_for(cmd,
-            domain::credential{cmd.principal, std::string{cmd.password.view()}});
-        return;
-    }
-
-    /*
-     * No password and a closed lock is a refusal, and the sentence says which
-     * of the two things went wrong. "The password was wrong" would be wrong:
-     * nothing was tried, and an operator who is told their password is bad will
-     * retype a password that was never the problem.
-     */
-    if (lock_service_.store_lock() != domain::store_lock::unlocked) {
-        raise({condition_source::store_lock, cmd.account_id},
-            std::format(
-                "cannot connect to {}: the store is {}, so no password is "
-                "available and none was supplied",
-                instance_row->name,
-                domain::to_string(lock_service_.store_lock())));
-        return;
-    }
-
-    auto sealed = catalogue_.account_repository().credential_of(cmd.account_id);
-    if (!sealed) {
-        raise({condition_source::credential, cmd.account_id},
-            store_failure("cannot read the stored credential",
-                sealed.error()));
-        return;
-    }
-    if (!sealed.value()) {
-        raise({condition_source::credential, cmd.account_id},
-            std::format(
-                "cannot connect to {}: the account has no stored credential and "
-                "no password was supplied",
-                instance_row->name));
-        BOOST_LOG_SEV(lg(), ores::logging::warn)
-            << "Cannot sign in to '" << instance_row->name
-            << "': account '" << cmd.account_id
-            << "' has no stored credential and no password was supplied";
-        return;
-    }
-
-    /*
-     * The sealed value goes to the pool to be opened. It is ciphertext and safe
-     * to hold here; what comes out of it is not, so it never travels back
-     * through this thread.
-     */
-    auto blob = std::move(sealed).value();
-    start_session_for(cmd, {}, std::move(blob.value()));
-}
-
-const domain::instance* instance_manager::wire_format_holder(
-    const domain::instance& row) const {
-    for (const auto session : live_sessions(sessions_)) {
-        const auto status = sessions_.status(session);
-        if (status != domain::session_status::connecting
-            && status != domain::session_status::authenticated)
-            continue;
-        const auto instance_id = sessions_.instance_id(session);
-        const auto held = catalogue_.instances().find(instance_id);
-        if (!held)
-            continue;
-        const auto* other = catalogue_.instances().get(*held);
-        if (other->wire_format != row.wire_format)
-            return other;
-    }
-    return nullptr;
-}
-
-void instance_manager::start_session_for(const command::command& cmd,
-    domain::credential credential, std::string sealed_credential) {
-    const auto instance = catalogue_.instances().find(cmd.instance_id);
-    if (!instance)
-        return;
-    const auto* instance_row = catalogue_.instances().get(*instance);
-
-    /*
-     * Reconnecting a pair resumes the same session rather than making a second
-     * one, which is the whole reason the table is keyed by the pair.
-     */
-    auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!handle)
-        handle = sessions_.insert(cmd.instance_id, cmd.account_id);
-    sessions_.set_status(*handle, domain::session_status::connecting);
-
-    /*
-     * The actor is created here, at the connect command, and owns the session
-     * from its first byte: the connection, the sign-in, the token and its
-     * refresh. The credential travels in its options and exists for exactly one
-     * attempt, because the actor wipes it the moment the sign-in resolves.
-     */
-    worker::session_actor_options options;
-    options.options = connection_options_for(*instance_row, seed_options_,
-        database_->path());
-    options.key = domain::session_key{cmd.instance_id, cmd.account_id};
-    options.credential = std::move(credential);
-    options.sealed_credential = std::move(sealed_credential);
-
-    /*
-     * A stored credential travels sealed, with the password that opens it, and
-     * the actor opens it on its own thread: the derivation is half a second of
-     * deliberate work that must not happen on the frame loop. The password is
-     * copied out of the held secret here, so the actor's copy dies with the
-     * attempt and the held copy survives for the next one.
-     */
-    if (!options.sealed_credential.empty())
-        options.master_password = lock_service_.master_password();
-
-    const auto attempt_key = running_key(cmd.instance_id, cmd.account_id);
-    const auto attempt = ++next_attempt_;
-    attempts_[attempt_key] = attempt;
-    options.attempt = attempt;
-
-    /*
-     * A second connect for a pair asks for a fresh attempt; the service stops
-     * the actor it already holds for the pair, so the events of the one being
-     * replaced cannot arrive for the connection this call is about to open.
-     */
-    static_cast<void>(session_service_.open(std::move(options)));
-}
-
 void instance_manager::report_store_failure(const std::string& instance_id,
     const std::string& account_id, std::string message) {
     event::event fact;
@@ -653,59 +479,6 @@ void instance_manager::report_store_failure(const std::string& instance_id,
     fact.account_id = account_id;
     fact.message = std::move(message);
     events_.push(std::move(fact));
-}
-
-void instance_manager::do_disconnect_session(const command::command& cmd) {
-    /*
-     * A sign-out is the one stop that says goodbye: the instance is asked to
-     * drop the token, best effort, because a token nobody will use again is
-     * still a credential.
-     */
-    session_service_.sign_out(cmd.instance_id, cmd.account_id);
-    market_feed_.detach(cmd.instance_id, cmd.account_id);
-
-    const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!handle)
-        return;
-
-    /*
-     * The windows are unbound before the row is released, because release bumps
-     * the generation: after it, the handle a window holds no longer compares
-     * equal to the row it was bound to, and the unlink would silently miss.
-     */
-    window_service_.unbind(*handle);
-
-    sessions_.remove(*handle);
-    static_cast<void>(save_windows());
-}
-
-void instance_manager::do_select_party(const command::command& cmd) {
-    if (cmd.party_id.empty()) {
-        raise({model_state::condition_source::session, cmd.account_id},
-            "no party was named");
-        return;
-    }
-
-    const auto handle = sessions_.find(cmd.instance_id, cmd.account_id);
-    if (!handle
-        || sessions_.status(*handle) != domain::session_status::authenticated) {
-        raise({model_state::condition_source::session, cmd.account_id},
-            "acting as another party needs a signed-in session");
-        return;
-    }
-
-    /*
-     * The choice is handed to the session's own actor, which owns the
-     * transport. A session with no actor left has nothing to ask, and saying so
-     * is better than leaving the control changed and nothing happening.
-     */
-    const auto actor = session_service_.feed(cmd.instance_id, cmd.account_id);
-    if (actor == nullptr) {
-        raise({model_state::condition_source::session, cmd.account_id},
-            "the session has no connection to act as another party");
-        return;
-    }
-    actor->select_party(cmd.party_id);
 }
 
 void instance_manager::do_refresh_window(const command::command& cmd) {
@@ -800,6 +573,29 @@ void instance_manager::complete_open(service::open_outcome outcome) {
         start_read(*outcome.read);
     if (outcome.refused)
         raise(std::move(outcome.refused->key), std::move(outcome.refused->message));
+}
+
+void instance_manager::complete_session(service::session_effect effect) {
+    for (auto& refused : effect.refusals)
+        raise(std::move(refused.key), std::move(refused.message));
+
+    /*
+     * A connect that got as far as an attempt is remembered by the pair, which
+     * is what lets a fact from an attempt that has been replaced be told apart
+     * from news about the one that is live now.
+     */
+    if (effect.attempted)
+        attempts_[running_key(effect.attempted->instance_id,
+            effect.attempted->account_id)] = effect.attempted->number;
+
+    for (const auto session : effect.unbind)
+        window_service_.unbind(session);
+
+    for (const auto& watched : effect.detach)
+        market_feed_.detach(watched.instance_id, watched.account_id);
+
+    if (effect.save_windows)
+        static_cast<void>(save_windows());
 }
 
 void instance_manager::apply(const event::event& ev) {

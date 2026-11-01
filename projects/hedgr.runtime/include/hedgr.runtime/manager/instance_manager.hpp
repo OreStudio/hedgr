@@ -370,26 +370,16 @@ private:
      */
     void raise(model::state::condition_key key, std::string message);
 
-    void do_connect_session(const model::command::command& cmd);
+    void do_refresh_window(const model::command::command& cmd);
 
     /**
-     * @brief The instance whose live session speaks a different wire format
-     * from @p row, or nullptr.
+     * @brief Raises what the session service refused, then does what it asked.
      *
-     * The ORE client keeps one process-wide codec that every connect
-     * overwrites, so a second format would corrupt the sessions already open
-     * (C-5). Live means connecting or authenticated: a failed session has no
-     * worker decoding anything, and a removed one has no row. A session of
-     * @p row itself never conflicts, its format being @p row's own. Probes are
-     * held back by the same answer, because their connect writes the same
-     * global.
+     * The session service decides what happens to a session; the windows, the
+     * feed and the reads belong to other services, so it describes them and
+     * this performs them.
      */
-    [[nodiscard]] const model::domain::instance*
-    wire_format_holder(const model::domain::instance& row) const;
-
-    void do_disconnect_session(const model::command::command& cmd);
-    void do_select_party(const model::command::command& cmd);
-    void do_refresh_window(const model::command::command& cmd);
+    void complete_session(service::session_effect effect);
 
     /** @brief Starts the read an open asked for, then raises what it refused. */
     void complete_open(service::open_outcome outcome);
@@ -408,20 +398,13 @@ private:
     void start_read(const service::read_request& request);
 
     /**
-     * @brief Hands one connect attempt to the session pool.
+     * @brief Stops and forgets one session's actor, without saying goodbye.
      *
-     * The tail of @c do_connect_session, split out because a connect whose
-     * credential is stored reaches it from a coroutine instead: the sealed
-     * secret can only be opened off the frame loop, so the attempt is started
-     * after that work lands rather than before.
-     *
-     * @p sealed_credential is empty for a password typed at the prompt and
-     * holds the stored blob when there is one. Exactly one of the two carries
-     * the secret, and the worker refuses to treat them as alternatives.
+     * A teardown: the session row is going, or the process is, so the instance
+     * is not asked to drop a token nobody will use again.
      */
-    void start_session_for(const model::command::command& cmd,
-                           model::domain::credential credential,
-                           std::string sealed_credential = {});
+    void retire_session(std::string_view instance_id,
+                        std::string_view account_id);
 
     /**
      * @brief Posts the fact that a store operation was refused.
@@ -433,15 +416,6 @@ private:
     void report_store_failure(const std::string& instance_id,
                               const std::string& account_id,
                               std::string message);
-
-    /**
-     * @brief Stops and forgets one session's actor, without saying goodbye.
-     *
-     * A teardown: the session row is going, or the process is, so the instance
-     * is not asked to drop a token nobody will use again.
-     */
-    void retire_session(std::string_view instance_id,
-                        std::string_view account_id);
 
     async::executor pool_;
 
@@ -483,7 +457,6 @@ private:
      * the new worker's sign-in.
      */
     std::unordered_map<std::string, std::uint64_t> attempts_;
-    std::uint64_t next_attempt_ = 0;
 
     /**
      * @brief The options the process was seeded with.
@@ -519,7 +492,37 @@ private:
     model::state::series_table series_;
     service::window_service window_service_{sessions_, series_};
     service::lock_service lock_service_{pool_.context(), commands_, events_, catalogue_.accounts()};
-    service::session_service session_service_{events_};
+    /**
+     * @brief The session service, which owns every session's actor and row.
+     *
+     * The tables and the two lock getters are handed over by reference, as the
+     * plan says; everything else it needs to reach it returns as an effect.
+     */
+    service::session_service session_service_{events_,
+        service::session_dependencies{
+            .instances = catalogue_.instances(),
+            .accounts = catalogue_.accounts(),
+            .sessions = sessions_,
+            .seed = seed_options_,
+            .database_path = [this]() -> std::filesystem::path {
+                return database_ ? database_->path()
+                                 : std::filesystem::path{};
+            },
+            .sealed_credential =
+                [this](std::string_view account_id)
+                -> std::expected<std::optional<std::string>,
+                    store::sqlite::store_error> {
+                return catalogue_.account_repository().credential_of(
+                    std::string{account_id});
+            },
+            .store_lock = [this] { return lock_service_.store_lock(); },
+            .master_password = [this] { return lock_service_.master_password(); },
+            .remember = [this](std::string_view account_id,
+                            std::string password) {
+                lock_service_.remember(std::string{account_id},
+                    std::move(password));
+            },
+        }};
     service::read_service read_service_{sessions_,
         window_service_.windows(), series_,
         [this](std::string_view instance_id, std::string_view account_id,
