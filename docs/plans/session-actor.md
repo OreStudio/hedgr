@@ -614,6 +614,17 @@ review.
 
 ### 7. `session_service`
 
+> **Status: the commands are in, the events are not.** `connect`, `disconnect`
+> and `select_party` now live in `session_service`, which holds the instance,
+> account and session tables and the two lock getters by reference and returns a
+> `session_effect` for the facade to perform: raise a refusal, unbind a window,
+> detach the feed, write the wall. The attempt counter moved with them. The
+> session cases of `apply` and the `attempts_` map that filters a stale fact are
+> still in `instance_manager`, so this step is half done: a session's commands
+> are supervised by the object that owns its actor, and its events are not yet.
+> Moving them needs the effect to carry the landing window, the rebind, the feed
+> attach and the reads a sign-in starts.
+
 The class already exists, holding the actor map from step 4, so this moves
 supervision into it rather than creating it: a session and its connection end up
 owned by one object, which is the point of both steps.
