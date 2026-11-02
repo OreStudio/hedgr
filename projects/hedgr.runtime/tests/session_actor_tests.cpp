@@ -1156,3 +1156,79 @@ TEST_CASE("live refresh: a real session renews its own token",
         std::this_thread::sleep_for(std::chrono::milliseconds{20});
     std::printf("finished=%d\n", actor.finished() ? 1 : 0);
 }
+
+/**
+ * @brief Whether a real actor can run a read, which is what a window needs.
+ *
+ * A chart's history, a flag's image and the currency map all arrive as answers
+ * to reads the actor runs; the tick stream is a subscription and is not. So an
+ * interface that plots live ticks but draws no history and no flags is an
+ * interface whose reads are not answering, and this asks the actor directly:
+ * sign in, ask for the catalogue, then for the tenant's currency map.
+ *
+ * Hidden, with the same environment as the live probe:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.runtime.tests "[.live-actor-read]"
+ */
+TEST_CASE("live actor read: an actor answers a catalogue and a map",
+    "[.live-actor-read]") {
+    hedgr::model::command::event_queue events;
+    session_actor actor(live_options(events));
+    actor.start();
+
+    const auto drain_until = [&events](const auto& wanted,
+                                   std::chrono::seconds within) {
+        std::vector<hedgr::model::event::event> facts;
+        const auto deadline = std::chrono::steady_clock::now() + within;
+        while (std::chrono::steady_clock::now() < deadline) {
+            for (auto& ev : events.drain())
+                facts.push_back(std::move(ev));
+            if (std::any_of(facts.begin(), facts.end(), wanted))
+                return facts;
+            std::this_thread::sleep_for(std::chrono::milliseconds{20});
+        }
+        return facts;
+    };
+
+    const auto sign_in = drain_until([](const auto& ev) {
+        return ev.kind == event_kind::session_authenticated
+            || ev.kind == event_kind::session_failed;
+    }, std::chrono::seconds{30});
+    const bool authenticated = std::any_of(sign_in.begin(), sign_in.end(),
+        [](const auto& ev) {
+            return ev.kind == event_kind::session_authenticated;
+        });
+    std::printf("authenticated=%d\n", authenticated ? 1 : 0);
+    std::fflush(stdout);
+    REQUIRE(authenticated);
+
+    std::printf("catalogue queued=%d\n", actor.submit_read(
+        hedgr::runtime::worker::catalogue_request{}) ? 1 : 0);
+    for (const auto& ev : drain_until([](const auto& fact) {
+             return fact.kind == event_kind::series_catalogue
+                 || fact.kind == event_kind::session_failed;
+         }, std::chrono::seconds{30})) {
+        if (ev.kind == event_kind::series_catalogue)
+            std::printf("catalogue answered: %zu series\n", ev.series.size());
+        if (ev.kind == event_kind::session_failed)
+            std::printf("catalogue failed: %s [%s]\n", ev.message.c_str(),
+                ev.code.c_str());
+    }
+
+    std::printf("map queued=%d\n", actor.submit_read(
+        hedgr::runtime::worker::image_map_request{}) ? 1 : 0);
+    for (const auto& ev : drain_until([](const auto& fact) {
+             return fact.kind == event_kind::currency_image_map;
+         }, std::chrono::seconds{30})) {
+        if (ev.kind == event_kind::currency_image_map)
+            std::printf("map answered: %zu images for tenant '%s'\n",
+                ev.image_refs.size(), ev.tenant_id.c_str());
+    }
+    std::fflush(stdout);
+
+    actor.request_logout();
+    const auto stopped =
+        std::chrono::steady_clock::now() + std::chrono::seconds{15};
+    while (!actor.finished() && std::chrono::steady_clock::now() < stopped)
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+}
