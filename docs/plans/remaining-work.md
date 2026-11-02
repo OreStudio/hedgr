@@ -6,7 +6,7 @@ them. "Blocked" names what must land elsewhere first.
 
 ## State of the code
 
-- Main is at 0.3.1 and deployed to goedel (`hedgr/current`, restarted).
+- Main is at 0.3.2 and deployed to goedel (`hedgr/current`, restarted).
 - Merged since 0.2.0: mini plot cards (fixed size, snap grid), chart header strip and
   purple palette, tab look, top menu bar with FILE, VIEW, INSTANCES, TOOLS and HELP,
   floating toolbar, Instances panel, Provider combo, launch intro with sound, the UX
