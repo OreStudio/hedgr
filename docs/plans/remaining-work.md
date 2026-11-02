@@ -149,18 +149,23 @@ Follow-ups noticed while building the Instances panel, both done:
   sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
   A session now has one connection for reads, ticks, the lifecycle and the
   logout.
-- Blocked: **every authenticated request in this build throws**, so the refresh
-  live check cannot pass until the environment is refreshed. `hedgr.session.tests
-  "[.live-refresh-now]"` reproduces it in nine seconds: `nats_client`'s
-  authenticated request throws `std::bad_alloc`, first inside the
-  `get_my_parties` read that `authenticate` swallows, so a sign-in looks fine
-  while every read and every refresh fails. The cause is an ABI skew: Hedgr
-  compiles against the OreStudio headers in `ores_dev_brave_hopper` (HEAD
-  2026-11-01) and links that tree's pre-built libraries, the newest of which is
-  2026-10-20, and OreStudio's `c16c7fd5` (2026-10-27) added a member to
-  `ores::nats::service::nats_client`, which `session_client` holds by value. Needs
-  the OreStudio libraries rebuilt from the current tree, then a Hedgr relink; the
-  tree is read-only to this workspace, so it is the operator's.
+- Done: **the step 6 live check is complete.** Against the `brave_hopper`
+  deployment on this host (broker `localhost:20405`, mTLS, monitor
+  `localhost:20406`), a real session ran 1440 s, the actor's refresh fired and
+  replaced the token, the session held **one** connection across it (`connz` read
+  25 before, 26 throughout, 25 after the sign-out) and signed out cleanly.
+  `hedgr.runtime.tests "[.live-refresh]"` is the check and
+  `"[.live-refresh-now]"` its nine-second form. Only a real broker restart is
+  still unchecked.
+- Done: **the stale-library skew that hid the check, and what it taught.** The
+  first attempt failed with `std::bad_alloc` from every authenticated request,
+  because Hedgr compiled against OreStudio headers from 2026-11-01 while linking
+  libraries from 2026-10-20, and `nats_client` — which `session_client` holds by
+  value — had gained a member in between. The operator's sprint 29 rebuild
+  (`0.0.29` libraries, 2026-11-02) and a Hedgr relink fixed it. Two things to
+  keep: the bundler copies OreStudio libraries into `publish/lib` and will
+  re-use the stale copy unless they are removed first, and a successful sign-in
+  proves nothing about reads because `authenticate` swallows its own read.
 - Done: **the step 6 live check, in part.** Against the `jolly_knuth` deployment
   on this host, a real mTLS sign-in as `super_admin` held **one** connection for
   the whole session and gave it back on the sign-out (the broker's list read 25,
