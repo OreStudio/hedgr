@@ -212,3 +212,123 @@ TEST_CASE("cancelling stops every actor and forgets them", "[sessions]") {
     CHECK(w.actors[0]->destroyed);
     CHECK(w.actors[1]->destroyed);
 }
+
+namespace {
+
+/**
+ * @brief A service that supervises, over tables the test fills itself.
+ *
+ * The world above is for the actor map alone, which needs no catalogue. This one
+ * hands the service the instance, account and session tables and an unlocked
+ * store, so a command that has to decide *what* to sign in as can be driven end
+ * to end and the actor's options inspected.
+ */
+struct supervised_world final {
+    supervised_world() {
+        service = std::make_unique<service::session_service>(events,
+            service::session_dependencies{
+                .instances = instances,
+                .accounts = accounts,
+                .sessions = sessions,
+                .seed = {},
+                .database_path = [] { return std::filesystem::path{}; },
+                .sealed_credential =
+                    [](std::string_view)
+                    -> std::expected<std::optional<std::string>,
+                        hedgr::store::sqlite::store_error> {
+                    return std::optional<std::string>{"a sealed password"};
+                },
+                .store_lock =
+                    [] { return model::domain::store_lock::unlocked; },
+                .master_password = [] {
+                    return model::domain::secret_string{
+                        std::string{"a master password"}};
+                },
+                .remember = [](std::string_view, std::string) {},
+            },
+            [this](worker::session_actor_options options)
+                -> std::unique_ptr<worker::tick_feed> {
+                auto state = std::make_shared<actor_state>();
+                state->options = std::move(options);
+                actors.push_back(state);
+                return std::make_unique<fake_actor>(state);
+            });
+    }
+
+    model::command::event_queue events;
+    model::state::instance_table instances;
+    model::state::account_table accounts;
+    model::state::session_table sessions;
+    std::vector<std::shared_ptr<actor_state>> actors;
+    std::unique_ptr<service::session_service> service;
+};
+
+}
+
+TEST_CASE("a remembered password still signs in as the account it belongs to",
+    "[sessions]") {
+    supervised_world w;
+
+    model::domain::instance instance;
+    instance.id = "i-1";
+    instance.name = "instance one";
+    instance.wire_format = "msgpack";
+    static_cast<void>(w.instances.upsert(std::move(instance)));
+
+    model::domain::account account;
+    account.id = "a-1";
+    account.instance_id = "i-1";
+    account.name = "tenant admin";
+    account.principal = "tenant_admin@acme.test";
+    static_cast<void>(w.accounts.upsert(std::move(account)));
+
+    /*
+     * No password: this is the sign-in that means "use the one you remember",
+     * so the credential travels sealed and nothing else names the account.
+     */
+    model::command::command cmd;
+    cmd.kind = model::command::command_kind::connect_session;
+    cmd.instance_id = "i-1";
+    cmd.account_id = "a-1";
+    cmd.principal = "tenant_admin@acme.test";
+
+    const auto effect = w.service->connect(cmd);
+    CHECK(effect.refusals.empty());
+    REQUIRE(w.actors.size() == 1);
+    CHECK(w.actors[0]->options.credential.principal
+        == "tenant_admin@acme.test");
+    CHECK(w.actors[0]->options.credential.password.empty());
+    CHECK(w.actors[0]->options.sealed_credential == "a sealed password");
+    CHECK(w.actors[0]->options.master_password.view() == "a master password");
+}
+
+TEST_CASE("an account with no principal is refused before anything starts",
+    "[sessions]") {
+    supervised_world w;
+
+    model::domain::instance instance;
+    instance.id = "i-1";
+    instance.name = "instance one";
+    instance.wire_format = "msgpack";
+    static_cast<void>(w.instances.upsert(std::move(instance)));
+
+    model::domain::account account;
+    account.id = "a-1";
+    account.instance_id = "i-1";
+    account.name = "tenant admin";
+    static_cast<void>(w.accounts.upsert(std::move(account)));
+
+    model::command::command cmd;
+    cmd.kind = model::command::command_kind::connect_session;
+    cmd.instance_id = "i-1";
+    cmd.account_id = "a-1";
+
+    const auto effect = w.service->connect(cmd);
+
+    REQUIRE(effect.refusals.size() == 1);
+    CHECK(effect.refusals.front().message
+        == "cannot connect to instance one: account 'a-1' has no principal, "
+           "which is the name the instance knows it by");
+    CHECK(w.actors.empty());
+    CHECK_FALSE(w.sessions.find("i-1", "a-1").has_value());
+}
