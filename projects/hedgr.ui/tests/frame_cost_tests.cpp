@@ -244,6 +244,7 @@ namespace {
 struct flag_draw final {
     int vertices = 0;
     float cursor_moved = 0.0f;
+    float cursor_x_moved = 0.0f;
     std::size_t texture_gets = 0;
     std::vector<std::string> asked;
 };
@@ -256,9 +257,11 @@ flag_draw draw_flags_for(desk& desk, std::string_view label) {
         const auto* list = ImGui::GetWindowDrawList();
         const auto vertices_before = list->VtxBuffer.Size;
         const auto cursor_before = ImGui::GetCursorPosY();
+        const auto cursor_x_before = ImGui::GetCursorPosX();
         render::draw_series_flags(input, desk.session, label);
         result.vertices = list->VtxBuffer.Size - vertices_before;
         result.cursor_moved = ImGui::GetCursorPosY() - cursor_before;
+        result.cursor_x_moved = ImGui::GetCursorPosX() - cursor_x_before;
     });
     result.texture_gets = desk.textures.gets - gets_before;
     for (const auto& request : desk.commands.drain())
@@ -288,7 +291,7 @@ TEST_CASE("a currency is drawn from its server image once it loads",
     CHECK(after.cursor_moved > 0.0f);
 }
 
-TEST_CASE("a currency with no server image draws nothing and reserves no space",
+TEST_CASE("a currency with no server image draws nothing and ends the row",
     "[frame][flags]") {
     headless_imgui imgui;
     desk desk;
@@ -299,7 +302,13 @@ TEST_CASE("a currency with no server image draws nothing and reserves no space",
     CHECK(drawn.asked.empty());
     CHECK(drawn.texture_gets == 0);
     CHECK(drawn.vertices == 0);
-    CHECK(drawn.cursor_moved == 0.0f);
+    /*
+     * No width is set aside, and the row still ends: a caller places what comes
+     * after on the line below and takes its position from the cursor, so a
+     * header with no flags must not hand the next surface the tail of its row.
+     */
+    CHECK(drawn.cursor_x_moved == 0.0f);
+    CHECK(drawn.cursor_moved > 0.0f);
 }
 
 namespace {
