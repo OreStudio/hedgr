@@ -327,6 +327,29 @@ TEST_CASE("live shape: what a deployment says about a chart and its flags",
                 field.text.c_str());
 
         const auto read = session.market_series_points(first.id);
+        /*
+         * The identity the catalogue carries names the party that owns the
+         * series. The tick service scopes its reads by the session's own party,
+         * so the two are tried apart as well as together: which of them the
+         * service matches on is the question a refusal leaves open.
+         */
+        {
+            auto no_party = first.identity;
+            no_party.party_id.clear();
+            const auto anon = session.market_series_points(first.id, no_party);
+            std::printf("points with no party: %s\n",
+                anon ? std::format("{} points", anon->points.size()).c_str()
+                     : anon.error().message.c_str());
+
+            auto session_party = first.identity;
+            session_party.party_id = signed_in->party_id;
+            const auto scoped =
+                session.market_series_points(first.id, session_party);
+            std::printf("points as the session's party: %s\n",
+                scoped
+                    ? std::format("{} points", scoped->points.size()).c_str()
+                    : scoped.error().message.c_str());
+        }
         if (!read) {
             std::printf("points failed: %s (%s)\n",
                 read.error().message.c_str(), read.error().detail.c_str());
@@ -380,11 +403,15 @@ TEST_CASE("live shape: what a deployment says about a chart and its flags",
             const auto text = std::string_view{
                 reinterpret_cast<const char*>(content->data.data()),
                 content->data.size()};
-            std::printf("  %s %s %zu bytes closed=%d ends='%.14s'\n",
+            std::printf("  %s %s %zu bytes closed=%d tail-hex",
                 image.currency.c_str(), content->mime_type.c_str(),
                 content->data.size(),
-                text.ends_with("</svg>") ? 1 : 0,
-                text.size() > 14 ? text.substr(text.size() - 14).data() : "");
+                text.ends_with("</svg>\n") ? 1 : 0);
+            const auto first = content->data.size() > 12
+                ? content->data.size() - 12 : content->data.size();
+            for (std::size_t at = first; at < content->data.size(); ++at)
+                std::printf(" %02x", static_cast<unsigned>(content->data[at]));
+            std::printf("\n");
         }
     }
     std::fflush(stdout);
