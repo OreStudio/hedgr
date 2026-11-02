@@ -197,10 +197,12 @@ void session_actor::set_watch(std::span<const watch_target> wanted) {
 
 bool session_actor::submit_read(read_request request) {
     bool full = false;
+    std::string tenant;
     {
         std::lock_guard lock(mu_);
         if (stopping_)
             return false;
+        tenant = tenant_;
         full = reads_.size() >= options_.max_queued_reads;
         if (!full)
             reads_.push_back(std::move(request));
@@ -212,8 +214,7 @@ bool session_actor::submit_read(read_request request) {
      * It is not queued, so the answer is the one built here.
      */
     if (full) {
-        push(read_failed(request, options_.key, options_.tenant_id,
-            full_queue_message));
+        push(read_failed(request, options_.key, tenant, full_queue_message));
         return true;
     }
     cv_.notify_all();
@@ -223,7 +224,7 @@ bool session_actor::submit_read(read_request request) {
 void session_actor::answer_reads(std::vector<read_request>& reads,
     session::transport::session_link& link) {
     for (const auto& request : reads) {
-        auto fact = read_event(request, options_.key, options_.tenant_id);
+        auto fact = read_event(request, options_.key, facts_.tenant_id);
         run_read(link, request, fact);
         push(std::move(fact));
     }
@@ -235,7 +236,7 @@ void session_actor::fail_reads(std::vector<read_request>& reads,
     const auto sentence = reason.empty() ? unknown_read_failure_message
                                          : reason;
     for (const auto& request : reads) {
-        auto fact = read_failed(request, options_.key, options_.tenant_id,
+        auto fact = read_failed(request, options_.key, facts_.tenant_id,
             sentence);
         push(std::move(fact));
     }
@@ -452,6 +453,10 @@ bool session_actor::sign_in(transport::session_link& link) {
     facts_.token = account.token;
     facts_.principal = account.principal;
     facts_.tenant_id = account.tenant_id;
+    {
+        std::lock_guard lock(mu_);
+        tenant_ = facts_.tenant_id;
+    }
     facts_.tenant_name = account.tenant_name;
     facts_.party_id = account.party_id;
     facts_.party_name = account.party_name;
@@ -542,6 +547,10 @@ void session_actor::run() {
         facts_.principal = options_.principal;
         facts_.tenant_id = options_.tenant_id;
         facts_.party_id = options_.party_id;
+    }
+    {
+        std::lock_guard lock(mu_);
+        tenant_ = facts_.tenant_id;
     }
 
     stream = make_stream();

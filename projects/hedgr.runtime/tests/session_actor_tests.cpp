@@ -1232,3 +1232,59 @@ TEST_CASE("live actor read: an actor answers a catalogue and a map",
     while (!actor.finished() && std::chrono::steady_clock::now() < stopped)
         std::this_thread::sleep_for(std::chrono::milliseconds{20});
 }
+
+TEST_CASE("a read answer carries the tenant the sign-in answered with",
+    "[market_stream][reads]") {
+    using namespace std::chrono;
+    using hedgr::model::event::event_kind;
+    using hedgr::runtime::worker::image_request;
+    using hedgr::runtime::worker::session_actor;
+    using fake_link = hedgr::testing::fake_session_link;
+
+    auto link = std::make_shared<fake_link>();
+    link->account_value.tenant_id = "tenant-answered";
+    link->account_value.tenant_name = "Answered";
+    link->account_value.party_id = "party-answered";
+    link->account_value.token = "a-token";
+    link->account_value.access_lifetime_s = 1800;
+
+    hedgr::model::command::event_queue events;
+    auto options = fake_options(link, events);
+    /*
+     * The actor signs in, so the tenant is IAM's answer and not the seed. The
+     * options carry none, which is the state a real connect is in: the map and
+     * images are filed by tenant, so an answer stamped with the seed's empty
+     * one leaves the window that wanted it waiting forever.
+     */
+    options.token.clear();
+    options.tenant_id.clear();
+    options.party_id.clear();
+    options.credential = hedgr::model::domain::credential{"principal",
+        "password"};
+
+    session_actor actor(std::move(options));
+    actor.start();
+
+    REQUIRE(wait_until([&events] {
+        for (const auto& ev : events.drain())
+            if (ev.kind == event_kind::session_authenticated)
+                return true;
+        return false;
+    }));
+
+    REQUIRE(actor.submit_read(image_request{.image_id = "img-1"}));
+    std::vector<hedgr::model::event::event> answers;
+    REQUIRE(wait_until([&events, &answers] {
+        for (auto& ev : events.drain())
+            if (ev.kind == event_kind::image_loaded)
+                answers.push_back(std::move(ev));
+        return !answers.empty();
+    }));
+
+    CHECK(answers.front().tenant_id == "tenant-answered");
+
+    actor.request_stop();
+    const auto stopped = steady_clock::now() + seconds{10};
+    while (!actor.finished() && steady_clock::now() < stopped)
+        std::this_thread::sleep_for(milliseconds{5});
+}

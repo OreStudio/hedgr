@@ -37,6 +37,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -310,6 +311,25 @@ void trace_absent_flags(const render_input& input,
         input.currency_images.image_for(tenant_id, pair.base);
     const auto* image = image_id != nullptr
         ? input.images.get(tenant_id, *image_id) : nullptr;
+
+    /*
+     * Said once for each state, not once a frame. The reason a header has no
+     * flag changes when the map arrives or an image lands, and those are the
+     * moments worth a line; a header that repeats the same sentence sixty times
+     * a second buries them.
+     */
+    auto reason = std::format("{}|{}|{}|{}|{}|{}", label, tenant_id,
+        map == nullptr ? "absent"
+                       : map->state == hedgr::model::state::image_map_state::ready
+                ? "ready" : "not ready",
+        image_id == nullptr ? "none" : "named",
+        image == nullptr ? "absent" : "held",
+        input.textures == nullptr ? "none" : "present");
+    static std::unordered_set<std::string> said;
+    if (!said.insert(reason).second)
+        return;
+    if (said.size() > 128)
+        said.clear();
     BOOST_LOG_SEV(lg(), ores::logging::debug)
         << "No flags for '" << label << "': currencies '" << pair.base
         << "' / '" << pair.quote << "', tenant "

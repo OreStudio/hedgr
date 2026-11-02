@@ -3235,3 +3235,92 @@ TEST_CASE("a party change reaches the session's actor and comes back as an "
     CHECK(changed);
     CHECK(link->switches == 1);
 }
+
+/**
+ * @brief Whether a manager that signs in for real ends up holding its maps.
+ *
+ * The interface draws flags from the tenant's currency map, which the runtime
+ * reads when a session authenticates. This asks the same question of a manager
+ * with a real store and a real deployment, so a map that never leaves "not
+ * ready" can be told apart from an interface that never asks for one.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.runtime.tests "[.live-desk]"
+ */
+TEST_CASE("live desk: a signed-in manager holds its currency map",
+    "[.live-desk]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    const temporary_database database("live-desk");
+    instance_manager manager;
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+
+    command save;
+    save.kind = command_kind::save_instance;
+    save.instance_row = make_instance("inst-live", "Live", "ores.live");
+    save.instance_row.nats_url = url;
+    save.instance_row.subject_prefix
+        = std::getenv("HEDGR_LIVE_PREFIX") != nullptr
+        ? std::getenv("HEDGR_LIVE_PREFIX") : "";
+    save.instance_row.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        save.instance_row.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        save.instance_row.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        save.instance_row.tls_key = key;
+    save.instance_id = save.instance_row.id;
+    push_command(manager, save);
+
+    command account;
+    account.kind = command_kind::save_account;
+    account.account_row = make_account("ident-live", "inst-live");
+    account.account_row.principal = principal;
+    push_command(manager, account);
+
+    command connect;
+    connect.kind = command_kind::connect_session;
+    connect.instance_id = "inst-live";
+    connect.account_id = "ident-live";
+    connect.principal = principal;
+    connect.password = secret_string{std::string{password}};
+    push_command(manager, connect);
+
+    const auto signed_in = wait_until([&manager] {
+        manager.pump();
+        const auto handle = manager.sessions().find("inst-live", "ident-live");
+        return handle && manager.sessions().status(*handle)
+            == session_status::authenticated;
+    }, std::chrono::seconds(30));
+    std::printf("authenticated=%d\n", signed_in ? 1 : 0);
+
+    const auto tenant = [&manager] {
+        const auto handle = manager.sessions().find("inst-live", "ident-live");
+        return handle ? std::string{manager.sessions().tenant_id(*handle)}
+                      : std::string{};
+    }();
+    std::printf("tenant=%s\n", tenant.c_str());
+
+    const auto ready = wait_until([&manager, &tenant] {
+        manager.pump();
+        const auto* map = manager.currency_images().get(tenant);
+        return map != nullptr
+            && map->state == hedgr::model::state::image_map_state::ready;
+    }, std::chrono::seconds(20));
+
+    const auto* map = manager.currency_images().get(tenant);
+    std::printf("map ready=%d state=%d currencies=%zu error='%s'\n",
+        ready ? 1 : 0,
+        map == nullptr ? -1 : static_cast<int>(map->state),
+        map == nullptr ? 0 : map->currencies.size(),
+        map == nullptr ? "" : map->error.c_str());
+    std::fflush(stdout);
+
+    manager.stop();
+}

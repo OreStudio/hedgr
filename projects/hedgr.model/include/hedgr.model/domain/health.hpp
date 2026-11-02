@@ -44,10 +44,18 @@ struct health_thresholds final {
     std::int64_t delayed_ns;
 };
 
-/** @brief The thresholds for tick-driven FX series. */
+/**
+ * @brief The thresholds for tick-driven FX series.
+ *
+ * A provider publishes on its own cadence and a few seconds of quiet is not
+ * news: the stamp is live for half a minute, at ease for five, and only then
+ * stale. The first window was five seconds, which turned a feed that ticks
+ * every five seconds into a permanent DELAYED badge and taught the operator to
+ * ignore the one signal that says the feed has stopped.
+ */
 inline constexpr health_thresholds fx_health_thresholds{
-    .live_ns = 5'000'000'000,
-    .delayed_ns = 30'000'000'000,
+    .live_ns = 30'000'000'000,
+    .delayed_ns = 300'000'000'000,
 };
 
 /**
