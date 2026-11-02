@@ -8,6 +8,12 @@ session's work in its own floating window.
 There is no per-window marker option and no notion of "the" instance. One Hedgr
 process holds the whole set, so there is nothing to tell apart.
 
+#+CAPTION: One process against one deployment. The Instances window holds the
+#+CAPTION: estate; the series browser lists what the signed-in party may plot,
+#+CAPTION: each row wearing the flags of the currencies its label names; and every
+#+CAPTION: chart, mini plot and line, keeps its own span, style and EMA.
+[[file:docs/images/hedgr-desktop.png]]
+
 * Layout
 
 Hedgr follows the OreStudio component conventions. Each component is a
