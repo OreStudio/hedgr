@@ -261,3 +261,160 @@ TEST_CASE("a failure the transport cannot name is a protocol error",
     REQUIRE(error.code == session_errc::protocol_error);
     REQUIRE(error.detail == "NATS publish failed: Connection closed");
 }
+
+/**
+ * @brief What a real deployment hands a chart and a flag, printed as it is.
+ *
+ * Hidden (`[.]`) and diagnostic on purpose: it asserts only that the reads
+ * answered, and prints the shape of what came back, so a chart that draws a
+ * sliver and a header with no flags can be told apart from a read that failed.
+ * Run it by name, with the deployment's own values:
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20405 ... hedgr.session.tests "[.live-shape]"
+ */
+TEST_CASE("live shape: what a deployment says about a chart and its flags",
+    "[.live-shape]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("party=%s tenant=%s\n", signed_in->party_id.c_str(),
+        signed_in->tenant_id.c_str());
+
+    const auto series = session.market_series(5);
+    if (!series) {
+        std::printf("catalogue failed: %s (%s)\n",
+            series.error().message.c_str(), series.error().detail.c_str());
+    } else {
+        std::printf("catalogue: %zu rows\n", series->size());
+        for (const auto& row : *series)
+            std::printf("  series %s label=%s asset=%s\n", row.id.c_str(),
+                row.label.c_str(), row.asset_class.c_str());
+    }
+
+    if (series && !series->empty()) {
+        const auto& first = series->front();
+        std::printf("first series uri=%s party=%s provider=%s\n",
+            first.oresmd_uri.c_str(), first.party_id.c_str(),
+            first.provider_code.c_str());
+        std::printf("  identity asset=%s scope=%s instrument=%s quote=%s "
+                    "fields=%zu empty=%d\n",
+            first.identity.asset.c_str(), first.identity.scope.c_str(),
+            first.identity.instrument_type.c_str(),
+            first.identity.quote_type.c_str(), first.identity.fields.size(),
+            first.identity.empty() ? 1 : 0);
+        for (const auto& field : first.identity.fields)
+            std::printf("  field %s=%s\n", field.name.c_str(),
+                field.text.c_str());
+
+        const auto read = session.market_series_points(first.id);
+        /*
+         * The identity the catalogue carries names the party that owns the
+         * series. The tick service scopes its reads by the session's own party,
+         * so the two are tried apart as well as together: which of them the
+         * service matches on is the question a refusal leaves open.
+         */
+        {
+            auto no_party = first.identity;
+            no_party.party_id.clear();
+            const auto anon = session.market_series_points(first.id, no_party);
+            std::printf("points with no party: %s\n",
+                anon ? std::format("{} points", anon->points.size()).c_str()
+                     : anon.error().message.c_str());
+
+            auto session_party = first.identity;
+            session_party.party_id = signed_in->party_id;
+            const auto scoped =
+                session.market_series_points(first.id, session_party);
+            std::printf("points as the session's party: %s\n",
+                scoped
+                    ? std::format("{} points", scoped->points.size()).c_str()
+                    : scoped.error().message.c_str());
+        }
+        if (!read) {
+            std::printf("points failed: %s (%s)\n",
+                read.error().message.c_str(), read.error().detail.c_str());
+        } else {
+            std::printf("points: %zu of %zu ticks, coordinates=%zu, "
+                        "truncated=%d shortened=%d from=%lld to=%lld\n",
+                read->points.size(), read->ticks, read->coordinates,
+                read->truncated ? 1 : 0, read->shortened ? 1 : 0,
+                static_cast<long long>(read->from_ns),
+                static_cast<long long>(read->to_ns));
+            if (!read->points.empty()) {
+                const auto& oldest = read->points.front();
+                const auto& newest = read->points.back();
+                std::printf("  oldest=%lld value=%f newest=%lld value=%f\n",
+                    static_cast<long long>(oldest.at_ns), oldest.value,
+                    static_cast<long long>(newest.at_ns), newest.value);
+                std::size_t zero = 0;
+                std::size_t backwards = 0;
+                for (std::size_t i = 1; i < read->points.size(); ++i) {
+                    if (read->points[i].at_ns == 0)
+                        ++zero;
+                    if (read->points[i].at_ns < read->points[i - 1].at_ns)
+                        ++backwards;
+                }
+                if (read->points.front().at_ns == 0)
+                    ++zero;
+                std::printf("  points at epoch zero=%zu out of order=%zu\n",
+                    zero, backwards);
+            }
+        }
+    }
+
+    const auto images = session.currency_images();
+    if (!images) {
+        std::printf("currency images failed: %s (%s)\n",
+            images.error().message.c_str(), images.error().detail.c_str());
+    } else {
+        std::printf("currency images: %zu\n", images->size());
+        for (const auto& image : *images)
+            std::printf("  currency=%s image=%s\n", image.currency.c_str(),
+                image.image_id.c_str());
+        for (std::size_t i = 0; i < images->size() && i < 4; ++i) {
+            const auto& image = (*images)[i];
+            const auto content = session.image_by_id(image.image_id);
+            if (!content) {
+                std::printf("  image %s failed: %s (%s)\n",
+                    image.image_id.c_str(), content.error().message.c_str(),
+                    content.error().detail.c_str());
+                continue;
+            }
+            const auto text = std::string_view{
+                reinterpret_cast<const char*>(content->data.data()),
+                content->data.size()};
+            std::printf("  %s %s %zu bytes closed=%d tail-hex",
+                image.currency.c_str(), content->mime_type.c_str(),
+                content->data.size(),
+                text.ends_with("</svg>\n") ? 1 : 0);
+            const auto first = content->data.size() > 12
+                ? content->data.size() - 12 : content->data.size();
+            for (std::size_t at = first; at < content->data.size(); ++at)
+                std::printf(" %02x", static_cast<unsigned>(content->data[at]));
+            std::printf("\n");
+        }
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}
+
