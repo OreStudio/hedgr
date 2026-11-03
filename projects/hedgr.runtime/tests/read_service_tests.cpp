@@ -921,3 +921,36 @@ TEST_CASE("an empty answer warns that the deployment returned nothing",
         CHECK(names(report, "no ticks"));
     }
 }
+
+TEST_CASE("a tick read names the party the session acts as",
+    "[reads][identity]") {
+    fixture f;
+    f.open();
+
+    /*
+     * The catalogue row carries the party the series belongs to, which is not
+     * the party this session acts as: a provider publishes the same series for
+     * every party, so a read that stated the owner's would name four of them
+     * and be refused as ambiguous.
+     */
+    auto catalogue = answer_of(event::event_kind::series_catalogue);
+    domain::market_series_row row;
+    row.id = "s-1";
+    row.label = "FX AUD/USD";
+    row.identity.asset = "fx";
+    row.identity.instrument_type = "fx_spot";
+    row.identity.quote_type = "rate";
+    row.identity.party_id = "owner-party";
+    row.party_id = "owner-party";
+    catalogue.series.push_back(std::move(row));
+    static_cast<void>(f.reads.apply(catalogue));
+
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request = std::get_if<
+        hedgr::runtime::worker::market_points_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->identity.party_id == "p-1");
+    CHECK(request->identity.asset == "fx");
+}

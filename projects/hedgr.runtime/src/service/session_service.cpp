@@ -199,6 +199,22 @@ session_effect session_service::connect(const model::command::command& cmd) {
     }
 
     /*
+     * The principal is the name IAM is asked about, and it comes from the
+     * account row. An account whose principal was left blank would otherwise
+     * reach the instance as an empty username, and the sentence it answers with
+     * ("Username cannot be empty") names neither the account nor the field the
+     * operator has to fill in.
+     */
+    if (cmd.principal.empty()) {
+        effect.refusals.push_back(refusal{
+            {model::state::condition_source::session, cmd.account_id},
+            std::format("cannot connect to {}: account '{}' has no principal, "
+                        "which is the name the instance knows it by",
+                instance_row->name, cmd.account_id)});
+        return effect;
+    }
+
+    /*
      * Before the password is remembered or a derivation is started: a refusal
      * starts nothing, and an operator who is told to disconnect another session
      * first should not also find a credential saved for an attempt that never
@@ -288,7 +304,15 @@ session_effect session_service::connect(const model::command::command& cmd) {
     }
 
     auto blob = std::move(sealed).value();
-    start(cmd, {}, std::move(blob.value()));
+    /*
+     * The principal travels with the sealed credential whether or not a
+     * password was typed. The box holds the password and nothing else, so a
+     * sign-in that means to use it still has to name the account IAM will be
+     * asked about: dropping the name here is what makes a remembered password
+     * sign in as nobody.
+     */
+    start(cmd, model::domain::credential{cmd.principal, {}},
+        std::move(blob.value()));
     return effect;
 }
 
