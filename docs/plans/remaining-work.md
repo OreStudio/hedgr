@@ -55,8 +55,13 @@ Follow-ups noticed while building the Instances panel, both done:
   `bloomberg`) and the server answered `series_ambiguous`. Brave Hopper has added
   `provider_code` to `resolve_series_identity_request`, and Hedgr now sends the identity
   parsed from the catalogue URI with the series' own provider (`series_identity` in
-  `session_client.cpp`; the tick-read log prints it). Not yet built or run against their
-  rebuilt environment: do that first, then check a Bloomberg series loads history.
+  `session_client.cpp`; the tick-read log prints it). One chart on the rebuilt brave_hopper
+  read 3304 ticks from `bloomberg`, so the identity resolves; what is not yet checked is the
+  same series with the provider dropped, which should be refused as ambiguous.
+  `hedgr.session.tests "[.live-providers]"` is that check, and it could not run on
+  2026-11-03 because the deployment's `marketdata` subjects stopped answering after the
+  rebuild (the catalogue read times out and `nats req` gets no reply). Re-run it when the
+  service is back.
 - **Reference providers in the catalogue.** Every FX spot is listed twice, `ore`
   (reference, never ticks) and `bloomberg` (data vendor, ticks). The operator was asked
   to choose between: Hedgr filters (done in part: the Provider combo), the server hides
@@ -75,8 +80,10 @@ Follow-ups noticed while building the Instances panel, both done:
   Only data-vendor series of four parties tick (UK, US, HK, System Party). Their own
   fix for the operator's party (PR 3710) may change this. Re-check after the next
   environment rebuild.
-- **Goedel's server** must run OreStudio main with PR 3711 and the provider fix for the
-  new Hedgr's history reads. Not checked.
+- Done: **Goedel needs no OreStudio of its own.** Its only OreStudio units are the
+  compute wrappers, and its Hedgr store names the instances on this host
+  (`nats://192.168.1.172:20405` and the rest), so the client there reads the same
+  deployments and there is no second server version to align.
 
 ## Design agreed but not built
 

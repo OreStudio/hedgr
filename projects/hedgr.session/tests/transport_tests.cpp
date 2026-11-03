@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -485,5 +486,84 @@ TEST_CASE("live refresh: a signed-in session renews its token at once",
     std::fflush(stdout);
 
     CHECK(refreshed.has_value());
+    session.disconnect();
+}
+
+/**
+ * @brief Whether history reads the same for every provider of a series.
+ *
+ * Every FX spot is catalogued twice, once by the reference provider and once by
+ * a data vendor, and only the vendor ticks. This reads a few series through the
+ * catalogue's own identity, then the same identity with the provider dropped,
+ * so the pair of answers says whether the provider is what makes a read name
+ * one series instead of four.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.session.tests "[.live-providers]"
+ */
+TEST_CASE("live providers: history names one series per provider",
+    "[.live-providers]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    /*
+     * A deployment that has just been reseeded answers the catalogue slowly
+     * enough to time out the default, so this probe waits like an operator
+     * would rather than declaring the read broken.
+     */
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    /*
+     * A handful is enough and all the deployment answers in time: the whole
+     * catalogue is nearly five hundred rows and a single read of two hundred
+     * times out. What the check needs is one row per provider, not every row.
+     */
+    const auto catalogue = session.market_series(6);
+    if (!catalogue)
+        std::printf("catalogue failed: %s (%s)\n",
+            catalogue.error().message.c_str(),
+            catalogue.error().detail.c_str());
+    REQUIRE(catalogue.has_value());
+
+    for (const auto& row : *catalogue) {
+        std::printf("%s provider='%s' asset=%s\n", row.label.c_str(),
+            row.provider_code.c_str(), row.asset_class.c_str());
+        auto identity = row.identity;
+        identity.party_id = signed_in->party_id;
+        const auto named = session.market_series_points(row.id, identity);
+        std::printf("  as catalogued -> %s\n",
+            named ? std::format("{} points", named->points.size()).c_str()
+                  : named.error().message.c_str());
+
+        auto unspecified = identity;
+        unspecified.provider_code.clear();
+        const auto loose = session.market_series_points(row.id, unspecified);
+        std::printf("  provider dropped -> %s\n",
+            loose ? std::format("{} points", loose->points.size()).c_str()
+                  : loose.error().message.c_str());
+    }
+    std::fflush(stdout);
     session.disconnect();
 }
