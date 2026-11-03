@@ -418,3 +418,72 @@ TEST_CASE("live shape: what a deployment says about a chart and its flags",
     session.disconnect();
 }
 
+/**
+ * @brief The live check the plan cannot make from a short probe: a refresh.
+ *
+ * The actor arms its refresh at four fifths of the token's lifetime, so the
+ * check that the *refresh itself* works needs either half an hour of waiting or
+ * a call made the moment the sign-in lands. This is the second: the instance
+ * issues a replacement whenever it is asked, so asking at once is the same code
+ * path as asking at 1440 s, and it takes nine seconds rather than twenty-four
+ * minutes.
+ *
+ * Hidden (`[.]`) for the same reason the runtime's probes are: it needs a
+ * deployment, mTLS material and a credential. Run it by name:
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.prime_origin \
+ *     HEDGR_LIVE_CA=<checkout>/build/keys/nats/ca.crt \
+ *     HEDGR_LIVE_CERT=<checkout>/build/keys/nats/ores.shell.crt \
+ *     HEDGR_LIVE_KEY=<checkout>/build/keys/nats/ores.shell.key \
+ *     HEDGR_LIVE_PRINCIPAL=super_admin \
+ *     HEDGR_LIVE_PASSWORD=... \
+ *     hedgr.session.tests "[.live-refresh-now]"
+ */
+TEST_CASE("live refresh: a signed-in session renews its token at once",
+    "[.live-refresh-now]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    if (!signed_in)
+        std::printf("sign-in failed: %s [%s] (%s)\n",
+            signed_in.error().message.c_str(),
+            std::string{hedgr::session::transport::to_string(
+                signed_in.error().code)}.c_str(),
+            signed_in.error().detail.c_str());
+    REQUIRE(signed_in.has_value());
+    std::printf("signed in as '%s' with a token of %d s\n",
+        signed_in->principal.c_str(), signed_in->access_lifetime_s);
+
+    const auto refreshed = session.refresh();
+    if (!refreshed)
+        std::printf("refresh failed: %s [%s] (%s)\n",
+            refreshed.error().message.c_str(),
+            std::string{hedgr::session::transport::to_string(
+                refreshed.error().code)}.c_str(),
+            refreshed.error().detail.c_str());
+    std::printf("refresh lifetime=%d\n", refreshed ? *refreshed : -1);
+    std::fflush(stdout);
+
+    CHECK(refreshed.has_value());
+    session.disconnect();
+}

@@ -149,6 +149,25 @@ Follow-ups noticed while building the Instances panel, both done:
   sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
   A session now has one connection for reads, ticks, the lifecycle and the
   logout.
+<<<<<<< HEAD
+- Done: **the step 6 live check is complete.** Against the `brave_hopper`
+  deployment on this host (broker `localhost:20405`, mTLS, monitor
+  `localhost:20406`), a real session ran 1440 s, the actor's refresh fired and
+  replaced the token, the session held **one** connection across it (`connz` read
+  25 before, 26 throughout, 25 after the sign-out) and signed out cleanly.
+  `hedgr.runtime.tests "[.live-refresh]"` is the check and
+  `"[.live-refresh-now]"` its nine-second form. Only a real broker restart is
+  still unchecked.
+- Done: **the stale-library skew that hid the check, and what it taught.** The
+  first attempt failed with `std::bad_alloc` from every authenticated request,
+  because Hedgr compiled against OreStudio headers from 2026-11-01 while linking
+  libraries from 2026-10-20, and `nats_client` — which `session_client` holds by
+  value — had gained a member in between. The operator's sprint 29 rebuild
+  (`0.0.29` libraries, 2026-11-02) and a Hedgr relink fixed it. Two things to
+  keep: the bundler copies OreStudio libraries into `publish/lib` and will
+  re-use the stale copy unless they are removed first, and a successful sign-in
+  proves nothing about reads because `authenticate` swallows its own read.
+=======
 - Done: **the session actor's step 7 has landed** — a session's commands *and*
   its facts are supervised by `session_service`. `connect`, `disconnect` and
   `select_party` moved first; then the session cases of
@@ -157,13 +176,13 @@ Follow-ups noticed while building the Instances panel, both done:
   pair. The effect the service returns now describes a landing window, a rebind,
   a feed attach or detach, a watch refresh on a party change, a read to start,
   and a line in the bar with its removal.
+>>>>>>> main
 - Done: **the step 6 live check, in part.** Against the `jolly_knuth` deployment
   on this host, a real mTLS sign-in as `super_admin` held **one** connection for
   the whole session and gave it back on the sign-out (the broker's list read 25,
   26, 25), and the refresh was armed at 1440 s of the token's 1800 s. Still
-  unchecked: a real broker restart, and the refresh itself, which is 24 minutes
-  out. `hedgr.runtime.tests "[live-probe]"` repeats the probe with `HEDGR_LIVE_*`
-  set, as its comment says.
+  unchecked: a real broker restart. `hedgr.runtime.tests "[live-probe]"` repeats
+  the probe with `HEDGR_LIVE_*` set, as its comment says.
 - Done: **`docs/review/README.md` status cells are current.** The session actor's
   decisions D1 to D6 and the series table's D1 to D7 each record where they came
   out — D1, D2, D3, D5 and D6 as recommended, D4 still undecided, D7 not done

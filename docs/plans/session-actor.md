@@ -831,8 +831,38 @@ directly by `hedgr.runtime.tests "[live-probe]"`:
 - the token's stated lifetime was 1800 s, so the actor armed its refresh at
   1440 s, as designed.
 
+Note that `jolly_knuth` and `swift_curie` refused `super_admin` on 2026-11-01
+(`invalid_credentials`), so the checks were repeated against `prime_origin`
+(broker `localhost:20005`, monitor `localhost:20006`), which signs it in.
+
 The probe is a hidden test case (`[.live-probe]`) with the command line in its
 comment, so the check can be repeated without a rebuild.
+
+**What the refresh check has shown, on 2026-11-02.** A second hidden test,
+`hedgr.runtime.tests "[.live-refresh]"`, holds a real session open until the
+refresh fires. Against `brave_hopper` (broker `localhost:20405`, mTLS, monitor
+`localhost:20406`, `super_admin`, token lifetime 1800 s) it waited **1440 s**,
+the refresh fired, the token was replaced with a different one, nothing failed
+and no connection was lost; `connz` read 25 before, 26 for the whole session and
+25 after the sign-out, so the refresh did not re-dial. The session then signed
+out cleanly. `hedgr.session.tests "[.live-refresh-now]"` is the same path in nine
+seconds — sign in, ask for a refresh at once, and it answers with a 1800 s
+lifetime — and is the one to run after any change to the refresh.
+
+The first attempt at this check, on 2026-11-01, failed for a reason worth
+recording because it was not the refresh: every *authenticated request* in that
+build threw `std::bad_alloc`, starting with the `get_my_parties` read inside
+`authenticate`, which swallows its failure — so a sign-in succeeded while every
+read and every refresh died. The cause was an ABI skew in the environment: Hedgr
+compiled against OreStudio headers from 2026-11-01 but linked that tree's
+pre-built libraries from 2026-10-20, and OreStudio's `c16c7fd5` (2026-10-27,
+"[nats] Renew a session once when its token is refused") had added a member to
+`ores::nats::service::nats_client`, which `session_client` holds **by value**.
+The library therefore read past the end of the object Hedgr built, and the string
+it found there had a pointer for a length. A full rebuild of the tree (libraries
+`0.0.29`, 2026-11-02) and a Hedgr relink made the check pass. The lesson for the
+next skew: a sign-in that succeeds proves nothing about reads, because
+`authenticate` swallows its own authenticated read.
 
 What the same check has **not** covered, and why:
 
@@ -841,9 +871,6 @@ What the same check has **not** covered, and why:
   connection. Step 3 is tested over a fake link that scripts those answers. The
   fake proves the actor's logic, not cnats's. Restarting a deployment's broker
   was not done: it would take the operator's services down with it.
-- Token refresh against the real IAM with the real lifetime: the refresh is at
-  1440 s, so the check needs a session held open for 24 minutes. The armed
-  deadline was observed; the refresh itself was not.
 - A desk of 100 windows, and a stopped broker for 30 s and for 3 minutes. The
   probe signs in one session with no windows.
 - TLS, which the probe did exercise (mTLS against the deployment's own CA and

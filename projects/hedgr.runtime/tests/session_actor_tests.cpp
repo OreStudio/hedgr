@@ -960,6 +960,44 @@ TEST_CASE("a party the instance refuses is reported and the session keeps its "
     stop(actor);
 }
 
+namespace {
+
+/**
+ * @brief The options a live check signs in with, read from the environment.
+ *
+ * One `require` per variable, because a live check that quietly does nothing is
+ * worse than one that says which value it was missing.
+ */
+[[nodiscard]] session_actor_options live_options(
+    hedgr::model::command::event_queue& events) {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_actor_options options;
+    options.options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.options.subject_prefix = prefix;
+    options.options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.options.tls_key = key;
+    options.key = hedgr::model::domain::session_key{"inst-live", "acct-live"};
+    options.events = &events;
+    options.credential = hedgr::model::domain::credential{principal, password};
+    options.attempt = 1;
+    options.ping_interval = std::chrono::seconds{30};
+    return options;
+}
+
+}
+
 /**
  * @brief The live check the plan names: a real sign-in on a real deployment.
  *
@@ -981,35 +1019,8 @@ TEST_CASE("a party the instance refuses is reported and the session keeps its "
  * by one for the whole session and back down when it signs out.
  */
 TEST_CASE("live probe: a real sign-in on a real deployment", "[.live-probe]") {
-    const auto* url = std::getenv("HEDGR_LIVE_URL");
-    const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX");
-    const auto* ca = std::getenv("HEDGR_LIVE_CA");
-    const auto* cert = std::getenv("HEDGR_LIVE_CERT");
-    const auto* key = std::getenv("HEDGR_LIVE_KEY");
-    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
-    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
-    REQUIRE(url != nullptr);
-    REQUIRE(principal != nullptr);
-    REQUIRE(password != nullptr);
-
     hedgr::model::command::event_queue events;
-    session_actor_options options;
-    options.options.nats_url = url;
-    options.options.subject_prefix = prefix != nullptr ? prefix : "";
-    options.options.wire_format = "msgpack";
-    if (ca != nullptr)
-        options.options.tls_ca = ca;
-    if (cert != nullptr)
-        options.options.tls_cert = cert;
-    if (key != nullptr)
-        options.options.tls_key = key;
-    options.key = hedgr::model::domain::session_key{"inst-live", "acct-live"};
-    options.events = &events;
-    options.credential = hedgr::model::domain::credential{principal, password};
-    options.attempt = 1;
-    options.ping_interval = std::chrono::seconds{30};
-
-    session_actor actor(std::move(options));
+    session_actor actor(live_options(events));
     actor.start();
 
     std::vector<hedgr::model::event::event> facts;
@@ -1052,4 +1063,96 @@ TEST_CASE("live probe: a real sign-in on a real deployment", "[.live-probe]") {
         std::this_thread::sleep_for(std::chrono::milliseconds{20});
     std::printf("finished=%d\n", actor.finished() ? 1 : 0);
     CHECK(authenticated);
+}
+
+/**
+ * @brief The refresh itself, on a real deployment: the one claim step 6 makes
+ * that a short probe cannot reach.
+ *
+ * The actor arms a refresh at four fifths of the token's stated lifetime, which
+ * IAM decides: 1800 s and 1440 s on the deployment this was written against. So
+ * the wait *is* the check, and the test is hidden for that reason alone as well
+ * as for the deployment's. Run it by name, and count the broker's connections
+ * from outside while it waits:
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20805 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.jolly_knuth \
+ *     ... \
+ *     hedgr.runtime.tests "[live-refresh]"
+ *
+ * A pass says three things: the refresh fired, it replaced the token rather than
+ * repeating it, and no connection was lost while it did - the session holds one
+ * connection across the whole lifetime, so a refresh must not re-dial. Sign out
+ * is still asked for at the end, because a token nobody will use again is still
+ * a credential (SR-24).
+ */
+TEST_CASE("live refresh: a real session renews its own token",
+    "[.live-refresh]") {
+    hedgr::model::command::event_queue events;
+    session_actor actor(live_options(events));
+    actor.start();
+
+    std::string signed_in_token;
+    bool failed = false;
+    const auto signed_in_by =
+        std::chrono::steady_clock::now() + std::chrono::seconds{30};
+    while (std::chrono::steady_clock::now() < signed_in_by) {
+        for (auto& ev : events.drain()) {
+            if (ev.kind == event_kind::session_authenticated)
+                signed_in_token = std::string{ev.token.view()};
+            if (ev.kind == event_kind::session_failed)
+                failed = true;
+        }
+        if (!signed_in_token.empty() || failed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    }
+    REQUIRE_FALSE(failed);
+    REQUIRE_FALSE(signed_in_token.empty());
+
+    /*
+     * The lifetime is 1800 s on the deployment measured, so 26 minutes covers
+     * the refresh at 1440 s and the expiry after it with time to spare. What is
+     * left of the token after it expires is the actor's own business, and a
+     * failure there ends the wait through @c session_failed.
+     */
+    const auto started = std::chrono::steady_clock::now();
+    const auto refreshed_by = started + std::chrono::minutes{26};
+    std::string refreshed_token;
+    int links_lost = 0;
+    while (std::chrono::steady_clock::now() < refreshed_by) {
+        for (auto& ev : events.drain()) {
+            if (ev.kind == event_kind::session_token_refreshed)
+                refreshed_token = std::string{ev.token.view()};
+            if (ev.kind == event_kind::session_failed) {
+                failed = true;
+                std::printf("failed after refreshes: %s (%s)\n",
+                    ev.message.c_str(), ev.code.c_str());
+            }
+            if (ev.kind == event_kind::link_lost)
+                ++links_lost;
+        }
+        if (!refreshed_token.empty() || failed)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds{250});
+    }
+
+    const auto waited = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - started);
+    std::printf("waited=%llds refreshed=%d failed=%d links_lost=%d\n",
+        static_cast<long long>(waited.count()), refreshed_token.empty() ? 0 : 1,
+        failed ? 1 : 0, links_lost);
+    std::fflush(stdout);
+
+    CHECK_FALSE(failed);
+    CHECK_FALSE(refreshed_token.empty());
+    CHECK(refreshed_token != signed_in_token);
+    CHECK(links_lost == 0);
+
+    actor.request_logout();
+    const auto stopped =
+        std::chrono::steady_clock::now() + std::chrono::seconds{15};
+    while (!actor.finished() && std::chrono::steady_clock::now() < stopped)
+        std::this_thread::sleep_for(std::chrono::milliseconds{20});
+    std::printf("finished=%d\n", actor.finished() ? 1 : 0);
 }
