@@ -294,25 +294,26 @@ std::optional<refusal> read_service::launch_market_read(
     return std::nullopt;
 }
 
-void read_service::start_currency_image_map(const model::event::event& ev) {
-    if (ev.tenant_id.empty() || !is_open())
+void read_service::start_currency_image_map(std::string_view instance_id,
+    std::string_view account_id, std::string_view tenant_id) {
+    if (tenant_id.empty() || !is_open())
         return;
-    if (const auto* existing = currency_images_.get(ev.tenant_id);
+    if (const auto* existing = currency_images_.get(std::string{tenant_id});
         existing != nullptr
         && (existing->state == model::state::image_map_state::ready
             || existing->state == model::state::image_map_state::reading))
         return;
-    if (pending_.contains(request_id::currency_image_map(ev.tenant_id)))
+    if (pending_.contains(request_id::currency_image_map(tenant_id)))
         return;
-    auto read = session_read_for(ev.instance_id, ev.account_id,
+    auto read = session_read_for(instance_id, account_id,
         read_gate::token_only);
     if (!read)
         return;
     if (!submit_read(*read, worker::image_map_request{}))
         return;
 
-    pending_.mark(request_id::currency_image_map(ev.tenant_id));
-    currency_images_.begin(ev.tenant_id);
+    pending_.mark(request_id::currency_image_map(tenant_id));
+    currency_images_.begin(std::string{tenant_id});
 }
 
 void read_service::retry_currency_image_map(std::string_view instance_id,
@@ -328,13 +329,8 @@ void read_service::retry_currency_image_map(std::string_view instance_id,
         const auto tenant = std::string{sessions_.tenant_id(*session)};
         const auto* map = currency_images_.get(tenant);
         if (map == nullptr
-            || map->state == model::state::image_map_state::failed) {
-            model::event::event retry;
-            retry.instance_id = std::string{instance_id};
-            retry.account_id = std::string{account_id};
-            retry.tenant_id = tenant;
-            start_currency_image_map(retry);
-        }
+            || map->state == model::state::image_map_state::failed)
+            start_currency_image_map(instance_id, account_id, tenant);
     }
 }
 

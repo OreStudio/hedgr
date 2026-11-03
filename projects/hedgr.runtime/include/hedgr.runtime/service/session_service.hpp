@@ -61,20 +61,61 @@ struct session_effect final {
     /** @brief Sessions whose windows must lose their binding. */
     std::vector<model::state::session_handle> unbind;
 
-    /** @brief The attempt a pair is now on, so a stale fact can be told. */
-    struct attempt final {
-        std::string instance_id;
-        std::string account_id;
-        std::uint64_t number = 0;
-    };
-    std::optional<attempt> attempted;
-
-    /** @brief Sessions the feed must stop watching. */
+    /** @brief One session, named as its pair. */
     struct watched final {
         std::string instance_id;
         std::string account_id;
     };
+
+    /** @brief Sessions the feed must stop watching. */
     std::vector<watched> detach;
+
+    /** @brief Sessions the feed must start watching. */
+    std::vector<watched> attach;
+
+    /** @brief Sessions the feed must watch a new party on. */
+    std::vector<watched> refresh_watches;
+
+    /** @brief A landing window the sign-in opens. */
+    struct landing final {
+        std::string instance_id;
+        std::string account_id;
+        model::domain::window_kind kind = model::domain::window_kind::workspace;
+    };
+    std::vector<landing> open;
+
+    /** @brief A restored window that can now be bound to its session. */
+    struct rebound final {
+        std::string instance_id;
+        std::string account_id;
+        model::state::session_handle session;
+    };
+    std::vector<rebound> rebind;
+
+    /** @brief A line the bar gains, or loses when @c clear is set. */
+    struct condition_change final {
+        model::state::condition_key key;
+        bool clear = false;
+        model::state::condition_severity severity =
+            model::state::condition_severity::error;
+        std::string message;
+    };
+    std::vector<condition_change> conditions;
+
+    /** @brief A read the session's own actor is asked to run. */
+    struct read_start final {
+        enum class kind { currency_image_map, market_catalogue };
+        kind what = kind::currency_image_map;
+        std::string instance_id;
+        std::string account_id;
+
+        /** @brief The tenant whose map is read; a catalogue leaves it empty. */
+        std::string tenant_id;
+    };
+    std::vector<read_start> reads;
+
+    /** @brief Whether the feed must be told the connection answered again. */
+    std::optional<watched> link_restored;
 
     /** @brief Whether the window wall has to be written again. */
     bool save_windows = false;
@@ -190,6 +231,18 @@ public:
         const model::command::command& cmd);
 
     /**
+     * @brief Applies one fact about a session, or says it is not about one.
+     *
+     * Nothing when the event is about the deployment rather than about a
+     * session - a read's answer, a probe, a lock - or when the session it is
+     * about has already gone. A fact from an attempt that has been replaced is
+     * dropped here: the actor of the old attempt may still be finishing, and
+     * its disconnect would otherwise land on top of the newer sign-in.
+     */
+    [[nodiscard]] std::optional<session_effect> apply(
+        const model::event::event& ev);
+
+    /**
      * @brief Opens a session's actor, retiring the one it already had.
      *
      * @param options what the actor connects with. Its @c key names the
@@ -251,13 +304,23 @@ private:
 
     /** @brief Creates the actor for one attempt, with its connection options. */
     void start(const model::command::command& cmd,
-        model::domain::credential credential, std::string sealed_credential,
-        session_effect& effect);
+        model::domain::credential credential, std::string sealed_credential);
 
     model::command::event_queue& events_;
     std::optional<session_dependencies> deps_;
     worker::tick_feed_factory feeds_;
     std::uint64_t next_attempt_ = 0;
+
+    /**
+     * @brief The attempt each pair is on, by the pair's running key.
+     *
+     * A second connect replaces the actor while the one it replaced is still
+     * winding down. Every fact carries the attempt that produced it, and a
+     * fact from an older attempt is dropped, so an actor's disconnect cannot
+     * overwrite the sign-in of the actor that replaced it.
+     */
+    std::unordered_map<std::string, std::uint64_t> attempts_;
+
     std::unordered_map<std::string, std::shared_ptr<worker::tick_feed>> actors_;
     std::vector<std::shared_ptr<worker::tick_feed>> retiring_;
 };

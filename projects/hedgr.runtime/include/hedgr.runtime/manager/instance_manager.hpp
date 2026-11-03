@@ -381,6 +381,9 @@ private:
      */
     void complete_session(service::session_effect effect);
 
+    /** @brief Starts one read a session's fact asked for, on its own actor. */
+    void start_session_read(const service::session_effect::read_start& read);
+
     /** @brief Starts the read an open asked for, then raises what it refused. */
     void complete_open(service::open_outcome outcome);
 
@@ -447,16 +450,6 @@ private:
      * is started when that answer lands.
      */
     std::unordered_set<std::string> catalogue_rereads_;
-
-    /**
-     * @brief The attempt each pair is on, by the pair's running key.
-     *
-     * A replacement worker is started while the old one is still winding down.
-     * Every fact carries the attempt that produced it, and a fact from an
-     * older attempt is dropped, so the old worker's disconnect cannot overwrite
-     * the new worker's sign-in.
-     */
-    std::unordered_map<std::string, std::uint64_t> attempts_;
 
     /**
      * @brief The options the process was seeded with.

@@ -149,6 +149,14 @@ Follow-ups noticed while building the Instances panel, both done:
   sign-out), and `session_worker`, `party_switch` and `deadline_wait` are deleted.
   A session now has one connection for reads, ticks, the lifecycle and the
   logout.
+- Done: **the session actor's step 7 has landed** — a session's commands *and*
+  its facts are supervised by `session_service`. `connect`, `disconnect` and
+  `select_party` moved first; then the session cases of
+  `instance_manager::apply` and the `attempts_` map that drops a fact from a
+  replaced attempt, so the facade no longer looks a session up by an event's
+  pair. The effect the service returns now describes a landing window, a rebind,
+  a feed attach or detach, a watch refresh on a party change, a read to start,
+  and a line in the bar with its removal.
 - Done: **the step 6 live check, in part.** Against the `jolly_knuth` deployment
   on this host, a real mTLS sign-in as `super_admin` held **one** connection for
   the whole session and gave it back on the sign-out (the broker's list read 25,

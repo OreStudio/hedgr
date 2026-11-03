@@ -262,8 +262,8 @@ constexpr std::int64_t base = 1'800'000'000 * second;
         /* The map is read for a token and does not look at the session's status. */
         {"currency image map", false, request_id::currency_image_map(tenant_id),
             [](fixture& f) {
-                f.reads.start_currency_image_map(
-                    answer_of(event::event_kind::session_authenticated));
+                f.reads.start_currency_image_map(instance_id, account_id,
+                    tenant_id);
             },
             answer_of(event::event_kind::currency_image_map)},
     };
@@ -365,8 +365,7 @@ TEST_CASE("the currency image map is handed to the session's actor",
     fixture f;
     f.open();
 
-    auto signed_in = answer_of(event::event_kind::session_authenticated);
-    f.reads.start_currency_image_map(signed_in);
+    f.reads.start_currency_image_map(instance_id, account_id, tenant_id);
 
     REQUIRE(f.submitted.size() == 1);
     CHECK(std::holds_alternative<hedgr::runtime::worker::image_map_request>(
@@ -518,8 +517,7 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
     CHECK(f.reads.pending().empty());
     CHECK(f.reads.failed_images().empty());
 
-    auto signed_in = answer_of(event::event_kind::session_authenticated);
-    f.reads.start_currency_image_map(signed_in);
+    f.reads.start_currency_image_map(instance_id, account_id, tenant_id);
 
     CHECK(f.submitted.empty());
     CHECK(f.reads.pending().empty());
