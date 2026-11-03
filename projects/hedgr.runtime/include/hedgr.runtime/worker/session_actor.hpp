@@ -355,6 +355,16 @@ private:
     std::optional<std::string> new_token_;
     std::optional<std::string> new_party_;
     std::vector<read_request> reads_;
+
+    /**
+     * @brief The tenant a read's answer is stamped with, guarded by @c mu_.
+     *
+     * The tenant is IAM's answer, known only once the actor has signed in, so
+     * it cannot come from the options: an answer stamped with the seed's empty
+     * tenant files a currency map and an image under a tenant nobody asks
+     * about, and the window that wanted them waits forever.
+     */
+    std::string tenant_;
     bool stopping_ = false;
 
     /**

@@ -36,7 +36,12 @@
 namespace {
 
 const std::string more_information("Try --help' for more information.");
-const std::string product_version("Hedgr ImGui Client v0.3.1");
+#ifndef HEDGR_PROJECT_VERSION
+#define HEDGR_PROJECT_VERSION "unknown"
+#endif
+
+const std::string product_version(
+    "Hedgr ImGui Client v" HEDGR_PROJECT_VERSION);
 const std::string usage_error_msg("Usage error: ");
 
 const std::string help_arg("help");

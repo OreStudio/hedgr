@@ -51,8 +51,13 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
 
-project(Hedgr VERSION 0.3.1 LANGUAGES CXX
+project(Hedgr VERSION 0.3.2 LANGUAGES CXX
     DESCRIPTION "Multi-instance ImGui/ImPlot client for OreStudio.")
+
+# The one place the version is written. The client's banner reads it from here
+# rather than repeating it, because a hand-copied version is a version that
+# eventually lies about what is running.
+add_compile_definitions(HEDGR_PROJECT_VERSION="${PROJECT_VERSION}")
 
 # Copy all binaries into the publish directory.
 set(HEDGR_PUBLISH_DIRECTORY ${CMAKE_BINARY_DIR}/publish)

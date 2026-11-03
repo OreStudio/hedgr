@@ -343,7 +343,7 @@ TEST_CASE("a delayed chart's change wears the delay, a stale one no state",
     {
         chart_fixture delayed{0.0001};
         const auto late = settled(
-            [&] { delayed.draw(newest_at_ns + 10'000'000'000); },
+            [&] { delayed.draw(newest_at_ns + 45'000'000'000); },
             frame_vertices);
         CHECK(has_pill(late, theme::tone::warning));
         CHECK_FALSE(has_pill(late, theme::tone::good));
@@ -351,7 +351,7 @@ TEST_CASE("a delayed chart's change wears the delay, a stale one no state",
     {
         chart_fixture stale{0.0001};
         const auto old = settled(
-            [&] { stale.draw(newest_at_ns + 120'000'000'000); },
+            [&] { stale.draw(newest_at_ns + 600'000'000'000); },
             frame_vertices);
         CHECK_FALSE(has_state_tone(old));
         CHECK(has_pill(old, theme::tone::neutral));
@@ -499,7 +499,7 @@ TEST_CASE("a docked chart wears the same pills as a floating one",
         chart_fixture delayed{-0.0001};
         delayed.docked = true;
         const auto vertices = settled(
-            [&] { delayed.draw(newest_at_ns + 10'000'000'000); },
+            [&] { delayed.draw(newest_at_ns + 45'000'000'000); },
             frame_vertices);
         CHECK(has_pill(vertices, theme::tone::warning));
         CHECK_FALSE(has_pill(vertices, theme::tone::bad));

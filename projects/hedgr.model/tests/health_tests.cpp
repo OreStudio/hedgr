@@ -40,9 +40,21 @@ constexpr std::int64_t now = 100 * second;
 }
 
 TEST_CASE("data health moves from live to delayed to stale", "[health]") {
-    CHECK(fx(now - 1 * second) == data_health::live);
-    CHECK(fx(now - 10 * second) == data_health::delayed);
-    CHECK(fx(now - 60 * second) == data_health::stale);
+    /*
+     * Half a minute is live, because a provider that ticks every five seconds
+     * must not read as delayed between two of its own ticks. The clock starts
+     * after the longest age a case names, so no case asks about a time before
+     * the epoch and reads it as an absent observation.
+     */
+    constexpr std::int64_t late = 10'000 * second;
+    const auto aged = [](std::int64_t age) {
+        return assess_data_health(late - age, late, fx_health_thresholds);
+    };
+    CHECK(aged(1 * second) == data_health::live);
+    CHECK(aged(25 * second) == data_health::live);
+    CHECK(aged(45 * second) == data_health::delayed);
+    CHECK(aged(240 * second) == data_health::delayed);
+    CHECK(aged(600 * second) == data_health::stale);
 }
 
 TEST_CASE("a future observation is live and no observation is unavailable",

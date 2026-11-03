@@ -250,3 +250,24 @@ TEST_CASE("a heading's flags are three quarters of the price pill, centred on it
         CHECK(ImGui::GetItemRectSize().y == Catch::Approx(pill));
     });
 }
+
+TEST_CASE("a deployment's own flag document rasterises", "[flags]") {
+    /*
+     * The exact bytes brave_hopper serves for AE: one <svg> with a viewBox, a
+     * trailing newline, and no width or height. It is the shape every flag in
+     * the deployment has, and the one the interface failed to draw.
+     */
+    const auto image = hedgr::ui::image::rasterize_svg(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" id=\"flag-icons-ae\" "
+        "viewBox=\"0 0 640 480\">\n"
+        "  <path fill=\"#00732f\" d=\"M0 0h640v160H0z\"/>\n"
+        "  <path fill=\"#fff\" d=\"M0 160h640v160H0z\"/>\n"
+        "  <path fill=\"#000001\" d=\"M0 320h640v160H0z\"/>\n"
+        "  <path fill=\"red\" d=\"M0 0h220v480H0z\"/>\n"
+        "</svg>\n",
+        64, 44);
+
+    REQUIRE(image.has_value());
+    CHECK(image->width == 64);
+    CHECK(image->height == 44);
+}

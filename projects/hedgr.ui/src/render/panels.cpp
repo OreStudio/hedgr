@@ -29,6 +29,7 @@
 #include "hedgr.ui/widget/view_state.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "imgui.h"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 
 #include <cstdint>
@@ -36,6 +37,7 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 
@@ -43,6 +45,13 @@ namespace {
 
 namespace domain = hedgr::model::domain;
 using hedgr::ui::render::render_input;
+
+/** @brief This file's logger, which says why a header carries no flags. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.panels");
+    return instance;
+}
 
 /** @brief An instance's name by key, falling back to the key itself. */
 [[nodiscard]] std::string_view instance_name(const render_input& input,
@@ -288,6 +297,51 @@ ImTextureID image_texture(const render_input& input,
         image->data);
 }
 
+void trace_absent_flags(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view label) {
+    /*
+     * A header with no flags says nothing about why: the tenant, the map, the
+     * currency and the image bytes are four different answers, and the one that
+     * is missing is the one an operator has to be told about.
+     */
+    const auto pair = hedgr::ui::widget::currencies_of(label);
+    const auto tenant_id = input.sessions.tenant_id(session);
+    const auto* map = input.currency_images.get(tenant_id);
+    const auto* image_id =
+        input.currency_images.image_for(tenant_id, pair.base);
+    const auto* image = image_id != nullptr
+        ? input.images.get(tenant_id, *image_id) : nullptr;
+
+    /*
+     * Said once for each state, not once a frame. The reason a header has no
+     * flag changes when the map arrives or an image lands, and those are the
+     * moments worth a line; a header that repeats the same sentence sixty times
+     * a second buries them.
+     */
+    auto reason = std::format("{}|{}|{}|{}|{}|{}", label, tenant_id,
+        map == nullptr ? "absent"
+                       : map->state == hedgr::model::state::image_map_state::ready
+                ? "ready" : "not ready",
+        image_id == nullptr ? "none" : "named",
+        image == nullptr ? "absent" : "held",
+        input.textures == nullptr ? "none" : "present");
+    static std::unordered_set<std::string> said;
+    if (!said.insert(reason).second)
+        return;
+    if (said.size() > 128)
+        said.clear();
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "No flags for '" << label << "': currencies '" << pair.base
+        << "' / '" << pair.quote << "', tenant "
+        << (tenant_id.empty() ? "none" : std::string{tenant_id})
+        << ", map " << (map == nullptr ? "absent"
+                : map->state == hedgr::model::state::image_map_state::ready
+                ? "ready" : "not ready")
+        << ", image id " << (image_id == nullptr ? "none" : "named")
+        << ", bytes " << (image == nullptr ? "absent" : "held")
+        << ", textures " << (input.textures == nullptr ? "none" : "present");
+}
+
 std::string identity_text(const identity_bar_state& state) {
     if (!state.signed_in)
         return "Not signed in";
@@ -325,8 +379,18 @@ void draw_series_flags(const render_input& input,
     const float flag_h = pill_h * hedgr::ui::theme::flag_height_fraction;
     const float flags_width =
         hedgr::ui::widget::flag_pair_width(flag_h, base_texture, quote_texture);
-    if (flags_width == 0.0f)
+    if (flags_width == 0.0f) {
+        /*
+         * Nothing to draw, and the line still ends here. The caller places what
+         * follows on the line below and reads its position from the cursor, so
+         * returning with the cursor where the header left it hands a chart the
+         * tail of its own title row: a plot one flag wide, pressed against the
+         * right edge of the window.
+         */
+        trace_absent_flags(input, session, label);
+        ImGui::NewLine();
         return;
+    }
 
     const float right = ImGui::GetWindowContentRegionMax().x - inset;
     if (ImGui::GetCursorPosX() < right - flags_width)
