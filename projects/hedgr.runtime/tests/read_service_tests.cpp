@@ -262,8 +262,8 @@ constexpr std::int64_t base = 1'800'000'000 * second;
         /* The map is read for a token and does not look at the session's status. */
         {"currency image map", false, request_id::currency_image_map(tenant_id),
             [](fixture& f) {
-                f.reads.start_currency_image_map(
-                    answer_of(event::event_kind::session_authenticated));
+                f.reads.start_currency_image_map(instance_id, account_id,
+                    tenant_id);
             },
             answer_of(event::event_kind::currency_image_map)},
     };
@@ -365,8 +365,7 @@ TEST_CASE("the currency image map is handed to the session's actor",
     fixture f;
     f.open();
 
-    auto signed_in = answer_of(event::event_kind::session_authenticated);
-    f.reads.start_currency_image_map(signed_in);
+    f.reads.start_currency_image_map(instance_id, account_id, tenant_id);
 
     REQUIRE(f.submitted.size() == 1);
     CHECK(std::holds_alternative<hedgr::runtime::worker::image_map_request>(
@@ -518,8 +517,7 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
     CHECK(f.reads.pending().empty());
     CHECK(f.reads.failed_images().empty());
 
-    auto signed_in = answer_of(event::event_kind::session_authenticated);
-    f.reads.start_currency_image_map(signed_in);
+    f.reads.start_currency_image_map(instance_id, account_id, tenant_id);
 
     CHECK(f.submitted.empty());
     CHECK(f.reads.pending().empty());
@@ -922,4 +920,37 @@ TEST_CASE("an empty answer warns that the deployment returned nothing",
         CHECK(names(report, "'s-1'"));
         CHECK(names(report, "no ticks"));
     }
+}
+
+TEST_CASE("a tick read names the party the session acts as",
+    "[reads][identity]") {
+    fixture f;
+    f.open();
+
+    /*
+     * The catalogue row carries the party the series belongs to, which is not
+     * the party this session acts as: a provider publishes the same series for
+     * every party, so a read that stated the owner's would name four of them
+     * and be refused as ambiguous.
+     */
+    auto catalogue = answer_of(event::event_kind::series_catalogue);
+    domain::market_series_row row;
+    row.id = "s-1";
+    row.label = "FX AUD/USD";
+    row.identity.asset = "fx";
+    row.identity.instrument_type = "fx_spot";
+    row.identity.quote_type = "rate";
+    row.identity.party_id = "owner-party";
+    row.party_id = "owner-party";
+    catalogue.series.push_back(std::move(row));
+    static_cast<void>(f.reads.apply(catalogue));
+
+    f.reads.start_market_backfill(instance_id, account_id, "s-1");
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request = std::get_if<
+        hedgr::runtime::worker::market_points_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->identity.party_id == "p-1");
+    CHECK(request->identity.asset == "fx");
 }

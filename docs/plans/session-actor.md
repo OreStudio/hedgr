@@ -196,7 +196,7 @@ stated below under reconnect.
 | Stream map, retire list, `take_reconnected` | `market_feed` | deleted. A `link_restored` event replaces the poll |
 | Attempt counter | manager `attempts_`, sessions only | `session_service`, tags sessions, reads and ticks |
 | `running_` and `stop_source` | manager | deleted. The actor has `request_stop` |
-| `start_session_for`, `start_stored_connect`, `stop_session` | facade | `session_service` (step 7) |
+| `start_session_for`, `start_stored_connect`, `stop_session`, `apply`'s session cases | facade | `session_service` (step 7, done) |
 | `pending_reads` | `read_service` | `read_service`, unchanged, plus actor-stop clears |
 | Wire codec | process global, written per client | one per actor, passed to every decode |
 | Pool (`pool_`) | sessions, reads, lock coroutines | lock coroutines and the secret derivation for a stored connect only |
@@ -614,35 +614,44 @@ review.
 
 ### 7. `session_service`
 
-> **Status: the commands are in, the events are not.** `connect`, `disconnect`
-> and `select_party` now live in `session_service`, which holds the instance,
-> account and session tables and the two lock getters by reference and returns a
-> `session_effect` for the facade to perform: raise a refusal, unbind a window,
-> detach the feed, write the wall. The attempt counter moved with them. The
-> session cases of `apply` and the `attempts_` map that filters a stale fact are
-> still in `instance_manager`, so this step is half done: a session's commands
-> are supervised by the object that owns its actor, and its events are not yet.
-> Moving them needs the effect to carry the landing window, the rebind, the feed
-> attach and the reads a sign-in starts.
+> **Status: done.** A session and its connection are now owned by one object. The
+> commands went first: `connect`, `disconnect` and `select_party` in
+> `session_service`, which holds the instance, account and session tables and the
+> two lock getters by reference and returns a `session_effect` for the facade to
+> perform. The events went second: `session_service::apply` takes one event and
+> answers whether it was about a session at all, so the session cases of
+> `instance_manager::apply` and the `attempts_` map that filters a stale fact are
+> gone from the facade, and a fact from a replaced attempt is dropped by the
+> object that numbered it. The effect now describes what the rest of the
+> interface does about a fact: a landing window, a rebind, a feed attach or
+> detach, a watch refresh on a party change, a read to start, a line in the bar
+> and its removal. Two smaller moves came with it: the currency image map's read
+> is asked for by a pair and a tenant rather than by an event, and the retry that
+> follows a refresh calls the same starter instead of building a fact to pass it.
+>
+> The facade keeps the reads themselves, because `read_service` owns them and the
+> effect only names what to start; and it keeps `catalogue_rereads_`, because
+> deferring a catalogue read behind one already in flight is read scheduling
+> rather than session state.
 
 The class already exists, holding the actor map from step 4, so this moves
 supervision into it rather than creating it: a session and its connection end up
 owned by one object, which is the point of both steps.
 
-What remains in the facade after step 6 is `running_`, `attempts_`,
+What remained in the facade after step 6 was `running_`, `attempts_`,
 `start_session_for`, `start_stored_connect`, `do_connect_session`,
-`do_disconnect_session`, `stop_session` and the session cases of `apply`
-(`instance_manager.cpp:468-730`, `:886-960`). Move them into `session_service`,
-which takes the instance, account and session tables and the lock getters by
-reference, returns effects for the facade the way `catalogue_service` does, and
-holds no manager. The two lock getters are `store_lock()` and
-`master_password()`, the same two the split plan named. It lands after the actor
-because moving supervision first would move it twice.
+`do_disconnect_session`, `stop_session` and the session cases of `apply`. All of
+it moved into `session_service`, which takes the instance, account and session
+tables and the lock getters by reference, returns effects for the facade the way
+`catalogue_service` does, and holds no manager. The two lock getters are
+`store_lock()` and `master_password()`, the same two the split plan named. It
+landed after the actor because moving supervision first would have moved it
+twice.
 
 Tests are the step 6 tests plus the stale-attempt tests, which are the ones the
-split plan said survive the actor. Risk is low. It is a move of code that
-step 6 has already rewritten. Measure: `instance_manager.cpp` loses about 260
-lines of method bodies and the session cases, and the facade holds no
+split plan said survive the actor. Risk was low, and it was a move of code that
+step 6 had already rewritten. Measure, as landed: `instance_manager.cpp` lost
+about 260 lines of method bodies and the session cases, and the facade holds no
 `std::stop_source`.
 
 ### 8. Term structures from member rings

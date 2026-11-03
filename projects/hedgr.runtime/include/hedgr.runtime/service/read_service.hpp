@@ -162,8 +162,9 @@ public:
      */
     [[nodiscard]] std::optional<refusal> start(const read_request& request);
 
-    /** @brief Reads a tenant's currency-to-image map. */
-    void start_currency_image_map(const model::event::event& ev);
+    /** @brief Reads the currency-to-image map of a session's tenant. */
+    void start_currency_image_map(std::string_view instance_id,
+        std::string_view account_id, std::string_view tenant_id);
 
     /**
      * @brief Reads the currency image map again when the first read failed.

@@ -69,6 +69,29 @@ constexpr std::chrono::milliseconds crm_cadence{5000};
     return row != nullptr ? row->identity : domain::market_series_identity{};
 }
 
+/**
+ * @brief The same identity, scoped to the party the session acts as.
+ *
+ * A provider publishes one series per party, so the tick service scopes a read
+ * by the caller's party and refuses an identity that names the series of four
+ * parties at once (`series_ambiguous`). The catalogue row names the party the
+ * series belongs to, which is not always the one the session acts as, so the
+ * session's own party is what a read states. A session with no party keeps the
+ * row's, because a refusal that names the ambiguity is more use than one that
+ * names nothing.
+ */
+[[nodiscard]] domain::market_series_identity session_scoped_identity(
+    domain::market_series_identity identity,
+    const model_state::session_table& sessions, std::string_view instance_id,
+    std::string_view account_id) {
+    if (const auto session = sessions.find(instance_id, account_id)) {
+        const auto party = sessions.party_id(*session);
+        if (!party.empty())
+            identity.party_id = std::string{party};
+    }
+    return identity;
+}
+
 }
 
 read_service::read_service(const model::state::session_table& sessions,
@@ -248,8 +271,10 @@ std::optional<refusal> read_service::launch_market_read(
         ? worker::read_request{worker::catalogue_request{}}
         : worker::read_request{worker::market_points_request{
               .series_id = std::string{series_id},
-              .identity = catalogue_identity(market_, read.instance_id,
-                  read.account_id, series_id)}};
+              .identity = session_scoped_identity(
+                  catalogue_identity(market_, read.instance_id,
+                      read.account_id, series_id),
+                  sessions_, read.instance_id, read.account_id)}};
     if (!submit_read(read, request))
         return std::nullopt;
 
@@ -269,25 +294,26 @@ std::optional<refusal> read_service::launch_market_read(
     return std::nullopt;
 }
 
-void read_service::start_currency_image_map(const model::event::event& ev) {
-    if (ev.tenant_id.empty() || !is_open())
+void read_service::start_currency_image_map(std::string_view instance_id,
+    std::string_view account_id, std::string_view tenant_id) {
+    if (tenant_id.empty() || !is_open())
         return;
-    if (const auto* existing = currency_images_.get(ev.tenant_id);
+    if (const auto* existing = currency_images_.get(std::string{tenant_id});
         existing != nullptr
         && (existing->state == model::state::image_map_state::ready
             || existing->state == model::state::image_map_state::reading))
         return;
-    if (pending_.contains(request_id::currency_image_map(ev.tenant_id)))
+    if (pending_.contains(request_id::currency_image_map(tenant_id)))
         return;
-    auto read = session_read_for(ev.instance_id, ev.account_id,
+    auto read = session_read_for(instance_id, account_id,
         read_gate::token_only);
     if (!read)
         return;
     if (!submit_read(*read, worker::image_map_request{}))
         return;
 
-    pending_.mark(request_id::currency_image_map(ev.tenant_id));
-    currency_images_.begin(ev.tenant_id);
+    pending_.mark(request_id::currency_image_map(tenant_id));
+    currency_images_.begin(std::string{tenant_id});
 }
 
 void read_service::retry_currency_image_map(std::string_view instance_id,
@@ -303,13 +329,8 @@ void read_service::retry_currency_image_map(std::string_view instance_id,
         const auto tenant = std::string{sessions_.tenant_id(*session)};
         const auto* map = currency_images_.get(tenant);
         if (map == nullptr
-            || map->state == model::state::image_map_state::failed) {
-            model::event::event retry;
-            retry.instance_id = std::string{instance_id};
-            retry.account_id = std::string{account_id};
-            retry.tenant_id = tenant;
-            start_currency_image_map(retry);
-        }
+            || map->state == model::state::image_map_state::failed)
+            start_currency_image_map(instance_id, account_id, tenant);
     }
 }
 
@@ -465,8 +486,9 @@ void read_service::start_market_backfill(std::string_view instance_id,
 
     const worker::market_points_request request{.series_id =
             std::string{series_id},
-        .identity = catalogue_identity(market_, instance_id, account_id,
-            series_id)};
+        .identity = session_scoped_identity(
+            catalogue_identity(market_, instance_id, account_id, series_id),
+            sessions_, instance_id, account_id)};
     if (!submit_read(*read, request))
         return;
 
@@ -512,8 +534,10 @@ void read_service::load_history(const model::command::command& cmd) {
     }
 
     const worker::market_history_request request{.series_id = cmd.series_id,
-        .identity = catalogue_identity(market_, cmd.instance_id,
-            cmd.account_id, cmd.series_id),
+        .identity = session_scoped_identity(
+            catalogue_identity(market_, cmd.instance_id, cmd.account_id,
+                cmd.series_id),
+            sessions_, cmd.instance_id, cmd.account_id),
         .from_ns = plan->from_ns,
         .to_ns = plan->to_ns};
     if (!submit_read(*read, request))
