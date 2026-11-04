@@ -555,14 +555,16 @@ TEST_CASE("live providers: history names one series per provider",
         const auto named = session.market_series_points(row.id, identity);
         std::printf("  as catalogued -> %s\n",
             named ? std::format("{} points", named->points.size()).c_str()
-                  : named.error().message.c_str());
+                  : std::format("{} ({})", named.error().message,
+                        named.error().detail).c_str());
 
         auto unspecified = identity;
         unspecified.provider_code.clear();
         const auto loose = session.market_series_points(row.id, unspecified);
         std::printf("  provider dropped -> %s\n",
             loose ? std::format("{} points", loose->points.size()).c_str()
-                  : loose.error().message.c_str());
+                  : std::format("{} ({})", loose.error().message,
+                        loose.error().detail).c_str());
     }
     std::fflush(stdout);
     session.disconnect();

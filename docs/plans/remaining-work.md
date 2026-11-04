@@ -58,10 +58,14 @@ Follow-ups noticed while building the Instances panel, both done:
   `session_client.cpp`; the tick-read log prints it). One chart on the rebuilt brave_hopper
   read 3304 ticks from `bloomberg`, so the identity resolves; what is not yet checked is the
   same series with the provider dropped, which should be refused as ambiguous.
-  `hedgr.session.tests "[.live-providers]"` is that check, and it could not run on
-  2026-11-03 because the deployment's `marketdata` subjects stopped answering after the
-  rebuild (the catalogue read times out and `nats req` gets no reply). Re-run it when the
-  service is back.
+  `hedgr.session.tests "[.live-providers]"` is that check. Run on 2026-11-04 against
+  `swift_curie` (OreStudio `6f5f5876`, libraries `0.0.29`), the read answers **with and
+  without** the provider — 339 points for USD/SEK and 340 for USD/ZAR each way — so on a
+  current build the provider disambiguates nothing and the party is what scopes the read.
+  On `eager_maxwell` the same read is refused because those catalogue rows carry no parsed
+  identity at all ("not among the 55 identities the service lists"), which is a deployment
+  behind the parse rather than an ambiguity. `brave_hopper` answered neither: its
+  `marketdata` subjects have no responders since its rebuild.
 - **Reference providers in the catalogue.** Every FX spot is listed twice, `ore`
   (reference, never ticks) and `bloomberg` (data vendor, ticks). The operator was asked
   to choose between: Hedgr filters (done in part: the Provider combo), the server hides
