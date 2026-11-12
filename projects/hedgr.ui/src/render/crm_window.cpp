@@ -225,7 +225,9 @@ void render_crm_matrix(window_handle handle, const render_input& input,
             ? std::string_view{snapshot->error} : std::string_view{};
         facts.has_data = false;
         facts.empty_what = "No rates are configured for this party.";
-        widget::draw_view_state_body(status, foot, widget::view_state_of(facts));
+        const auto verdict = widget::view_state_of(facts);
+        trace_view_state("cross rates", state.crm_name, state, verdict);
+        widget::draw_view_state_body(status, foot, verdict);
         static_cast<void>(
             draw_foot_with_party(input, *session, status, foot, state));
         ImGui::PopID();

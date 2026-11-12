@@ -533,6 +533,83 @@ void window_service::rebind(std::string_view instance_id,
     }
 }
 
+namespace {
+
+/**
+ * @brief The catalogue row a restored window's label names now, or nullptr.
+ *
+ * Two providers list the same instrument, so a reference provider's copy is
+ * passed over: it defines the instrument and never ticks, and a window
+ * re-pointed at one would be as dead as the row it came from.
+ */
+[[nodiscard]] const domain::market_series_row* row_named(
+    const model_state::series_catalogue& catalogue, std::string_view label,
+    std::string_view party_id) {
+    const domain::market_series_row* fallback = nullptr;
+    for (const auto& row : catalogue.series) {
+        if (row.label != label)
+            continue;
+        if (!party_id.empty() && !row.party_id.empty()
+            && row.party_id != party_id)
+            continue;
+        for (const auto& provider : catalogue.providers) {
+            if (provider.code == row.provider_code
+                && domain::is_reference_provider(provider))
+                fallback = &row;
+        }
+        if (fallback != &row)
+            return &row;
+    }
+    return fallback;
+}
+
+}
+
+void window_service::resolve_series(std::string_view instance_id,
+    std::string_view account_id) {
+    const auto* catalogue = series_.catalogue(instance_id, account_id);
+    if (catalogue == nullptr
+        || catalogue->state != model_state::catalogue_state::ready)
+        return;
+    const auto session = sessions_.find(instance_id, account_id);
+    if (!session)
+        return;
+    const auto party = sessions_.party_id(*session);
+
+    for (const auto window : live_windows(windows_)) {
+        if (windows_.session_of(window) != session)
+            continue;
+        auto& shape = windows_.state(window);
+        std::string* series_id = nullptr;
+        const std::string* label = nullptr;
+        if (auto* chart = std::get_if<domain::chart_state>(&shape)) {
+            series_id = &chart->series_id;
+            label = &chart->label;
+        } else if (auto* card = std::get_if<domain::mini_plot_state>(&shape)) {
+            series_id = &card->series_id;
+            label = &card->label;
+        }
+        if (series_id == nullptr || series_id->empty())
+            continue;
+        if (catalogue->row_of(*series_id) != nullptr)
+            continue;
+        const auto* row = row_named(*catalogue, *label, party);
+        if (row == nullptr) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Restored window '" << windows_.id(window) << "' names "
+                << "series '" << *series_id << "' ('" << *label
+                << "') that the catalogue does not list and no label matches";
+            continue;
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Restored window '" << windows_.id(window) << "' re-pointed from "
+            << "series '" << *series_id << "' to '" << row->id << "' ('"
+            << *label << "')";
+        *series_id = row->id;
+        hold_series(window, instance_id, account_id);
+    }
+}
+
 void window_service::unbind(model_state::session_handle session) {
     for (const auto window : live_windows(windows_)) {
         if (windows_.session_of(window) == session)

@@ -123,6 +123,7 @@ void render_term_structure(window_handle handle, const render_input& input,
     facts.has_data = has_data;
     facts.empty_what = "This curve holds no points.";
     const auto verdict = widget::view_state_of(facts);
+    trace_view_state("term structure", terms->label, state, verdict);
 
     set_health_foot(foot,
         hedgr::model::domain::assess_data_health(newest_at_ns,

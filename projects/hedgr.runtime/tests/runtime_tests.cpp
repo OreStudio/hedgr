@@ -2808,6 +2808,58 @@ TEST_CASE("an image is read once and not asked for again while in flight or afte
     manager.stop();
 }
 
+TEST_CASE("a restored chart is re-pointed at the series the catalogue holds now",
+    "[windows][restore]") {
+    const temporary_database database("restore-repoint");
+    instance_manager manager(0, unreachable_actors());
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    /*
+     * A wall saved against an instance that has since been re-provisioned: the
+     * chart names a series id the deployment minted before the reseed, and the
+     * only thing still naming it is its label.
+     */
+    push_command(manager, open_window(window_kind::chart, read_instance,
+        read_account, "s-from-the-old-instance"));
+    const auto window = *manager.windows().find(
+        std::format("chart:{}:{}:s-from-the-old-instance", read_instance,
+            read_account));
+    REQUIRE(manager.windows().session_of(window).has_value());
+
+    event catalogue;
+    catalogue.kind = event_kind::series_catalogue;
+    catalogue.instance_id = read_instance;
+    catalogue.account_id = read_account;
+    catalogue.series.push_back(hedgr::model::domain::market_series_row{
+        .id = "s-minted-by-the-reseed",
+        .uri = "oresmd://fx/GBP?type=series&instrument=fx_spot&quote=rate",
+        .label = "FX GBP/USD",
+        .asset_class = "FX",
+        .provider_code = "bloomberg",
+        .party_id = "party",
+        .curve_key = "fx/gbp",
+        .curve_label = "FX GBP/USD"});
+    manager.events().push(catalogue);
+    manager.pump();
+
+    /*
+     * The window names the row the catalogue lists, and holds it, which is what
+     * puts it back on the feed's change list to be watched and backfilled.
+     */
+    const auto* chart = std::get_if<hedgr::model::domain::chart_state>(
+        &manager.windows().state(window));
+    REQUIRE(chart != nullptr);
+    CHECK(chart->series_id == "s-minted-by-the-reseed");
+    const auto held = manager.windows().series(window);
+    REQUIRE(held.size() == 1);
+    const auto key = manager.market().key_of(held.front());
+    REQUIRE(key.has_value());
+    CHECK(key->series_id == "s-minted-by-the-reseed");
+
+    manager.stop();
+}
+
 TEST_CASE("a term structure whose member lists differ is never read",
     "[runtime][reads]") {
     const temporary_database database("term-structure-mismatch");

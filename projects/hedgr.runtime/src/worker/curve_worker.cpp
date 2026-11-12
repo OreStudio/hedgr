@@ -171,9 +171,18 @@ void run_curve_read(hedgr::session::transport::session_link& link,
                 ? read.error().detail : read.error().message;
             return;
         }
-        const auto tail = read->points.size() > max_history
-            ? read->points.size() - max_history : std::size_t{0};
-        for (const auto& point : std::span(read->points).subspan(tail)) {
+        /*
+         * A member named by a tenor is one series of that tenor, so its first
+         * coordinate is the ladder's rung. A member named by nothing is a
+         * series whose observations carry the ladder themselves - one
+         * coordinate per term - and a read that kept only the first coordinate
+         * would answer with one tenor, which is one point on the plot.
+         */
+        const auto& held = request.member_tenors[i].empty()
+            ? read->terms : read->points;
+        const auto tail = held.size() > max_history
+            ? held.size() - max_history : std::size_t{0};
+        for (const auto& point : std::span(held).subspan(tail)) {
             const auto tenor = request.member_tenors[i].empty()
                 ? point.term : request.member_tenors[i];
             by_term[tenor][point.at_ns] = point.value;
