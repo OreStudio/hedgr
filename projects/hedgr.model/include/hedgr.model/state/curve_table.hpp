@@ -52,6 +52,25 @@ enum class curve_state : std::uint8_t {
  * instant. A window draws a slice of that block; nothing is copied per frame
  * and nothing is sorted per frame.
  */
+/** @brief How many instants of one curve a desk keeps. */
+inline constexpr std::size_t curve_history_limit = 32;
+
+/**
+ * @brief One ordered set of pillars, shared by every curve that has it.
+ *
+ * Usually every curve on a desk is quoted on the same pillars, so the names and
+ * their tenor order are stored once and addressed by index. A curve's values
+ * are already in that order, which is what lets a plot draw N curves without
+ * sorting or copying anything per frame.
+ */
+struct curve_axis final {
+    /** @brief The pillar names, in drawing order. */
+    std::vector<std::string> pillars;
+
+    /** @brief One row per instant, oldest first, after the last apply. */
+    std::vector<std::int64_t> as_of_ns;
+};
+
 struct curve_row final {
     /** @brief The curve's name, as the deployment spells it. */
     std::string label;
@@ -62,13 +81,13 @@ struct curve_row final {
     /** @brief Why the last read failed, or empty. */
     std::string error;
 
-    /** @brief The pillar names, in drawing order. */
-    std::vector<std::string> pillars;
+    /** @brief Which shared pillar axis this curve is quoted on. */
+    std::size_t axis = 0;
 
-    /** @brief One instant per row of @c values, oldest first. */
+    /** @brief The instants, oldest first, at most @c curve_history_limit. */
     std::vector<std::int64_t> as_of_ns;
 
-    /** @brief @c as_of_ns.size() * @c pillars.size() values, row-major. */
+    /** @brief @c as_of_ns.size() * pillars() values, row-major. */
     std::vector<double> values;
 
     curve_state state = curve_state::unread;
@@ -82,10 +101,11 @@ struct curve_row final {
     }
 
     /** @brief The value at one instant and pillar, or nothing outside it. */
-    [[nodiscard]] const double* instant(std::size_t row) const noexcept {
-        if (row >= as_of_ns.size() || pillars.empty())
+    [[nodiscard]] const double* instant(std::size_t row,
+        std::size_t pillars) const noexcept {
+        if (row >= as_of_ns.size() || pillars == 0)
             return nullptr;
-        return values.data() + row * pillars.size();
+        return values.data() + row * pillars;
     }
 };
 
@@ -147,6 +167,21 @@ public:
     [[nodiscard]] static std::vector<std::size_t>
     pillar_order(const std::vector<std::string>& pillars);
 
+    /** @brief The shared pillar axis a curve is quoted on, by index. */
+    [[nodiscard]] const curve_axis& axis(std::size_t index) const noexcept {
+        return axes_[index];
+    }
+
+    /** @brief How many distinct pillar axes the held curves use. */
+    [[nodiscard]] std::size_t axes() const noexcept { return axes_.size(); }
+
+private:
+    /** @brief The shared axis for @p pillars, making one when it is new. */
+    [[nodiscard]] std::size_t intern_axis(
+        const std::vector<std::string>& pillars);
+
+public:
+
 private:
     struct slot final {
         std::string instance_id;
@@ -157,6 +192,8 @@ private:
     std::vector<slot> rows_;
     std::vector<std::uint32_t> alive_;
     std::vector<std::uint32_t> generation_;
+    std::vector<curve_axis> axes_;
+    std::unordered_map<std::string, std::size_t> by_pillars_;
     std::unordered_map<std::string, std::uint32_t> by_key_;
     std::uint64_t version_ = 0;
 };

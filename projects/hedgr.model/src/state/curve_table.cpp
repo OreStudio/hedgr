@@ -118,16 +118,75 @@ void curve_table::begin(curve_handle h) {
     row->version = ++version_;
 }
 
+std::size_t curve_table::intern_axis(
+    const std::vector<std::string>& pillars) {
+    std::string key;
+    for (const auto& pillar : pillars) {
+        key += pillar;
+        key.push_back('\x1f');
+    }
+    if (const auto found = by_pillars_.find(key); found != by_pillars_.end())
+        return found->second;
+
+    curve_axis axis;
+    axis.pillars = pillars;
+    const auto index = axes_.size();
+    axes_.push_back(std::move(axis));
+    by_pillars_.emplace(std::move(key), index);
+    return index;
+}
+
 void curve_table::apply(curve_handle h, std::string label,
     std::vector<std::string> pillars, std::vector<std::int64_t> as_of_ns,
     std::vector<double> values) {
     auto* row = get(h);
     if (row == nullptr)
         return;
+
+    /*
+     * The pillars are put in drawing order once, here, and the values are
+     * permuted with them: a desk plots many curves, and a plot that sorted its
+     * pillars per frame would pay that cost once per window rather than once
+     * per read. The order is shared with every curve quoted on the same
+     * pillars.
+     */
+    const auto order = pillar_order(pillars);
+    std::vector<std::string> ordered;
+    ordered.reserve(order.size());
+    for (const auto at : order)
+        ordered.push_back(pillars[at]);
+
+    const auto instants = as_of_ns.size();
+    const auto count = ordered.size();
+    std::vector<double> permuted;
+    if (values.size() == instants * count) {
+        permuted.resize(values.size());
+        for (std::size_t row_index = 0; row_index < instants; ++row_index) {
+            for (std::size_t pillar = 0; pillar < count; ++pillar) {
+                permuted[row_index * count + pillar]
+                    = values[row_index * count + order[pillar]];
+            }
+        }
+    }
+
+    /*
+     * Only the newest instants are kept: a curve read on a cadence for a day
+     * would otherwise grow without bound, and a desk holds dozens of curves.
+     */
+    std::size_t drop = 0;
+    if (instants > curve_history_limit)
+        drop = instants - curve_history_limit;
+
     row->label = std::move(label);
-    row->pillars = std::move(pillars);
-    row->as_of_ns = std::move(as_of_ns);
-    row->values = std::move(values);
+    row->axis = intern_axis(ordered);
+    row->as_of_ns.assign(as_of_ns.begin() + static_cast<std::ptrdiff_t>(drop),
+        as_of_ns.end());
+    if (permuted.size() == instants * count) {
+        row->values.assign(permuted.begin() + static_cast<std::ptrdiff_t>(drop * count),
+            permuted.end());
+    } else {
+        row->values.clear();
+    }
     row->error.clear();
     row->state = curve_state::ready;
     row->version = ++version_;
@@ -144,6 +203,8 @@ void curve_table::fail(curve_handle h, std::string message) {
 
 void curve_table::clear() {
     rows_.clear();
+    axes_.clear();
+    by_pillars_.clear();
     alive_.clear();
     generation_.clear();
     by_key_.clear();

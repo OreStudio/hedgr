@@ -569,3 +569,96 @@ TEST_CASE("live providers: history names one series per provider",
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief What a deployment publishes as curves, printed as it is.
+ *
+ * A curve is an object the deployment calibrates and publishes, not a set of
+ * series a client assembles, so this asks for the party's published curves and
+ * then for one curve's instants, and prints what came back: the name, the
+ * instant, how many pillars, and the first few pillars with their values.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.session.tests "[.live-curves]"
+ */
+TEST_CASE("live curves: what a deployment publishes for a party",
+    "[.live-curves]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("party=%s\n", signed_in->party_id.c_str());
+
+    const auto sets = session.published_curves(20);
+    if (!sets) {
+        std::printf("published curves failed: %s (%s)\n",
+            sets.error().message.c_str(), sets.error().detail.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    std::printf("published curves: %zu\n", sets->size());
+    for (std::size_t i = 0; i < sets->size() && i < 5; ++i) {
+        const auto& set = (*sets)[i];
+        std::printf("  curve='%s' series='%s' state='%s' points=%u\n",
+            set.curve.c_str(), set.series_id.c_str(), set.state_code.c_str(),
+            set.point_count);
+    }
+
+    const ores::marketdata::messaging::published_curve_set* with_points =
+        nullptr;
+    for (const auto& set : *sets)
+        if (!set.series_id.empty()) {
+            with_points = &set;
+            break;
+        }
+    if (with_points == nullptr) {
+        std::printf("no curve names a series\n");
+        std::fflush(stdout);
+        return;
+    }
+
+    const auto instants =
+        session.published_curve_sets(with_points->series_id, 5);
+    if (!instants) {
+        std::printf("curve sets failed: %s (%s)\n",
+            instants.error().message.c_str(),
+            instants.error().detail.c_str());
+        std::fflush(stdout);
+        return;
+    }
+    std::printf("curve sets for '%s': %zu\n", with_points->curve.c_str(),
+        instants->size());
+    for (const auto& set : *instants) {
+        std::printf("  as_of=%lld state='%s' points=%zu\n",
+            static_cast<long long>(std::chrono::duration_cast<
+                std::chrono::nanoseconds>(set.as_of.time_since_epoch())
+                                       .count()),
+            set.state_code.c_str(), set.points.size());
+        for (std::size_t i = 0; i < set.points.size() && i < 5; ++i)
+            std::printf("    pillar='%s' value='%s' kind='%s'\n",
+                set.points[i].pillar.c_str(), set.points[i].value.c_str(),
+                set.points[i].value_kind.c_str());
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}
