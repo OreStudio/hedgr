@@ -22,7 +22,7 @@
 #include "hedgr.session/market/tick_stream.hpp"
 #include "ores.marketdata.api/datum/market_datum.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
-#include "ores.marketdata.core/datum/oresmd_uri_codec.hpp"
+#include "ores.marketdata.api/datum/oresmd_uri_codec.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <boost/uuid/string_generator.hpp>

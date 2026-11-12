@@ -51,7 +51,7 @@ if(NOT DEFINED CMAKE_CXX_STANDARD)
     set(CMAKE_CXX_EXTENSIONS OFF)
 endif()
 
-project(Hedgr VERSION 0.3.2 LANGUAGES CXX
+project(Hedgr VERSION 0.3.3 LANGUAGES CXX
     DESCRIPTION "Multi-instance ImGui/ImPlot client for OreStudio.")
 
 # The one place the version is written. The client's banner reads it from here
