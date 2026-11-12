@@ -19,41 +19,69 @@
  */
 #include "hedgr.runtime/service/curve_mapping.hpp"
 #include "hedgr.model/event/event.hpp"
-#include <charconv>
-#include <chrono>
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <unordered_map>
 
 namespace hedgr::runtime::service {
 
 namespace {
 
-[[nodiscard]] std::optional<double> parse_value(std::string_view text) {
-    double value = 0.0;
-    const auto parsed =
-        std::from_chars(text.data(), text.data() + text.size(), value);
-    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
-        return std::nullopt;
-    if (!std::isfinite(value))
-        return std::nullopt;
-    return value;
+[[nodiscard]] constexpr double curve_gap() {
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 }
 
-curve_reading read_published_curve(
-    const ores::marketdata::messaging::published_curve_set& set) {
+curve_reading read_published_curves(
+    std::span<const hedgr::session::transport::published_curve> sets) {
+    using hedgr::session::transport::published_curve;
+
+    std::vector<const published_curve*> instants;
+    instants.reserve(sets.size());
+    for (const auto& set : sets)
+        if (!set.points.empty())
+            instants.push_back(&set);
+    std::stable_sort(instants.begin(), instants.end(),
+        [](const published_curve* left, const published_curve* right) {
+            return left->as_of_ns < right->as_of_ns;
+        });
+
     curve_reading reading;
-    reading.label = set.curve;
-    reading.as_of_ns.push_back(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            set.as_of.time_since_epoch())
-            .count());
-    for (const auto& point : set.points) {
-        const auto value = parse_value(point.value);
-        if (!value || point.pillar.empty())
-            continue;
-        reading.pillars.push_back(point.pillar);
-        reading.values.push_back(*value);
+    if (instants.empty())
+        return reading;
+    reading.label = instants.front()->label;
+
+    std::unordered_map<std::string, std::size_t> pillar_at;
+    for (const auto* set : instants) {
+        for (const auto& point : set->points) {
+            if (point.pillar.empty() || !point.numeric)
+                continue;
+            if (pillar_at.contains(point.pillar))
+                continue;
+            pillar_at.emplace(point.pillar, reading.pillars.size());
+            reading.pillars.push_back(point.pillar);
+        }
+    }
+    if (reading.pillars.empty())
+        return reading;
+
+    const auto count = reading.pillars.size();
+    std::vector<double> carried(count, curve_gap());
+    reading.as_of_ns.reserve(instants.size());
+    reading.values.reserve(instants.size() * count);
+    for (const auto* set : instants) {
+        for (const auto& point : set->points) {
+            if (!point.numeric)
+                continue;
+            if (const auto found = pillar_at.find(point.pillar);
+                found != pillar_at.end())
+                carried[found->second] = point.value;
+        }
+        reading.as_of_ns.push_back(set->as_of_ns);
+        reading.values.insert(
+            reading.values.end(), carried.begin(), carried.end());
     }
     return reading;
 }
@@ -69,17 +97,6 @@ bool apply_curve_event(model::state::curve_table& curves,
         return false;
     curves.apply(handle, event.curve_label, event.curve_pillars,
         event.curve_as_of_ns, event.curve_values);
-    return true;
-}
-
-bool apply_published_curve(model::state::curve_table& curves,
-    model::state::curve_handle handle,
-    const ores::marketdata::messaging::published_curve_set& set) {
-    auto reading = read_published_curve(set);
-    if (reading.pillars.empty())
-        return false;
-    curves.apply(handle, std::move(reading.label), std::move(reading.pillars),
-        std::move(reading.as_of_ns), std::move(reading.values));
     return true;
 }
 

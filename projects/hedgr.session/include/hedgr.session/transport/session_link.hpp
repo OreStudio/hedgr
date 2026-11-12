@@ -175,6 +175,15 @@ public:
     [[nodiscard]] virtual result<
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const = 0;
+
+    /** @brief The curves the deployment publishes for this session's party. */
+    [[nodiscard]] virtual result<std::vector<published_curve_head>>
+    published_curves(std::uint32_t limit) const = 0;
+
+    /** @brief One published curve's most recent instants, newest first. */
+    [[nodiscard]] virtual result<std::vector<published_curve>>
+    published_curve_sets(std::string_view series_id,
+        std::uint32_t limit) const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -303,6 +312,17 @@ public:
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const override {
         return client_.list_providers();
+    }
+
+    [[nodiscard]] result<std::vector<published_curve_head>> published_curves(
+        std::uint32_t limit) const override {
+        return client_.published_curves(limit);
+    }
+
+    [[nodiscard]] result<std::vector<published_curve>> published_curve_sets(
+        std::string_view series_id,
+        std::uint32_t limit) const override {
+        return client_.published_curve_sets(series_id, limit);
     }
 
 private:

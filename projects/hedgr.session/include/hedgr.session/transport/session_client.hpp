@@ -251,6 +251,66 @@ struct market_series_read final {
 };
 
 /**
+ * @brief One published curve's name and the series it is published under.
+ *
+ * A curve is an object the deployment calibrates and publishes, so a chooser
+ * lists what it publishes rather than a set of series a client assembles.
+ */
+struct published_curve_head final {
+    /** @brief The curve's name, as the deployment spells it. */
+    std::string label;
+
+    /** @brief The series the curve is published under. */
+    std::string series_id;
+
+    /** @brief The deployment's state word for the curve. */
+    std::string state_code;
+
+    /** @brief How many pillars the curve holds. */
+    std::uint32_t points = 0;
+};
+
+/** @brief One pillar of a published curve: its name and its value. */
+struct published_curve_point final {
+    /** @brief The pillar, as the deployment spells it ("10Y", "3M"). */
+    std::string pillar;
+
+    /** @brief The value as a number, or zero when @c numeric is false. */
+    double value = 0.0;
+
+    /** @brief Whether the deployment's text was a finite number. */
+    bool numeric = false;
+
+    /** @brief What the value means: discount, zero rate, and so on. */
+    std::string value_kind;
+};
+
+/**
+ * @brief One published curve at one instant.
+ *
+ * The value text is parsed here, at the boundary, so nothing above this layer
+ * carries the deployment's decimal spelling; a pillar whose text is not a
+ * finite number keeps its name with @c numeric false, because a curve with a
+ * hole in it is still the curve the deployment stated.
+ */
+struct published_curve final {
+    /** @brief The curve's name. */
+    std::string label;
+
+    /** @brief The series the curve is published under. */
+    std::string series_id;
+
+    /** @brief The instant the curve was as of, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief The deployment's state word for this instant. */
+    std::string state_code;
+
+    /** @brief The pillars, in the order the deployment sent them. */
+    std::vector<published_curve_point> points;
+};
+
+/**
  * @brief One blocking connection from one account to one instance.
  *
  * Every call here blocks until the instance answers or the request times
@@ -499,16 +559,13 @@ public:
      * @brief The curves the deployment publishes for this session's party.
      *
      * A curve is an object the deployment calibrates and publishes, not a set
-     * of series a client assembles: each set is one curve at one instant, with
-     * a pillar and a value per point, which is what a chart of a curve and its
-     * evolution draw. The deployment's own type is returned rather than copied
-     * into a model type until the window that draws it exists.
+     * of series a client assembles. This is the chooser's list: a name, the
+     * series the curve is published under and how many pillars it holds.
      *
-     * @param limit the most sets to ask for.
+     * @param limit the most curves to ask for.
      * @pre the session is authenticated.
      */
-    [[nodiscard]] result<
-        std::vector<ores::marketdata::messaging::published_curve_set>>
+    [[nodiscard]] result<std::vector<published_curve_head>>
     published_curves(std::uint32_t limit = 50) const;
 
     /**
@@ -518,8 +575,7 @@ public:
      * @param limit how many instants to ask for.
      * @pre the session is authenticated.
      */
-    [[nodiscard]] result<
-        std::vector<ores::marketdata::messaging::published_curve_set>>
+    [[nodiscard]] result<std::vector<published_curve>>
     published_curve_sets(std::string_view series_id,
         std::uint32_t limit = 5) const;
 
