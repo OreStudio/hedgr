@@ -20,6 +20,7 @@
 #ifndef HEDGR_RUNTIME_SERVICE_CURVE_MAPPING_HPP
 #define HEDGR_RUNTIME_SERVICE_CURVE_MAPPING_HPP
 
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
@@ -55,6 +56,21 @@ struct curve_reading final {
 [[nodiscard]] HEDGR_RUNTIME_EXPORT curve_reading
 read_published_curve(
     const ores::marketdata::messaging::published_curve_set& set);
+
+/**
+ * @brief Turns a curve event into the model's row.
+ *
+ * The event is already columnar, so this is a move rather than a parse: the
+ * actor that read the curve paid the boundary cost on its own thread, which is
+ * where the frame loop must never pay it.
+ *
+ * @param event the @c curve_sets event. A non-empty @c message is a failed read
+ *        and is recorded as one, keeping whatever the row already held.
+ * @return whether the event carried a curve.
+ */
+HEDGR_RUNTIME_EXPORT bool apply_curve_event(
+    model::state::curve_table& curves, model::state::curve_handle handle,
+    const hedgr::model::event::event& event);
 
 /**
  * @brief Stores a curve set on the row a window holds.
