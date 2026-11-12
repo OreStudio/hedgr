@@ -139,10 +139,31 @@ Follow-ups noticed while building the Instances panel, both done:
   the surface slice: the surface reuses this shape (two shared axes and a grid
   of values per instant, see `docs/verification/rates-term-structures.md`), and
   a curve lookup no longer allocates because a frame asks for its curve once.
-- Next: **B** is superseded by the published curve - the deployment states the
-  curve, so deriving it from member rings is no longer on the path - and **C**
-  (the volatility surface protocol probe) is the next slice, followed by **D**,
-  the 3D plot.
+- Done: **what the deployment looked like from goedel, and the three faults it
+  showed.** Tested there on 2026-11-12 with the curve window in place:
+  - most FX plots sat reading and the IR curves held a single point. The log
+    said `holds 500 series`, which was the read's own limit and not the
+    deployment's total: the catalogue ended mid-list, so a chart whose series
+    fell past the cut never found its identity. `market_series` now pages until
+    the deployment's total (801 series on brave_hopper) and a truncated read is
+    no longer possible;
+  - the rates plot's x axis read `1W 4M 4M 4M`, and looked like a memory fault
+    because it was one: the plot held a pointer to a pillar name inside the
+    axis vector, which grows when another curve is read. Axes are heap-held now
+    and carry their own C strings;
+  - the curve dived at its last point, because `ON` was not a tenor and sorted
+    with the strangers at the long end. `ON`, `TN` and `SN` now come first.
+  A curve read also logs its source, its pillars and its instants, so the next
+  report of a thin plot has a line behind it.
+- Slice **C**, the surface probe, is done as far as it can be: the reads and
+  the types exist and `[.live-surfaces]` prints what a deployment states.
+  Brave Hopper holds 10 SSVI blueprints over 10 pairs on a 7 expiry by 5 strike
+  grid and **has published none of them**, so the window that draws one will
+  read "nothing is published at or before this instant" until the deployment
+  publishes; calibrating is a write and needs the operator's word.
+- Next: **D**, the 3D plot. It reuses the curve's shape (two shared axes and a
+  grid), per `docs/verification/rates-term-structures.md`, and **B** stays
+  superseded by the published curve.
 
 ## Small items
 
