@@ -303,6 +303,68 @@ struct curve_instant final {
  * No exception escapes a public method: every failure, including the ones the
  * wrapped client throws, arrives as a session_error a window can render.
  */
+/**
+ * @brief One FX volatility surface blueprint the caller's party holds.
+ *
+ * A blueprint is the recipe a calibration fits: the pair, the smile model, the
+ * interpolation between expiries, the output grid and the series the surface is
+ * written to. A chooser lists the names; the grid it states is what a person
+ * reads to know what the surface will be drawn on.
+ */
+struct surface_blueprint final {
+    /** @brief The blueprint's identifier. */
+    std::string id;
+
+    /** @brief The name a person wrote for it, such as EURUSD-BROKER. */
+    std::string name;
+
+    /** @brief The pair's base currency. */
+    std::string base_currency;
+
+    /** @brief The pair's quote currency. */
+    std::string quote_currency;
+
+    /** @brief The model fitted at each expiry: ssvi, sabr or spline. */
+    std::string smile_model;
+
+    /** @brief The output grid's expiries as tenor codes, comma separated. */
+    std::string expiries;
+
+    /** @brief The output grid's strikes in the deployment's grammar. */
+    std::string strikes;
+};
+
+/**
+ * @brief One published surface, as a grid on two axes.
+ *
+ * The axes are the surface's two categories, and the values are row-major with
+ * one row per expiry and one column per strike - the same shape a curve has,
+ * with a second axis instead of a second instant. Nothing here is a point
+ * carrying its own copy of an axis name.
+ */
+struct surface_grid final {
+    /** @brief The blueprint the surface belongs to. */
+    std::string blueprint_id;
+
+    /** @brief The blueprint's name. */
+    std::string name;
+
+    /** @brief The instant the surface was published as of, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief The publish the answer came from. */
+    std::string publish_id;
+
+    /** @brief The expiries, shortest first. */
+    std::vector<std::string> expiries;
+
+    /** @brief The strikes, in the blueprint's order. */
+    std::vector<std::string> strikes;
+
+    /** @brief @c expiries.size() * @c strikes.size() volatilities, row-major. */
+    std::vector<double> values;
+};
+
 class HEDGR_SESSION_EXPORT session_client final {
 public:
     /**
@@ -529,11 +591,15 @@ public:
      * from each series' canonical URI, which is the only name the deployment
      * gives it.
      *
-     * @param limit the most rows to ask for.
+     * The list is paged until the deployment's own total is reached, because a
+     * deployment holds more series than one answer carries and a truncated
+     * catalogue is a chart that never finds its series.
+     *
+     * @param page_size the rows to ask for at a time.
      * @return the series, or why they could not be read.
      */
     [[nodiscard]] result<std::vector<market_series_summary>>
-    market_series(std::uint32_t limit = 500) const;
+    market_series(std::uint32_t page_size = 500) const;
 
     /**
      * @brief The curves the deployment publishes for this session's party.
@@ -557,6 +623,31 @@ public:
      */
     [[nodiscard]] result<std::vector<curve_instant>> published_curve_sets(
         std::string_view series_id, std::uint32_t limit = 5) const;
+
+    /**
+     * @brief The FX volatility surface blueprints this session's party holds.
+     *
+     * Pages `refdata.v1.fx_vol_surface_blueprints.list`. The deployment scopes
+     * the read to the caller's party, so this is what the login may calibrate
+     * and read.
+     *
+     * @param limit the most blueprints to ask for.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<std::vector<surface_blueprint>>
+    fx_vol_surface_blueprints(std::uint32_t limit = 100) const;
+
+    /**
+     * @brief The newest surface of one blueprint published at or before @p as_of_ns.
+     *
+     * Naming an expiry or a strike would slice it; this asks for the whole
+     * grid. A blueprint with nothing published at or before the instant is a
+     * refusal that says so, not an empty surface.
+     *
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<surface_grid> published_fx_vol_surface(
+        std::string_view blueprint_id, std::int64_t as_of_ns) const;
 
     /**
      * @brief Reads every market data provider and its kind.
