@@ -118,10 +118,25 @@ void open_curve(const render_input& input,
      * reads is the shape those points make together.
      */
     std::vector<const domain::market_series_row*> members;
+    std::vector<std::string_view> tenors;
     if (const auto* catalogue = input.market.catalogue(instance_id, account_id)) {
         for (const auto& candidate : catalogue->series) {
-            if (candidate.curve_key.empty() || candidate.curve_key != row.curve_key)
+            if (candidate.curve_key.empty()
+                || candidate.curve_key != row.curve_key)
                 continue;
+            /*
+             * One provider's copy of the curve, and one row per tenor: every
+             * spot is catalogued twice, once by a reference provider and once by
+             * a vendor, and a read that named both copies of a tenor names it
+             * twice.
+             */
+            if (candidate.provider_code != row.provider_code
+                || candidate.party_id != row.party_id)
+                continue;
+            if (std::find(tenors.begin(), tenors.end(), candidate.tenor)
+                != tenors.end())
+                continue;
+            tenors.push_back(candidate.tenor);
             members.push_back(&candidate);
         }
     }
