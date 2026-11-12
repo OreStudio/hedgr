@@ -28,13 +28,12 @@
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/crm_table.hpp"
-#include "hedgr.model/state/term_structure_table.hpp"
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
-#include "hedgr.ui/render/term_ladder.hpp"
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
@@ -393,9 +392,6 @@ struct window_ui_state final {
     /** @brief Whether the last frame saw a history read in flight. */
     bool history_was_reading = false;
 
-    /** @brief A term structure window's ladder, rebuilt when its read changes. */
-    term_ladder ladder;
-
     /** @brief A series browser's rows and parties, rebuilt when they change. */
     series_browser_view series_view;
     party_list parties;
@@ -527,8 +523,8 @@ struct render_input final {
     /** @brief The market series, their catalogues and the points each holds. */
     const hedgr::model::state::series_table& market;
 
-    /** @brief The latest term structure each browser session read. */
-    const hedgr::model::state::term_structure_table& term_structures;
+    /** @brief The latest curve each browser session read. */
+    const hedgr::model::state::curve_table& curves;
 
     /** @brief The latest CRM batch each session and party read. */
     const hedgr::model::state::crm_table& crm;

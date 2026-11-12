@@ -95,9 +95,7 @@ enum class event_kind : std::uint8_t {
     /** @brief One tenant image was read by identifier, or could not be. */
     image_loaded = 13,
     /** @brief A published curve's instants were read, or could not be. */
-    curve_sets = 24,
-    /** @brief One interest-rate curve was read, as its latest term nodes. */
-    term_structure = 14,
+    curve_sets = 14,
     /** @brief A party's cross-rates batch was read. */
     crm_rates = 15,
     /** @brief The enabled CRM names a party has configured. */
@@ -279,14 +277,11 @@ struct event final {
     /** @brief Image identifier, for image_loaded. */
     std::string image_id;
 
-    /** @brief The curve identity, for term_structure. */
+    /** @brief The curve identity, for curve_sets. */
     std::string curve_key;
 
-    /** @brief The curve's name, for term_structure. */
+    /** @brief The curve's name, for curve_sets. */
     std::string curve_label;
-
-    /** @brief The recent curves, oldest first, for term_structure. */
-    std::vector<domain::term_curve> term_curves;
 
     /** @brief The batch's cells, for crm_rates. */
     std::vector<domain::crm_cell> crm_cells;
@@ -324,12 +319,15 @@ struct event final {
     std::vector<image_ref> image_refs;
 
     /**
-     * @brief A published curve, columnar, for @c curve_sets.
+     * @brief A curve, columnar, for @c curve_sets.
      *
      * The pillars are names the deployment sent ("10Y"), stored once per
      * event; the instants are one per row of @c curve_values, row-major with
      * one row per instant. A curve is a matrix, and a window draws N of them,
-     * so nothing here is a point carrying its own copy of a name.
+     * so nothing here is a point carrying its own copy of a name. Both sources
+     * answer in this shape: a published curve arrives as the deployment stated
+     * it, and a curve assembled from each tenor's ticks is carried forward to
+     * the same instants so that it fits.
      */
     std::vector<std::string> curve_pillars;
     std::vector<std::int64_t> curve_as_of_ns;

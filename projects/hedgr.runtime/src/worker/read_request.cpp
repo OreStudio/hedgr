@@ -24,7 +24,7 @@
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
-#include "hedgr.runtime/worker/term_structure_worker.hpp"
+#include "hedgr.runtime/worker/curve_worker.hpp"
 
 namespace hedgr::runtime::worker {
 
@@ -73,8 +73,8 @@ model::event::event read_event(const read_request& request,
                    [&](const deployment_request&) {
                        fact.kind = event::event_kind::deployment_snapshot;
                    },
-                   [&](const term_request& value) {
-                       fact.kind = event::event_kind::term_structure;
+                   [&](const curve_request& value) {
+                       fact.kind = event::event_kind::curve_sets;
                        fact.curve_key = value.key;
                        fact.curve_label = value.label;
                    },
@@ -131,9 +131,8 @@ void run_read(hedgr::session::transport::session_link& link,
                    [&](const deployment_request&) {
                        run_deployment_read(link, answer);
                    },
-                   [&](const term_request& value) {
-                       run_term_structure_read(link, value.member_ids,
-                           value.member_tenors, answer);
+                   [&](const curve_request& value) {
+                       run_curve_read(link, value, answer);
                    },
                    [&](const catalogue_request&) {
                        run_market_read(link, request, answer);

@@ -563,31 +563,12 @@ TEST_CASE("the cost of a frame over 200 charts of a full ring",
 
 namespace {
 
-const std::vector<std::string> ladder_tenors{"10Y", "2Y", "1M", "6M", "ON",
-    "3M", "1Y", "5Y", "1W", "30Y", "15Y", "2W"};
-
-/** @brief @p count curves over the ladder tenors, each a little higher. */
-std::vector<model::domain::term_curve> curves_of(std::size_t count) {
-    std::vector<model::domain::term_curve> curves;
-    for (std::size_t c = 0; c < count; ++c) {
-        model::domain::term_curve curve{
-            .at_ns = static_cast<std::int64_t>(c + 1) * 1'000'000'000};
-        for (std::size_t t = 0; t < ladder_tenors.size(); ++t) {
-            curve.nodes.push_back({.tenor = ladder_tenors[t],
-                .value = 0.03 + 0.001 * static_cast<double>(c)
-                    + 0.0001 * static_cast<double>(t),
-                .at_ns = curve.at_ns});
-        }
-        curves.push_back(std::move(curve));
-    }
-    return curves;
-}
-
 /** @brief Allocations of one steady term structure frame overlaying @p overlays. */
 std::size_t term_structure_frame_allocations(int overlays) {
     headless_imgui imgui;
     desk desk;
-    desk.term_structures.set("i", "a", "k", "IR GBP", curves_of(10));
+    hedgr::testing::seed_curve(desk.curves, "i", "a", "k", "IR GBP", 10,
+        10'000'000'000);
     const auto handle = desk.open(model::domain::window_kind::term_structure,
         model::domain::term_structure_state{.label = "IR GBP", .curve_key = "k"});
     render::window_ui_state state;

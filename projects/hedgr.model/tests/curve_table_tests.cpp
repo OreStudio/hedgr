@@ -87,6 +87,8 @@ TEST_CASE("curves on the same pillars share one axis, and one order",
     CHECK(curves.axes() == 1);
     const auto& axis = curves.axis(curves.get(eur)->axis);
     CHECK(axis.pillars == std::vector<std::string>{"1Y", "2Y", "10Y"});
+    /* The x positions come with the axis, so a plot reads them per frame. */
+    CHECK(axis.positions == std::vector<double>{0.0, 1.0, 2.0});
     /* Both curves are stored in the axis order, so a plot needs no sort. */
     CHECK(curves.get(eur)->values[0] == 0.01);
     CHECK(curves.get(eur)->values[1] == 0.02);
@@ -130,3 +132,23 @@ TEST_CASE("a failed read keeps what the curve already held", "[curves]") {
     CHECK(curves.axis(row->axis).pillars.size() == 1);
     CHECK(row->values.size() == 1);
 }
+
+TEST_CASE("a curve's version moves on begin, apply and fail", "[curves]") {
+    curve_table curves;
+    const auto handle = curves.intern("i", "a", "s");
+    const auto fresh = curves.version(handle);
+    curves.begin(handle);
+    REQUIRE(curves.version(handle) > fresh);
+    const auto begun = curves.version(handle);
+    curves.apply(handle, "EUR", {"1Y"}, {100}, {0.01});
+    REQUIRE(curves.version(handle) > begun);
+    const auto applied = curves.version(handle);
+    curves.fail(handle, "no observations");
+    REQUIRE(curves.version(handle) > applied);
+
+    /* The stamp is the table's, so it never repeats for another curve. */
+    const auto other = curves.intern("i", "a", "other");
+    curves.begin(other);
+    REQUIRE(curves.version(other) > curves.version(handle));
+}
+

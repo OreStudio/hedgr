@@ -37,7 +37,6 @@ set(files
     "status_bar_tests.cpp"
     "series_browser_view_tests.cpp"
     "tab_look_tests.cpp"
-    "term_ladder_tests.cpp"
     "toolbar_tests.cpp"
 )
 

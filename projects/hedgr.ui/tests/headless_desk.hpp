@@ -20,16 +20,19 @@
 #ifndef HEDGR_UI_TESTS_HEADLESS_DESK_HPP
 #define HEDGR_UI_TESTS_HEADLESS_DESK_HPP
 
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "implot.h"
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -110,7 +113,7 @@ struct desk final {
     model::state::labelling_table labellings;
     model::state::session_table sessions;
     model::state::series_table market;
-    model::state::term_structure_table term_structures;
+    model::state::curve_table curves;
     model::state::crm_table crm;
     model::state::tenant_image_map currency_images;
     model::state::image_cache images;
@@ -145,7 +148,7 @@ struct desk final {
             .labellings = labellings,
             .sessions = sessions,
             .market = market,
-            .term_structures = term_structures,
+            .curves = curves,
             .crm = crm,
             .currency_images = currency_images,
             .images = images,
@@ -173,6 +176,37 @@ struct desk final {
         return handle;
     }
 };
+
+/**
+ * @brief Fills a curve row with @p count instants on the ten tenors.
+ *
+ * The shape a term structure window draws: one value per pillar per instant,
+ * the newest at @p newest_at_ns and the others a minute apart before it.
+ */
+inline model::state::curve_handle seed_curve(model::state::curve_table& curves,
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view series_id, std::string label, std::size_t count,
+    std::int64_t newest_at_ns = 0) {
+    static const std::vector<std::string> tenors{"ON", "1W", "1M", "3M", "6M",
+        "1Y", "2Y", "5Y", "10Y", "30Y"};
+    const auto handle = curves.intern(instance_id, account_id, series_id);
+
+    std::vector<std::int64_t> as_of_ns;
+    std::vector<double> values;
+    as_of_ns.reserve(count);
+    values.reserve(count * tenors.size());
+    for (std::size_t c = 0; c < count; ++c) {
+        as_of_ns.push_back(newest_at_ns
+            - static_cast<std::int64_t>(count - 1 - c) * 60'000'000'000);
+        for (std::size_t t = 0; t < tenors.size(); ++t) {
+            values.push_back(0.038 + 0.0004 * static_cast<double>(c)
+                + 0.003 * std::log1p(static_cast<double>(t)));
+        }
+    }
+    curves.apply(handle, std::move(label), tenors, std::move(as_of_ns),
+        std::move(values));
+    return handle;
+}
 
 /** @brief Draws one frame of @p draw inside a fixed window. */
 template<class Draw>

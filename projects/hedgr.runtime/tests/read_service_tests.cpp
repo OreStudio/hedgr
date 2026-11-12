@@ -312,7 +312,7 @@ TEST_CASE("exactly the six answering events name a read", "[reads][registry]") {
     for (const auto other : {kind::session_status_changed,
              kind::session_authenticated, kind::session_failed,
              kind::probe_result, kind::crm_names, kind::crm_rates,
-             kind::term_structure}) {
+             kind::curve_sets}) {
         CHECK_FALSE(request_id::answered_by(answer_of(other)).has_value());
     }
 }
@@ -441,14 +441,15 @@ TEST_CASE("a curve read is handed to the session's actor", "[reads][actor]") {
 
     REQUIRE(f.submitted.size() == 1);
     const auto* request =
-        std::get_if<hedgr::runtime::worker::term_request>(&f.submitted[0]);
+        std::get_if<hedgr::runtime::worker::curve_request>(&f.submitted[0]);
     REQUIRE(request != nullptr);
     CHECK(request->key == "curve-1");
     CHECK(request->label == "Curve");
+    CHECK_FALSE(request->published);
     CHECK(request->member_ids == std::vector<std::string>{"m-1y", "m-2y"});
     CHECK(request->member_tenors == std::vector<std::string>{"1Y", "2Y"});
-    CHECK(f.reads.term_structures().get(instance_id, account_id, "curve-1")
-        != nullptr);
+    CHECK(f.reads.curves().find(instance_id, account_id, "curve-1")
+              .has_value());
 }
 
 TEST_CASE("a catalogue read is handed to the session's actor",
@@ -540,8 +541,8 @@ TEST_CASE("a read the actor refuses leaves nothing in flight",
         {service::read_kind::term_structure, f.term_table}));
 
     CHECK(f.submitted.empty());
-    CHECK(f.reads.term_structures().get(instance_id, account_id, "curve-1")
-        == nullptr);
+    CHECK_FALSE(f.reads.curves().find(instance_id, account_id, "curve-1")
+                    .has_value());
 }
 
 TEST_CASE("a read the session cannot make is refused without a mark",

@@ -239,27 +239,6 @@ struct market_provider_row final {
     return row.kind == "reference";
 }
 
-/** @brief One node of a term structure: a tenor and the rate at it. */
-struct term_node final {
-    /** @brief The tenor or term label, as the series URI spells it. */
-    std::string tenor;
-
-    /** @brief The rate at that tenor. */
-    double value = 0.0;
-
-    /** @brief The observation time of the value. */
-    std::int64_t at_ns = 0;
-};
-
-/** @brief One observation of a term structure at one instant. */
-struct term_curve final {
-    /** @brief The instant the curve was observed. */
-    std::int64_t at_ns = 0;
-
-    /** @brief One value per tenor. */
-    std::vector<term_node> nodes;
-};
-
 /** @brief The three resolutions a live series keeps. */
 enum class market_level : std::uint8_t {
     fine = 0,

@@ -28,7 +28,6 @@
 #include "hedgr.model/state/bucket_ring.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
-#include "hedgr.model/state/term_structure_table.hpp"
 #include <unordered_set>
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/estate_history.hpp"
@@ -993,67 +992,6 @@ TEST_CASE("a tenant image map answers by currency", "[images]") {
     images.fail("t-2", "no currencies");
     REQUIRE(images.get("t-2")->state == image_map_state::failed);
     REQUIRE(images.get("t-2")->error == "no currencies");
-}
-
-TEST_CASE("a term structure read replaces the previous curve", "[rates]") {
-    using hedgr::model::state::term_structure_table;
-
-    term_structure_table curves;
-    REQUIRE(curves.get("i", "a", "k") == nullptr);
-    curves.begin("i", "a", "k", "IR GBP IR_SWAP");
-    REQUIRE(curves.get("i", "a", "k")->curves.empty());
-    REQUIRE(curves.get("i", "a", "k")->reading == true);
-
-    curves.set("i", "a", "k", "IR GBP IR_SWAP",
-        {hedgr::model::domain::term_curve{.at_ns = 10,
-             .nodes = {{.tenor = "1D", .value = 0.04, .at_ns = 10}}},
-            hedgr::model::domain::term_curve{.at_ns = 12,
-                .nodes = {{.tenor = "1D", .value = 0.05, .at_ns = 12}}}});
-    const auto* curve = curves.get("i", "a", "k");
-    REQUIRE(curve->label == "IR GBP IR_SWAP");
-    REQUIRE(curve->curves.size() == 2);
-    REQUIRE(curve->curves.back().at_ns == 12);
-    REQUIRE(curve->reading == false);
-    REQUIRE(curve->error.empty());
-
-    curves.begin("i", "a", "k", "IR USD IR_SWAP");
-    curve = curves.get("i", "a", "k");
-    REQUIRE(curve->label == "IR USD IR_SWAP");
-    REQUIRE(curve->curves.size() == 2);
-    REQUIRE(curve->curves.back().at_ns == 12);
-    REQUIRE(curve->reading == true);
-    REQUIRE(curve->error.empty());
-
-    curves.fail("i", "a", "k", "no observations");
-    curve = curves.get("i", "a", "k");
-    REQUIRE(curve->reading == false);
-    REQUIRE(curve->error == "no observations");
-    REQUIRE(curve->curves.size() == 2);
-    REQUIRE(curve->curves.back().at_ns == 12);
-}
-
-TEST_CASE("a term structure row's version changes on begin, set and fail",
-    "[rates]") {
-    using hedgr::model::state::term_structure_table;
-
-    term_structure_table curves;
-    curves.begin("i", "a", "k", "IR");
-    const auto begun = curves.get("i", "a", "k")->version;
-    REQUIRE(begun > 0);
-    curves.set("i", "a", "k", "IR", {});
-    const auto set = curves.get("i", "a", "k")->version;
-    REQUIRE(set > begun);
-    curves.fail("i", "a", "k", "no observations");
-    const auto failed = curves.get("i", "a", "k")->version;
-    REQUIRE(failed > set);
-
-    curves.begin("i", "a", "other", "IR");
-    REQUIRE(curves.get("i", "a", "other")->version > failed);
-    REQUIRE(curves.get("i", "a", "k")->version == failed);
-
-    curves.clear();
-    curves.begin("i", "a", "k", "IR");
-    REQUIRE(curves.get("i", "a", "k")->version > failed + 1);
 }
 
 TEST_CASE("the image cache keeps tenants apart and evicts least recently used",
