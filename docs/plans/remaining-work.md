@@ -155,6 +155,23 @@ Follow-ups noticed while building the Instances panel, both done:
     with the strangers at the long end. `ON`, `TN` and `SN` now come first.
   A curve read also logs its source, its pillars and its instants, so the next
   report of a thin plot has a line behind it.
+- Done: **the second goedel test, and the three faults behind it.** "Charts that
+  auto open from the previous session spin for ever; new ones work; every rates
+  plot holds one point":
+  - a restored chart kept a series id the deployment no longer holds. A
+    re-provisioned instance mints new ids under a new party, so the saved id
+    resolved to another party's row and the feed refused to watch it. After
+    every catalogue read a window whose series is not listed is matched by its
+    label and re-pointed at the row that carries it now;
+  - a series that belongs to another party now fails with a sentence naming both
+    parties, so the window draws ERROR and the reason rather than spinning;
+  - a curve read kept the first coordinate only. An interest-rate series carries
+    its ladder as one coordinate per term, so the read answered with one tenor -
+    one point. It now keeps every coordinate's points, each naming its own term.
+  Every data window also traces its state when it changes - drawing, reading,
+  error, no data, with the reason - so a spinning plot is a line in the log.
+  Verified locally against `brave_hopper` on `localhost:20405`; nothing deployed
+  until the operator has seen it on this machine.
 - Slice **C**, the surface probe, is done as far as it can be: the reads and
   the types exist and `[.live-surfaces]` prints what a deployment states.
   Brave Hopper holds 10 SSVI blueprints over 10 pairs on a 7 expiry by 5 strike
