@@ -55,6 +55,32 @@ namespace {
 }
 
 /**
+ * @brief How many years an overnight convention names, or -1 for another name.
+ *
+ * The front of a curve is quoted by convention rather than by a number of
+ * days: `ON` is today to tomorrow, `TN` tomorrow to the next day and `SN` the
+ * day after. They are the shortest pillars there are, and a plot that sorted
+ * them as "not a tenor" would put the overnight rate at the long end and draw
+ * a curve that dives at its last point.
+ */
+[[nodiscard]] double overnight_years(std::string_view pillar) {
+    if (pillar.size() < 2 || pillar.size() > 3)
+        return -1.0;
+    char folded[4]{};
+    for (std::size_t i = 0; i < pillar.size(); ++i)
+        folded[i] = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(pillar[i])));
+    const std::string_view name{folded, pillar.size()};
+    if (name == "ON")
+        return 0.5 / 365.0;
+    if (name == "TN")
+        return 1.0 / 365.0;
+    if (name == "SN")
+        return 2.0 / 365.0;
+    return -1.0;
+}
+
+/**
  * @brief How many years a pillar names, for ordering.
  *
  * Tenors arrive as text ("1M", "10Y", "ON"). Parsing them once, when the curve
@@ -64,6 +90,8 @@ namespace {
 [[nodiscard]] double pillar_years(std::string_view pillar) {
     if (pillar.empty())
         return -1.0;
+    if (const auto overnight = overnight_years(pillar); overnight >= 0.0)
+        return overnight;
     auto at = std::size_t{0};
     double amount = 0.0;
     const auto first = pillar.data();
@@ -152,11 +180,20 @@ std::size_t curve_table::intern_axis(
     if (const auto found = by_pillars_.find(key); found != by_pillars_.end())
         return found->second;
 
-    curve_axis axis;
-    axis.pillars = pillars;
-    axis.positions.resize(pillars.size());
-    for (std::size_t i = 0; i < axis.positions.size(); ++i)
-        axis.positions[i] = static_cast<double>(i);
+    /*
+     * The axis is heap-held and its labels point into its own names: a plot is
+     * handed both and reads them every frame, so an axis that moved with the
+     * vector's growth would leave the plot reading a freed string - a curve
+     * drawn against garbage.
+     */
+    auto axis = std::make_unique<curve_axis>();
+    axis->pillars = pillars;
+    axis->positions.resize(pillars.size());
+    axis->labels.resize(pillars.size());
+    for (std::size_t i = 0; i < axis->positions.size(); ++i) {
+        axis->positions[i] = static_cast<double>(i);
+        axis->labels[i] = axis->pillars[i].c_str();
+    }
     const auto index = axes_.size();
     axes_.push_back(std::move(axis));
     by_pillars_.emplace(std::move(key), index);

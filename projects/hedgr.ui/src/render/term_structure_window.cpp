@@ -34,7 +34,6 @@
 #include "implot.h"
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -48,24 +47,6 @@ namespace {
 
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
-
-/**
- * @brief Prints a pillar's name at its index on the categorical x axis.
- *
- * A pillar is a name, not a number: the plot's x values are pillar indices and
- * this is what the axis reads at a tick. The names come from the shared axis,
- * which is why nothing is copied per frame.
- */
-int pillar_tick(double value, char* text, int size, void* data) {
-    const auto* axis = static_cast<const model::state::curve_axis*>(data);
-    if (axis == nullptr || !std::isfinite(value))
-        return 0;
-    const auto at = static_cast<std::size_t>(std::lround(value));
-    if (value < 0.0 || at >= axis->pillars.size())
-        return 0;
-    return std::snprintf(text, static_cast<std::size_t>(size), "%s",
-        axis->pillars[at].c_str());
-}
 
 }
 
@@ -217,8 +198,13 @@ void render_term_structure(window_handle handle, const render_input& input,
                     plot_flags)) {
                 ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
                     ImPlotAxisFlags_Opposite);
-                ImPlot::SetupAxisFormat(ImAxis_X1, pillar_tick,
-                    const_cast<hedgr::model::state::curve_axis*>(axis));
+                /*
+                 * One tick per pillar, named by the shared axis: a curve is
+                 * read by its tenors, so the axis says every tenor rather than
+                 * whichever round numbers the plot would pick.
+                 */
+                ImPlot::SetupAxisTicks(ImAxis_X1, axis->positions.data(),
+                    static_cast<int>(pillars), axis->labels.data());
                 ImPlot::SetupAxisLimits(ImAxis_X1, -0.75,
                     static_cast<double>(pillars) - 0.25, ImGuiCond_Always);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, low - pad, high + pad,
