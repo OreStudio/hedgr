@@ -10,6 +10,7 @@
 set(files
     "account_seed_tests.cpp"
     "catalogue_tests.cpp"
+    "curve_mapping_tests.cpp"
     "connection_options_tests.cpp"
     "crm_worker_tests.cpp"
     "environment_seed_tests.cpp"
