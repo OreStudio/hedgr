@@ -708,6 +708,15 @@ void instance_manager::apply(const event::event& ev) {
      */
     if (read_service_.apply(ev)) {
         /*
+         * A restored window may name a series the catalogue no longer holds -
+         * an instance re-provisioned since the wall was saved mints new ids -
+         * and the answer that just landed is what can put it back on a series
+         * that exists. The feed's next pass then watches and backfills it.
+         */
+        if (ev.kind == event::event_kind::series_catalogue)
+            window_service_.resolve_series(ev.instance_id, ev.account_id);
+
+        /*
          * A party change that wanted a catalogue read while another was in
          * flight is honoured here, now that the old answer has cleared the
          * pending mark. The new read then uses the new token.

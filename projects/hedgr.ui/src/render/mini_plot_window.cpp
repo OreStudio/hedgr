@@ -360,6 +360,7 @@ void render_mini_plot(window_handle handle, const render_input& input,
     facts.has_data = points.size > 0;
     facts.empty_what = "This series holds no points.";
     const auto verdict = widget::view_state_of(facts);
+    trace_view_state("mini plot", card->label, state, verdict);
     const std::size_t first = has_points
         ? mini_plot_first(points, span_ns) : 0;
     const double open = has_points ? points.value[first] : 0.0;

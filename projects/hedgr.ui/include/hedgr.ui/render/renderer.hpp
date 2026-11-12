@@ -213,6 +213,19 @@ struct window_ui_state final {
     /** @brief The request the window's controls made this frame. */
     tile_request tile = tile_request::none;
 
+    /**
+     * @brief What this window last wrote to the log about its own state.
+     *
+     * A window is drawn sixty times a second and its state changes a few times
+     * a session, so the log carries the changes and not the frames. Kept per
+     * window, because a window is the unit an operator names in a report.
+     */
+    struct traced_state final {
+        int state = -1;
+        std::string reason;
+    };
+    traced_state traced;
+
     /** @brief Whether a card was being dragged on the previous frame. */
     bool was_moving = false;
 

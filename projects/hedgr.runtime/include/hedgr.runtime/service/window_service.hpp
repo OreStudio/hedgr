@@ -136,6 +136,22 @@ public:
         model::state::session_handle session);
 
     /**
+     * @brief Re-points restored windows at the series the catalogue lists now.
+     *
+     * A window wall outlives the instance it was saved against. After a
+     * re-provision the deployment mints new series ids under a new party, so a
+     * restored chart names a series that no longer exists: it would wait for a
+     * backfill nothing starts, and spin for good. When the catalogue is read,
+     * a window whose series it does not list is matched by its label and
+     * re-pointed at the row that carries it now.
+     *
+     * Called after every catalogue read; a window whose series is listed is
+     * left alone.
+     */
+    void resolve_series(std::string_view instance_id,
+        std::string_view account_id);
+
+    /**
      * @brief Unbinds every window bound to one session.
      *
      * Called before the session row is released, because release bumps the

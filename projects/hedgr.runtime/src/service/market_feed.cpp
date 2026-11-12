@@ -27,6 +27,7 @@
 #include "support.hpp"
 #include <algorithm>
 #include <boost/log/sources/severity_feature.hpp>
+#include <format>
 #include <string>
 #include <utility>
 #include <string_view>
@@ -168,16 +169,30 @@ bool market_feed::wanted(const market_stream_entry& entry,
      * The tick subject is party scoped and the token is for the session's
      * party. A chart looking at another party through the picker keeps its
      * backfill and manual refresh, not a live stream.
+     *
+     * A window restored from a layout the instance no longer agrees with lands
+     * here: its series is listed, but under a party this session does not act
+     * as, because the instance was re-provisioned. Saying so is what turns a
+     * plot that spins for good into one that explains itself, and a session
+     * that later acts as that party clears it.
      */
     const auto session = sessions_.find(entry.instance_id, entry.account_id);
     if (!session)
         return false;
     if (info->party_id != sessions_.party_id(*session)) {
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Not watching series '" << series_.key_of(series)->series_id
-            << "': it belongs to party '" << info->party_id
-            << "' and the session is party '" << sessions_.party_id(*session)
-            << "'";
+        std::string why = std::format(
+            "This series belongs to party '{}' and the session acts as party "
+            "'{}. The instance may have been re-provisioned: close this window "
+            "and open the series again from the series browser.",
+            info->party_id, sessions_.party_id(*session));
+        if (series_.failure(series) != why) {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Not watching series '" << series_.key_of(series)->series_id
+                << "': it belongs to party '" << info->party_id
+                << "' and the session is party '"
+                << sessions_.party_id(*session) << "'";
+            series_.fail(series, why, steady_now_ns());
+        }
         return false;
     }
     return true;

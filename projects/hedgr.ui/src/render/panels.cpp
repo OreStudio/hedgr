@@ -367,6 +367,47 @@ float series_flags_width(const render_input& input,
         image_texture(input, session, pair.quote));
 }
 
+void trace_view_state(std::string_view screen, std::string_view subject,
+    hedgr::ui::render::window_ui_state& state,
+    const hedgr::ui::widget::view_verdict& verdict) {
+    using hedgr::ui::widget::view_state;
+
+    const auto word = [](view_state value) -> const char* {
+        switch (value) {
+        case view_state::none:
+            return "drawing";
+        case view_state::reading:
+            return "reading";
+        case view_state::not_connected:
+            return "no session";
+        case view_state::error:
+            return "error";
+        case view_state::no_data:
+            return "no data";
+        }
+        return "?";
+    };
+
+    const auto code = static_cast<int>(verdict.state);
+    if (state.traced.state == code
+        && state.traced.reason == verdict.reason)
+        return;
+    state.traced.state = code;
+    state.traced.reason = std::string{verdict.reason};
+
+    if (verdict.reason.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Window '" << (subject.empty() ? std::string_view{"?"} : subject)
+            << "' (" << screen << "): " << word(verdict.state);
+        return;
+    }
+    BOOST_LOG_SEV(lg(), verdict.state == view_state::error
+            ? ores::logging::warn : ores::logging::info)
+        << "Window '" << (subject.empty() ? std::string_view{"?"} : subject)
+        << "' (" << screen << "): " << word(verdict.state) << " - "
+        << verdict.reason;
+}
+
 void draw_series_flags(const render_input& input,
     const hedgr::model::state::session_handle session,
     std::string_view label, float inset) {

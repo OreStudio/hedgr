@@ -302,6 +302,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     catalogue_facts.empty_what =
         "This deployment holds no market series for this session.";
     const auto catalogue_verdict = widget::view_state_of(catalogue_facts);
+    trace_view_state("market data", "catalogue", state, catalogue_verdict);
     widget::set_view_foot(foot, catalogue_verdict);
 
     const auto session_party = input.sessions.party_id(*session);

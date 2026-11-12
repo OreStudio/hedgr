@@ -300,6 +300,25 @@ HEDGR_UI_EXPORT void request_published_curve_window(const render_input& input,
     const hedgr::model::domain::published_curve& curve);
 
 /**
+ * @brief Logs a window's state when it changes, and says why.
+ *
+ * A plot that spins or shows one point is a question about the window, and the
+ * log is where the answer has to be: this writes one line each time a window's
+ * judged state changes - reading, error, no data, content - carrying the reason
+ * the window states (a failed read's sentence, a series' failure). It writes
+ * nothing while the state holds, so a session's log is a handful of lines
+ * rather than a line per frame.
+ *
+ * @param screen the kind of screen, in the words a person reads ("chart").
+ * @param subject what the window is about: a series label, a curve's name.
+ * @param state the window's own UI state, which remembers the last line.
+ * @param verdict what the window's body will draw.
+ */
+HEDGR_UI_EXPORT void trace_view_state(std::string_view screen,
+    std::string_view subject, window_ui_state& state,
+    const hedgr::ui::widget::view_verdict& verdict);
+
+/**
  * @brief Asks for the Instances window.
  *
  * The window is found or made by the runtime, which owns the window table. The

@@ -248,6 +248,17 @@ struct market_series_read final {
 
     /** @brief The end of that span, or zero when it ran to the service clock. */
     std::int64_t to_ns = 0;
+
+    /**
+     * @brief Every point of every coordinate, each naming its own coordinate.
+     *
+     * A chart plots @c points, which is one coordinate's series. A term
+     * structure is not: an interest-rate series carries its ladder as one
+     * coordinate per term, so a read that kept only the first coordinate
+     * answered with one tenor. These are the points of all of them, in time
+     * order, each carrying the term its coordinate names.
+     */
+    std::vector<market_point> terms;
 };
 
 /** @brief One pillar of a published curve: its name and its value. */

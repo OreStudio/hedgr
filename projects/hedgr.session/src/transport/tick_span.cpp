@@ -84,10 +84,19 @@ result<market_series_read> series_read_from_ticks(
             "the tick reply names no coordinate");
 
     read.coordinate = reply.coordinates.front();
-    const auto term = market::series_term(read.coordinate);
     auto at_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
         reply.first_instant->time_since_epoch()).count();
+    /*
+     * A coordinate is one series of the reply, and its term is part of its
+     * name. A chart plots the first; a curve takes the ladder, which is one
+     * coordinate per term, so both are kept.
+     */
+    std::vector<std::string> terms;
+    terms.reserve(reply.coordinates.size());
+    for (const auto& coordinate : reply.coordinates)
+        terms.push_back(market::series_term(coordinate));
     read.points.reserve(count);
+    read.terms.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         at_ns += reply.gaps_us[i] * 1000;
         const auto index = reply.coordinate_indexes[i];
@@ -97,9 +106,12 @@ result<market_series_read> series_read_from_ticks(
                 std::format("tick {} names coordinate {} of {}", i, index,
                     reply.coordinates.size()));
         }
+        const auto at = static_cast<std::size_t>(index);
+        read.terms.push_back(market_point{.at_ns = at_ns,
+            .value = reply.values[i], .term = terms[at]});
         if (index == 0)
             read.points.push_back(market_point{.at_ns = at_ns,
-                .value = reply.values[i], .term = term});
+                .value = reply.values[i], .term = terms[at]});
     }
     return read;
 }
