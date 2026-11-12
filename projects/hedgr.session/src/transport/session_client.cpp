@@ -793,16 +793,16 @@ namespace {
     return std::isfinite(value);
 }
 
-[[nodiscard]] std::vector<hedgr::session::transport::published_curve>
-to_published_curves(
+[[nodiscard]] std::vector<hedgr::session::transport::curve_instant>
+to_curve_instants(
     std::vector<ores::marketdata::messaging::published_curve_set> sets) {
-    using hedgr::session::transport::published_curve;
-    using hedgr::session::transport::published_curve_point;
+    using hedgr::session::transport::curve_instant;
+    using hedgr::session::transport::curve_point;
 
-    std::vector<published_curve> curves;
+    std::vector<curve_instant> curves;
     curves.reserve(sets.size());
     for (auto& set : sets) {
-        published_curve curve;
+        curve_instant curve;
         curve.label = std::move(set.curve);
         curve.series_id = set.series_id;
         curve.as_of_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -811,7 +811,7 @@ to_published_curves(
         curve.state_code = set.state_code;
         curve.points.reserve(set.points.size());
         for (auto& point : set.points) {
-            published_curve_point parsed;
+            curve_point parsed;
             parsed.pillar = std::move(point.pillar);
             parsed.value_kind = std::move(point.value_kind);
             parsed.numeric = parse_curve_value(point.value, parsed.value);
@@ -824,7 +824,7 @@ to_published_curves(
 
 }
 
-result<std::vector<published_curve_head>>
+result<std::vector<hedgr::model::domain::published_curve>>
 session_client::published_curves(std::uint32_t limit) const {
     if (!is_connected() || !is_authenticated())
         return fail(session_errc::not_authenticated,
@@ -848,12 +848,12 @@ session_client::published_curves(std::uint32_t limit) const {
             return fail(session_errc::read_refused,
                 answer->message.empty() ? "the deployment refused the curves"
                                         : answer->message);
-        std::vector<published_curve_head> heads;
+        std::vector<hedgr::model::domain::published_curve> heads;
         heads.reserve(answer->sets.size());
         for (auto& set : answer->sets) {
-            heads.push_back(published_curve_head{.label = std::move(set.curve),
+            heads.push_back(hedgr::model::domain::published_curve{
+                .label = std::move(set.curve),
                 .series_id = std::move(set.series_id),
-                .state_code = std::move(set.state_code),
                 .points = set.point_count});
         }
         return heads;
@@ -864,7 +864,7 @@ session_client::published_curves(std::uint32_t limit) const {
     }
 }
 
-result<std::vector<published_curve>>
+result<std::vector<hedgr::session::transport::curve_instant>>
 session_client::published_curve_sets(std::string_view series_id,
     std::uint32_t limit) const {
     if (!is_connected() || !is_authenticated())
@@ -889,7 +889,7 @@ session_client::published_curve_sets(std::string_view series_id,
             return fail(session_errc::read_refused,
                 answer->message.empty() ? "the deployment refused the curve"
                                         : answer->message);
-        return to_published_curves(std::move(answer->sets));
+        return to_curve_instants(std::move(answer->sets));
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {

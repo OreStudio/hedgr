@@ -35,16 +35,16 @@ namespace {
 }
 
 curve_reading read_published_curves(
-    std::span<const hedgr::session::transport::published_curve> sets) {
-    using hedgr::session::transport::published_curve;
+    std::span<const hedgr::session::transport::curve_instant> sets) {
+    using curve_instant = hedgr::session::transport::curve_instant;
 
-    std::vector<const published_curve*> instants;
+    std::vector<const curve_instant*> instants;
     instants.reserve(sets.size());
     for (const auto& set : sets)
         if (!set.points.empty())
             instants.push_back(&set);
     std::stable_sort(instants.begin(), instants.end(),
-        [](const published_curve* left, const published_curve* right) {
+        [](const curve_instant* left, const curve_instant* right) {
             return left->as_of_ns < right->as_of_ns;
         });
 

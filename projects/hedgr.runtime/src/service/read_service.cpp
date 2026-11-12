@@ -414,8 +414,8 @@ void read_service::start_term_structure_read(
      * pair with their tenors.
      */
     const bool published = st != nullptr && st->member_ids.empty();
-    const bool members_pair = !published
-        && (st == nullptr || st->member_ids.size() == st->member_tenors.size());
+    const bool members_pair = published
+        || (st != nullptr && st->member_ids.size() == st->member_tenors.size());
     if (st == nullptr || st->curve_key.empty() || !members_pair) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Term structure window "
@@ -595,6 +595,8 @@ bool read_service::apply(const model::event::event& ev) {
         if (ev.message.empty()) {
             market_.apply_catalogue(ev.instance_id, ev.account_id,
                 ev.series, ev.providers);
+            market_.apply_published_curves(ev.instance_id, ev.account_id,
+                ev.published_curves, ev.published_curves_error);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);

@@ -250,28 +250,8 @@ struct market_series_read final {
     std::int64_t to_ns = 0;
 };
 
-/**
- * @brief One published curve's name and the series it is published under.
- *
- * A curve is an object the deployment calibrates and publishes, so a chooser
- * lists what it publishes rather than a set of series a client assembles.
- */
-struct published_curve_head final {
-    /** @brief The curve's name, as the deployment spells it. */
-    std::string label;
-
-    /** @brief The series the curve is published under. */
-    std::string series_id;
-
-    /** @brief The deployment's state word for the curve. */
-    std::string state_code;
-
-    /** @brief How many pillars the curve holds. */
-    std::uint32_t points = 0;
-};
-
 /** @brief One pillar of a published curve: its name and its value. */
-struct published_curve_point final {
+struct curve_point final {
     /** @brief The pillar, as the deployment spells it ("10Y", "3M"). */
     std::string pillar;
 
@@ -293,7 +273,7 @@ struct published_curve_point final {
  * finite number keeps its name with @c numeric false, because a curve with a
  * hole in it is still the curve the deployment stated.
  */
-struct published_curve final {
+struct curve_instant final {
     /** @brief The curve's name. */
     std::string label;
 
@@ -307,7 +287,7 @@ struct published_curve final {
     std::string state_code;
 
     /** @brief The pillars, in the order the deployment sent them. */
-    std::vector<published_curve_point> points;
+    std::vector<curve_point> points;
 };
 
 /**
@@ -565,7 +545,7 @@ public:
      * @param limit the most curves to ask for.
      * @pre the session is authenticated.
      */
-    [[nodiscard]] result<std::vector<published_curve_head>>
+    [[nodiscard]] result<std::vector<hedgr::model::domain::published_curve>>
     published_curves(std::uint32_t limit = 50) const;
 
     /**
@@ -575,9 +555,8 @@ public:
      * @param limit how many instants to ask for.
      * @pre the session is authenticated.
      */
-    [[nodiscard]] result<std::vector<published_curve>>
-    published_curve_sets(std::string_view series_id,
-        std::uint32_t limit = 5) const;
+    [[nodiscard]] result<std::vector<curve_instant>> published_curve_sets(
+        std::string_view series_id, std::uint32_t limit = 5) const;
 
     /**
      * @brief Reads every market data provider and its kind.

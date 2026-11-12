@@ -452,6 +452,67 @@ TEST_CASE("a curve read is handed to the session's actor", "[reads][actor]") {
               .has_value());
 }
 
+TEST_CASE("a window with no tenor members reads the published curve",
+    "[reads][actor][curve]") {
+    fixture f;
+    f.open();
+
+    /*
+     * The browser opens a published curve by naming the series and no
+     * members, and that is what tells the read to ask the deployment for the
+     * curve itself rather than a tail per tenor.
+     */
+    domain::window_spec published;
+    published.id = "published-curve";
+    published.kind = domain::window_kind::term_structure;
+    published.session = domain::session_key{instance_id, account_id};
+    published.state = domain::term_structure_state{.label = "EUR-ESTR",
+        .curve_key = "s-curve"};
+    const auto window = f.windows.insert(published);
+    f.windows.bind_session(window, f.session);
+
+    const auto refused = f.reads.start(
+        {service::read_kind::term_structure, window});
+    CHECK_FALSE(refused.has_value());
+
+    REQUIRE(f.submitted.size() == 1);
+    const auto* request =
+        std::get_if<hedgr::runtime::worker::curve_request>(&f.submitted[0]);
+    REQUIRE(request != nullptr);
+    CHECK(request->published);
+    CHECK(request->key == "s-curve");
+    CHECK(request->member_ids.empty());
+}
+
+TEST_CASE("a published curve's answer lands as a row of instants",
+    "[reads][curve]") {
+    fixture f;
+    f.open();
+
+    event::event answer;
+    answer.kind = event::event_kind::curve_sets;
+    answer.instance_id = std::string{instance_id};
+    answer.account_id = std::string{account_id};
+    answer.curve_key = "s-curve";
+    answer.curve_label = "EUR-ESTR";
+    answer.curve_pillars = {"10Y", "1Y"};
+    answer.curve_as_of_ns = {100, 200};
+    answer.curve_values = {0.03, 0.01, 0.031, 0.011};
+    REQUIRE(f.reads.apply(answer));
+
+    const auto handle = f.reads.curves().find(instance_id, account_id,
+        "s-curve");
+    REQUIRE(handle.has_value());
+    const auto* row = f.reads.curves().get(*handle);
+    REQUIRE(row != nullptr);
+    CHECK(row->label == "EUR-ESTR");
+    CHECK(row->as_of_ns == std::vector<std::int64_t>{100, 200});
+    /* The axis is the plot's order: the shortest tenor first. */
+    CHECK(f.reads.curves().axis(row->axis).pillars
+        == std::vector<std::string>{"1Y", "10Y"});
+    CHECK(row->values == std::vector<double>{0.01, 0.03, 0.011, 0.031});
+}
+
 TEST_CASE("a catalogue read is handed to the session's actor",
     "[reads][actor]") {
     fixture f;

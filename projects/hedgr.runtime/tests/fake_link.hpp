@@ -52,8 +52,8 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<session::transport::market_series_summary> catalogue;
     session::transport::market_series_read points_read;
     std::vector<hedgr::model::domain::market_provider_row> providers;
-    std::vector<session::transport::published_curve_head> curve_heads;
-    std::vector<session::transport::published_curve> curve_sets;
+    std::vector<hedgr::model::domain::published_curve> curve_heads;
+    std::vector<session::transport::curve_instant> curve_sets;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -305,7 +305,7 @@ struct fake_session_link final : session::transport::session_link {
     }
 
     [[nodiscard]] session::transport::result<
-        std::vector<session::transport::published_curve_head>>
+        std::vector<hedgr::model::domain::published_curve>>
     published_curves(std::uint32_t) const override {
         if (curves_error)
             return std::unexpected(*curves_error);
@@ -313,7 +313,7 @@ struct fake_session_link final : session::transport::session_link {
     }
 
     [[nodiscard]] session::transport::result<
-        std::vector<session::transport::published_curve>>
+        std::vector<session::transport::curve_instant>>
     published_curve_sets(std::string_view, std::uint32_t) const override {
         if (curve_sets_error)
             return std::unexpected(*curve_sets_error);

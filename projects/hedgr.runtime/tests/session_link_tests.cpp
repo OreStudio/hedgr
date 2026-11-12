@@ -148,14 +148,14 @@ TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
 TEST_CASE("a published curve is read in one call, not one per tenor",
     "[link][term]") {
     fake_link link;
-    link.curve_sets.push_back(session::published_curve{
+    link.curve_sets.push_back(session::curve_instant{
         .label = "EUR-ESTR",
         .series_id = "s-curve",
         .as_of_ns = 100,
         .state_code = "published",
-        .points = {session::published_curve_point{.pillar = "2Y",
+        .points = {session::curve_point{.pillar = "2Y",
                        .value = 0.02, .numeric = true},
-            session::published_curve_point{.pillar = "1Y",
+            session::curve_point{.pillar = "1Y",
                 .value = 0.01, .numeric = true}}});
 
     model::event::event fact;
@@ -173,7 +173,7 @@ TEST_CASE("a published curve is read in one call, not one per tenor",
 TEST_CASE("a published curve the deployment states empty is a failure",
     "[link][term]") {
     fake_link link;
-    link.curve_sets.push_back(session::published_curve{
+    link.curve_sets.push_back(session::curve_instant{
         .label = "EUR-ESTR", .series_id = "s-curve", .as_of_ns = 100});
 
     model::event::event fact;
@@ -216,6 +216,37 @@ TEST_CASE("a catalogue read carries its series and providers", "[link][market]")
     REQUIRE(fact.providers.size() == 1);
     CHECK(fact.providers[0].kind == "data_vendor");
     CHECK(fact.message.empty());
+}
+
+TEST_CASE("a catalogue read carries the curves the deployment publishes",
+    "[link][market][curve]") {
+    fake_link link;
+    link.curve_heads.push_back(model::domain::published_curve{
+        .label = "EUR-ESTR", .series_id = "s-curve", .points = 7});
+
+    const auto fact = market_read(link, catalogue_request());
+    REQUIRE(fact.published_curves.size() == 1);
+    CHECK(fact.published_curves[0].label == "EUR-ESTR");
+    CHECK(fact.published_curves[0].series_id == "s-curve");
+    CHECK(fact.published_curves[0].points == 7);
+    CHECK(fact.published_curves_error.empty());
+    CHECK(fact.message.empty());
+}
+
+TEST_CASE("a failed curve read leaves the catalogue standing",
+    "[link][market][curve]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-1", .label = "FX EUR/USD"});
+    link.curves_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "curves refused"};
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.message.empty());
+    REQUIRE(fact.series.size() == 1);
+    CHECK(fact.published_curves.empty());
+    CHECK(fact.published_curves_error == "curves refused");
 }
 
 TEST_CASE("a points read carries its points", "[link][market]") {

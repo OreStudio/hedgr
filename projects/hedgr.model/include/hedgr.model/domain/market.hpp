@@ -239,6 +239,24 @@ struct market_provider_row final {
     return row.kind == "reference";
 }
 
+/**
+ * @brief One curve the deployment publishes, as a chooser lists it.
+ *
+ * A curve is an object the deployment calibrates and publishes rather than a
+ * set of series a client assembles, so it is named and opened on its own. The
+ * series it is published under is what a window reads.
+ */
+struct published_curve final {
+    /** @brief The curve's name, as the deployment spells it ("EUR-ESTR"). */
+    std::string label;
+
+    /** @brief The series the curve is published under. */
+    std::string series_id;
+
+    /** @brief How many pillars the curve holds. */
+    std::uint32_t points = 0;
+};
+
 /** @brief The three resolutions a live series keeps. */
 enum class market_level : std::uint8_t {
     fine = 0,

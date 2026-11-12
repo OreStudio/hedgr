@@ -60,7 +60,7 @@ struct curve_reading final {
  * because a zero on a curve is a rate of zero and that is a lie a chart draws.
  */
 [[nodiscard]] HEDGR_RUNTIME_EXPORT curve_reading read_published_curves(
-    std::span<const hedgr::session::transport::published_curve> sets);
+    std::span<const hedgr::session::transport::curve_instant> sets);
 
 /**
  * @brief Turns a curve event into the model's row.

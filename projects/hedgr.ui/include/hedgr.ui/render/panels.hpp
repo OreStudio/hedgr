@@ -21,6 +21,7 @@
 #define HEDGR_UI_RENDER_PANELS_HPP
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
@@ -286,6 +287,17 @@ HEDGR_UI_EXPORT void request_series_window(const render_input& input,
     hedgr::model::domain::window_kind kind, std::string_view series_id,
     std::string_view label,
     std::optional<std::int64_t> span_ns = std::nullopt);
+
+/**
+ * @brief Asks for the window that shows one curve the deployment publishes.
+ *
+ * The window holds the curve's series and no tenor members, which is what tells
+ * the read that the curve is one object the deployment states rather than a
+ * ladder a client assembles from a series per tenor.
+ */
+HEDGR_UI_EXPORT void request_published_curve_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const hedgr::model::domain::published_curve& curve);
 
 /**
  * @brief Asks for the Instances window.

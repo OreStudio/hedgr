@@ -230,6 +230,18 @@ struct event final {
      */
     std::vector<domain::market_provider_row> providers;
 
+    /**
+     * @brief The curves the deployment publishes, for series_catalogue.
+     *
+     * Carried with the catalogue because the browser is what opens a curve.
+     * Empty when the deployment publishes none or that read failed, in which
+     * case @c published_curves_error says why.
+     */
+    std::vector<domain::published_curve> published_curves;
+
+    /** @brief Why the published curve read failed, for series_catalogue. */
+    std::string published_curves_error;
+
     /** @brief The series a points event is about, for series_points. */
     std::string series_id;
 

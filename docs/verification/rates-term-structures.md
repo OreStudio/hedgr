@@ -35,8 +35,46 @@ and its own connection; the frame loop only draws the result.
 - One IR series is one curve: the ladder lives in its observations, not in the
   series URI. The worker reads the series' observations and takes the newest
   value per term from their URIs.
-- `term_structure_table` holds the latest curve per session; the draw copies the
-  nodes, sorts them by tenor, and plots them.
+- `curve_table` holds the latest curve per session, columnar: the pillars once,
+  in drawing order, and a row of values per instant. The draw reads a row; it
+  sorts and copies nothing per frame.
+
+## Curves the deployment publishes
+
+A deployment also calibrates curves and publishes them as one object each
+(`marketdata.v1.ops.list_published_curves` for the names,
+`get_published_curve_sets` for one curve's instants). They are not series: each
+has a name, the series it is published under and a pillar/value pair per point.
+
+Those curves travel with the catalogue the browser already reads, so one
+refresh fills the series list and the curve list together. A failed curve read
+leaves the series list standing and records why the curve list is short.
+
+A window holds the curve's series and **no tenor members**, which is what tells
+the read to ask the deployment for the curve itself rather than a tail per
+tenor. Both sources answer in the same columnar `curve_sets` event, so the
+window that draws a published curve and the window that draws a ladder
+assembled from ticks share one store, one read path and one plot. A published
+curve's pillars are put in the same tenor order, and a pillar a later instant
+omits carries the earlier value forward.
+
+The published curves are listed in the browser's IR view, under the curve
+table: the tick curves first, then the deployment's own, marked `published` in
+the provider column. Double-clicking one opens its term structure.
+
+Against `brave_hopper` on 2026-11-12 the deployment published 20 curves (one per
+currency: `TRY-TLREF`, `CHF-SARON`, `AUD-AONIA`, …), seven pillars each, and
+`get_published_curve_sets` answered one instant per curve with `discount`
+values. `hedgr.session.tests "[.live-curves]"` is the probe.
+
+## The surface slices reuse this shape
+
+A volatility surface is a curve in two dimensions: pillars become a tenor axis
+and an expiry axis, and a row of values becomes a grid. The surface model is
+therefore the same shape as `curve_table` - shared axes, interned per session,
+a bounded set of instants, row-major values and a version stamp - and the plot
+reads a grid rather than a row. Nothing about the curve's read path or its
+plot changes to make room for it.
 
 ## Verification
 
@@ -53,3 +91,8 @@ newest observation and took the series' index `tenor=1D` as the curve term.
 
 Live tick updates. The curve is read on selection and on refresh, as agreed;
 watching every tenor and rebuilding the curve from ticks is the next slice.
+
+The published curve's `as_of` is what the health foot ages: a window opened for
+a curve the deployment published once shows that instant, and it reads `stale`
+rather than pretending the curve is live. The deployment republishes on its own
+schedule and the window reads it again on refresh.

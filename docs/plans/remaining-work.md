@@ -122,6 +122,28 @@ Follow-ups noticed while building the Instances panel, both done:
   cannot read falls back to the list, so an old catalogue still works. The extra
   call per read, and the two more of a widened first load, are gone.
 
+## Curves, in the order given (A to D)
+
+- Done: **A, the IR curve.** Choosing `IR` in the browser lists curves rather
+  than points, and a curve is every tenor its provider and party list, so one
+  click opens the whole ladder; a reference provider's twin copy of a tenor is
+  no longer gathered with the vendor's (#174, #175).
+- Done: **the published curve, end to end.** The deployment calibrates curves
+  and publishes them as one object each; those are now read through the session
+  link, parsed at the boundary, carried with the catalogue, listed in the
+  browser's IR view beside the tick curves, and drawn by the term structure
+  window as the deployment stated them. The curve model was unified to make
+  that possible: one columnar `curve_table` holds a curve whichever way it was
+  read, `term_structure_table` and its ladder are gone, and a curve's pillars
+  are ordered once per read rather than once per frame. Two things recorded for
+  the surface slice: the surface reuses this shape (two shared axes and a grid
+  of values per instant, see `docs/verification/rates-term-structures.md`), and
+  a curve lookup no longer allocates because a frame asks for its curve once.
+- Next: **B** is superseded by the published curve - the deployment states the
+  curve, so deriving it from member rings is no longer on the path - and **C**
+  (the volatility surface protocol probe) is the next slice, followed by **D**,
+  the 3D plot.
+
 ## Small items
 
 - Done: VIEW > Windows has a title filter at the top of the panel, folded, with a

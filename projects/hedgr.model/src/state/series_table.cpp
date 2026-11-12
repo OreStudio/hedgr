@@ -146,6 +146,15 @@ void series_table::begin_catalogue(std::string_view instance_id,
     catalogue.generation = ++counter_;
 }
 
+void series_table::apply_published_curves(std::string_view instance_id,
+    std::string_view account_id, std::vector<domain::published_curve> curves,
+    std::string error) {
+    auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;
+    catalogue.published_curves = std::move(curves);
+    catalogue.published_error = std::move(error);
+    catalogue.generation = ++counter_;
+}
+
 void series_table::fail_catalogue(std::string_view instance_id,
     std::string_view account_id, std::string message) {
     auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;

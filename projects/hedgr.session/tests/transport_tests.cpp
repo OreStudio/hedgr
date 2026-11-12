@@ -619,12 +619,11 @@ TEST_CASE("live curves: what a deployment publishes for a party",
     std::printf("published curves: %zu\n", sets->size());
     for (std::size_t i = 0; i < sets->size() && i < 5; ++i) {
         const auto& set = (*sets)[i];
-        std::printf("  curve='%s' series='%s' state='%s' points=%u\n",
-            set.label.c_str(), set.series_id.c_str(), set.state_code.c_str(),
-            set.points);
+        std::printf("  curve='%s' series='%s' points=%u\n",
+            set.label.c_str(), set.series_id.c_str(), set.points);
     }
 
-    const hedgr::session::transport::published_curve_head* with_points = nullptr;
+    const hedgr::model::domain::published_curve* with_points = nullptr;
     for (const auto& set : *sets)
         if (!set.series_id.empty()) {
             with_points = &set;

@@ -30,9 +30,9 @@ namespace transport = hedgr::session::transport;
 
 namespace {
 
-[[nodiscard]] transport::published_curve_point point(std::string pillar,
+[[nodiscard]] transport::curve_point point(std::string pillar,
     double value, std::string kind = "discount") {
-    transport::published_curve_point p;
+    transport::curve_point p;
     p.pillar = std::move(pillar);
     p.value = value;
     p.numeric = true;
@@ -40,9 +40,9 @@ namespace {
     return p;
 }
 
-[[nodiscard]] transport::published_curve set_of(std::int64_t as_of_ns,
-    std::vector<transport::published_curve_point> points) {
-    transport::published_curve set;
+[[nodiscard]] transport::curve_instant set_of(std::int64_t as_of_ns,
+    std::vector<transport::curve_point> points) {
+    transport::curve_instant set;
     set.label = "EUR IR SWAP";
     set.series_id = "s-1";
     set.as_of_ns = as_of_ns;
@@ -54,7 +54,7 @@ namespace {
 }
 
 TEST_CASE("a published curve becomes pillars and numbers", "[curves]") {
-    const std::vector<transport::published_curve> sets{set_of(100,
+    const std::vector<transport::curve_instant> sets{set_of(100,
         {point("10Y", 0.075807871141227612),
             point("12M", 0.68910259588050338),
             point("2Y", 0.49232515532723253)})};
@@ -70,7 +70,7 @@ TEST_CASE("a published curve becomes pillars and numbers", "[curves]") {
 TEST_CASE("a pillar the deployment could not spell is left out", "[curves]") {
     auto bad = point("2Y", 0.02);
     bad.numeric = false;
-    const std::vector<transport::published_curve> sets{set_of(100,
+    const std::vector<transport::curve_instant> sets{set_of(100,
         {point("1Y", 0.01), bad, point("", 0.03), point("3Y", 0.04)})};
 
     const auto reading = service::read_published_curves(sets);
@@ -85,7 +85,7 @@ TEST_CASE("instants are put oldest first and a pillar is carried forward",
      * republished. A curve is the object as it stood, so 1Y keeps the value
      * the earlier instant gave it, and 2Y is a gap until it exists.
      */
-    const std::vector<transport::published_curve> sets{
+    const std::vector<transport::curve_instant> sets{
         set_of(200, {point("1Y", 0.02)}),
         set_of(100, {point("2Y", 0.03)}),
     };
@@ -144,6 +144,6 @@ TEST_CASE("a failed curve read keeps what the row held", "[curves]") {
 }
 
 TEST_CASE("a curve with no usable point leaves the row alone", "[curves]") {
-    const std::vector<transport::published_curve> sets{set_of(100, {})};
+    const std::vector<transport::curve_instant> sets{set_of(100, {})};
     CHECK(service::read_published_curves(sets).pillars.empty());
 }
