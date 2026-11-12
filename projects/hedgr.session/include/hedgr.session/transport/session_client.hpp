@@ -25,6 +25,7 @@
 #include "hedgr.session/export.hpp"
 #include "hedgr.session/transport/session_error.hpp"
 #include "hedgr.session/transport/session_account.hpp"
+#include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
 #include "hedgr.session/transport/session_options.hpp"
 #include <chrono>
 #include <cstddef>
@@ -493,6 +494,34 @@ public:
      */
     [[nodiscard]] result<std::vector<market_series_summary>>
     market_series(std::uint32_t limit = 500) const;
+
+    /**
+     * @brief The curves the deployment publishes for this session's party.
+     *
+     * A curve is an object the deployment calibrates and publishes, not a set
+     * of series a client assembles: each set is one curve at one instant, with
+     * a pillar and a value per point, which is what a chart of a curve and its
+     * evolution draw. The deployment's own type is returned rather than copied
+     * into a model type until the window that draws it exists.
+     *
+     * @param limit the most sets to ask for.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<
+        std::vector<ores::marketdata::messaging::published_curve_set>>
+    published_curves(std::uint32_t limit = 50) const;
+
+    /**
+     * @brief One published curve's most recent instants, newest first.
+     *
+     * @param series_id the series the curve is published under.
+     * @param limit how many instants to ask for.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<
+        std::vector<ores::marketdata::messaging::published_curve_set>>
+    published_curve_sets(std::string_view series_id,
+        std::uint32_t limit = 5) const;
 
     /**
      * @brief Reads every market data provider and its kind.

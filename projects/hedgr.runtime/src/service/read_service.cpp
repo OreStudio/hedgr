@@ -407,8 +407,15 @@ void read_service::start_term_structure_read(
     const auto spec = windows_.spec(handle, sessions_);
     const auto* st = std::get_if<domain::term_structure_state>(&spec.state);
     if (st == nullptr || st->curve_key.empty() || st->member_ids.empty()
-        || st->member_ids.size() != st->member_tenors.size())
+        || st->member_ids.size() != st->member_tenors.size()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Term structure window "
+            << (st == nullptr ? "holds no curve" : st->curve_key)
+            << " not read: " << (st == nullptr ? 0 : st->member_ids.size())
+            << " members for "
+            << (st == nullptr ? 0 : st->member_tenors.size()) << " tenors";
         return;
+    }
     if (!spec.session)
         return;
     auto read = session_read_for(spec.session->instance_id,
@@ -428,10 +435,18 @@ void read_service::start_term_structure_read(
 
 void read_service::load_term_structure(
     const model::command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Term structure '" << cmd.curve_key << "' from '" << cmd.series_id
+        << "': " << cmd.member_ids.size() << " members, "
+        << cmd.member_tenors.size() << " tenors";
     if (cmd.curve_key.empty()
         || cmd.member_ids.size() != cmd.member_tenors.size()
-        || cmd.member_ids.empty())
+        || cmd.member_ids.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Term structure '" << cmd.curve_key
+            << "' not read: the members and their tenors do not pair up";
         return;
+    }
     auto read = session_read_for(cmd.instance_id, cmd.account_id,
         read_gate::signed_in);
     if (!read)

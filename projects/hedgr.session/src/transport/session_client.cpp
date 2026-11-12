@@ -36,6 +36,7 @@
 #include "ores.iam.api/messaging/tenant_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/provider_protocol.hpp"
 #include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
@@ -765,6 +766,71 @@ session_client::image_by_id(std::string_view image_id) const {
     } catch (const boost::bad_lexical_cast&) {
         return fail(session_errc::protocol_error,
             "the image identifier is not a UUID");
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<ores::marketdata::messaging::published_curve_set>>
+session_client::published_curves(std::uint32_t limit) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a curve read needs a signed-in session");
+
+    using ores::marketdata::messaging::list_published_curves_request;
+    using ores::marketdata::messaging::list_published_curves_response;
+    try {
+        list_published_curves_request request;
+        request.party_id = account_.party_id;
+        request.limit = limit;
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                list_published_curves_response>(client(),
+                list_published_curves_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the published curves answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::read_refused,
+                answer->message.empty() ? "the deployment refused the curves"
+                                        : answer->message);
+        return answer->sets;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<ores::marketdata::messaging::published_curve_set>>
+session_client::published_curve_sets(std::string_view series_id,
+    std::uint32_t limit) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a curve read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_published_curve_sets_request;
+    using ores::marketdata::messaging::get_published_curve_sets_response;
+    try {
+        get_published_curve_sets_request request;
+        request.series_id = std::string{series_id};
+        request.limit = limit;
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_published_curve_sets_response>(client(),
+                get_published_curve_sets_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the curve sets answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::read_refused,
+                answer->message.empty() ? "the deployment refused the curve"
+                                        : answer->message);
+        return answer->sets;
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {
