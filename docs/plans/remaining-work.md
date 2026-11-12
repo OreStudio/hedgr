@@ -142,7 +142,10 @@ Follow-ups noticed while building the Instances panel, both done:
   submitted inside `ImGui::NewFrame`, so the app starts a frame through
   `theme::begin_frame_with_tab_font()`, which makes the tab face the default for
   that call and restores the base face before any window body draws.
-- The reference's menu bar mode switcher and window controls are not built.
+- The reference's **window controls** are decided against: the desktop draws the
+  window frame, per ADR 10 (`docs/adr/0010-the-window-frame.md`). Its **menu bar
+  mode switcher** is the part of that title bar which is the application's own,
+  and is still to be built once the chart has modes.
 - Done: **the bold monospace weight ships.** JetBrains Mono Bold is bundled
   beside the Regular and found by the same lookup, and it is the emphasis face
   everywhere: the intro's wordmark, a table's captions and a tab's badge count.
