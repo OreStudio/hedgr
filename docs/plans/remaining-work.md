@@ -50,24 +50,27 @@ Follow-ups noticed while building the Instances panel, both done:
 
 ## Blocked on OreStudio (Brave Hopper session)
 
-- **Tick history by identity.** `get_series_ticks` takes a typed identity (PR 3711); it
-  once had no provider, so 65 identities matched two series of one party (an `ore` and a
-  `bloomberg`) and the server answered `series_ambiguous`. Brave Hopper has added
-  `provider_code` to `resolve_series_identity_request`, and Hedgr now sends the identity
-  parsed from the catalogue URI with the series' own provider (`series_identity` in
-  `session_client.cpp`; the tick-read log prints it). One chart on the rebuilt brave_hopper
-  read 3304 ticks from `bloomberg`, so the identity resolves; what is not yet checked is the
-  same series with the provider dropped, which should be refused as ambiguous.
-  `hedgr.session.tests "[.live-providers]"` is that check. Run on 2026-11-04 against
-  `swift_curie` (OreStudio `6f5f5876`, libraries `0.0.29`), the read answers **with and
-  without** the provider — 339 points for USD/SEK and 340 for USD/ZAR each way — so on a
-  current build the provider disambiguates nothing and the party is what scopes the read.
-  On `eager_maxwell` the same read is refused because those catalogue rows carry no parsed
-  identity at all ("not among the 55 identities the service lists"), which is a deployment
-  behind the parse rather than an ambiguity. `brave_hopper` answered neither: its
-  `marketdata` subjects have no responders since its rebuild.
+- Done: **Tick history by identity.** `get_series_ticks` takes a typed identity,
+  and Hedgr sends the one parsed from the catalogue URI with the series' own
+  provider. It is closed by two runs of `hedgr.session.tests "[.live-providers]"`:
+  - on `swift_curie` (OreStudio `6f5f5876`, libraries `0.0.29`) the read answers
+    with and without the provider — 339 points for USD/SEK, 340 for USD/ZAR each
+    way — so there the party is what scopes the read and the provider adds
+    nothing;
+  - on `brave_hopper`, rebuilt on 2026-11-12, the provider is what makes the read
+    name one series. A `bloomberg` series reads (USD/BRL, **4340 points**); the
+    same identity with the provider dropped is refused as `series_ambiguous`
+    ("names 2 series of the ticks (1 parties; providers bloomberg, ore)"), and
+    the reference twin is refused as `not_subscribed` ("needs a subscription to
+    the provider ore that holds display or non-display, and this party holds
+    none that does").
+  That closes the last "not yet run" line about history reads.
 - **Reference providers in the catalogue.** Every FX spot is listed twice, `ore`
-  (reference, never ticks) and `bloomberg` (data vendor, ticks). The operator was asked
+  (reference, never ticks) and `bloomberg` (data vendor, ticks). The deployment has now
+  said what a reference series is worth to this client: reading one is refused with
+  `not_subscribed` unless the party holds a subscription to that provider, so a window
+  that lists them offers rows that cannot be plotted. Hedgr's default of hiding them
+  (VIEW > Reference providers shows them) is what that supports. The operator was asked
   to choose between: Hedgr filters (done in part: the Provider combo), the server hides
   reference providers by default with an `include_reference` flag (recommended), or the
   `ore` series are no longer published. No answer sent yet. When the server decides,
