@@ -175,30 +175,12 @@ struct chart_fixture final : window_fixture {
     }
 };
 
-std::vector<model::domain::term_curve> curves(std::size_t count) {
-    static const std::vector<std::string> tenors{"ON", "1W", "1M", "3M",
-        "6M", "1Y", "2Y", "5Y", "10Y", "30Y"};
-    std::vector<model::domain::term_curve> result;
-    for (std::size_t c = 0; c < count; ++c) {
-        model::domain::term_curve curve{
-            .at_ns = newest_at_ns - static_cast<std::int64_t>(count - c)
-                * 60'000'000'000};
-        for (std::size_t t = 0; t < tenors.size(); ++t) {
-            curve.nodes.push_back({.tenor = tenors[t],
-                .value = 0.038 + 0.0004 * static_cast<double>(c)
-                    + 0.003 * std::log1p(static_cast<double>(t)),
-                .at_ns = curve.at_ns});
-        }
-        result.push_back(std::move(curve));
-    }
-    return result;
-}
-
 struct term_fixture final : window_fixture {
     model::state::window_handle window;
 
     term_fixture() {
-        desk.term_structures.set("i", "a", "k", "IR GBP SONIA", curves(4));
+        hedgr::testing::seed_curve(desk.curves, "i", "a", "k",
+            "IR GBP SONIA", 4, newest_at_ns);
         window = desk.open(model::domain::window_kind::term_structure,
             model::domain::term_structure_state{.label = "IR GBP SONIA",
                 .curve_key = "k"});

@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/service/read_service.hpp"
+#include "hedgr.runtime/service/curve_mapping.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
@@ -406,8 +407,16 @@ void read_service::start_term_structure_read(
         return;
     const auto spec = windows_.spec(handle, sessions_);
     const auto* st = std::get_if<domain::term_structure_state>(&spec.state);
-    if (st == nullptr || st->curve_key.empty() || st->member_ids.empty()
-        || st->member_ids.size() != st->member_tenors.size()) {
+    /*
+     * A window with no tenor members is a curve the deployment publishes: the
+     * whole ladder arrives from one call rather than a series per tenor. A
+     * window with members is assembled from their ticks, and its members must
+     * pair with their tenors.
+     */
+    const bool published = st != nullptr && st->member_ids.empty();
+    const bool members_pair = published
+        || (st != nullptr && st->member_ids.size() == st->member_tenors.size());
+    if (st == nullptr || st->curve_key.empty() || !members_pair) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Term structure window "
             << (st == nullptr ? "holds no curve" : st->curve_key)
@@ -423,25 +432,29 @@ void read_service::start_term_structure_read(
     if (!read)
         return;
 
-    const worker::term_request request{.key = st->curve_key,
+    const worker::curve_request request{.key = st->curve_key,
         .label = st->label,
+        .published = published,
         .member_ids = st->member_ids,
         .member_tenors = st->member_tenors};
     if (!submit_read(*read, request))
         return;
-    term_structures_.begin(read->instance_id, read->account_id, st->curve_key,
-        st->label);
+    curves_.begin(curves_.intern(read->instance_id, read->account_id,
+        st->curve_key));
 }
 
 void read_service::load_term_structure(
     const model::command::command& cmd) {
+    const bool published = cmd.member_ids.empty();
     BOOST_LOG_SEV(lg(), ores::logging::info)
         << "Term structure '" << cmd.curve_key << "' from '" << cmd.series_id
-        << "': " << cmd.member_ids.size() << " members, "
-        << cmd.member_tenors.size() << " tenors";
+        << "': " << (published ? std::string{"published curve"}
+                               : std::format("{} members, {} tenors",
+                                     cmd.member_ids.size(),
+                                     cmd.member_tenors.size()));
     if (cmd.curve_key.empty()
-        || cmd.member_ids.size() != cmd.member_tenors.size()
-        || cmd.member_ids.empty()) {
+        || (!published
+            && cmd.member_ids.size() != cmd.member_tenors.size())) {
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "Term structure '" << cmd.curve_key
             << "' not read: the members and their tenors do not pair up";
@@ -452,14 +465,15 @@ void read_service::load_term_structure(
     if (!read)
         return;
 
-    const worker::term_request request{.key = cmd.curve_key,
+    const worker::curve_request request{.key = cmd.curve_key,
         .label = cmd.curve_label,
+        .published = published,
         .member_ids = cmd.member_ids,
         .member_tenors = cmd.member_tenors};
     if (!submit_read(*read, request))
         return;
-    term_structures_.begin(cmd.instance_id, cmd.account_id, cmd.curve_key,
-        cmd.curve_label);
+    curves_.begin(curves_.intern(cmd.instance_id, cmd.account_id,
+        cmd.curve_key));
 }
 
 void read_service::load_image(const model::command::command& cmd) {
@@ -581,6 +595,8 @@ bool read_service::apply(const model::event::event& ev) {
         if (ev.message.empty()) {
             market_.apply_catalogue(ev.instance_id, ev.account_id,
                 ev.series, ev.providers);
+            market_.apply_published_curves(ev.instance_id, ev.account_id,
+                ev.published_curves, ev.published_curves_error);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);
@@ -606,14 +622,10 @@ bool read_service::apply(const model::event::event& ev) {
                     crm_cadence).count());
         return true;
     }
-    case event::event_kind::term_structure: {
-        if (ev.message.empty()) {
-            term_structures_.set(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.curve_label, ev.term_curves);
-        } else {
-            term_structures_.fail(ev.instance_id, ev.account_id, ev.curve_key,
-                ev.message);
-        }
+    case event::event_kind::curve_sets: {
+        const auto handle = curves_.intern(ev.instance_id, ev.account_id,
+            ev.curve_key);
+        service::apply_curve_event(curves_, handle, ev);
         return true;
     }
     case event::event_kind::image_loaded: {
@@ -728,7 +740,7 @@ void read_service::clear() {
     currency_images_.clear();
     images_.clear();
     failed_images_.clear();
-    term_structures_.clear();
+    curves_.clear();
     crm_.clear();
     pending_.clear_all();
 }

@@ -23,13 +23,13 @@
 #include "hedgr.model/command/channel.hpp"
 #include "hedgr.model/command/command.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
-#include "hedgr.model/state/term_structure_table.hpp"
 #include "hedgr.runtime/export.hpp"
 #include "hedgr.runtime/refusal.hpp"
 #include "hedgr.runtime/service/pending_reads.hpp"
@@ -128,9 +128,8 @@ public:
     }
 
     /** @brief The latest curve each browser session read. */
-    [[nodiscard]] const model::state::term_structure_table&
-    term_structures() const noexcept {
-        return term_structures_;
+    [[nodiscard]] const model::state::curve_table& curves() const noexcept {
+        return curves_;
     }
 
     /** @brief The bounded cache of tenant images by identifier. */
@@ -361,7 +360,7 @@ private:
     model::state::image_cache images_;
 
     /** @brief The latest curve each browser session read. */
-    model::state::term_structure_table term_structures_;
+    model::state::curve_table curves_;
 
     model::state::crm_table crm_;
 };

@@ -619,13 +619,11 @@ TEST_CASE("live curves: what a deployment publishes for a party",
     std::printf("published curves: %zu\n", sets->size());
     for (std::size_t i = 0; i < sets->size() && i < 5; ++i) {
         const auto& set = (*sets)[i];
-        std::printf("  curve='%s' series='%s' state='%s' points=%u\n",
-            set.curve.c_str(), set.series_id.c_str(), set.state_code.c_str(),
-            set.point_count);
+        std::printf("  curve='%s' series='%s' points=%u\n",
+            set.label.c_str(), set.series_id.c_str(), set.points);
     }
 
-    const ores::marketdata::messaging::published_curve_set* with_points =
-        nullptr;
+    const hedgr::model::domain::published_curve* with_points = nullptr;
     for (const auto& set : *sets)
         if (!set.series_id.empty()) {
             with_points = &set;
@@ -646,17 +644,18 @@ TEST_CASE("live curves: what a deployment publishes for a party",
         std::fflush(stdout);
         return;
     }
-    std::printf("curve sets for '%s': %zu\n", with_points->curve.c_str(),
+    std::printf("curve sets for '%s': %zu\n", with_points->label.c_str(),
         instants->size());
     for (const auto& set : *instants) {
         std::printf("  as_of=%lld state='%s' points=%zu\n",
-            static_cast<long long>(std::chrono::duration_cast<
-                std::chrono::nanoseconds>(set.as_of.time_since_epoch())
-                                       .count()),
-            set.state_code.c_str(), set.points.size());
+            static_cast<long long>(set.as_of_ns), set.state_code.c_str(),
+            set.points.size());
         for (std::size_t i = 0; i < set.points.size() && i < 5; ++i)
             std::printf("    pillar='%s' value='%s' kind='%s'\n",
-                set.points[i].pillar.c_str(), set.points[i].value.c_str(),
+                set.points[i].pillar.c_str(),
+                set.points[i].numeric
+                    ? std::format("{}", set.points[i].value).c_str()
+                    : "(not a number)",
                 set.points[i].value_kind.c_str());
     }
     std::fflush(stdout);

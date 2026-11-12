@@ -138,6 +138,20 @@ struct HEDGR_MODEL_EXPORT series_catalogue final {
      */
     std::vector<domain::market_provider_row> providers;
 
+    /**
+     * @brief The curves the deployment publishes, as its own chooser lists them.
+     *
+     * A published curve is one object rather than a series per tenor, so it is
+     * not a catalogue row: it carries a name and the series it is published
+     * under, and a window opened for it reads the deployment's curve sets.
+     * Empty when the deployment publishes none, or when that read failed while
+     * the series read answered.
+     */
+    std::vector<domain::published_curve> published_curves;
+
+    /** @brief Why the published curve read failed, or empty. */
+    std::string published_error;
+
     /** @brief Where the read stands. */
     catalogue_state state = catalogue_state::unread;
 
@@ -192,6 +206,19 @@ public:
         std::string_view account_id,
         std::vector<domain::market_series_row> rows,
         std::vector<domain::market_provider_row> providers = {});
+
+    /**
+     * @brief Records the curves a session's deployment publishes.
+     *
+     * Kept apart from the series rows because a curve is one object rather
+     * than a series per tenor. A failure is recorded beside the list and
+     * leaves the catalogue's own state alone: the chooser then lists what it
+     * had and says why the curve list may be short.
+     */
+    void apply_published_curves(std::string_view instance_id,
+        std::string_view account_id,
+        std::vector<domain::published_curve> curves,
+        std::string error = {});
 
     /** @brief Marks one session's catalogue read as started. */
     void begin_catalogue(std::string_view instance_id,

@@ -33,6 +33,7 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -71,6 +72,29 @@ float draw_series_row(std::string_view label, float extra_indent,
         label.data() + label.size()).x;
 }
 
+/** @brief Whether @p text holds @p needle, ignoring case and an empty needle. */
+[[nodiscard]] bool contains_folded(std::string_view text,
+    std::string_view needle) {
+    if (needle.empty())
+        return true;
+    const auto lower = [](char character) {
+        return static_cast<char>(
+            std::tolower(static_cast<unsigned char>(character)));
+    };
+    for (std::size_t i = 0; i + needle.size() <= text.size(); ++i) {
+        bool match = true;
+        for (std::size_t j = 0; j < needle.size(); ++j) {
+            if (lower(text[i + j]) != lower(needle[j])) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
 }
 
 namespace hedgr::ui::render {
@@ -86,6 +110,29 @@ bool mini_plot_button() {
     ImGui::PopStyleColor(2);
     ImGui::SetItemTooltip("%s", "Open a mini plot for this series");
     return pressed;
+}
+
+/**
+ * @brief The published curves whose name matches @p filter, by name.
+ *
+ * They are listed beside the tick curves rather than filtered by provider or
+ * party: a published curve is one object the deployment calibrates, not a
+ * series under a provider.
+ */
+[[nodiscard]] std::vector<domain::published_curve> published_curves_matching(
+    const hedgr::model::state::series_catalogue* catalogue,
+    std::string_view filter) {
+    std::vector<domain::published_curve> matching;
+    if (catalogue == nullptr)
+        return matching;
+    for (const auto& curve : catalogue->published_curves)
+        if (contains_folded(curve.label, filter))
+            matching.push_back(curve);
+    std::sort(matching.begin(), matching.end(),
+        [](const auto& left, const auto& right) {
+            return left.label < right.label;
+        });
+    return matching;
 }
 
 }
@@ -159,6 +206,26 @@ void open_curve(const render_input& input,
         request.member_ids.push_back(member->id);
         request.member_tenors.push_back(member->tenor);
     }
+    input.commands.push(std::move(request));
+}
+
+void request_published_curve_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const domain::published_curve& curve) {
+    /*
+     * No members: the window reads the deployment's published curve sets
+     * rather than assembling a ladder from one series per tenor, which is what
+     * an empty member list tells the read to do.
+     */
+    command request;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::term_structure;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.series_id = curve.series_id;
+    request.series_label = curve.label;
+    request.curve_key = curve.series_id;
+    request.curve_label = curve.label;
     input.commands.push(std::move(request));
 }
 
@@ -434,7 +501,16 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 .hidden_providers = hidden_providers},
             rows);
         const auto& curves = state.series_view.rows;
-        if (curves.empty()) {
+        /*
+         * The deployment's own curves. A published curve is one calibrated
+         * object rather than a tenor per series, so it is not a catalogue row:
+         * the list carries it beside the tick curves, and opening it reads the
+         * deployment's curve sets instead of assembling ticks.
+         */
+        const auto* read_catalogue = catalogue;
+        const auto published = published_curves_matching(read_catalogue,
+            filter);
+        if (curves.empty() && published.empty()) {
             draw_no_match("No curves match the filters.");
             return;
         }
@@ -469,6 +545,22 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TextDisabled("%zu tenors", std::size_t{1});
                 if (chosen)
                     ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
+            }
+            for (const auto& curve : published) {
+                ImGui::PushID(curve.series_id.c_str());
+                if (ImGui::Selectable("##published-row"))
+                    request_published_curve_window(input, *session, curve);
+                const float row_y = ImGui::GetItemRectMin().y;
+                request_flags(input, *session, curve.label);
+                const auto pair =
+                    hedgr::ui::widget::currencies_of(curve.label);
+                const float label_end = draw_series_row(curve.label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
+                ImGui::SetCursorScreenPos(ImVec2(label_end + 12.0f, row_y));
+                ImGui::TextDisabled("%u pillars, published",
+                    curve.points);
                 ImGui::PopID();
             }
             ImGui::EndCombo();
@@ -519,11 +611,40 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TableNextColumn();
                 ImGui::TextDisabled("%s", curve.provider_code.c_str());
             }
+            for (const auto& curve : published) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::PushID(curve.series_id.c_str());
+                ImGui::Selectable("##published", false,
+                    ImGuiSelectableFlags_SpanAllColumns
+                        | ImGuiSelectableFlags_AllowDoubleClick);
+                const auto pair =
+                    hedgr::ui::widget::currencies_of(curve.label);
+                draw_series_row(curve.label, 0.0f,
+                    image_texture(input, *session, pair.base),
+                    image_texture(input, *session, pair.quote));
+                if (ImGui::IsItemHovered()
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    request_published_curve_window(input, *session, curve);
+                ImGui::SetItemTooltip(
+                    "%s, published by the deployment: %u pillars",
+                    curve.series_id.c_str(), curve.points);
+                ImGui::PopID();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%u", curve.points);
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("published");
+            }
             ImGui::EndTable();
         }
 
-        ImGui::TextDisabled(
-            "Double-click a curve to open its term structure.");
+        if (!published.empty())
+            ImGui::TextDisabled(
+                "Double-click a curve to open its term structure; a curve the "
+                "deployment publishes is read as the deployment stated it.");
+        else
+            ImGui::TextDisabled(
+                "Double-click a curve to open its term structure.");
         draw_foot();
         ImGui::PopID();
         return;

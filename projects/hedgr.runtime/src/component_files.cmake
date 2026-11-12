@@ -31,7 +31,7 @@ set(files
     "worker/session_actor.cpp"
     "worker/tick_sink.cpp"
     "worker/probe_worker.cpp"
-    "worker/term_structure_worker.cpp"
+    "worker/curve_worker.cpp"
     "worker/read_request.cpp"
 )
 
@@ -64,7 +64,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/probe_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/deployment_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/image_map_worker.hpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/term_structure_worker.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/curve_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/image_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_names_worker.hpp"

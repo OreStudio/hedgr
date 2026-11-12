@@ -18,6 +18,7 @@ set(files
     "time_text_tests.cpp"
     "window_look_tests.cpp"
     "ema_tests.cpp"
+    "curve_request_tests.cpp"
     "flags_tests.cpp"
     "frame_cost_tests.cpp"
     "gallery_tests.cpp"
@@ -37,7 +38,6 @@ set(files
     "status_bar_tests.cpp"
     "series_browser_view_tests.cpp"
     "tab_look_tests.cpp"
-    "term_ladder_tests.cpp"
     "toolbar_tests.cpp"
 )
 

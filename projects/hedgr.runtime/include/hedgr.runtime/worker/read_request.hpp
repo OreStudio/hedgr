@@ -65,13 +65,23 @@ struct crm_rates_request final {
 struct deployment_request final {
 };
 
-/** @brief One curve, named as its tenor members. */
-struct term_request final {
-    /** @brief The curve's key, as the browser holds it. */
+/** @brief One curve, either published or assembled from its tenors' ticks. */
+struct curve_request final {
+    /** @brief The curve's key: a published series, or the tick curve's. */
     std::string key;
 
     /** @brief The curve's label, for the event and its log line. */
     std::string label;
+
+    /**
+     * @brief Whether the deployment publishes this curve.
+     *
+     * A published curve is one object the deployment calibrates and states at
+     * an instant, read in a call of its own. Everything else is assembled from
+     * the ticks of one series per tenor, which is the older source and is read
+     * while a deployment publishes nothing for the curve.
+     */
+    bool published = false;
 
     /** @brief The series of each tenor, in the order the table shows them. */
     std::vector<std::string> member_ids;
@@ -127,7 +137,7 @@ struct market_history_request final {
  * whole of what a session asks for and no read opens a connection of its own.
  */
 using read_request = std::variant<image_request, image_map_request,
-    crm_names_request, crm_rates_request, deployment_request, term_request,
+    crm_names_request, crm_rates_request, deployment_request, curve_request,
     catalogue_request, market_points_request, market_history_request>;
 
 /**

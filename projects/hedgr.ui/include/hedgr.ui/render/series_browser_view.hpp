@@ -132,6 +132,16 @@ HEDGR_UI_EXPORT bool update_providers(series_browser_view& view,
 }
 
 /**
+ * @brief How many days a tenor names, for ordering.
+ *
+ * A tenor arrives as text ("1M", "10Y", "ON"). The browser lists the tenors of
+ * a curve in the order a person reads them, so the text is parsed into an
+ * amount of days once, when the list is built. A label that is not a tenor
+ * sorts last.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT int tenor_rank(std::string_view tenor);
+
+/**
  * @brief The parties a login may act as, parsed from the session's column.
  *
  * The runtime serialises the list as id, unit separator, name, with a record

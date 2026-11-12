@@ -52,6 +52,8 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<session::transport::market_series_summary> catalogue;
     session::transport::market_series_read points_read;
     std::vector<hedgr::model::domain::market_provider_row> providers;
+    std::vector<hedgr::model::domain::published_curve> curve_heads;
+    std::vector<session::transport::curve_instant> curve_sets;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -61,6 +63,8 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> catalogue_error;
     std::optional<session::transport::session_error> points_error;
     std::optional<session::transport::session_error> providers_error;
+    std::optional<session::transport::session_error> curves_error;
+    std::optional<session::transport::session_error> curve_sets_error;
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
     std::optional<session::transport::session_error> tail_error;
@@ -298,6 +302,22 @@ struct fake_session_link final : session::transport::session_link {
         if (providers_error)
             return std::unexpected(*providers_error);
         return providers;
+    }
+
+    [[nodiscard]] session::transport::result<
+        std::vector<hedgr::model::domain::published_curve>>
+    published_curves(std::uint32_t) const override {
+        if (curves_error)
+            return std::unexpected(*curves_error);
+        return curve_heads;
+    }
+
+    [[nodiscard]] session::transport::result<
+        std::vector<session::transport::curve_instant>>
+    published_curve_sets(std::string_view, std::uint32_t) const override {
+        if (curve_sets_error)
+            return std::unexpected(*curve_sets_error);
+        return curve_sets;
     }
 };
 

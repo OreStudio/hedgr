@@ -28,10 +28,30 @@ namespace hedgr::model::state {
 
 namespace {
 
-/** @brief The running key one curve is interned by. */
-[[nodiscard]] std::string curve_key(std::string_view instance_id,
+/**
+ * @brief The hash of one curve's three names, without touching the heap.
+ *
+ * A lookup runs once per curve per frame, so the names are hashed where they
+ * already are rather than joined into a key string first. Two different names
+ * may hash the same, which is why the slots a hash names are compared in full.
+ */
+[[nodiscard]] std::size_t curve_hash(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) {
-    return std::format("{}\x1f{}\x1f{}", instance_id, account_id, series_id);
+    constexpr std::size_t offset = 1469598103934665603ull;
+    constexpr std::size_t prime = 1099511628211ull;
+    auto hash = offset;
+    const auto mix = [&hash](std::string_view text) {
+        for (const char character : text) {
+            hash ^= static_cast<unsigned char>(character);
+            hash *= prime;
+        }
+        hash ^= 0x1f;
+        hash *= prime;
+    };
+    mix(instance_id);
+    mix(account_id);
+    mix(series_id);
+    return hash;
 }
 
 /**
@@ -72,11 +92,8 @@ namespace {
 
 curve_handle curve_table::intern(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) {
-    const auto key = curve_key(instance_id, account_id, series_id);
-    if (const auto found = by_key_.find(key); found != by_key_.end()) {
-        const auto index = found->second;
-        return curve_handle{index, generation_[index]};
-    }
+    if (const auto found = find(instance_id, account_id, series_id))
+        return *found;
 
     const auto index = static_cast<std::uint32_t>(rows_.size());
     rows_.push_back(slot{.instance_id = std::string{instance_id},
@@ -84,17 +101,24 @@ curve_handle curve_table::intern(std::string_view instance_id,
         .row = curve_row{.series_id = std::string{series_id}}});
     alive_.push_back(1);
     generation_.push_back(0);
-    by_key_.emplace(key, index);
+    by_key_[curve_hash(instance_id, account_id, series_id)].push_back(index);
     return curve_handle{index, generation_[index]};
 }
 
 std::optional<curve_handle> curve_table::find(std::string_view instance_id,
     std::string_view account_id, std::string_view series_id) const {
     const auto found =
-        by_key_.find(curve_key(instance_id, account_id, series_id));
+        by_key_.find(curve_hash(instance_id, account_id, series_id));
     if (found == by_key_.end())
         return std::nullopt;
-    return curve_handle{found->second, generation_[found->second]};
+    for (const auto index : found->second) {
+        const auto& held = rows_[index];
+        if (held.instance_id == instance_id
+            && held.account_id == account_id
+            && held.row.series_id == series_id)
+            return curve_handle{index, generation_[index]};
+    }
+    return std::nullopt;
 }
 
 bool curve_table::contains(curve_handle h) const noexcept {
@@ -130,6 +154,9 @@ std::size_t curve_table::intern_axis(
 
     curve_axis axis;
     axis.pillars = pillars;
+    axis.positions.resize(pillars.size());
+    for (std::size_t i = 0; i < axis.positions.size(); ++i)
+        axis.positions[i] = static_cast<double>(i);
     const auto index = axes_.size();
     axes_.push_back(std::move(axis));
     by_pillars_.emplace(std::move(key), index);

@@ -17,19 +17,19 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
-#ifndef HEDGR_RUNTIME_WORKER_TERM_STRUCTURE_WORKER_HPP
-#define HEDGR_RUNTIME_WORKER_TERM_STRUCTURE_WORKER_HPP
+#ifndef HEDGR_RUNTIME_WORKER_CURVE_WORKER_HPP
+#define HEDGR_RUNTIME_WORKER_CURVE_WORKER_HPP
 
-#include "hedgr.model/domain/market.hpp"
 #include "hedgr.model/event/event.hpp"
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.runtime/export.hpp"
+#include "hedgr.runtime/service/curve_mapping.hpp"
+#include "hedgr.runtime/worker/read_request.hpp"
 #include "hedgr.session/transport/session_link.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <span>
 #include <string>
-#include <vector>
 
 namespace hedgr::runtime::worker {
 
@@ -37,21 +37,29 @@ namespace hedgr::runtime::worker {
 using pillar_history = std::map<std::string, std::map<std::int64_t, double>>;
 
 /**
- * @brief Rebuilds the curves at the newest @p max_history instants.
+ * @brief Rebuilds the curve at the newest @p max_history instants.
  *
- * Each tenor's last value is carried forward to every instant. An instant
- * before some tenor's first observation would yield a partial curve, so only
- * instants from the latest first observation onward are emitted, and every
- * curve holds every tenor that has data. The newest instant always qualifies.
+ * Each tenor's last value is carried forward to every instant, so every curve
+ * holds every tenor that has data. An instant before some tenor's first
+ * observation would yield a partial curve, so only instants from the latest
+ * first observation onward are emitted; the newest instant always qualifies.
+ *
+ * The result is columnar, with the pillars in drawing order, so the model and
+ * the plot take it as it is rather than sorting it once per frame.
  */
-[[nodiscard]] HEDGR_RUNTIME_EXPORT std::vector<model::domain::term_curve>
-build_term_curves(const pillar_history& by_term, std::size_t max_history);
+[[nodiscard]] HEDGR_RUNTIME_EXPORT service::curve_reading
+build_curve(const pillar_history& by_term, std::size_t max_history);
 
-/** @brief Fills the event's curves from each member's tail, or its failure. */
-HEDGR_RUNTIME_EXPORT void run_term_structure_read(
+/**
+ * @brief Fills @p answer with the curve @p request names, or why it failed.
+ *
+ * A published curve is one deployment call; any other curve is a tail per
+ * tenor. Both answer in the same columnar shape, so the window that draws it
+ * cannot tell which source it came from - and does not need to.
+ */
+HEDGR_RUNTIME_EXPORT void run_curve_read(
     hedgr::session::transport::session_link& link,
-    std::span<const std::string> ids, std::span<const std::string> tenors,
-    model::event::event& answer);
+    const curve_request& request, model::event::event& answer);
 
 }
 

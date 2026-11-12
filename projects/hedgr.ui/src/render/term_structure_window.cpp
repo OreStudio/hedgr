@@ -33,6 +33,8 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -46,6 +48,24 @@ namespace {
 
 namespace icon = hedgr::ui::icon;
 namespace theme = hedgr::ui::theme;
+
+/**
+ * @brief Prints a pillar's name at its index on the categorical x axis.
+ *
+ * A pillar is a name, not a number: the plot's x values are pillar indices and
+ * this is what the axis reads at a tick. The names come from the shared axis,
+ * which is why nothing is copied per frame.
+ */
+int pillar_tick(double value, char* text, int size, void* data) {
+    const auto* axis = static_cast<const model::state::curve_axis*>(data);
+    if (axis == nullptr || !std::isfinite(value))
+        return 0;
+    const auto at = static_cast<std::size_t>(std::lround(value));
+    if (value < 0.0 || at >= axis->pillars.size())
+        return 0;
+    return std::snprintf(text, static_cast<std::size_t>(size), "%s",
+        axis->pillars[at].c_str());
+}
 
 }
 
@@ -77,52 +97,56 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::PopID();
         return;
     }
-    const auto* curve = input.term_structures.get(
-        input.sessions.instance_id(*session),
-        input.sessions.account_id(*session), terms->curve_key);
+    const auto* row = [&]() -> const hedgr::model::state::curve_row* {
+        const auto found = input.curves.find(
+            input.sessions.instance_id(*session),
+            input.sessions.account_id(*session), terms->curve_key);
+        return found ? input.curves.get(*found) : nullptr;
+    }();
+    const hedgr::model::state::curve_axis* axis = nullptr;
+    std::size_t pillars = 0;
+    bool has_data = false;
+    /*
+     * A row that has never been applied names no axis: a read in flight or one
+     * that failed leaves the last good curve, and a curve with nothing behind
+     * it has no pillars to draw.
+     */
+    if (row != nullptr && row->axis < input.curves.axes()) {
+        axis = &input.curves.axis(row->axis);
+        pillars = axis->pillars.size();
+        has_data = pillars > 0 && !row->as_of_ns.empty()
+            && row->values.size() == row->as_of_ns.size() * pillars;
+    }
 
     const auto history = std::clamp(state.market_view.term_history,
         term_history_min, term_history_max);
     int history_index = history - 1;
-    int first = 0;
-    int primary = -1;
-    std::int64_t newest_at_ns = 0;
-    if (curve != nullptr && !curve->curves.empty()) {
-        /*
-         * The live stream publishes a few pillars at a time, so the newest
-         * timestamp is often a partial curve. The newest complete curve is the
-         * one worth drawing boldly; the history window ends there.
-         */
-        std::size_t best = 0;
-        primary = 0;
-        for (int c = 0; c < static_cast<int>(curve->curves.size()); ++c) {
-            if (curve->curves[static_cast<std::size_t>(c)].nodes.size() >= best) {
-                best = curve->curves[static_cast<std::size_t>(c)].nodes.size();
-                primary = c;
-            }
-        }
-        first = std::max(0, primary - history + 1);
-        if (primary >= 0 && curve->curves[static_cast<std::size_t>(primary)].at_ns > 0)
-            newest_at_ns = curve->curves[static_cast<std::size_t>(primary)].at_ns;
-    }
+    const int primary = has_data
+        ? static_cast<int>(row->as_of_ns.size()) - 1 : -1;
+    const int first = primary >= 0 ? std::max(0, primary - history + 1) : 0;
+    const int count = primary - first + 1;
+    const std::int64_t newest_at_ns = primary >= 0 ? row->as_of_ns[
+        static_cast<std::size_t>(primary)] : 0;
 
     /*
      * A failed read that leaves older curves still draws them, and the foot
      * says ERROR over them. The mark takes the plot's place only when there is
      * no curve to draw.
      */
+    const bool reading = row != nullptr
+        && row->state == hedgr::model::state::curve_state::reading;
     auto facts = session_view_facts(input, handle);
-    facts.reading = curve == nullptr || curve->reading;
-    facts.read_failure = curve != nullptr ? std::string_view{curve->error}
-                                          : std::string_view{};
-    facts.has_data = curve != nullptr && !curve->curves.empty();
+    facts.reading = row == nullptr || reading;
+    facts.read_failure = row != nullptr ? std::string_view{row->error}
+                                        : std::string_view{};
+    facts.has_data = has_data;
     facts.empty_what = "This curve holds no points.";
     const auto verdict = widget::view_state_of(facts);
 
     set_health_foot(foot,
         hedgr::model::domain::assess_data_health(newest_at_ns,
             input.wall_now_ns, hedgr::model::domain::ir_health_thresholds),
-        newest_at_ns, input.wall_now_ns, curve != nullptr && curve->reading);
+        newest_at_ns, input.wall_now_ns, reading);
     widget::set_view_foot(foot, verdict);
     foot.controls.push_back(widget::foot_combo{
         .id = "history",
@@ -134,12 +158,11 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::AlignTextToFramePadding();
     widget::value_pill(terms->label);
     ImGui::SetItemTooltip("%s", terms->curve_key.c_str());
-    if (primary >= 0 && !curve->curves[static_cast<std::size_t>(primary)].nodes.empty()) {
+    if (has_data) {
         ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         widget::caption("Terms", "Tenors on the newest curve.");
         ImGui::SameLine();
-        ImGui::Text("%zu",
-            curve->curves[static_cast<std::size_t>(primary)].nodes.size());
+        ImGui::Text("%zu", pillars);
     }
     ImGui::SameLine();
     draw_series_flags(input, *session, terms->label);
@@ -151,30 +174,27 @@ void render_term_structure(window_handle handle, const render_input& input,
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {
-        if (!facts.has_data) {
+        if (!has_data) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
             const ImVec2 room = ImGui::GetContentRegionAvail();
             widget::draw_view_state(verdict, at,
                 ImVec2(at.x + room.x, at.y + room.y),
                 theme::view_state_glyph_size);
         } else {
-            const auto& all_curves = curve->curves;
-            const int end = primary + 1;
-            const int count = end - first;
+            const auto& xs = axis->positions;
+            const auto per_instant = static_cast<std::size_t>(pillars);
 
-            const auto& ladder = state.ladder;
-            update_term_ladder(state.ladder,
-                {.version = curve->version, .history = history}, all_curves,
-                static_cast<std::size_t>(first),
-                static_cast<std::size_t>(primary));
-            const auto& xs = ladder.xs;
-
-            double low = all_curves[static_cast<std::size_t>(primary)].nodes.front().value;
+            double low = row->values[static_cast<std::size_t>(primary)
+                * per_instant];
             double high = low;
-            for (int c = first; c < end; ++c) {
-                for (const auto& node : all_curves[static_cast<std::size_t>(c)].nodes) {
-                    low = std::min(low, node.value);
-                    high = std::max(high, node.value);
+            for (int c = first; c <= primary; ++c) {
+                const auto* ys = row->values.data()
+                    + static_cast<std::size_t>(c) * per_instant;
+                for (std::size_t i = 0; i < per_instant; ++i) {
+                    if (!std::isfinite(ys[i]))
+                        continue;
+                    low = std::min(low, ys[i]);
+                    high = std::max(high, ys[i]);
                 }
             }
             const double span = high - low > 0.0
@@ -197,23 +217,24 @@ void render_term_structure(window_handle handle, const render_input& input,
                     plot_flags)) {
                 ImPlot::SetupAxes("", "", ImPlotAxisFlags_None,
                     ImPlotAxisFlags_Opposite);
-                ImPlot::SetupAxisTicks(ImAxis_X1, xs.data(),
-                    static_cast<int>(xs.size()), ladder.labels.data());
+                ImPlot::SetupAxisFormat(ImAxis_X1, pillar_tick,
+                    const_cast<hedgr::model::state::curve_axis*>(axis));
                 ImPlot::SetupAxisLimits(ImAxis_X1, -0.75,
-                    static_cast<double>(xs.size()) - 0.25, ImGuiCond_Always);
+                    static_cast<double>(pillars) - 0.25, ImGuiCond_Always);
                 ImPlot::SetupAxisLimits(ImAxis_Y1, low - pad, high + pad,
                     ImGuiCond_Always);
                 ImPlot::SetupAxisFormat(ImAxis_Y1, "%.5f");
 
                 const ImVec4 newest_colour =
                     ImGui::ColorConvertU32ToFloat4(theme::curve_latest_colour);
-                for (int c = first; c < end; ++c) {
+                for (int c = first; c <= primary; ++c) {
                     const bool newest = c == primary;
-                    const auto& ys = ladder.ys[static_cast<std::size_t>(c - first)];
+                    const auto* ys = row->values.data()
+                        + static_cast<std::size_t>(c) * per_instant;
 
                     if (newest) {
-                        fill_gradient_under_curve(xs.data(), ys.data(),
-                            static_cast<int>(xs.size()),
+                        fill_gradient_under_curve(xs.data(), ys,
+                            static_cast<int>(per_instant),
                             theme::curve_latest_colour, 0.30f);
                     }
 
@@ -245,8 +266,8 @@ void render_term_structure(window_handle handle, const render_input& input,
                         spec.MarkerSize = 3.0f;
                     }
                     ImGui::PushID(c);
-                    ImPlot::PlotLine("##curve", xs.data(), ys.data(),
-                        static_cast<int>(xs.size()), spec);
+                    ImPlot::PlotLine("##curve", xs.data(), ys,
+                        static_cast<int>(per_instant), spec);
                     ImGui::PopID();
                 }
                 ImPlot::EndPlot();

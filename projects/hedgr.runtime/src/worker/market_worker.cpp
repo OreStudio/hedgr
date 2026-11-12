@@ -51,6 +51,14 @@ namespace transport = hedgr::session::transport;
     return market_silence();
 }
 
+/**
+ * @brief How many published curves a catalogue read lists.
+ *
+ * The chooser lists the deployment's curves, a couple of dozen on the desk it
+ * was built against, so this is a generous ceiling rather than a page size.
+ */
+constexpr std::uint32_t curve_heads_limit = 200;
+
 /** @brief What an unanswered tick read says, for the chart's foot and plot. */
 [[nodiscard]] std::string unanswered_text(const std::string& detail) {
     return "The marketdata service did not answer the tick history call "
@@ -102,8 +110,10 @@ market_read_report report_market_read(const read_request& request,
                 count, code);
         }
         return {false, std::format("Market catalogue for '{}' holds {} series "
-                                   "of {} parties; by provider: {}",
-            instance, fact.series.size(), parties.size(), providers)};
+                                   "of {} parties and {} published curves; by "
+                                   "provider: {}",
+            instance, fact.series.size(), parties.size(),
+            fact.published_curves.size(), providers)};
     }
 
     const auto* history = std::get_if<market_history_request>(&request);
@@ -193,6 +203,24 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The market provider read failed: "
                     << providers.error().message;
+            }
+
+            /*
+             * The curves the deployment publishes travel with the catalogue
+             * for the same reason the providers do: the browser is what opens
+             * a curve, and one refresh fills both of its lists. A failed curve
+             * read leaves its list empty and says why; it does not fail the
+             * catalogue.
+             */
+            if (const auto curves = link.published_curves(curve_heads_limit);
+                curves) {
+                answer.published_curves = std::move(*curves);
+            } else {
+                answer.published_curves_error = curves.error().message.empty()
+                    ? curves.error().detail : curves.error().message;
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The published curve read failed: "
+                    << answer.published_curves_error;
             }
         } else {
             answer.message = describe(read.error());

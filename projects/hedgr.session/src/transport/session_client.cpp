@@ -21,7 +21,9 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -773,7 +775,56 @@ session_client::image_by_id(std::string_view image_id) const {
     }
 }
 
-result<std::vector<ores::marketdata::messaging::published_curve_set>>
+namespace {
+
+/**
+ * @brief The deployment's decimal text as a number, when it is one.
+ *
+ * A curve's values arrive as text. Parsing them where the wire format is
+ * decoded keeps the decimal spelling out of every layer above, and a value
+ * that is not a finite number is reported as missing rather than as a zero
+ * the deployment never published.
+ */
+[[nodiscard]] bool parse_curve_value(std::string_view text, double& value) {
+    const auto parsed =
+        std::from_chars(text.data(), text.data() + text.size(), value);
+    if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size())
+        return false;
+    return std::isfinite(value);
+}
+
+[[nodiscard]] std::vector<hedgr::session::transport::curve_instant>
+to_curve_instants(
+    std::vector<ores::marketdata::messaging::published_curve_set> sets) {
+    using hedgr::session::transport::curve_instant;
+    using hedgr::session::transport::curve_point;
+
+    std::vector<curve_instant> curves;
+    curves.reserve(sets.size());
+    for (auto& set : sets) {
+        curve_instant curve;
+        curve.label = std::move(set.curve);
+        curve.series_id = set.series_id;
+        curve.as_of_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            set.as_of.time_since_epoch())
+                             .count();
+        curve.state_code = set.state_code;
+        curve.points.reserve(set.points.size());
+        for (auto& point : set.points) {
+            curve_point parsed;
+            parsed.pillar = std::move(point.pillar);
+            parsed.value_kind = std::move(point.value_kind);
+            parsed.numeric = parse_curve_value(point.value, parsed.value);
+            curve.points.push_back(std::move(parsed));
+        }
+        curves.push_back(std::move(curve));
+    }
+    return curves;
+}
+
+}
+
+result<std::vector<hedgr::model::domain::published_curve>>
 session_client::published_curves(std::uint32_t limit) const {
     if (!is_connected() || !is_authenticated())
         return fail(session_errc::not_authenticated,
@@ -797,7 +848,15 @@ session_client::published_curves(std::uint32_t limit) const {
             return fail(session_errc::read_refused,
                 answer->message.empty() ? "the deployment refused the curves"
                                         : answer->message);
-        return answer->sets;
+        std::vector<hedgr::model::domain::published_curve> heads;
+        heads.reserve(answer->sets.size());
+        for (auto& set : answer->sets) {
+            heads.push_back(hedgr::model::domain::published_curve{
+                .label = std::move(set.curve),
+                .series_id = std::move(set.series_id),
+                .points = set.point_count});
+        }
+        return heads;
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {
@@ -805,7 +864,7 @@ session_client::published_curves(std::uint32_t limit) const {
     }
 }
 
-result<std::vector<ores::marketdata::messaging::published_curve_set>>
+result<std::vector<hedgr::session::transport::curve_instant>>
 session_client::published_curve_sets(std::string_view series_id,
     std::uint32_t limit) const {
     if (!is_connected() || !is_authenticated())
@@ -830,7 +889,7 @@ session_client::published_curve_sets(std::string_view series_id,
             return fail(session_errc::read_refused,
                 answer->message.empty() ? "the deployment refused the curve"
                                         : answer->message);
-        return answer->sets;
+        return to_curve_instants(std::move(answer->sets));
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {

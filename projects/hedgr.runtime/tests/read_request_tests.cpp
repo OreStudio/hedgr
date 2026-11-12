@@ -82,10 +82,10 @@ TEST_CASE("a CRM rates request carries the scope it was asked for", "[read]") {
 
 TEST_CASE("a curve request names the curve it will answer with", "[read]") {
     const worker::read_request request =
-        worker::term_request{.key = "curve-1", .label = "USD swaps"};
+        worker::curve_request{.key = "curve-1", .label = "USD swaps"};
 
     const auto fact = worker::read_event(request, key(), "t-1");
-    CHECK(fact.kind == model::event::event_kind::term_structure);
+    CHECK(fact.kind == model::event::event_kind::curve_sets);
     CHECK(fact.curve_key == "curve-1");
     CHECK(fact.curve_label == "USD swaps");
 }
@@ -157,12 +157,12 @@ TEST_CASE("a CRM rates read fills the event's cells", "[read]") {
     CHECK(fact.message.empty());
 }
 
-TEST_CASE("a curve read fills the event's curves", "[read][term]") {
+TEST_CASE("a curve read fills the event's curve", "[read][term]") {
     fake_link link;
     link.tails["s-1"] = {
         session::market_point{.at_ns = 100, .value = 1.5}};
 
-    const worker::read_request request = worker::term_request{
+    const worker::read_request request = worker::curve_request{
         .key = "curve-1",
         .label = "USD swaps",
         .member_ids = {"s-1"},
@@ -170,11 +170,10 @@ TEST_CASE("a curve read fills the event's curves", "[read][term]") {
     auto fact = worker::read_event(request, key(), "t-1");
     worker::run_read(link, request, fact);
 
-    REQUIRE(fact.term_curves.size() == 1);
     CHECK(fact.curve_key == "curve-1");
-    REQUIRE(fact.term_curves[0].nodes.size() == 1);
-    CHECK(fact.term_curves[0].nodes[0].tenor == "1Y");
-    CHECK(fact.term_curves[0].nodes[0].value == 1.5);
+    CHECK(fact.curve_pillars == std::vector<std::string>{"1Y"});
+    CHECK(fact.curve_as_of_ns == std::vector<std::int64_t>{100});
+    CHECK(fact.curve_values == std::vector<double>{1.5});
 }
 
 TEST_CASE("a deployment request names its event", "[read]") {

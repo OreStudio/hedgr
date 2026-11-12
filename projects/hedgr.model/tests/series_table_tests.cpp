@@ -440,6 +440,36 @@ TEST_CASE("a catalogue refreshes held rows and keeps their rings",
     CHECK(table.size() == 2);
 }
 
+TEST_CASE("the published curves travel with the catalogue",
+    "[series][catalogue][curve]") {
+    series_table table;
+    table.apply_catalogue(instance_id, account_id, {row("s-1", "uri-1")});
+    const auto* catalogue = table.catalogue(instance_id, account_id);
+    REQUIRE(catalogue != nullptr);
+    CHECK(catalogue->published_curves.empty());
+    CHECK(catalogue->published_error.empty());
+    const auto generation = catalogue->generation;
+
+    table.apply_published_curves(instance_id, account_id,
+        {{.label = "EUR-ESTR", .series_id = "s-curve", .points = 7},
+            {.label = "GBP-SONIA", .series_id = "s-2", .points = 6}});
+    catalogue = table.catalogue(instance_id, account_id);
+    REQUIRE(catalogue != nullptr);
+    CHECK(catalogue->published_curves.size() == 2);
+    CHECK(catalogue->published_curves[0].label == "EUR-ESTR");
+    CHECK(catalogue->published_curves[0].points == 7);
+    CHECK(catalogue->generation > generation);
+    /* The series rows are the catalogue's own and are left alone. */
+    CHECK(catalogue->series.size() == 1);
+
+    table.apply_published_curves(instance_id, account_id, {},
+        "the deployment refused the curves");
+    catalogue = table.catalogue(instance_id, account_id);
+    REQUIRE(catalogue != nullptr);
+    CHECK(catalogue->published_curves.empty());
+    CHECK(catalogue->published_error == "the deployment refused the curves");
+}
+
 TEST_CASE("a new row takes its description from the catalogue",
     "[series][catalogue]") {
     series_table table;

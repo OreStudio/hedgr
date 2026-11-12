@@ -239,25 +239,22 @@ struct market_provider_row final {
     return row.kind == "reference";
 }
 
-/** @brief One node of a term structure: a tenor and the rate at it. */
-struct term_node final {
-    /** @brief The tenor or term label, as the series URI spells it. */
-    std::string tenor;
+/**
+ * @brief One curve the deployment publishes, as a chooser lists it.
+ *
+ * A curve is an object the deployment calibrates and publishes rather than a
+ * set of series a client assembles, so it is named and opened on its own. The
+ * series it is published under is what a window reads.
+ */
+struct published_curve final {
+    /** @brief The curve's name, as the deployment spells it ("EUR-ESTR"). */
+    std::string label;
 
-    /** @brief The rate at that tenor. */
-    double value = 0.0;
+    /** @brief The series the curve is published under. */
+    std::string series_id;
 
-    /** @brief The observation time of the value. */
-    std::int64_t at_ns = 0;
-};
-
-/** @brief One observation of a term structure at one instant. */
-struct term_curve final {
-    /** @brief The instant the curve was observed. */
-    std::int64_t at_ns = 0;
-
-    /** @brief One value per tenor. */
-    std::vector<term_node> nodes;
+    /** @brief How many pillars the curve holds. */
+    std::uint32_t points = 0;
 };
 
 /** @brief The three resolutions a live series keeps. */

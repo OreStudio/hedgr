@@ -67,8 +67,14 @@ struct curve_axis final {
     /** @brief The pillar names, in drawing order. */
     std::vector<std::string> pillars;
 
-    /** @brief One row per instant, oldest first, after the last apply. */
-    std::vector<std::int64_t> as_of_ns;
+    /**
+     * @brief The x position of each pillar, from zero, in drawing order.
+     *
+     * A pillar is a category rather than a number, so the plot's x axis is the
+     * pillar's index and its label is the pillar's name. The positions are
+     * made once with the axis because a plot reads them every frame.
+     */
+    std::vector<double> positions;
 };
 
 struct curve_row final {
@@ -180,9 +186,9 @@ private:
     [[nodiscard]] std::size_t intern_axis(
         const std::vector<std::string>& pillars);
 
-public:
+    /** @brief The slots that hash to one key, compared in full on a lookup. */
+    using key_bucket = std::vector<std::uint32_t>;
 
-private:
     struct slot final {
         std::string instance_id;
         std::string account_id;
@@ -194,7 +200,15 @@ private:
     std::vector<std::uint32_t> generation_;
     std::vector<curve_axis> axes_;
     std::unordered_map<std::string, std::size_t> by_pillars_;
-    std::unordered_map<std::string, std::uint32_t> by_key_;
+
+    /**
+     * @brief Slots by the hash of their three names.
+     *
+     * A lookup happens once per curve per frame, so it must not build a key
+     * string on the heap: the names are hashed as views and the few slots that
+     * share a hash are compared in full.
+     */
+    std::unordered_map<std::size_t, key_bucket> by_key_;
     std::uint64_t version_ = 0;
 };
 

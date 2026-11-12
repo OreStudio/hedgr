@@ -787,13 +787,14 @@ TEST_CASE("a term structure window shows the mark for each of its states",
     CHECK(drew(reading, shape) == view_state::reading);
     no_sentences(reading);
 
-    desk.term_structures.fail("i", "a", "c", "the curve was refused");
+    const auto curve_row = desk.curves.intern("i", "a", "c");
+    desk.curves.fail(curve_row, "the curve was refused");
     const auto failed = window_frame(desk, handle, state);
     CHECK(drew(failed, shape) == view_state::error);
     CHECK(failed.says("ERROR"));
     no_sentences(failed);
 
-    desk.term_structures.set("i", "a", "c", "IR USD", {});
+    desk.curves.apply(curve_row, "IR USD", {}, {}, {});
     const auto empty = window_frame(desk, handle, state);
     CHECK(drew(empty, shape) == view_state::no_data);
     CHECK(empty.says("NO DATA"));

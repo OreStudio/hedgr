@@ -19,11 +19,39 @@
  */
 #include "hedgr.ui/render/series_browser_view.hpp"
 
-#include "hedgr.ui/render/term_ladder.hpp"
 #include <algorithm>
 #include <cctype>
 
 namespace hedgr::ui::render {
+
+int tenor_rank(std::string_view tenor) {
+    if (tenor.empty())
+        return 0;
+    int amount = 0;
+    std::size_t i = 0;
+    while (i < tenor.size()
+        && std::isdigit(static_cast<unsigned char>(tenor[i]))) {
+        amount = amount * 10 + (tenor[i] - '0');
+        ++i;
+    }
+    if (amount == 0)
+        amount = 1;
+    if (i >= tenor.size())
+        return amount;
+    switch (static_cast<char>(std::toupper(
+        static_cast<unsigned char>(tenor[i])))) {
+    case 'D':
+        return amount;
+    case 'W':
+        return amount * 7;
+    case 'M':
+        return amount * 30;
+    case 'Y':
+        return amount * 365;
+    default:
+        return amount;
+    }
+}
 
 namespace {
 

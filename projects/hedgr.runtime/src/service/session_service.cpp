@@ -591,7 +591,6 @@ std::optional<session_effect> session_service::apply(
     case model::event::event_kind::series_history:
     case model::event::event_kind::currency_image_map:
     case model::event::event_kind::image_loaded:
-    case model::event::event_kind::term_structure:
     case model::event::event_kind::crm_rates:
     case model::event::event_kind::curve_sets:
     case model::event::event_kind::crm_names:

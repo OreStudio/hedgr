@@ -23,8 +23,9 @@
 #include "hedgr.model/event/event.hpp"
 #include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.runtime/export.hpp"
-#include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
-#include <cstddef>
+#include "hedgr.session/transport/session_client.hpp"
+#include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -45,17 +46,21 @@ struct curve_reading final {
 };
 
 /**
- * @brief Reads one published curve set into the model's shape.
+ * @brief Reads a curve's instants into the model's shape.
  *
- * Pillars arrive as text ("10Y", "3M") and values as decimal text, so both are
- * parsed here, at the boundary, and never again: the model orders the pillars
- * once and stores the values as numbers. A pillar whose value will not parse is
- * left out rather than stored as a zero, because a zero on a curve is a rate of
- * zero, which is a lie a chart draws.
+ * The deployment publishes one set per instant, and a set names only the
+ * pillars it carried, so the instants are put in time order and the pillars
+ * are the union of every set's. A set that omits a pillar carries the latest
+ * earlier value forward: a curve is the object as it stood, and a pillar that
+ * was not republished did not stop existing. A pillar with no value at or
+ * before an instant is stored as not-a-number, which a plot draws as a gap
+ * rather than as a rate of zero.
+ *
+ * A pillar whose value the deployment could not spell as a number is left out,
+ * because a zero on a curve is a rate of zero and that is a lie a chart draws.
  */
-[[nodiscard]] HEDGR_RUNTIME_EXPORT curve_reading
-read_published_curve(
-    const ores::marketdata::messaging::published_curve_set& set);
+[[nodiscard]] HEDGR_RUNTIME_EXPORT curve_reading read_published_curves(
+    std::span<const hedgr::session::transport::curve_instant> sets);
 
 /**
  * @brief Turns a curve event into the model's row.
@@ -71,15 +76,6 @@ read_published_curve(
 HEDGR_RUNTIME_EXPORT bool apply_curve_event(
     model::state::curve_table& curves, model::state::curve_handle handle,
     const hedgr::model::event::event& event);
-
-/**
- * @brief Stores a curve set on the row a window holds.
- *
- * @return whether the set had a usable point.
- */
-HEDGR_RUNTIME_EXPORT bool apply_published_curve(
-    model::state::curve_table& curves, model::state::curve_handle handle,
-    const ores::marketdata::messaging::published_curve_set& set);
 
 }
 

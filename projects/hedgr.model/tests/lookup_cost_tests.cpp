@@ -19,10 +19,10 @@
  */
 #include "allocation_counter.hpp"
 #include "hedgr.model/state/crm_table.hpp"
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
-#include "hedgr.model/state/term_structure_table.hpp"
 #include <catch2/catch_all.hpp>
 #include <cstddef>
 #include <string>
@@ -93,13 +93,14 @@ TEST_CASE("looking up a held CRM batch allocates nothing", "[cost][crm]") {
 }
 
 TEST_CASE("looking up a held curve allocates nothing", "[cost][rates]") {
-    hedgr::model::state::term_structure_table curves;
-    curves.set(instance, account, curve, "IR GBP", {});
+    hedgr::model::state::curve_table curves;
+    const auto handle = curves.intern(instance, account, curve);
+    curves.apply(handle, "IR GBP", {"1Y", "2Y"}, {1}, {0.01, 0.02});
 
     const auto before = allocations();
     std::size_t found = 0;
     for (int i = 0; i < lookups; ++i)
-        found += curves.get(instance, account, curve) != nullptr;
+        found += curves.find(instance, account, curve).has_value();
     CHECK(allocations() - before == 0);
     CHECK(found == static_cast<std::size_t>(lookups));
 }

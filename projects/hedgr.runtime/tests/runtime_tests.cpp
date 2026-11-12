@@ -95,6 +95,7 @@ using hedgr::model::event::event;
 using hedgr::model::event::event_kind;
 using hedgr::model::state::catalogue_state;
 using hedgr::model::state::condition_source;
+using hedgr::model::state::curve_row;
 using hedgr::model::state::series_bucket;
 using hedgr::model::state::series_handle;
 using hedgr::model::state::window_handle;
@@ -117,6 +118,15 @@ using hedgr::session::transport::session_options;
 [[nodiscard]] std::string unique_token() {
     std::random_device source;
     return std::format("{:08x}{:08x}", source(), source());
+}
+
+/** @brief The curve a session holds under @p series_id, or nullptr. */
+[[nodiscard]] const curve_row* held_curve(const instance_manager& manager,
+    std::string_view instance_id, std::string_view account_id,
+    std::string_view series_id) {
+    const auto handle = manager.curves().find(instance_id, account_id,
+        series_id);
+    return handle ? manager.curves().get(*handle) : nullptr;
 }
 
 /**
@@ -2163,7 +2173,7 @@ TEST_CASE("a restored window reopened by command is rebound and reads at once",
     const auto terms =
         *manager.windows().find("terms:inst-refused:ident-1:curve-1");
     REQUIRE(manager.windows().next_refresh_ns(terms) == 0);
-    REQUIRE(manager.term_structures().get("inst-refused", "ident-1", "curve-1")
+    REQUIRE(held_curve(manager, "inst-refused", "ident-1", "curve-1")
         == nullptr);
 
     push_command(manager, open_window(window_kind::term_structure,
@@ -2179,13 +2189,14 @@ TEST_CASE("a restored window reopened by command is rebound and reads at once",
     CHECK(manager.windows().session_of(terms) == session);
     CHECK(manager.windows().next_refresh_ns(terms) == parked_deadline);
     const auto* curve =
-        manager.term_structures().get("inst-refused", "ident-1", "curve-1");
+        held_curve(manager, "inst-refused", "ident-1", "curve-1");
     REQUIRE(curve != nullptr);
     const auto settled = wait_until([&] {
         manager.pump();
         const auto* held =
-            manager.term_structures().get("inst-refused", "ident-1", "curve-1");
-        return held != nullptr && !held->reading && !held->error.empty();
+            held_curve(manager, "inst-refused", "ident-1", "curve-1");
+        return held != nullptr
+            && held->state == hedgr::model::state::curve_state::failed;
     }, std::chrono::seconds(10));
     REQUIRE(settled);
 
@@ -2475,8 +2486,8 @@ struct read_starter final {
         {"term structure window", false, true,
             open(window_kind::term_structure, "curve-1"),
             [](const instance_manager& m) {
-                return m.term_structures().get(read_instance, read_account,
-                    "curve-1") != nullptr;
+                return held_curve(m, read_instance, read_account, "curve-1")
+                    != nullptr;
             }},
         {"crm matrix window", false, true, open(window_kind::crm_matrix),
             [](const instance_manager& m) {
@@ -2486,8 +2497,8 @@ struct read_starter final {
         {"load_term_structure command", false, true,
             load(command_kind::load_term_structure),
             [](const instance_manager& m) {
-                return m.term_structures().get(read_instance, read_account,
-                    "curve-1") != nullptr;
+                return held_curve(m, read_instance, read_account, "curve-1")
+                    != nullptr;
             }},
         {"load_crm_names command", false, false,
             load(command_kind::load_crm_names),
@@ -2808,7 +2819,7 @@ TEST_CASE("a term structure whose member lists differ is never read",
         read_account, "curve-1");
     window.member_tenors = {"1Y"};
     push_command(manager, window);
-    CHECK(manager.term_structures().get(read_instance, read_account, "curve-1")
+    CHECK(held_curve(manager, read_instance, read_account, "curve-1")
         == nullptr);
 
     command load;
@@ -2820,12 +2831,12 @@ TEST_CASE("a term structure whose member lists differ is never read",
     load.member_ids = {"m-1y", "m-2y"};
     load.member_tenors = {"1Y"};
     push_command(manager, load);
-    CHECK(manager.term_structures().get(read_instance, read_account, "curve-2")
+    CHECK(held_curve(manager, read_instance, read_account, "curve-2")
         == nullptr);
 
     load.member_tenors = {"1Y", "2Y"};
     push_command(manager, load);
-    CHECK(manager.term_structures().get(read_instance, read_account, "curve-2")
+    CHECK(held_curve(manager, read_instance, read_account, "curve-2")
         != nullptr);
     manager.stop();
 }

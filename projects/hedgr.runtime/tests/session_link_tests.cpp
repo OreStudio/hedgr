@@ -21,8 +21,8 @@
 #include "hedgr.runtime/worker/crm_names_worker.hpp"
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
+#include "hedgr.runtime/worker/curve_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
-#include "hedgr.runtime/worker/term_structure_worker.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -113,17 +113,18 @@ TEST_CASE("a curve is built from each member's tail", "[link][term]") {
     link.tails["s-2"] = {
         session::market_point{.at_ns = 100, .value = 2.0},
         session::market_point{.at_ns = 200, .value = 2.1}};
-    const std::vector<std::string> ids{"s-1", "s-2"};
-    const std::vector<std::string> tenors{"1Y", "2Y"};
 
     model::event::event fact;
-    worker::run_term_structure_read(link, ids, tenors, fact);
-    REQUIRE(fact.term_curves.size() == 2);
-    CHECK(fact.term_curves[0].at_ns == 100);
-    REQUIRE(fact.term_curves[0].nodes.size() == 2);
-    CHECK(fact.term_curves[0].nodes[0].tenor == "1Y");
-    CHECK(fact.term_curves[0].nodes[0].value == 1.0);
-    CHECK(fact.term_curves[1].nodes[1].value == 2.1);
+    worker::run_curve_read(link,
+        worker::curve_request{.key = "c",
+            .label = "IR GBP",
+            .member_ids = {"s-1", "s-2"},
+            .member_tenors = {"1Y", "2Y"}},
+        fact);
+    CHECK(fact.curve_label == "IR GBP");
+    CHECK(fact.curve_pillars == std::vector<std::string>{"1Y", "2Y"});
+    CHECK(fact.curve_as_of_ns == std::vector<std::int64_t>{100, 200});
+    CHECK(fact.curve_values == std::vector<double>{1.0, 2.0, 1.1, 2.1});
     CHECK(fact.message.empty());
     CHECK(link.tail_calls == 2);
 }
@@ -132,13 +133,54 @@ TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
     fake_link link;
     link.tail_error = session::session_error{
         .code = session::session_errc::timeout, .message = "no answer"};
-    const std::vector<std::string> ids{"s-1"};
-    const std::vector<std::string> tenors{"1Y"};
 
     model::event::event fact;
-    worker::run_term_structure_read(link, ids, tenors, fact);
-    CHECK(fact.term_curves.empty());
+    worker::run_curve_read(link,
+        worker::curve_request{.key = "c",
+            .label = "IR GBP",
+            .member_ids = {"s-1"},
+            .member_tenors = {"1Y"}},
+        fact);
+    CHECK(fact.curve_pillars.empty());
     CHECK(fact.message == "no answer");
+}
+
+TEST_CASE("a published curve is read in one call, not one per tenor",
+    "[link][term]") {
+    fake_link link;
+    link.curve_sets.push_back(session::curve_instant{
+        .label = "EUR-ESTR",
+        .series_id = "s-curve",
+        .as_of_ns = 100,
+        .state_code = "published",
+        .points = {session::curve_point{.pillar = "2Y",
+                       .value = 0.02, .numeric = true},
+            session::curve_point{.pillar = "1Y",
+                .value = 0.01, .numeric = true}}});
+
+    model::event::event fact;
+    worker::run_curve_read(link,
+        worker::curve_request{.key = "s-curve", .label = "EUR-ESTR",
+            .published = true},
+        fact);
+    CHECK(fact.curve_pillars == std::vector<std::string>{"2Y", "1Y"});
+    CHECK(fact.curve_as_of_ns == std::vector<std::int64_t>{100});
+    CHECK(fact.curve_values == std::vector<double>{0.02, 0.01});
+    CHECK(fact.message.empty());
+    CHECK(link.tail_calls == 0);
+}
+
+TEST_CASE("a published curve the deployment states empty is a failure",
+    "[link][term]") {
+    fake_link link;
+    link.curve_sets.push_back(session::curve_instant{
+        .label = "EUR-ESTR", .series_id = "s-curve", .as_of_ns = 100});
+
+    model::event::event fact;
+    worker::run_curve_read(link,
+        worker::curve_request{.key = "s-curve", .published = true}, fact);
+    CHECK(fact.curve_pillars.empty());
+    CHECK_FALSE(fact.message.empty());
 }
 
 namespace {
@@ -174,6 +216,37 @@ TEST_CASE("a catalogue read carries its series and providers", "[link][market]")
     REQUIRE(fact.providers.size() == 1);
     CHECK(fact.providers[0].kind == "data_vendor");
     CHECK(fact.message.empty());
+}
+
+TEST_CASE("a catalogue read carries the curves the deployment publishes",
+    "[link][market][curve]") {
+    fake_link link;
+    link.curve_heads.push_back(model::domain::published_curve{
+        .label = "EUR-ESTR", .series_id = "s-curve", .points = 7});
+
+    const auto fact = market_read(link, catalogue_request());
+    REQUIRE(fact.published_curves.size() == 1);
+    CHECK(fact.published_curves[0].label == "EUR-ESTR");
+    CHECK(fact.published_curves[0].series_id == "s-curve");
+    CHECK(fact.published_curves[0].points == 7);
+    CHECK(fact.published_curves_error.empty());
+    CHECK(fact.message.empty());
+}
+
+TEST_CASE("a failed curve read leaves the catalogue standing",
+    "[link][market][curve]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-1", .label = "FX EUR/USD"});
+    link.curves_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "curves refused"};
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.message.empty());
+    REQUIRE(fact.series.size() == 1);
+    CHECK(fact.published_curves.empty());
+    CHECK(fact.published_curves_error == "curves refused");
 }
 
 TEST_CASE("a points read carries its points", "[link][market]") {

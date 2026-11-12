@@ -30,7 +30,7 @@
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
 #include "hedgr.model/state/crm_table.hpp"
-#include "hedgr.model/state/term_structure_table.hpp"
+#include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.runtime/async/executor.hpp"
@@ -211,9 +211,8 @@ public:
     }
 
     /** @brief The latest curve each browser session read. */
-    [[nodiscard]] const model::state::term_structure_table&
-    term_structures() const noexcept {
-        return read_service_.term_structures();
+    [[nodiscard]] const model::state::curve_table& curves() const noexcept {
+        return read_service_.curves();
     }
 
     /** @brief The bounded cache of tenant images by identifier. */
