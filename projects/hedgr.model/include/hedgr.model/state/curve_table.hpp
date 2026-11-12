@@ -23,6 +23,7 @@
 #include "hedgr.model/export.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -62,6 +63,11 @@ inline constexpr std::size_t curve_history_limit = 32;
  * their tenor order are stored once and addressed by index. A curve's values
  * are already in that order, which is what lets a plot draw N curves without
  * sorting or copying anything per frame.
+ *
+ * The table holds its axes behind a pointer and never copies one, because
+ * @c labels points into @c pillars: a plot hands the labels to the plot library
+ * and reads them every frame, so an axis that moved would leave it reading a
+ * freed string - a curve drawn against garbage.
  */
 struct curve_axis final {
     /** @brief The pillar names, in drawing order. */
@@ -75,6 +81,9 @@ struct curve_axis final {
      * made once with the axis because a plot reads them every frame.
      */
     std::vector<double> positions;
+
+    /** @brief @c pillars as C strings, index for index, for the plot's axis. */
+    std::vector<const char*> labels;
 };
 
 struct curve_row final {
@@ -175,7 +184,7 @@ public:
 
     /** @brief The shared pillar axis a curve is quoted on, by index. */
     [[nodiscard]] const curve_axis& axis(std::size_t index) const noexcept {
-        return axes_[index];
+        return *axes_[index];
     }
 
     /** @brief How many distinct pillar axes the held curves use. */
@@ -198,7 +207,7 @@ private:
     std::vector<slot> rows_;
     std::vector<std::uint32_t> alive_;
     std::vector<std::uint32_t> generation_;
-    std::vector<curve_axis> axes_;
+    std::vector<std::unique_ptr<curve_axis>> axes_;
     std::unordered_map<std::string, std::size_t> by_pillars_;
 
     /**

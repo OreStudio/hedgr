@@ -61,13 +61,28 @@ TEST_CASE("a curve holds its instants as rows over one pillar order",
 }
 
 TEST_CASE("pillars are ordered by tenor, and a stranger sorts last", "[curves]") {
-    const std::vector<std::string> pillars{"10Y", "1M", "ON", "2Y", "1Y"};
+    /*
+     * The front of a curve is quoted by convention: ON is today to tomorrow,
+     * TN the day after and SN the day after that. They are shorter than a
+     * week, so a curve that sorted them as "not a tenor" would put the
+     * overnight rate at the long end and dive at its last point.
+     */
+    const std::vector<std::string> pillars{"10Y", "1M", "ON", "2Y", "1Y", "1W",
+        "SPREAD"};
     const auto order = curve_table::pillar_order(pillars);
-    CHECK(pillars[order[0]] == "1M");
-    CHECK(pillars[order[1]] == "1Y");
-    CHECK(pillars[order[2]] == "2Y");
-    CHECK(pillars[order[3]] == "10Y");
-    CHECK(pillars[order[4]] == "ON");
+    CHECK(pillars[order[0]] == "ON");
+    CHECK(pillars[order[1]] == "1W");
+    CHECK(pillars[order[2]] == "1M");
+    CHECK(pillars[order[3]] == "1Y");
+    CHECK(pillars[order[4]] == "2Y");
+    CHECK(pillars[order[5]] == "10Y");
+    CHECK(pillars[order[6]] == "SPREAD");
+
+    const std::vector<std::string> overnights{"SN", "TN", "ON"};
+    const auto front = curve_table::pillar_order(overnights);
+    CHECK(overnights[front[0]] == "ON");
+    CHECK(overnights[front[1]] == "TN");
+    CHECK(overnights[front[2]] == "SN");
 }
 
 TEST_CASE("curves on the same pillars share one axis, and one order",

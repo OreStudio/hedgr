@@ -19,9 +19,11 @@
  */
 #include "hedgr.runtime/worker/curve_worker.hpp"
 #include "hedgr.model/state/curve_table.hpp"
+#include "ores.logging/make_logger.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <set>
 #include <span>
@@ -30,6 +32,13 @@
 namespace hedgr::runtime::worker {
 
 namespace {
+
+/** @brief This worker's logger: what a curve read found, and where it failed. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.runtime.worker.curve_worker");
+    return instance;
+}
 
 /**
  * @brief How many instants one curve read asks the deployment for.
@@ -109,15 +118,25 @@ void run_curve_read(hedgr::session::transport::session_link& link,
         if (!sets) {
             answer.message = sets.error().message.empty()
                 ? sets.error().detail : sets.error().message;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The published curve '" << request.key << "' failed: "
+                << answer.message;
             return;
         }
         auto reading = service::read_published_curves(*sets);
         if (reading.pillars.empty()) {
             answer.message = "the deployment published no pillar for this curve";
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The published curve '" << request.key
+                << "' answered " << sets->size() << " sets and no pillar";
             return;
         }
         if (!request.label.empty())
             reading.label = request.label;
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Published curve '" << request.key << "' (" << reading.label
+            << "): " << reading.pillars.size() << " pillars, "
+            << reading.as_of_ns.size() << " instants";
         answer.curve_label = std::move(reading.label);
         answer.curve_pillars = std::move(reading.pillars);
         answer.curve_as_of_ns = std::move(reading.as_of_ns);
@@ -164,10 +183,17 @@ void run_curve_read(hedgr::session::transport::session_link& link,
     auto reading = build_curve(by_term, max_history);
     if (reading.pillars.empty()) {
         answer.message = "the curve's tenors hold no observations";
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The curve '" << request.key << "' has " << count
+            << " members and no observation";
         return;
     }
     if (!request.label.empty())
         reading.label = request.label;
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Curve '" << request.key << "' from " << count << " members ("
+        << reading.label << "): " << reading.pillars.size() << " pillars, "
+        << reading.as_of_ns.size() << " instants";
     answer.curve_label = std::move(reading.label);
     answer.curve_pillars = std::move(reading.pillars);
     answer.curve_as_of_ns = std::move(reading.as_of_ns);
