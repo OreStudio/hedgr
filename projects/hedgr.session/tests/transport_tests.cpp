@@ -661,3 +661,102 @@ TEST_CASE("live curves: what a deployment publishes for a party",
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief What a deployment publishes as FX volatility surfaces, printed as it is.
+ *
+ * A surface is calibrated from a blueprint and published as a grid: expiries on
+ * one axis, strikes on the other, one volatility per cell. Nothing on the desk
+ * draws it yet, so this asks what the deployment holds and prints the shape it
+ * answers with - the blueprint, its recipe's grid, and the published grid's
+ * axes and values - before a window is built on it.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.session.tests "[.live-surfaces]"
+ */
+TEST_CASE("live surfaces: what a deployment publishes as a vol surface",
+    "[.live-surfaces]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("party=%s\n", signed_in->party_id.c_str());
+
+    const auto blueprints = session.fx_vol_surface_blueprints(50);
+    if (!blueprints) {
+        std::printf("surface blueprints failed: %s (%s)\n",
+            blueprints.error().message.c_str(),
+            blueprints.error().detail.c_str());
+        std::fflush(stdout);
+        session.disconnect();
+        return;
+    }
+    std::printf("surface blueprints: %zu\n", blueprints->size());
+    for (const auto& blueprint : *blueprints) {
+        std::printf("  '%s' id=%s pair=%s/%s model='%s'\n",
+            blueprint.name.c_str(), blueprint.id.c_str(),
+            blueprint.base_currency.c_str(),
+            blueprint.quote_currency.c_str(), blueprint.smile_model.c_str());
+        std::printf("    grid expiries='%s' strikes='%s'\n",
+            blueprint.expiries.c_str(), blueprint.strikes.c_str());
+    }
+    if (blueprints->empty()) {
+        std::fflush(stdout);
+        session.disconnect();
+        return;
+    }
+
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    const auto& first = blueprints->front();
+    const auto surface = session.published_fx_vol_surface(first.id, now_ns);
+    if (!surface) {
+        std::printf("published surface of '%s' failed: %s (%s)\n",
+            first.name.c_str(), surface.error().message.c_str(),
+            surface.error().detail.c_str());
+        std::fflush(stdout);
+        session.disconnect();
+        return;
+    }
+    std::printf("surface of '%s' as_of=%lld publish=%s: %zu expiries x %zu "
+                "strikes = %zu values\n",
+        surface->name.c_str(), static_cast<long long>(surface->as_of_ns),
+        surface->publish_id.c_str(), surface->expiries.size(),
+        surface->strikes.size(), surface->values.size());
+    for (const auto& expiry : surface->expiries)
+        std::printf("  expiry='%s'\n", expiry.c_str());
+    for (const auto& strike : surface->strikes)
+        std::printf("  strike='%s'\n", strike.c_str());
+    const auto strikes = surface->strikes.size();
+    for (std::size_t row = 0; row < surface->expiries.size(); ++row) {
+        std::printf("  %s:", surface->expiries[row].c_str());
+        for (std::size_t column = 0;
+            column < strikes && row * strikes + column < surface->values.size();
+            ++column)
+            std::printf(" %.6f", surface->values[row * strikes + column]);
+        std::printf("\n");
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}

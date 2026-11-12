@@ -54,6 +54,8 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<hedgr::model::domain::market_provider_row> providers;
     std::vector<hedgr::model::domain::published_curve> curve_heads;
     std::vector<session::transport::curve_instant> curve_sets;
+    std::vector<session::transport::surface_blueprint> blueprints;
+    session::transport::surface_grid surface;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -65,6 +67,8 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> providers_error;
     std::optional<session::transport::session_error> curves_error;
     std::optional<session::transport::session_error> curve_sets_error;
+    std::optional<session::transport::session_error> blueprints_error;
+    std::optional<session::transport::session_error> surface_error;
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
     std::optional<session::transport::session_error> tail_error;
@@ -318,6 +322,22 @@ struct fake_session_link final : session::transport::session_link {
         if (curve_sets_error)
             return std::unexpected(*curve_sets_error);
         return curve_sets;
+    }
+
+    [[nodiscard]] session::transport::result<
+        std::vector<session::transport::surface_blueprint>>
+    fx_vol_surface_blueprints(std::uint32_t) const override {
+        if (blueprints_error)
+            return std::unexpected(*blueprints_error);
+        return blueprints;
+    }
+
+    [[nodiscard]] session::transport::result<session::transport::surface_grid>
+    published_fx_vol_surface(std::string_view,
+        std::int64_t) const override {
+        if (surface_error)
+            return std::unexpected(*surface_error);
+        return surface;
     }
 };
 

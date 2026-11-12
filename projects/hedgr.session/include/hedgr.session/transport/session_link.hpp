@@ -185,6 +185,14 @@ public:
     [[nodiscard]] virtual result<std::vector<curve_instant>>
     published_curve_sets(std::string_view series_id,
         std::uint32_t limit) const = 0;
+
+    /** @brief The FX volatility surface blueprints this session may read. */
+    [[nodiscard]] virtual result<std::vector<surface_blueprint>>
+    fx_vol_surface_blueprints(std::uint32_t limit) const = 0;
+
+    /** @brief One blueprint's newest surface published at or before an instant. */
+    [[nodiscard]] virtual result<surface_grid> published_fx_vol_surface(
+        std::string_view blueprint_id, std::int64_t as_of_ns) const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -324,6 +332,17 @@ public:
         std::string_view series_id,
         std::uint32_t limit) const override {
         return client_.published_curve_sets(series_id, limit);
+    }
+
+    [[nodiscard]] result<std::vector<surface_blueprint>>
+    fx_vol_surface_blueprints(std::uint32_t limit) const override {
+        return client_.fx_vol_surface_blueprints(limit);
+    }
+
+    [[nodiscard]] result<surface_grid> published_fx_vol_surface(
+        std::string_view blueprint_id,
+        std::int64_t as_of_ns) const override {
+        return client_.published_fx_vol_surface(blueprint_id, as_of_ns);
     }
 
 private:

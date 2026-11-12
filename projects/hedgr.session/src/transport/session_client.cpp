@@ -38,11 +38,13 @@
 #include "ores.iam.api/messaging/tenant_protocol.hpp"
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
+#include "ores.marketdata.api/messaging/fx_vol_surface_operation_protocol.hpp"
 #include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/provider_protocol.hpp"
 #include "ores.refdata.api/messaging/crm_topology_config_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_pair_convention_protocol.hpp"
+#include "ores.refdata.api/messaging/fx_vol_surface_blueprint_protocol.hpp"
 #include "ores.assets.api/messaging/image_protocol.hpp"
 #include "ores.refdata.api/messaging/currency_protocol.hpp"
 #include "ores.nats/domain/wire_codec.hpp"
@@ -897,6 +899,102 @@ session_client::published_curve_sets(std::string_view series_id,
     }
 }
 
+result<std::vector<surface_blueprint>>
+session_client::fx_vol_surface_blueprints(std::uint32_t limit) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a surface read needs a signed-in session");
+
+    using ores::refdata::messaging::list_fx_vol_surface_blueprints_request;
+    using ores::refdata::messaging::list_fx_vol_surface_blueprints_response;
+    try {
+        std::vector<surface_blueprint> blueprints;
+        std::uint32_t offset = 0;
+        for (;;) {
+            list_fx_vol_surface_blueprints_request request;
+            request.offset = offset;
+            request.limit = limit;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_fx_vol_surface_blueprints_response>(client(),
+                    list_fx_vol_surface_blueprints_request::nats_subject,
+                    request, options_.request_timeout);
+            if (!answer)
+                return fail(session_errc::protocol_error,
+                    "the surface blueprint answer could not be decoded");
+            if (answer->result.outcome != ores::utility::domain::outcome::ok)
+                return fail(session_errc::read_refused,
+                    answer->result.message.empty()
+                        ? std::string("the deployment refused the surfaces")
+                        : answer->result.message);
+            for (const auto& blueprint : answer->blueprints) {
+                blueprints.push_back(surface_blueprint{
+                    .id = boost::uuids::to_string(blueprint.id),
+                    .name = blueprint.name,
+                    .base_currency = blueprint.base_currency_code,
+                    .quote_currency = blueprint.quote_currency_code,
+                    .smile_model = blueprint.smile_model,
+                    .expiries = blueprint.output_expiries,
+                    .strikes = blueprint.output_strikes});
+            }
+            offset += static_cast<std::uint32_t>(answer->blueprints.size());
+            if (answer->blueprints.empty() || blueprints.size() >= answer->total)
+                break;
+        }
+        return blueprints;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<surface_grid> session_client::published_fx_vol_surface(
+    std::string_view blueprint_id, std::int64_t as_of_ns) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "a surface read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_published_fx_vol_surface_request;
+    using ores::marketdata::messaging::get_published_fx_vol_surface_response;
+    try {
+        get_published_fx_vol_surface_request request;
+        request.blueprint_id = std::string{blueprint_id};
+        request.as_of = std::chrono::system_clock::time_point{
+            std::chrono::nanoseconds{as_of_ns}};
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_published_fx_vol_surface_response>(client(),
+                get_published_fx_vol_surface_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the surface answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::read_refused,
+                answer->message.empty() ? "the deployment refused the surface"
+                                        : answer->message);
+
+        surface_grid grid;
+        grid.blueprint_id = std::string{blueprint_id};
+        grid.name = answer->blueprint_name;
+        grid.as_of_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            answer->as_of.time_since_epoch())
+                            .count();
+        grid.publish_id = answer->publish_request_id;
+        grid.expiries = answer->expiries;
+        grid.strikes = answer->strikes;
+        grid.values.reserve(answer->points.size());
+        for (const auto& point : answer->points)
+            grid.values.push_back(point.volatility);
+        return grid;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
 result<int> session_client::refresh() {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,
@@ -1370,7 +1468,7 @@ result<deployment_read> session_client::deployment() const {
 }
 
 result<std::vector<market_series_summary>>
-session_client::market_series(std::uint32_t limit) const {
+session_client::market_series(std::uint32_t page_size) const {
     if (!is_connected()) {
         return fail(session_errc::closed,
             "a market series read needs an open connection to the instance");
@@ -1384,37 +1482,53 @@ session_client::market_series(std::uint32_t limit) const {
     using ores::marketdata::messaging::list_market_series_response;
 
     try {
-        list_market_series_request request{};
-        request.limit = limit;
         /*
-         * The deployment states which fields a list may be ordered by, and the
-         * series URI is not one of them. The read is sorted here instead, so
-         * the order a screen shows does not depend on the wire's vocabulary.
+         * The deployment holds more series than one answer carries, so the
+         * list is paged until its own total is reached. A single read of every
+         * row is slow enough to time out, which is why the page is a few
+         * hundred rather than everything: a truncated catalogue is a chart
+         * that never finds its series and a curve that holds one tenor, and
+         * both read as an empty deployment.
          */
-
-        const auto answer =
-            ores::nats::service::authenticated_request_and_decode<
-                list_market_series_response>(client(),
-                list_market_series_request::nats_subject, request,
-                options_.request_timeout);
-        if (!answer) {
-            BOOST_LOG_SEV(lg(), ores::logging::warn)
-                << "The market series answer could not be decoded: "
-                << answer.error().what();
-            return fail(session_errc::protocol_error,
-                "the market series answer could not be decoded");
-        }
-        if (answer->result.outcome != ores::utility::domain::outcome::ok) {
-            return fail(session_errc::protocol_error,
-                answer->result.message.empty()
-                    ? std::string("the deployment refused the market series")
-                    : answer->result.message);
-        }
-
+        constexpr std::uint32_t default_page = 250;
+        const auto limit_rows = page_size == 0 ? default_page : page_size;
         std::vector<market_series_summary> rows;
-        rows.reserve(answer->market_series.size());
-        for (const auto& row : answer->market_series) {
-            rows.push_back(market::summarise_series(row));
+        std::uint32_t offset = 0;
+        for (;;) {
+            list_market_series_request request{};
+            request.offset = offset;
+            request.limit = limit_rows;
+            /*
+             * The deployment states which fields a list may be ordered by, and
+             * the series URI is not one of them. The read is sorted here
+             * instead, so the order a screen shows does not depend on the
+             * wire's vocabulary.
+             */
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_market_series_response>(client(),
+                    list_market_series_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer) {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The market series answer could not be decoded: "
+                    << answer.error().what();
+                return fail(session_errc::protocol_error,
+                    "the market series answer could not be decoded");
+            }
+            if (answer->result.outcome != ores::utility::domain::outcome::ok) {
+                return fail(session_errc::protocol_error,
+                    answer->result.message.empty()
+                        ? std::string("the deployment refused the market series")
+                        : answer->result.message);
+            }
+
+            for (const auto& row : answer->market_series) {
+                rows.push_back(market::summarise_series(row));
+            }
+            offset += static_cast<std::uint32_t>(answer->market_series.size());
+            if (answer->market_series.empty() || rows.size() >= answer->total)
+                break;
         }
         std::sort(rows.begin(), rows.end(),
             [](const market_series_summary& a, const market_series_summary& b) {
