@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/service/curve_mapping.hpp"
+#include "hedgr.model/event/event.hpp"
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -55,6 +56,20 @@ curve_reading read_published_curve(
         reading.values.push_back(*value);
     }
     return reading;
+}
+
+bool apply_curve_event(model::state::curve_table& curves,
+    model::state::curve_handle handle,
+    const hedgr::model::event::event& event) {
+    if (!event.message.empty()) {
+        curves.fail(handle, event.message);
+        return false;
+    }
+    if (event.curve_pillars.empty() || event.curve_as_of_ns.empty())
+        return false;
+    curves.apply(handle, event.curve_label, event.curve_pillars,
+        event.curve_as_of_ns, event.curve_values);
+    return true;
 }
 
 bool apply_published_curve(model::state::curve_table& curves,

@@ -94,6 +94,8 @@ enum class event_kind : std::uint8_t {
     currency_image_map = 12,
     /** @brief One tenant image was read by identifier, or could not be. */
     image_loaded = 13,
+    /** @brief A published curve's instants were read, or could not be. */
+    curve_sets = 24,
     /** @brief One interest-rate curve was read, as its latest term nodes. */
     term_structure = 14,
     /** @brief A party's cross-rates batch was read. */
@@ -320,6 +322,18 @@ struct event final {
 
     /** @brief The tenant's currency-to-image map, for currency_image_map. */
     std::vector<image_ref> image_refs;
+
+    /**
+     * @brief A published curve, columnar, for @c curve_sets.
+     *
+     * The pillars are names the deployment sent ("10Y"), stored once per
+     * event; the instants are one per row of @c curve_values, row-major with
+     * one row per instant. A curve is a matrix, and a window draws N of them,
+     * so nothing here is a point carrying its own copy of a name.
+     */
+    std::vector<std::string> curve_pillars;
+    std::vector<std::int64_t> curve_as_of_ns;
+    std::vector<double> curve_values;
 
     /**
      * @brief The parties the login may act as, for session_authenticated.

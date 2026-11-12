@@ -593,6 +593,7 @@ std::optional<session_effect> session_service::apply(
     case model::event::event_kind::image_loaded:
     case model::event::event_kind::term_structure:
     case model::event::event_kind::crm_rates:
+    case model::event::event_kind::curve_sets:
     case model::event::event_kind::crm_names:
         /*
          * Each is about the deployment or a window rather than about a session,

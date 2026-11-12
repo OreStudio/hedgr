@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.runtime/service/curve_mapping.hpp"
+#include "hedgr.model/event/event.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <string>
@@ -88,6 +89,43 @@ TEST_CASE("an applied curve lands on the row in drawing order", "[curves]") {
         == std::vector<std::string>{"1Y", "2Y", "10Y"});
     CHECK(row->values[0] == 0.01);
     CHECK(row->values[2] == 0.03);
+}
+
+TEST_CASE("a curve event lands on the row it names", "[curves]") {
+    hedgr::model::event::event event;
+    event.kind = hedgr::model::event::event_kind::curve_sets;
+    event.curve_label = "EUR IR SWAP";
+    event.curve_pillars = {"10Y", "1Y", "2Y"};
+    event.curve_as_of_ns = {100};
+    event.curve_values = {0.03, 0.01, 0.02};
+
+    state::curve_table curves;
+    const auto handle = curves.intern("i", "a", "s-1");
+    REQUIRE(service::apply_curve_event(curves, handle, event));
+
+    const auto* row = curves.get(handle);
+    REQUIRE(row != nullptr);
+    CHECK(row->state == state::curve_state::ready);
+    CHECK(curves.axis(row->axis).pillars
+        == std::vector<std::string>{"1Y", "2Y", "10Y"});
+    CHECK(row->values[0] == 0.01);
+}
+
+TEST_CASE("a failed curve read keeps what the row held", "[curves]") {
+    state::curve_table curves;
+    const auto handle = curves.intern("i", "a", "s-1");
+    REQUIRE(service::apply_published_curve(curves, handle,
+        set_of({point("1Y", "0.01")})));
+
+    hedgr::model::event::event event;
+    event.kind = hedgr::model::event::event_kind::curve_sets;
+    event.message = "the deployment refused the curve";
+    CHECK_FALSE(service::apply_curve_event(curves, handle, event));
+
+    const auto* row = curves.get(handle);
+    REQUIRE(row != nullptr);
+    CHECK(row->state == state::curve_state::failed);
+    CHECK(row->values.size() == 1);
 }
 
 TEST_CASE("a curve with no usable point leaves the row alone", "[curves]") {
