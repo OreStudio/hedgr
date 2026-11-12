@@ -109,17 +109,41 @@ void open_curve(const render_input& input,
     hedgr::model::state::session_handle session,
     const domain::market_series_row& row) {
     const auto& label = curve_label_of(row);
+    const auto instance_id = std::string{input.sessions.instance_id(session)};
+    const auto account_id = std::string{input.sessions.account_id(session)};
+
+    /*
+     * The curve is every tenor the catalogue lists for it, not the one row the
+     * operator happened to click: an IR series is a point, and what a person
+     * reads is the shape those points make together.
+     */
+    std::vector<const domain::market_series_row*> members;
+    if (const auto* catalogue = input.market.catalogue(instance_id, account_id)) {
+        for (const auto& candidate : catalogue->series) {
+            if (candidate.curve_key.empty() || candidate.curve_key != row.curve_key)
+                continue;
+            members.push_back(&candidate);
+        }
+    }
+    /* A row with no curve of its own is still plottable as a one-point curve. */
+    if (members.empty() || row.curve_key.empty())
+        members.push_back(&row);
+
     command request;
     request.kind = command_kind::open_window;
     request.new_window_kind = domain::window_kind::term_structure;
     request.series_id = row.id;
     request.series_label = label;
-    request.instance_id = std::string{input.sessions.instance_id(session)};
-    request.account_id = std::string{input.sessions.account_id(session)};
-    request.curve_key = row.id;
+    request.instance_id = instance_id;
+    request.account_id = account_id;
+    request.curve_key = row.curve_key.empty() ? row.id : row.curve_key;
     request.curve_label = label;
-    request.member_ids.push_back(row.id);
-    request.member_tenors.push_back({});
+    request.member_ids.reserve(members.size());
+    request.member_tenors.reserve(members.size());
+    for (const auto* member : members) {
+        request.member_ids.push_back(member->id);
+        request.member_tenors.push_back(member->tenor);
+    }
     input.commands.push(std::move(request));
 }
 
