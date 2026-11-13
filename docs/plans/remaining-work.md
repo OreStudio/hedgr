@@ -208,8 +208,12 @@ server API as it stands:
 - the *curve* is the evolution read (`get_series_evolution`), which states its
   axes (`fields 'term'`) and every node, or the published curve sets where the
   deployment publishes the curve;
-- bid/ask, if the deployment carries them, are separate series by `quote_type`,
-  so a two-sided row is a column mapping rather than a new read.
+- **two-way prices are not supported**, so the operator's decision is one column
+  of **mid** and column headers for **bid** and **ask** that stay blank. A blank
+  bid or ask is a screen that says the deployment quotes one side; filling it
+  with the mid would invent a book that does not exist. If a deployment later
+  carries `quote_type` series for bid and ask, they are a column mapping onto
+  the same rows rather than a new read.
 
 So: one window, two panes - the ladder (a table, as the CRM matrix is) over the
 curve (the term structure plot that already works). One read per rung for the
