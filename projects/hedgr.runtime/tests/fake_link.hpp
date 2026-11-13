@@ -56,6 +56,8 @@ struct fake_session_link final : session::transport::session_link {
     std::vector<session::transport::curve_instant> curve_sets;
     std::vector<session::transport::surface_blueprint> blueprints;
     session::transport::surface_grid surface;
+    std::vector<session::transport::market_point> observations;
+    session::transport::series_evolution evolution;
 
     std::optional<session::transport::session_error> connect_error;
     std::optional<session::transport::session_error> resume_error;
@@ -69,6 +71,8 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> curve_sets_error;
     std::optional<session::transport::session_error> blueprints_error;
     std::optional<session::transport::session_error> surface_error;
+    std::optional<session::transport::session_error> observations_error;
+    std::optional<session::transport::session_error> evolution_error;
     std::optional<session::transport::session_error> image_error;
     std::optional<session::transport::session_error> deployment_error;
     std::optional<session::transport::session_error> tail_error;
@@ -338,6 +342,16 @@ struct fake_session_link final : session::transport::session_link {
         if (surface_error)
             return std::unexpected(*surface_error);
         return surface;
+    }
+
+    [[nodiscard]] session::transport::result<
+        session::transport::series_evolution>
+    market_series_evolution(std::string_view,
+        const hedgr::model::domain::market_series_identity&, std::int64_t,
+        std::int64_t) const override {
+        if (evolution_error)
+            return std::unexpected(*evolution_error);
+        return evolution;
     }
 };
 

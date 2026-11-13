@@ -49,6 +49,15 @@ namespace {
  */
 constexpr std::uint32_t curve_instants = 32;
 
+/**
+ * @brief How many calendar days of observations a ladder's read spans.
+ *
+ * An observation window is bounded by days and ends today, and the synthetic
+ * feed writes one ladder a day, so this is also how many curves the plot can
+ * overlay. The newest instant is the one a desk reads.
+ */
+constexpr int curve_observation_days = 5;
+
 [[nodiscard]] constexpr double curve_gap() {
     return std::numeric_limits<double>::quiet_NaN();
 }
@@ -156,6 +165,87 @@ void run_curve_read(hedgr::session::transport::session_link& link,
      */
     constexpr std::size_t max_history = model::state::curve_history_limit;
     pillar_history by_term;
+
+    /*
+     * A member with no tenor of its own is one series that carries the whole
+     * ladder, and the deployment states that shape rather than leaving it to be
+     * inferred: the evolution read names the object's axes and every node on
+     * them, then one value per node per instant. A tick reply names a coordinate
+     * and not a term, so reading one as ticks answers with the series' index
+     * tenor - one point on the plot.
+     */
+    if (!request.member_identity.empty()) {
+        const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+        const auto from_ns = now_ns
+            - static_cast<std::int64_t>(curve_observation_days) * 24 * 60 * 60
+                * 1'000'000'000;
+        const auto read = link.market_series_evolution(
+            request.member_ids.empty() ? std::string_view{}
+                                       : request.member_ids.front(),
+            request.member_identity, from_ns, now_ns);
+        if (!read) {
+            answer.message = read.error().message.empty()
+                ? read.error().detail : read.error().message;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The evolution of curve '" << request.key
+                << "' failed: " << answer.message;
+            return;
+        }
+
+        /*
+         * The pillar of a node is the label its term axis carries. An object
+         * with no term axis has no ladder to plot, and says so rather than
+         * drawing every node's labels joined into one name.
+         */
+        std::size_t term_field = read->fields.size();
+        for (std::size_t i = 0; i < read->fields.size(); ++i)
+            if (read->fields[i] == "term")
+                term_field = i;
+        if (term_field == read->fields.size() || read->nodes.empty()
+            || read->instants.empty()) {
+            answer.message = std::format(
+                "the deployment states no term axis for this curve ({} axes, "
+                "{} nodes, {} instants)",
+                read->fields.size(), read->nodes.size(),
+                read->instants.size());
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Curve '" << request.key << "': " << answer.message;
+            return;
+        }
+
+        service::curve_reading reading;
+        reading.pillars.reserve(read->nodes.size());
+        for (const auto& node : read->nodes) {
+            if (term_field >= node.size())
+                continue;
+            reading.pillars.push_back(node[term_field]);
+        }
+        const auto count = reading.pillars.size();
+        reading.as_of_ns.reserve(read->instants.size());
+        reading.values.reserve(read->instants.size() * count);
+        for (const auto& instant : read->instants) {
+            reading.as_of_ns.push_back(instant.as_of_ns);
+            for (std::size_t i = 0; i < count; ++i)
+                reading.values.push_back(i < instant.values.size()
+                        ? instant.values[i] : curve_gap());
+        }
+        if (!request.label.empty())
+            reading.label = request.label;
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Curve '" << request.key << "' from the deployment's own shape ("
+            << reading.label << "): " << reading.pillars.size()
+            << " pillars, " << reading.as_of_ns.size() << " instants, axes '"
+            << (read->fields.empty() ? std::string{} : read->fields.front())
+            << "'";
+        answer.curve_label = std::move(reading.label);
+        answer.curve_pillars = std::move(reading.pillars);
+        answer.curve_as_of_ns = std::move(reading.as_of_ns);
+        answer.curve_values = std::move(reading.values);
+        return;
+    }
+
     const auto count = std::min(request.member_ids.size(),
         request.member_tenors.size());
     for (std::size_t i = 0; i < count; ++i) {

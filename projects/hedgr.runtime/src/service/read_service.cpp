@@ -432,11 +432,26 @@ void read_service::start_term_structure_read(
     if (!read)
         return;
 
-    const worker::curve_request request{.key = st->curve_key,
+    worker::curve_request request{.key = st->curve_key,
         .label = st->label,
         .published = published,
         .member_ids = st->member_ids,
         .member_tenors = st->member_tenors};
+    /*
+     * A member with no tenor of its own carries the whole ladder, and the
+     * deployment states that shape rather than leaving it to be inferred: the
+     * evolution read declares the object's axes and every node on them. The
+     * catalogue is where the series' typed identity is stated, so the request
+     * takes it from there rather than from a command that never had it.
+     */
+    if (!published && st->member_tenors.front().empty()) {
+        const auto* catalogue = market_.catalogue(read->instance_id,
+            read->account_id);
+        const auto* row = catalogue != nullptr
+            ? catalogue->row_of(st->member_ids.front()) : nullptr;
+        if (row != nullptr)
+            request.member_identity = row->identity;
+    }
     if (!submit_read(*read, request))
         return;
     curves_.begin(curves_.intern(read->instance_id, read->account_id,
@@ -465,11 +480,23 @@ void read_service::load_term_structure(
     if (!read)
         return;
 
-    const worker::curve_request request{.key = cmd.curve_key,
+    worker::curve_request request{.key = cmd.curve_key,
         .label = cmd.curve_label,
         .published = published,
         .member_ids = cmd.member_ids,
         .member_tenors = cmd.member_tenors};
+    /*
+     * As in start_term_structure_read: a composite member is read as the shape
+     * the deployment states, which needs the series' typed identity.
+     */
+    if (!published && cmd.member_tenors.front().empty()) {
+        const auto* catalogue = market_.catalogue(cmd.instance_id,
+            cmd.account_id);
+        const auto* row = catalogue != nullptr
+            ? catalogue->row_of(cmd.member_ids.front()) : nullptr;
+        if (row != nullptr)
+            request.member_identity = row->identity;
+    }
     if (!submit_read(*read, request))
         return;
     curves_.begin(curves_.intern(cmd.instance_id, cmd.account_id,

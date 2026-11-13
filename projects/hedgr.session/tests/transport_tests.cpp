@@ -39,6 +39,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <set>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -566,6 +567,88 @@ TEST_CASE("live providers: history names one series per provider",
                   : std::format("{} ({})", loose.error().message,
                         loose.error().detail).c_str());
     }
+    std::fflush(stdout);
+    session.disconnect();
+}
+
+/**
+ * @brief What a curve whose ladder lives in its observations reads as.
+ *
+ * An interest-rate series can carry its whole ladder as observations of one
+ * series, each naming its term. That is the source the term structure window
+ * uses for such a series, because a tick reply names the coordinate rather than
+ * the term and would answer with the index tenor alone. This asks for the
+ * observations of every IR series the catalogue lists and prints the terms each
+ * one names.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.session.tests "[.live-ir-ladder]"
+ */
+TEST_CASE("live IR: the terms a curve's observations name",
+    "[.live-ir-ladder]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto series = session.market_series(500);
+    REQUIRE(series.has_value());
+    std::size_t seen = 0;
+    for (const auto& row : *series) {
+        if (row.asset_class.empty() || row.asset_class != "IR")
+            continue;
+        /*
+         * The same series through both reads that could carry a ladder: the
+         * observations, whose coordinates name the term, and the evolution,
+         * whose shape declares its axes. Printing both is how the choice is
+         * made from what the deployment states rather than from a guess.
+         */
+        const auto evolution = session.market_series_evolution(row.id,
+            row.identity, 0, 0);
+        if (!evolution) {
+            std::printf("'%s' evolution failed: %s\n", row.label.c_str(),
+                evolution.error().message.c_str());
+            continue;
+        }
+        std::printf("'%s' evolution: fields ", row.label.c_str());
+        for (const auto& field : evolution->fields)
+            std::printf("'%s' ", field.c_str());
+        std::printf("%zu nodes, %zu instants\n", evolution->nodes.size(),
+            evolution->instants.size());
+        for (std::size_t i = 0;
+            i < evolution->nodes.size() && i < 12; ++i) {
+            std::printf("  node:");
+            for (const auto& label : evolution->nodes[i])
+                std::printf(" %s", label.c_str());
+            if (!evolution->instants.empty()
+                && i < evolution->instants.back().values.size())
+                std::printf(" = %.6f", evolution->instants.back().values[i]);
+            std::printf("\n");
+        }
+        if (++seen == 3)
+            break;
+    }
+    std::printf("read %zu IR series\n", seen);
     std::fflush(stdout);
     session.disconnect();
 }

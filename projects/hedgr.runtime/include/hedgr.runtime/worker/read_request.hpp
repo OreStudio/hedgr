@@ -88,6 +88,16 @@ struct curve_request final {
 
     /** @brief The tenor each member is plotted under. */
     std::vector<std::string> member_tenors;
+
+    /**
+     * @brief The typed identity of a member whose ladder is its own shape.
+     *
+     * A member with no tenor of its own is one series that carries the whole
+     * ladder. The deployment states that shape: the evolution read declares the
+     * object's axes and every node on them, then one value per node per instant,
+     * which is the term structure itself. Empty for the other kind of member.
+     */
+    hedgr::model::domain::market_series_identity member_identity;
 };
 
 /** @brief The series the deployment publishes, and their providers. */
