@@ -152,3 +152,38 @@ TEST_CASE("the party prompt opens for a session that has to choose",
     frame([&] { render::draw_party_prompt(answered_input, answered); });
     CHECK(answered.instance_id.empty());
 }
+
+TEST_CASE("the party prompt keeps the row the operator moved it to",
+    "[party][prompt]") {
+    /*
+     * The combo used to be re-seeded from the session's own party on every
+     * frame, so a selection snapped back to the deployment's default before it
+     * could be confirmed. The choice is seeded once, when the prompt opens, and
+     * then belongs to the operator.
+     */
+    headless_imgui imgui;
+    desk desk;
+    static_cast<void>(desk.accounts.upsert(model::domain::account{
+        .id = "a", .instance_id = "i", .name = "Desk",
+        .principal = "trader@desk"}));
+    desk.sessions.set_parties(desk.session,
+        "p1\x1f" "Acme UK plc\x1e" "p2\x1f" "Acme US Inc");
+    desk.sessions.set_account_result(desk.session, "Acme", "Acme UK plc",
+        "p1", model::domain::secret_string{"t"});
+    auto input = desk.input();
+
+    render::party_prompt_state state;
+    frame([&] { render::draw_party_prompt(input, state); });
+    /* It opens on the party the session acts as. */
+    CHECK(state.choice == 0);
+
+    /* The operator moves it to the second row. */
+    state.choice = 1;
+    frame([&] { render::draw_party_prompt(input, state); });
+    CHECK(state.choice == 1);
+
+    /* And it stays there however many frames pass. */
+    frame([&] { render::draw_party_prompt(input, state); });
+    frame([&] { render::draw_party_prompt(input, state); });
+    CHECK(state.choice == 1);
+}

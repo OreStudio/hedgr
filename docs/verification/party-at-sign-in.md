@@ -52,6 +52,37 @@ remembered without a round trip to the instance.
 - "Not now" is an answer for the run. The prompt says the party can be changed
   later from a window's status bar.
 
+## Which party call a fresh login accepts
+
+The transport's own docstring said a multi-party login signs in with a single-use
+token that only `select_party` may present. Measured against `brave_hopper` on
+2026-11-13, the opposite is true: `select_party` refuses a fresh login's token
+("Invalid or expired token", `authentication_rejected`) and `switch_party`
+accepts it. The session actor has always used `switch_party`, which is why the
+party control works; `hedgr.session.tests "[.live-party]"` checks both calls
+against the deployment and prints which was accepted, so the docstring can be
+corrected against evidence rather than argument.
+
+## The prompt's first bug, and the log that found it
+
+The prompt re-seeded its combo from the session's own party on every frame, so
+the operator's selection snapped back to the deployment's default before it could
+be confirmed - the "combo box always goes back to system party" report. It is
+seeded once now, and a test draws four frames after moving the selection and
+checks it stayed.
+
+Nothing about any of this was in the log, which is what made the report hard to
+act on. Three lines now appear at INFO or WARN, and every refusal reaches the log
+whether or not it reached the bar:
+
+- `Asking account '<id>' on '<instance>' which party to act as: the login holds
+  N and none is remembered` - the prompt opening;
+- `Session '<instance>' / '<account>' asked to act as party '<id>', from
+  '<current>'` - the runtime taking the ask, and either the actor's `now acts as`
+  or its `was refused` line following it;
+- `Condition raised (<source> '<subject>'): <message>` - every refusal, logged
+  where the bar's red is raised.
+
 ## Verified
 
 - `hedgr.store.tests`: a version 8 store migrates with its instance and account

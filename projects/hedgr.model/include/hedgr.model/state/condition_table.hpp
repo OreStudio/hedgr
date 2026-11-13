@@ -64,6 +64,10 @@ enum class condition_source : std::uint8_t {
     probe,
 };
 
+/** @brief The source's name, for a log line. */
+[[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
+to_string(condition_source value) noexcept;
+
 /**
  * @brief How long a condition from a source stands.
  *

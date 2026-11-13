@@ -58,6 +58,16 @@ struct party_prompt_state final {
     int choice = 0;
 
     /**
+     * @brief Whether @c choice has been seeded from the session's own party.
+     *
+     * Seeded once, when the prompt opens, and never again: re-seeding it every
+     * frame would overwrite the row the operator just clicked, and the combo
+     * would snap back to the party the deployment chose however often it was
+     * moved.
+     */
+    bool seeded = false;
+
+    /**
      * @brief Sessions whose prompt was put down for this run.
      *
      * "Not now" is an answer. Asking again on the next frame would make the

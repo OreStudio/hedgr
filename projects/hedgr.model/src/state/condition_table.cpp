@@ -68,6 +68,26 @@ const condition* condition_table::current() const noexcept {
     return best;
 }
 
+std::string_view to_string(condition_source value) noexcept {
+    switch (value) {
+    case condition_source::startup: return "startup";
+    case condition_source::instance: return "instance";
+    case condition_source::account: return "account";
+    case condition_source::folder: return "folder";
+    case condition_source::label: return "label";
+    case condition_source::labelling: return "labelling";
+    case condition_source::shortcut: return "shortcut";
+    case condition_source::session: return "session";
+    case condition_source::credential: return "credential";
+    case condition_source::store_lock: return "store_lock";
+    case condition_source::window: return "window";
+    case condition_source::window_wall: return "window_wall";
+    case condition_source::read: return "read";
+    case condition_source::probe: return "probe";
+    }
+    return "unknown";
+}
+
 std::string_view condition_table::message() const noexcept {
     const auto* shown = current();
     return shown == nullptr ? std::string_view{} : shown->message;
