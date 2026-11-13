@@ -18,6 +18,7 @@
  *
  */
 #include "hedgr.ui/render/party_foot.hpp"
+#include "hedgr.ui/render/curve_ladder.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/render/windows.hpp"
 #include "hedgr.ui/icon/fonts.hpp"
@@ -25,6 +26,8 @@
 #include "hedgr.ui/render/market_status.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/render/plot_fill.hpp"
+#include "hedgr.ui/render/series_text.hpp"
+#include "hedgr.ui/render/time_text.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/controls.hpp"
 #include "hedgr.ui/theme/theme.hpp"
@@ -33,7 +36,9 @@
 #include "imgui.h"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -159,8 +164,82 @@ void render_term_structure(window_handle handle, const render_input& input,
 
     const float foot_height = widget::status_foot_height(status, foot);
     const ImVec2 available = ImGui::GetContentRegionAvail();
-    const float plot_height = std::max(
-        available.y - foot_height - ImGui::GetStyle().ItemSpacing.y, 80.0f);
+
+    /*
+     * The ladder first, the curve under it. That is the order a desk reads a
+     * term structure in: the quotes at each tenor, then the shape drawn through
+     * them. The ladder takes a share of the window rather than a fixed height,
+     * because a curve of seven rungs and one of twenty ask for different room,
+     * and it is capped so the plot is never squeezed out.
+     */
+    const float ladder_height = has_data
+        ? std::clamp(available.y * 0.38f, 96.0f, 260.0f) : 0.0f;
+    if (has_data) {
+        constexpr std::size_t most_rungs = 64;
+        static thread_local std::array<ladder_rung, most_rungs> rungs;
+        const auto shown = std::min(pillars, most_rungs);
+        curve_ladder(input, *session, *terms, *row, *axis,
+            std::span{rungs.data(), shown});
+
+        constexpr ImGuiTableFlags ladder_flags = ImGuiTableFlags_RowBg
+            | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY
+            | ImGuiTableFlags_SizingStretchProp;
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(6.0f, 2.0f));
+        if (ImGui::BeginTable("##ladder", 5, ladder_flags,
+                ImVec2(0.0f, ladder_height))) {
+            ImGui::TableSetupColumn("Rung", ImGuiTableColumnFlags_WidthFixed,
+                90.0f);
+            ImGui::TableSetupColumn("Mid");
+            ImGui::TableSetupColumn("Bid");
+            ImGui::TableSetupColumn("Ask");
+            ImGui::TableSetupColumn("Age", ImGuiTableColumnFlags_WidthFixed,
+                70.0f);
+            ImGui::TableSetupScrollFreeze(0, 1);
+            ImGui::TableHeadersRow();
+            for (std::size_t i = 0; i < shown; ++i) {
+                const auto& rung = rungs[i];
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(rung.label.data(), rung.label.data()
+                    + rung.label.size());
+                ImGui::TableNextColumn();
+                if (rung.mid) {
+                    /* The numeric face, so the digits line up down the column. */
+                    ImGui::PushFont(icon::numeric_font());
+                    ImGui::TextUnformatted(format_price(*rung.mid).c_str());
+                    ImGui::PopFont();
+                    if (rung.ticking)
+                        ImGui::SetItemTooltip(
+                            "A tick from this rung's own series: the row moves "
+                            "as the market does.");
+                    else
+                        ImGui::SetItemTooltip(
+                            "The value in the newest curve this window read. "
+                            "The rung has no ticks of its own yet.");
+                } else {
+                    ImGui::TextDisabled("-");
+                }
+                /*
+                 * Bid and ask are blank, and stay blank. The deployment quotes
+                 * one side, so a ladder that filled them - with the mid or
+                 * with anything else - would be drawing a book that does not
+                 * exist.
+                 */
+                ImGui::TableNextColumn();
+                ImGui::TableNextColumn();
+                ImGui::TableNextColumn();
+                if (rung.at_ns > 0) {
+                    ImGui::TextDisabled("%s",
+                        tick_age_text(input.wall_now_ns - rung.at_ns).c_str());
+                }
+            }
+            ImGui::EndTable();
+        }
+        ImGui::PopStyleVar();
+    }
+
+    const float plot_height = std::max(available.y - ladder_height
+            - foot_height - ImGui::GetStyle().ItemSpacing.y * 2.0f, 80.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     if (ImGui::BeginChild("##curve-area", ImVec2(available.x, plot_height),
             ImGuiChildFlags_None)) {

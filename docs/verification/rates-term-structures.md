@@ -1,5 +1,33 @@
 # Interest rates as term structures
 
+## The ladder
+
+The curve window has two panes: the **ladder** - a table of the quotes by rung -
+over the **curve** - the plot through them. That is how a desk reads a term
+structure: the numbers at each tenor, then the shape.
+
+The ladder is one row per pillar of the curve's own axis, so it and the plot can
+never disagree about which rungs there are. A row's value comes from the rung's
+own series when the window holds one, and from the curve's newest instant when it
+does not:
+
+- a rung whose series is watched shows a **tick**, and the row moves as the
+  market does. A term-structure window holds every one of its rungs, which is
+  what makes the feed subscribe to them - before this the plot moved only when
+  the thirty-second whole-curve read answered;
+- a rung with no tick of its own - a published curve, which is one calibrated
+  object rather than a series per rung, or a rung whose series is quiet - shows
+  the value the newest curve holds, and the row's tooltip says which it is.
+
+There is a **Mid** column and there are **Bid** and **Ask** column headers with
+nothing under them. The deployment quotes one side, so filling them would draw a
+book that does not exist. If a deployment ever carries `quote_type` series for
+bid and ask, those become columns mapping onto the same rows, not a new read.
+
+The painted window (`hedgr.ui.tests "[.gallery]"` with `HEDGR_WINDOW_GALLERY`) is
+where this is looked at: `term-structure.ppm` shows ten tenors of ladder over the
+curve.
+
 ## What changed
 
 The series browser now has an asset-class selector. Choosing `IR` switches the

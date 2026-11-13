@@ -243,6 +243,25 @@ So: one window, two panes - the ladder (a table, as the CRM matrix is) over the
 curve (the term structure plot that already works). One read per rung for the
 ticks, one evolution read for the shape.
 
+Done, 2026-11-13, as a pane rather than a new window: the term-structure window
+now draws the ladder over the curve, because the two panes are the same curve.
+What that meant:
+
+- the ladder is `render::curve_ladder`, one row per pillar of the curve's own
+  axis, filled from the rung's series when the window holds one and from the
+  curve's newest instant otherwise. A row says which it used, so a rung whose
+  series has no ticks yet reads as the curve's value rather than as frozen;
+- a term structure now holds **every rung**, not one key: holding is what makes
+  the feed watch, so the rungs tick. Before this a curve window held no series
+  at all and the plot moved only when the thirty-second read answered;
+- **mid only**, with `Bid` and `Ask` headers and no cells under them, as decided;
+- the painted window (`[.gallery]`, `term-structure.ppm`) shows the ladder of ten
+  tenors over the curve in the same window.
+
+Still open on this screen: the window kind is still `term_structure` and the
+operator called it a curve monitor, so the *name* is a change still to make; and
+the ladder's age column shows the value's age, not the rung's subscription state.
+
 **3. What it is called.** In a trading system the table of quotes by tenor is a
 **ladder** (the "swap ladder", "deposit ladder"); the plotted shape is the
 **curve**; a screen holding both is a **curve monitor** - the IR counterpart of

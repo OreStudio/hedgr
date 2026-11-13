@@ -3431,3 +3431,48 @@ TEST_CASE("live desk: a signed-in manager holds its currency map",
 
     manager.stop();
 }
+
+TEST_CASE("a term structure holds every rung, so the ladder has ticks",
+    "[runtime][reads]") {
+    const temporary_database database("term-structure-rungs");
+    instance_manager manager(0, unreachable_actors());
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    auto window = open_window(window_kind::term_structure, read_instance,
+        read_account, "curve-1");
+    window.member_ids = {"m-on", "m-1y", "m-30y"};
+    window.member_tenors = {"ON", "1Y", "30Y"};
+    push_command(manager, window);
+
+    const auto opened = find_window_of_kind(manager, window_kind::term_structure);
+    REQUIRE(opened.has_value());
+
+    /*
+     * A rung is a series, and the feed watches the series a window holds. So a
+     * term structure that held only its curve key would draw a ladder of values
+     * that never moved: one read of the whole curve every thirty seconds.
+     */
+    const auto held = manager.windows().series(*opened);
+    REQUIRE(held.size() == 3);
+
+    const auto key = manager.market().key_of(held[0]);
+    REQUIRE(key.has_value());
+    CHECK(key->series_id == "m-on");
+    CHECK(manager.market().watchers(held[0]) == 1);
+
+    /* Each rung holds exactly one watch, and the window's own lifetime ends
+     * them: a rung nobody releases is a subscription nobody closes. */
+    for (const auto handle : held)
+        CHECK(manager.market().watchers(handle) == 1);
+
+    push_command(manager, [&] {
+        command close;
+        close.kind = command_kind::close_window;
+        close.window_id = manager.windows().id(*opened);
+        return close;
+    }());
+    for (const auto handle : held)
+        CHECK(manager.market().watchers(handle) == 0);
+    manager.stop();
+}

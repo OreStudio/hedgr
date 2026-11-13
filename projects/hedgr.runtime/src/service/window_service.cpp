@@ -21,6 +21,7 @@
 #include "ores.logging/boost_severity.hpp"
 #include "support.hpp"
 #include <boost/log/sources/severity_feature.hpp>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <format>
@@ -200,23 +201,44 @@ window_service::window_service(const model_state::session_table& sessions,
 void window_service::hold_series(model_state::window_handle window,
     std::string_view instance_id, std::string_view account_id) {
     const auto& shape = windows_.state(window);
-    std::string_view series_id;
+
+    /*
+     * Which series a window puts its weight behind. A chart and a card hold the
+     * one they plot. A term structure holds every rung, because a rung is a
+     * series and holding it is what makes the feed watch it: the ladder under
+     * the curve ticks only while each rung is watched, and a rung nobody holds
+     * is a rung nobody subscribes to. A published curve has no rungs and holds
+     * nothing, which is right - there is no series behind it to tick.
+     */
+    std::vector<std::string_view> ids;
     if (const auto* chart = std::get_if<domain::chart_state>(&shape))
-        series_id = chart->series_id;
+        ids.push_back(chart->series_id);
     else if (const auto* card = std::get_if<domain::mini_plot_state>(&shape))
-        series_id = card->series_id;
-    if (series_id.empty())
+        ids.push_back(card->series_id);
+    else if (const auto* terms = std::get_if<domain::term_structure_state>(&shape))
+        ids.assign(terms->member_ids.begin(), terms->member_ids.end());
+
+    std::vector<model_state::series_handle> wanted;
+    wanted.reserve(ids.size());
+    for (const auto id : ids) {
+        if (id.empty())
+            continue;
+        const auto handle = series_.intern(instance_id, account_id, id);
+        if (std::ranges::find(wanted, handle) == wanted.end())
+            wanted.push_back(handle);
+    }
+    if (wanted.empty())
         return;
 
-    const auto wanted = series_.intern(instance_id, account_id, series_id);
     const auto held = windows_.series(window);
-    if (held.size() == 1 && held.front() == wanted)
+    if (std::ranges::equal(held, wanted))
         return;
 
     /* Acquire before release, so a series the window keeps never reaches zero. */
-    series_.acquire(wanted);
+    for (const auto handle : wanted)
+        series_.acquire(handle);
     drop_series(window);
-    windows_.set_series(window, std::span{&wanted, 1});
+    windows_.set_series(window, wanted);
 }
 
 void window_service::drop_series(model_state::window_handle window) {
