@@ -338,6 +338,30 @@ open_outcome window_service::open(const command::command& cmd) {
             windows_.request_focus(key);
 
             /*
+             * A curve's membership is the catalogue's answer and it can change
+             * between openings: the window is keyed by the row that was
+             * clicked, not by the rungs that row belongs to. Reopening a curve
+             * therefore restates its members, or the window keeps drawing the
+             * ladder it was first given - one rung, forever, however the
+             * grouping improves.
+             */
+            if (traits.refresh_read == read_kind::term_structure
+                && !cmd.member_ids.empty()) {
+                if (auto* terms = std::get_if<domain::term_structure_state>(
+                        &windows_.state(*existing))) {
+                    if (terms->member_ids != cmd.member_ids
+                        || terms->member_tenors != cmd.member_tenors) {
+                        terms->member_ids = cmd.member_ids;
+                        terms->member_tenors = cmd.member_tenors;
+                        terms->label = cmd.series_label;
+                        BOOST_LOG_SEV(lg(), ores::logging::info)
+                            << "Curve window '" << key << "' reopened with "
+                            << cmd.member_ids.size() << " rungs";
+                    }
+                }
+            }
+
+            /*
              * A window restored from the store is open and unbound: the
              * session it was saved against does not exist at start. A sign-in
              * that asks for that window again is the moment the binding can be

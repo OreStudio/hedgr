@@ -2860,6 +2860,50 @@ TEST_CASE("a restored chart is re-pointed at the series the catalogue holds now"
     manager.stop();
 }
 
+TEST_CASE("a curve window reopened with more rungs takes them", "[windows]") {
+    const temporary_database database("curve-reopen");
+    instance_manager manager(0, unreachable_actors());
+    REQUIRE(manager.start(database.path(), seed_options()).has_value());
+    set_up_read_scenario(manager, read_scenario::authenticated);
+
+    /*
+     * A curve window is keyed by the row that was clicked, not by the rungs
+     * that row belongs to, so its membership can improve between openings.
+     * Reopening must restate it: a window that kept its first answer drew one
+     * rung for ever, however the grouping was fixed.
+     */
+    auto first = open_window(window_kind::term_structure, read_instance,
+        read_account, "curve-1");
+    first.member_ids = {"m-1d"};
+    first.member_tenors = {"1D"};
+    push_command(manager, first);
+    manager.pump();
+
+    const auto window = *manager.windows().find(
+        std::format("terms:{}:{}:curve-1", read_instance, read_account));
+    const auto* started = std::get_if<hedgr::model::domain::term_structure_state>(
+        &manager.windows().state(window));
+    REQUIRE(started != nullptr);
+    REQUIRE(started->member_ids == std::vector<std::string>{"m-1d"});
+
+    auto second = open_window(window_kind::term_structure, read_instance,
+        read_account, "curve-1");
+    second.member_ids = {"m-0d", "m-3m"};
+    second.member_tenors = {"0D", "3M"};
+    second.series_label = "IR AUD IR_SWAP";
+    push_command(manager, second);
+    manager.pump();
+
+    const auto* terms = std::get_if<hedgr::model::domain::term_structure_state>(
+        &manager.windows().state(window));
+    REQUIRE(terms != nullptr);
+    CHECK(terms->member_ids == std::vector<std::string>{"m-0d", "m-3m"});
+    CHECK(terms->member_tenors == std::vector<std::string>{"0D", "3M"});
+    CHECK(terms->label == "IR AUD IR_SWAP");
+
+    manager.stop();
+}
+
 TEST_CASE("a term structure whose member lists differ is never read",
     "[runtime][reads]") {
     const temporary_database database("term-structure-mismatch");
