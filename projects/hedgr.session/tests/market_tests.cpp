@@ -129,7 +129,28 @@ TEST_CASE("a curve key groups the tenors of one rate series", "[market]") {
     REQUIRE(market::series_curve_key(one_day)
         == "oresmd://ir/GBP?fwd_start=0D&instrument=ir_swap&quote=rate&type=series");
     REQUIRE(market::series_curve_key(zero).empty());
-    REQUIRE(market::series_curve_label(one_day) == "IR GBP IR_SWAP");
+    /*
+     * The forward start is part of the curve's identity, so it is part of its
+     * name: without it this label and the 3M ladder's are the same string, and
+     * the chooser lists two rows nobody can tell apart.
+     */
+    REQUIRE(market::series_curve_label(one_day) == "IR GBP IR_SWAP 0D");
+}
+
+TEST_CASE("two curves of one currency get two names", "[market]") {
+    /*
+     * A swap ladder is quoted per forward start, so these are two curves of one
+     * currency. The key already told them apart; the label has to as well, or
+     * the chooser lists two rows under one name and an operator has no way to
+     * know which is which - which is what four identical AONIA rows looked like.
+     */
+    const auto spot =
+        "oresmd://ir/AUD?type=series&instrument=ir_swap&quote=rate&fwd_start=0D&tenor=1D";
+    const auto three_month =
+        "oresmd://ir/AUD?type=series&instrument=ir_swap&quote=rate&fwd_start=3M&tenor=1D";
+    CHECK(market::series_curve_key(spot) != market::series_curve_key(three_month));
+    CHECK(market::series_curve_label(spot) == "IR AUD IR_SWAP 0D");
+    CHECK(market::series_curve_label(three_month) == "IR AUD IR_SWAP 3M");
 }
 
 TEST_CASE("a series asset class is the URI's own word, upper-cased",

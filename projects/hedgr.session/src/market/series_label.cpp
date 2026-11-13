@@ -152,6 +152,26 @@ std::string series_curve_label(std::string_view oresmd_uri) {
     const auto curve = parameter(uri, "curve_id");
     if (!curve.empty())
         label += " " + curve;
+
+    /*
+     * Every other field the curve's identity carries, so that two curves have
+     * two names. A curve key is the URI without its term, and the fields left in
+     * it are exactly what tells one curve of a currency from another: a swap
+     * ladder is quoted per forward start, so `fwd_start=0D` and `fwd_start=3M`
+     * are two curves - and a label that dropped the field named both of them
+     * "IR AUD IR_SWAP", which is a list of rows nobody can tell apart.
+     *
+     * The values are appended bare, in the key's own order, because the fields
+     * are few and their names are longer than the values a desk reads.
+     */
+    for (const auto& [name, value] : uri.parameters) {
+        if (name == "type" || name == "tenor" || name == "term"
+            || name == "instrument" || name == "curve_id" || name == "quote")
+            continue;
+        if (value.empty())
+            continue;
+        label += " " + value;
+    }
     return label;
 }
 

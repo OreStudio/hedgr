@@ -27,7 +27,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <format>
+#include <algorithm>
 #include <map>
+#include <set>
 #include <set>
 #include <string>
 #include <vector>
@@ -174,9 +176,101 @@ TEST_CASE("live curve: the rungs a curve's series name", "[.live-curve-shape]") 
 
     transport::session_client session(options);
     REQUIRE(session.connect());
-    REQUIRE(session.authenticate(principal, password).has_value());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
     const auto catalogue = session.market_series(500);
     REQUIRE(catalogue.has_value());
+
+    /*
+     * What the chooser lists for one currency, in the shape the browser groups
+     * it: the curve label, the party, the provider and the rungs. The point is
+     * to see why several rows can carry one name.
+     */
+    if (const auto* wanted = std::getenv("HEDGR_LIVE_CURVES"); wanted != nullptr) {
+        std::map<std::string, std::size_t> rows_per_label;
+        for (const auto& row : *catalogue) {
+            if (row.curve_label.empty() || row.curve_label.find(wanted)
+                    == std::string::npos)
+                continue;
+            std::printf("curve '%s' series %s tenor='%s' party='%s' "
+                        "provider='%s'\n",
+                row.curve_label.c_str(), row.id.c_str(), row.tenor.c_str(),
+                row.party_id.c_str(), row.provider_code.c_str());
+        }
+        const auto published = session.published_curves(100);
+        if (published) {
+            for (const auto& curve : *published) {
+                std::printf("published '%s' series=%s points=%u\n",
+                    curve.label.c_str(), curve.series_id.c_str(),
+                    curve.points);
+            }
+        } else {
+            std::printf("published curves refused: %s\n",
+                published.error().message.c_str());
+        }
+        std::fflush(stdout);
+    }
+
+    /*
+     * What the browser's IR list would hold for each party the login may act
+     * as: the tick curves scoped to that party, and the published curves whose
+     * series belong to it. This is the shape the list is built from, so a name
+     * that appears several times can be traced to what makes the rows differ.
+     */
+    if (std::getenv("HEDGR_LIVE_LIST") != nullptr) {
+        const auto published = session.published_curves(200);
+        for (const auto& party : signed_in->parties) {
+            std::set<std::string> curve_keys;
+            for (const auto& row : *catalogue) {
+                if (row.asset_class != "IR" || row.party_id != party.id
+                    || row.curve_key.empty())
+                    continue;
+                curve_keys.insert(row.curve_key);
+            }
+            std::size_t own_published = 0;
+            std::size_t unknown_party = 0;
+            if (published) {
+                for (const auto& curve : *published) {
+                    const auto found = std::find_if(catalogue->begin(),
+                        catalogue->end(), [&](const auto& row) {
+                            return row.id == curve.series_id;
+                        });
+                    if (found == catalogue->end())
+                        ++unknown_party;
+                    else if (found->party_id == party.id)
+                        ++own_published;
+                }
+            }
+            std::printf("party '%s' (%s): %zu tick curves, %zu published, "
+                        "%zu published whose series the catalogue does not list\n",
+                party.name.c_str(), party.id.c_str(), curve_keys.size(),
+                own_published, unknown_party);
+            /*
+             * The labels a party holds more than one curve under. This is the
+             * "four AONIA curves" question: one name, several rows, and the key
+             * and provider are what tell them apart.
+             */
+            std::map<std::string, std::set<std::string>> labels;
+            for (const auto& row : *catalogue) {
+                if (row.asset_class != "IR" || row.party_id != party.id
+                    || row.curve_key.empty())
+                    continue;
+                labels[row.curve_label].insert(row.curve_key + " by "
+                    + row.provider_code);
+            }
+            for (const auto& [label, keys] : labels) {
+                if (keys.size() < 2)
+                    continue;
+                std::printf("    '%s' holds %zu curves:\n", label.c_str(),
+                    keys.size());
+                for (const auto& key : keys)
+                    std::printf("        %s\n", key.c_str());
+            }
+        }
+        std::printf("published curves in total: %zu\n",
+            published ? published->size() : 0);
+        std::fflush(stdout);
+    }
 
     /* Group by everything the rung must not vary, then look at what varies. */
     std::map<std::string, std::vector<const transport::market_series_summary*>>

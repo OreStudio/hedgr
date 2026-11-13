@@ -1,5 +1,31 @@
 # Interest rates as term structures
 
+## Why two curves can carry one name, and no longer do
+
+An operator reported "4 different AONIA curves with no explanation". The
+deployment holds one copy of `IR AUD DISCOUNT AUD-AONIA` per party that lists it,
+and a swap ladder is quoted per forward start: on `brave_hopper` a single party
+holds three curves called `IR AUD IR_SWAP`, which differ only by `fwd_start` (0D
+and 3M) and by provider (`demo` and `bloomberg`).
+
+The curve's name was the URI minus its term, so it named the currency, the
+instrument and the curve id - and dropped the fields that tell one curve of that
+currency from another. Two curves therefore rendered as one string.
+
+- **The label now carries the whole identity.** `series_curve_label` appends
+  every remaining field of the curve key (`fwd_start`, `index_name`, …) except
+  `type`, `quote`, `tenor`/`term`, and the two it already shows. So the ladder at
+  0D is `IR AUD IR_SWAP 0D` and the one at 3M is `IR AUD IR_SWAP 3M`.
+- **The provider is shown in the chooser**, not only in the table's Provider
+  column, so two names that still collide (the same ladder from two desks) differ
+  on the row.
+- **The list is scoped to the acting party**, and the published-curve list is
+  filtered by the party that owns the series it is published under - a published
+  curve is listed once per party that holds it, and only one of those copies is
+  the session's.
+- **The log says which party a list was built for**, once per rebuild:
+  `Curves listed for party '<id>': N of M series, filter '<text>'`.
+
 ## The ladder
 
 The curve window has two panes: the **ladder** - a table of the quotes by rung -
