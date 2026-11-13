@@ -1,6 +1,12 @@
 # Server contracts for the market-data screens
 
-**Status.** Written before any screen is built, at the operator's instruction:
+**Status.** Gap analysis. The implementable half is
+`server-contracts-spec.md`, which states field-level contracts, the derivation
+rules that must not live in a client, acceptance criteria per operation, and the
+`hedgr` code each operation deletes. An agent implementing the server side reads
+that one; this page says why each operation exists.
+
+Written before any screen is built, at the operator's instruction:
 the same screens will be built on `ores.web`, so no derivation may live in a
 client. This page is the gap between what the signed-off prototypes need and what
 the deployment answers today, with the operation names taken from
