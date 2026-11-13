@@ -68,6 +68,7 @@ const std::vector<table_ddl> hand_written{
         name TEXT NOT NULL,
         principal TEXT NOT NULL,
         folder_id TEXT NOT NULL,
+        party_id TEXT NOT NULL DEFAULT '',
         credential TEXT,
         UNIQUE(instance_id, principal)
     ))",

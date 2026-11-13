@@ -29,8 +29,10 @@
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/store_lock.hpp"
 #include "hedgr.model/export.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace hedgr::model::event {
@@ -419,6 +421,28 @@ struct event final {
     /** @brief The policy's rules, for password_policy_fetched. */
     domain::password_policy policy;
 };
+
+/**
+ * @brief Whether the parties @p serialised holds @p party_id.
+ *
+ * The list travels as id, unit separator, name, record separator, repeated, and
+ * every reader of it has to answer this question: the interface to tick the
+ * acting party, the runtime to decide whether a remembered party is still one
+ * the login may act as. Parsing it here rather than in each reader keeps the two
+ * from disagreeing about the separators.
+ */
+[[nodiscard]] HEDGR_MODEL_EXPORT bool
+holds_party(std::string_view serialised, std::string_view party_id) noexcept;
+
+/**
+ * @brief How many parties the serialised list holds.
+ *
+ * One more than the record separators, because the list has no trailing
+ * separator. Empty is zero, which is the state of a session that has not signed
+ * in yet rather than a login with no parties.
+ */
+[[nodiscard]] HEDGR_MODEL_EXPORT std::size_t
+party_count(std::string_view serialised) noexcept;
 
 }
 

@@ -52,6 +52,7 @@ dom::account to_domain(const account_entity& row) {
     value.name = row.name;
     value.principal = row.principal;
     value.folder_id = row.folder_id;
+    value.party_id = row.party_id;
     return value;
 }
 
@@ -63,6 +64,7 @@ account_entity to_entity(const dom::account& row) {
         .name = row.name,
         .principal = row.principal,
         .folder_id = row.folder_id,
+        .party_id = row.party_id,
     };
 }
 
@@ -140,6 +142,19 @@ sqlite::result<void> account_repository::set_parent(std::string_view id,
         sqlgen::update<account_entity>("folder_id"_c.set(std::string{folder_id})) |
         sqlgen::where("id"_c == std::string{id});
     return done(query(db_->connection()));
+}
+
+sqlite::result<void> account_repository::set_party(std::string_view id,
+    std::string_view party_id) {
+    /*
+     * An UPDATE rather than an upsert, for the credential's reason: the party
+     * belongs to an account that exists, and a typo in an id must not conjure a
+     * row with no instance, no name and no principal.
+     */
+    const auto query =
+        sqlgen::update<account_entity>("party_id"_c.set(std::string{party_id})) |
+        sqlgen::where("id"_c == std::string{id});
+    return updated(query(db_->connection()), *db_, id);
 }
 
 sqlite::result<void> account_repository::remove(std::string_view id) {

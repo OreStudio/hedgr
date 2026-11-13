@@ -64,6 +64,18 @@ struct account final {
      * can use a remembered password or has to ask for one.
      */
     bool has_credential = false;
+
+    /**
+     * @brief The party this account last acted as, or empty for none yet.
+     *
+     * A login may act as more than one party, and the deployment's answer
+     * usually lands on a default that is not the desk's own - a system party,
+     * say. The party the operator chose is remembered here so the next sign-in
+     * starts in it, and so a party prompt only appears when there is no choice
+     * to repeat. Empty means nothing has been chosen; it is written when a
+     * session acting as this account switches party.
+     */
+    std::string party_id;
 };
 
 }

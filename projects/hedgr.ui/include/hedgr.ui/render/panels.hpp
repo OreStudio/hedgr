@@ -256,6 +256,21 @@ HEDGR_UI_EXPORT void draw_series_flags(const render_input& input,
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;
 
+/**
+ * @brief Whether a session has to be asked which party to act as.
+ *
+ * True for a signed-in session whose login may act as more than one party and
+ * whose account has never had a party chosen. The deployment signs a login in as
+ * whatever its default is - usually a system party - and a session that acts as
+ * that by accident reads another party's data as though it were the desk's.
+ *
+ * A session whose account does remember a party is not asked: the runtime moves
+ * it to that party at the sign-in, and the choice is repeated rather than made
+ * again.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT bool needs_party_choice(const render_input& input,
+    hedgr::model::state::session_handle session);
+
 [[nodiscard]] HEDGR_UI_EXPORT bool
 shows_window(hedgr::model::domain::window_kind kind, const render_input& input,
     std::string_view window_id) noexcept;

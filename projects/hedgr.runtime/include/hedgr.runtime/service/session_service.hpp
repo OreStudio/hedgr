@@ -114,6 +114,23 @@ struct session_effect final {
     };
     std::vector<read_start> reads;
 
+    /**
+     * @brief A party the session must act as before its own reads.
+     *
+     * The deployment signs a login in as a default party, usually a system one,
+     * and that default is rarely the desk the operator works for. The party this
+     * account acted as last time is therefore asked for as soon as the sign-in
+     * answers, so the session settles on the operator's party rather than on the
+     * deployment's guess. It travels as an effect rather than as a command the
+     * service sends itself, because the facade is what owns the queue.
+     */
+    struct party_switch final {
+        std::string instance_id;
+        std::string account_id;
+        std::string party_id;
+    };
+    std::optional<party_switch> party;
+
     /** @brief Whether the feed must be told the connection answered again. */
     std::optional<watched> link_restored;
 
@@ -150,6 +167,14 @@ struct session_dependencies final {
 
     /** @brief Remembers a password for an account, when the store allows it. */
     std::function<void(std::string_view, std::string)> remember;
+
+    /**
+     * @brief Records the party a session acts as, for its next sign-in.
+     *
+     * Called when a party change is confirmed rather than when it is asked for:
+     * a refused party must not become the remembered one.
+     */
+    std::function<void(std::string_view, std::string_view)> remember_party;
 };
 
 /**

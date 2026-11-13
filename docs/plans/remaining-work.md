@@ -196,6 +196,30 @@ window reads, and used as the default for every window, the browser's foot
 control and "Acting as". System party then becomes a party like any other
 rather than an accident of the principal.
 
+Done, 2026-11-13. Measured on `brave_hopper`: `super_admin` may act as one party
+(System Party, 216 series) and `tenant_admin@acme_corporation` as five, signing
+in on System Party (801 series) while the desk's own rows sit under "ACME
+Corporation UK plc" and its siblings. The build:
+
+- the account row gained `party_id` (store schema 9, migrated from 8 by one
+  `ALTER TABLE`), which is the party the account acted as last time;
+- the runtime moves a fresh sign-in to that party as soon as IAM answers, before
+  anything in this run reads. A remembered party the login may no longer act as
+  is not asked for; it is logged and the login's own default stands;
+- the choice is remembered when the instance *confirms* a party change, never
+  when it is asked for, so a refused party never becomes the remembered one.
+  Choosing the party the session already acts as is a confirmation too: it is
+  remembered without a round trip;
+- a login with more than one party and no remembered one is asked once, in a
+  prompt drawn after the windows the sign-in opened: the list, the party it was
+  signed in as, "Act as ..." and "Not now". Declining keeps the deployment's
+  party for the run and says where the control is instead.
+
+The remaining piece is the prompt's *placement*: it is a question at the point of
+signing in rather than a field on the sign-in form, because the parties are only
+known after IAM answers. Making it a field means carrying the previous run's
+party names into the form, which the store does not hold yet.
+
 **2. An IR monitor for one currency: the ladder and the curve.** The operator
 wants both what a desk reads: the table of every IR quote of a currency,
 ticking, and the bootstrapped curve drawn through it. Both are possible with the

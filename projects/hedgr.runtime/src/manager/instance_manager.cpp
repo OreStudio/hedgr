@@ -587,6 +587,16 @@ void instance_manager::complete_session(service::session_effect effect) {
     for (auto& refused : effect.refusals)
         raise(std::move(refused.key), std::move(refused.message));
 
+    /*
+     * The remembered party is asked for before anything the session reads, so
+     * nothing is read for a party the operator did not choose. The ask is
+     * asynchronous - the instance issues the token - so the party change's own
+     * effect is what re-reads the catalogue.
+     */
+    if (effect.party)
+        switch_party(effect.party->instance_id, effect.party->account_id,
+            effect.party->party_id);
+
     for (const auto session : effect.unbind)
         window_service_.unbind(session);
 
@@ -651,6 +661,16 @@ void instance_manager::start_session_read(
             raise(std::move(refused->key), std::move(refused->message));
         return;
     }
+}
+
+void instance_manager::switch_party(std::string_view instance_id,
+    std::string_view account_id, std::string_view party_id) {
+    command::command request;
+    request.kind = command::command_kind::select_party;
+    request.instance_id = std::string{instance_id};
+    request.account_id = std::string{account_id};
+    request.party_id = std::string{party_id};
+    complete_session(session_service_.select_party(request));
 }
 
 void instance_manager::apply(const event::event& ev) {

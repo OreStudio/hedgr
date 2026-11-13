@@ -20,6 +20,7 @@
 #include "hedgr.model/domain/session.hpp"
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.model/domain/window_json_io.hpp"
+#include "hedgr.model/event/event.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
 #include <string>
@@ -166,4 +167,38 @@ TEST_CASE("a mini plot's state survives the stored form", "[window]") {
     REQUIRE(old.has_value());
     CHECK(std::get<domain::mini_plot_state>(*old).span_ns
         == std::int64_t{5} * 60 * 1'000'000'000);
+}
+
+TEST_CASE("the parties a sign-in lists are read from its columns", "[event]") {
+    using hedgr::model::event::holds_party;
+    using hedgr::model::event::party_count;
+
+    /*
+     * The shape IAM's answer is serialised in: id, unit separator, name, and a
+     * record separator between parties. Both readers of it agree here rather
+     * than in each component, so a separator changed in one place cannot leave
+     * the other reading names as ids.
+     */
+    const std::string parties = "p-system\x1f" "System Party\x1e"
+                                "p-uk\x1f" "Acme UK plc\x1e"
+                                "p-hk\x1f" "Acme HK Ltd";
+
+    CHECK(party_count(parties) == 3);
+    CHECK(holds_party(parties, "p-uk"));
+    CHECK(holds_party(parties, "p-hk"));
+    CHECK(holds_party(parties, "p-system"));
+    CHECK_FALSE(holds_party(parties, "p-gone"));
+
+    /*
+     * A name is not an id: the second column must never answer for the first,
+     * or a party remembered by name would be asked for as an id.
+     */
+    CHECK_FALSE(holds_party(parties, "Acme UK plc"));
+    CHECK_FALSE(holds_party(parties, "System Party"));
+
+    /* Nothing chosen and nothing listed are different from zero parties. */
+    CHECK(party_count("") == 0);
+    CHECK(party_count("p-only\x1f" "Only party") == 1);
+    CHECK_FALSE(holds_party(parties, ""));
+    CHECK_FALSE(holds_party("", "p-uk"));
 }
