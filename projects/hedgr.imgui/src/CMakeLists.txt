@@ -109,12 +109,17 @@ set(HEDGR_ORES_LIB_DIR ${ORES_BUILD_DIR}/publish/lib)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 if(Python3_Interpreter_FOUND AND TARGET hedgr.imgui.exe)
+    # OreStudio's directory is searched first because it is the source of truth
+    # for its own libraries. Searching the publish directory first let an
+    # already-bundled copy of the same version name shadow the checkout being
+    # built against, and the bundler then found nothing to do: the app ran with
+    # the other checkout's library and failed at the first new symbol.
     add_custom_command(TARGET ${exe_target_name} POST_BUILD
         COMMAND ${Python3_EXECUTABLE} ${HEDGR_BUNDLE_SCRIPT}
             --binary $<TARGET_FILE:${exe_target_name}>
             --destination ${HEDGR_PUBLISH_DIRECTORY}/lib
-            --search ${HEDGR_PUBLISH_DIRECTORY}/lib
             --search ${HEDGR_ORES_LIB_DIR}
+            --search ${HEDGR_PUBLISH_DIRECTORY}/lib
         COMMENT "Bundling the shared library dependencies into publish/lib"
         VERBATIM)
 else()

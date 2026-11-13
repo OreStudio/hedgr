@@ -90,6 +90,13 @@ to_session_errc(ores::nats::service::nats_error_kind kind) noexcept {
             return tls_failed;
         case nats_error_kind::connection_timeout:
             return timeout;
+        case nats_error_kind::request_timeout:
+            /*
+             * The connection is up and the responder was too slow, which is the
+             * same thing a reader needs to know as a connect that never
+             * completed: nobody answered in time.
+             */
+            return timeout;
         case nats_error_kind::services_unavailable:
             return services_unavailable;
         case nats_error_kind::other:

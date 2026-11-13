@@ -176,6 +176,17 @@ public:
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const = 0;
 
+    /**
+     * @brief The instrument catalogue this session may see.
+     *
+     * The deployment's grouping of series into the things a person reads, with
+     * the filter applied there rather than here.
+     */
+    [[nodiscard]] virtual result<
+        std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter) const = 0;
+
     /** @brief The curves the deployment publishes for this session's party. */
     [[nodiscard]] virtual result<
         std::vector<hedgr::model::domain::published_curve>>
@@ -330,6 +341,12 @@ public:
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const override {
         return client_.list_providers();
+    }
+
+    [[nodiscard]] result<std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter) const override {
+        return client_.list_instruments(filter);
     }
 
     [[nodiscard]] result<std::vector<hedgr::model::domain::published_curve>>

@@ -240,6 +240,137 @@ struct market_provider_row final {
 }
 
 /**
+ * @brief One axis of an instrument's shape, with its values in draw order.
+ *
+ * The field is an oresmd field code such as `tenor` or `strike_label`, never a
+ * display name, because it names the coordinate rather than a column heading.
+ * The values arrive in the server's order, so a plot draws them as they come
+ * and never sorts them.
+ */
+struct instrument_axis final {
+    /** @brief The oresmd field code the shape stores, for example tenor. */
+    std::string field;
+
+    /** @brief The values on this axis, in the order the server states them. */
+    std::vector<std::string> values;
+};
+
+/**
+ * @brief One source behind an instrument, and whether its value is current.
+ *
+ * The provider kind is the provider table's own word, so a definition can be
+ * told from a quote without a second read. The staleness verdict is the
+ * server's, measured against the threshold it holds for the instrument's kind:
+ * this client draws it and never recomputes it.
+ */
+struct instrument_source final {
+    /** @brief The provider's code, for example ore or bloomberg. */
+    std::string provider_code;
+
+    /** @brief The provider's own kind, for example reference or data_vendor. */
+    std::string provider_kind;
+
+    /** @brief The series this source quotes the instrument through. */
+    std::string series_id;
+
+    /** @brief When this source's newest observation was taken, epoch ns, or 0. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges this source past its staleness threshold. */
+    bool stale = false;
+};
+
+/**
+ * @brief Whether @p source is a definition rather than a price.
+ *
+ * A reference provider publishes what an instrument is and never ticks, so a
+ * screen that offers prices can leave these out and one that explains an
+ * instrument keeps them.
+ */
+[[nodiscard]] inline bool is_reference_source(
+    const instrument_source& source) noexcept {
+    return source.provider_kind == "reference";
+}
+
+/**
+ * @brief One instrument: the series a person reads as one thing.
+ *
+ * The deployment's definition, not this client's grouping. A curve is one entry
+ * and never one entry per pillar; a pair is one entry with no axes; a surface is
+ * one entry whose two axes are its expiries and its strikes. The name is the
+ * server's, unique within the party and the kind, and is what a person types
+ * into the search.
+ *
+ * The kind is the server's word - `pair`, `ladder`, `curve` or `surface` - and
+ * a screen draws it as a badge rather than deriving a category of its own. Any
+ * grouping this client would be tempted to do is already done here.
+ */
+struct market_instrument final {
+    /** @brief The instrument's identifier, stable within the party. */
+    std::string instrument_id;
+
+    /** @brief The server's kind for it: pair, ladder, curve or surface. */
+    std::string kind;
+
+    /** @brief The name a person searches for and a list draws. */
+    std::string name;
+
+    /** @brief The currency it is about, for a single-currency instrument. */
+    std::string currency;
+
+    /** @brief The pair's base currency, or empty when it is not a pair. */
+    std::string base_currency;
+
+    /** @brief The pair's quote currency, or empty when it is not a pair. */
+    std::string quote_currency;
+
+    /** @brief The schema's instrument type, for example ir_swap or fx_spot. */
+    std::string instrument_type;
+
+    /** @brief The schema's quote type, for example rate or price. */
+    std::string quote_type;
+
+    /** @brief The forward start the instrument is struck at, or empty. */
+    std::string forward_start;
+
+    /** @brief The shape's axes, in the order the server states them. */
+    std::vector<instrument_axis> axes;
+
+    /** @brief The providers behind it, each with its own verdict. */
+    std::vector<instrument_source> sources;
+
+    /** @brief The party that owns it. */
+    std::string party_id;
+
+    /** @brief Whether every source is stale, in the server's judgement. */
+    bool stale = false;
+
+    /** @brief The newest instant any source was observed, epoch ns, or 0. */
+    std::int64_t as_of_ns = 0;
+};
+
+/**
+ * @brief What a caller narrows the instrument catalogue to.
+ *
+ * The deployment applies all three and returns what remains, so a search is one
+ * read rather than a filter this client runs over a cached list: a query it
+ * matches on more than a name, and a kind it knows the full set of.
+ */
+struct instrument_filter final {
+    /** @brief Free text, matched against the facts the server holds. */
+    std::string query;
+
+    /** @brief The kinds wanted, empty for all of them. */
+    std::vector<std::string> kinds;
+
+    /** @brief The provider whose instruments are wanted, empty for all. */
+    std::string provider_code;
+};
+
+/**
  * @brief One curve the deployment publishes, as a chooser lists it.
  *
  * A curve is an object the deployment calibrates and publishes rather than a

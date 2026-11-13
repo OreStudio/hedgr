@@ -15,7 +15,11 @@
 set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-ores_source_dir=${ORES_SOURCE_DIR:-/home/marco/Development/OreStudio/ores_dev_brave_hopper}
+# The client reads the market-data operations (list_instruments, get_rate_ladder,
+# get_fx_montage, get_curve_analytics), which this checkout carries. A checkout
+# without them fails to compile rather than failing at run time, which is the
+# point: the header is the contract.
+ores_source_dir=${ORES_SOURCE_DIR:-/home/marco/Development/OreStudio/ores_dev_prime_origin}
 ores_build_dir=${ORES_BUILD_DIR:-${ores_source_dir}/build/output/linux-clang-release-ninja}
 build_dir=${HEDGR_BUILD_DIR:-${repo_dir}/build/output/linux-clang-release}
 
@@ -32,16 +36,26 @@ fi
 
 export VCPKG_DISABLE_METRICS=1
 
+# Configure on every run, not only the first. A cache remembers which OreStudio
+# checkout it was pointed at, and reusing one that disagrees with the checkout
+# asked for here either fails to compile or, worse, compiles against an older
+# API and fails at run time. cmake re-running is cheap; a stale cache is not.
 if [ ! -f "${build_dir}/CMakeCache.txt" ]; then
     echo "configuring ${build_dir}"
-    cmake -S "${repo_dir}" -B "${build_dir}" -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CXX_COMPILER=clang++ \
-        -DORES_SOURCE_DIR="${ores_source_dir}" \
-        -DORES_BUILD_DIR="${ores_build_dir}" \
-        -DVCPKG_OVERLAY_PORTS="${repo_dir}/build/vcpkg-overlays" \
-        -DVCPKG_BINARY_SOURCES="clear;files,${repo_dir}/.cache/vcpkg-binary,readwrite;files,${HOME}/.cache/vcpkg/archives,read"
+else
+    configured=$(sed -n 's/^ORES_SOURCE_DIR:PATH=//p' "${build_dir}/CMakeCache.txt")
+    if [ "${configured}" != "${ores_source_dir}" ]; then
+        echo "re-pointing ${build_dir} at ${ores_source_dir} (was ${configured})"
+    fi
 fi
+cmake -S "${repo_dir}" -B "${build_dir}" -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DORES_SOURCE_DIR="${ores_source_dir}" \
+    -DORES_BUILD_DIR="${ores_build_dir}" \
+    -DVCPKG_OVERLAY_PORTS="${repo_dir}/build/vcpkg-overlays" \
+    -DVCPKG_BINARY_SOURCES="clear;files,${repo_dir}/.cache/vcpkg-binary,readwrite;files,${HOME}/.cache/vcpkg/archives,read" \
+    > /dev/null
 
 if [ "$#" -eq 0 ]; then
     cmake --build "${build_dir}"

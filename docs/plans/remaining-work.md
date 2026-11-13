@@ -122,6 +122,36 @@ Follow-ups noticed while building the Instances panel, both done:
   cannot read falls back to the list, so an old catalogue still works. The extra
   call per read, and the two more of a widened first load, are gone.
 
+## The market-data screens, in the order agreed (2026-11-13)
+
+The design is in `docs/plans/market-data-ux.md` and the server contracts are in
+`docs/plans/server-contracts-spec.md`. The order is the operator's, because each
+step is what the next one draws.
+
+1. **Done: rows are instruments.** `session_client::list_instruments` reads the
+   catalogue the server groups, so a curve is one row and not one per pillar or
+   per party, and the axes arrive declared rather than inferred from a tick
+   reply's coordinate. The filter is the deployment's. Measured on `prime_origin`:
+   46 instruments, 20 curves and 26 pairs, `AUD-AONIA` with its seven terms as an
+   axis. See `docs/verification/instrument-catalogue.md`. Not yet drawn: the
+   Explorer still builds its rows from series.
+2. **Currency as a control**, not a filter that changes what a row is.
+3. **The Rates Ladder window**, from `get_rate_ladder`: provider columns, mid
+   only, the conventions row the server states.
+4. **The menu by asset class**, with Search across kinds.
+5. **The FX montage** (`get_fx_montage`) and the surface grid and smile
+   (`get_curve_analytics`).
+
+Two facts that shape all five, measured rather than assumed:
+
+- every curve on `prime_origin` comes through `ore`, whose provider kind is
+  `reference`, and that source is current. Hiding reference sources by kind would
+  hide every curve. The rule has to be about whether a source has data.
+- the client now builds against the OreStudio checkout that carries these
+  operations, and the bundler refreshes its copies instead of keeping the first
+  one it ever saw. Both were silent failures: a stale `publish/lib` ran the old
+  API and failed at the first new symbol.
+
 ## Curves, in the order given (A to D)
 
 - Done: **A, the IR curve.** Choosing `IR` in the browser lists curves rather

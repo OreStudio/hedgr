@@ -733,6 +733,31 @@ public:
         std::int64_t from_ns, std::int64_t to_ns) const;
 
     /**
+     * @brief Reads the instrument catalogue this session may see.
+     *
+     * An instrument is the deployment's own grouping of series into the thing a
+     * person reads: a curve is one entry rather than one per pillar, a pair is
+     * one entry with no axes. The grouping, the naming, the ordering and the
+     * staleness verdict all arrive decided, so nothing above this layer decides
+     * what belongs together.
+     *
+     * The filter is applied by the deployment, not here, so a search is one read
+     * of the catalogue rather than a scan of a cached list. The pages are read
+     * until the deployment's own total is reached, because a truncated
+     * catalogue is an instrument a search never finds.
+     *
+     * @param filter what to narrow to, all empty for the whole catalogue.
+     * @param page_size the rows to ask for at a time.
+     * @pre the session is authenticated.
+     * @return the instruments in the server's order, or why they could not be
+     *         read.
+     */
+    [[nodiscard]] result<std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter = {},
+        std::uint32_t page_size = 500) const;
+
+    /**
      * @brief Reads every market data provider and its kind.
      *
      * Pages `marketdata.v1.providers.list` until the deployment's total is

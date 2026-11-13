@@ -1716,6 +1716,123 @@ session_client::market_series(std::uint32_t page_size) const {
     }
 }
 
+namespace {
+
+/**
+ * @brief One wire instrument, read into the domain's own terms.
+ *
+ * The two instants are converted here, where the deployment's clock spelling is
+ * still in hand, so nothing above this layer handles a time_point for a market
+ * fact.
+ */
+[[nodiscard]] hedgr::model::domain::market_instrument
+to_instrument(const ores::marketdata::messaging::market_instrument& wire) {
+    using hedgr::model::domain::instrument_axis;
+    using hedgr::model::domain::instrument_source;
+    using hedgr::model::domain::market_instrument;
+
+    const auto epoch_ns = [](std::chrono::system_clock::time_point when) {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            when.time_since_epoch())
+            .count();
+    };
+
+    market_instrument out;
+    out.instrument_id = wire.instrument_id;
+    out.kind = wire.kind;
+    out.name = wire.name;
+    out.currency = wire.currency;
+    out.base_currency = wire.base_currency;
+    out.quote_currency = wire.quote_currency;
+    out.instrument_type = wire.instrument_type;
+    out.quote_type = wire.quote_type;
+    out.forward_start = wire.forward_start;
+    out.party_id = wire.party_id;
+    out.stale = wire.stale;
+    out.as_of_ns = epoch_ns(wire.as_of);
+    for (const auto& axis : wire.axes)
+        out.axes.push_back(instrument_axis{
+            .field = axis.field, .values = axis.values});
+    for (const auto& source : wire.sources) {
+        out.sources.push_back(instrument_source{
+            .provider_code = source.provider_code,
+            .provider_kind = source.provider_kind,
+            .series_id = source.series_id,
+            .as_of_ns = epoch_ns(source.as_of),
+            .age_seconds = source.age_seconds,
+            .stale = source.stale});
+    }
+    return out;
+}
+
+}
+
+result<std::vector<hedgr::model::domain::market_instrument>>
+session_client::list_instruments(
+    const hedgr::model::domain::instrument_filter& filter,
+    std::uint32_t page_size) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "an instrument read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "an instrument read needs a signed-in session");
+    }
+
+    using ores::marketdata::messaging::list_instruments_request;
+    using ores::marketdata::messaging::list_instruments_response;
+
+    try {
+        std::vector<hedgr::model::domain::market_instrument> rows;
+        std::int64_t offset = 0;
+        const auto page = static_cast<std::int64_t>(page_size == 0 ? 1 : page_size);
+        for (;;) {
+            list_instruments_request request{};
+            request.query = filter.query;
+            request.kinds = filter.kinds;
+            request.provider_code = filter.provider_code;
+            request.offset = offset;
+            request.limit = page;
+            const auto answer =
+                ores::nats::service::authenticated_request_and_decode<
+                    list_instruments_response>(client(),
+                    list_instruments_request::nats_subject, request,
+                    options_.request_timeout);
+            if (!answer) {
+                return fail(session_errc::protocol_error,
+                    "the instrument answer could not be decoded");
+            }
+            if (!answer->success) {
+                return fail(session_errc::read_refused,
+                    answer->message.empty()
+                        ? std::string("the deployment refused the instruments")
+                        : answer->message);
+            }
+            for (const auto& wire : answer->instruments)
+                rows.push_back(to_instrument(wire));
+            offset += static_cast<std::int64_t>(answer->instruments.size());
+            if (answer->instruments.empty() || offset >= answer->total)
+                break;
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read " << rows.size() << " market instruments on '"
+            << options_.subject_prefix << "'"
+            << (filter.query.empty()
+                    ? std::string()
+                    : std::format(" for query '{}'", filter.query));
+        return rows;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The instrument read failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The instrument read failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
 result<std::vector<hedgr::model::domain::market_provider_row>>
 session_client::list_providers() const {
     if (!is_connected()) {

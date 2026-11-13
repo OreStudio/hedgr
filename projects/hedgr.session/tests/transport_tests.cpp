@@ -919,3 +919,137 @@ TEST_CASE("live party: which party call a fresh login accepts",
         session.disconnect();
     }
 }
+
+/**
+ * @brief What the instrument catalogue answers, and whether it filters where
+ * the screens need it to.
+ *
+ * The catalogue is the foundation the market screens are built on: a row per
+ * instrument rather than per series, with the server's kind, its axes in draw
+ * order and a staleness verdict per source. This prints the shape of what comes
+ * back and proves that the filter arguments are applied by the deployment rather
+ * than by this client, because a screen that filtered locally would need a rule
+ * of its own for what matches a search.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.prime_origin \
+ *     HEDGR_LIVE_CA=<checkout>/build/keys/nats/ca.crt \
+ *     HEDGR_LIVE_CERT=<checkout>/build/keys/nats/ores.shell.crt \
+ *     HEDGR_LIVE_KEY=<checkout>/build/keys/nats/ores.shell.key \
+ *     HEDGR_LIVE_PRINCIPAL=super_admin \
+ *     HEDGR_LIVE_PASSWORD=... \
+ *     hedgr.session.tests "[.live-instruments]"
+ */
+TEST_CASE("live instruments: the catalogue a screen draws",
+    "[.live-instruments]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    /* The catalogue reads many rows and derives each one's shape. */
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto all = session.list_instruments();
+    if (!all) {
+        std::printf("instrument catalogue failed: %s (%s)\n",
+            all.error().message.c_str(), all.error().detail.c_str());
+        std::fflush(stdout);
+        session.disconnect();
+        return;
+    }
+    std::printf("catalogue: %zu instruments\n", all->size());
+
+    std::map<std::string, std::size_t> by_kind;
+    for (const auto& instrument : *all)
+        ++by_kind[instrument.kind];
+    for (const auto& [kind, count] : by_kind)
+        std::printf("  kind='%s' count=%zu\n", kind.c_str(), count);
+
+    /*
+     * Which providers each kind actually comes from, with the provider's own
+     * kind beside it. A screen that offered to hide reference definitions would
+     * hide every instrument of a kind whose only source is one, so the
+     * distribution decides whether that is a filter worth offering at all.
+     */
+    std::map<std::string, std::map<std::string, std::size_t>> by_source;
+    for (const auto& instrument : *all)
+        for (const auto& source : instrument.sources)
+            ++by_source[instrument.kind][source.provider_code + " (" +
+                source.provider_kind + ")"];
+    for (const auto& [kind, sources] : by_source)
+        for (const auto& [source, count] : sources)
+            std::printf("  kind='%s' source='%s' count=%zu\n", kind.c_str(),
+                source.c_str(), count);
+
+    /* One of each kind, however much its axes hold. */
+    std::set<std::string> shown;
+    for (const auto& instrument : *all) {
+        if (!shown.insert(instrument.kind).second)
+            continue;
+        std::printf("kind='%s' name='%s' type=%s quote=%s ccy=%s pair=%s/%s "
+                    "fwd=%s stale=%d as_of=%lld\n",
+            instrument.kind.c_str(), instrument.name.c_str(),
+            instrument.instrument_type.c_str(), instrument.quote_type.c_str(),
+            instrument.currency.c_str(), instrument.base_currency.c_str(),
+            instrument.quote_currency.c_str(),
+            instrument.forward_start.c_str(),
+            instrument.stale ? 1 : 0,
+            static_cast<long long>(instrument.as_of_ns));
+        for (const auto& axis : instrument.axes) {
+            std::printf("  axis '%s' holds %zu values:", axis.field.c_str(),
+                axis.values.size());
+            for (std::size_t i = 0; i < axis.values.size() && i < 12; ++i)
+                std::printf(" %s", axis.values[i].c_str());
+            std::printf("%s\n", axis.values.size() > 12 ? " ..." : "");
+        }
+        for (const auto& source : instrument.sources)
+            std::printf("  source provider='%s' kind='%s' stale=%d age=%llds\n",
+                source.provider_code.c_str(), source.provider_kind.c_str(),
+                source.stale ? 1 : 0,
+                static_cast<long long>(source.age_seconds));
+    }
+
+    /*
+     * The deployment applies the filter, so the same query answers fewer rows
+     * without this client having a matching rule of its own.
+     */
+    if (!all->empty()) {
+        const auto& sample = all->front();
+        const auto by_name = session.list_instruments(
+            {.query = sample.name});
+        std::printf("query='%s' -> %s\n", sample.name.c_str(),
+            by_name ? std::format("{} instruments", by_name->size()).c_str()
+                    : by_name.error().message.c_str());
+
+        const auto curves = session.list_instruments({.kinds = {"curve"}});
+        std::printf("kinds={curve} -> %s\n",
+            curves ? std::format("{} instruments", curves->size()).c_str()
+                   : curves.error().message.c_str());
+        if (curves) {
+            for (const auto& curve : *curves)
+                std::printf("  curve '%s'\n", curve.name.c_str());
+        }
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}
