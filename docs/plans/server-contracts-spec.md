@@ -8,6 +8,19 @@ needed; this page says *what* to build, field by field, with acceptance criteria
 Nothing here is implemented. Where a rule is a decision rather than a fact, it is
 marked **DECIDE** so it is not mistaken for something read off the deployment.
 
+## Which deployment the acceptance criteria run against
+
+The criteria below say "against `brave_hopper`" because that is where the shapes
+were measured. The agent assigned this work tests against **`eager_maxwell`**
+(`nats://localhost:21405`, prefix `ores.dev.eager_maxwell`), and the counts,
+currencies and blueprints there are its own: the *invariants* in each acceptance
+list are the requirement, the specific instruments are examples of the shape.
+
+So: assert the invariants; derive the expected numbers from the deployment under
+test; and where a deployment simply has nothing of a kind (a party with no vol
+blueprints, a currency with no published curve), say so in the response and in
+the test rather than bending the contract to fit.
+
 ## Ground rules for every operation
 
 These are the conventions the existing operations already follow; a new operation
@@ -117,8 +130,10 @@ provider. The name must therefore carry whatever field distinguishes peers —
 `AUD-AONIA` copies on `brave_hopper` are five parties' instruments, and a session
 sees one. This is a server decision; the client cannot be trusted with it.
 
-**Acceptance.** Against `brave_hopper`, as `tenant_admin@acme_corporation` acting
-as ACME Corporation UK plc:
+**Acceptance.** Against the deployment under test, signed in as a login that
+holds more than one party and acting as a business party (on `brave_hopper` that
+was `tenant_admin@acme_corporation` acting as ACME Corporation UK plc; on
+`eager_maxwell`, the equivalent):
 
 - `query = "aud"` returns exactly one `ladder` for AUD swaps, one `curve` for
   `AUD-AONIA`, one `pair` for `AUD/USD`, one `pair` for `GBP/AUD` (found from the
@@ -198,7 +213,8 @@ year fraction `t_i` and discount factor `DF_i`:
 The market pillar and the bootstrapped row for the same tenor are a **pair**, and
 the response must make that checkable: same `tenor`, same `maturity_date`.
 
-**Acceptance.** For `AUD-AONIA` (published against `brave_hopper`): the response
+**Acceptance.** For a published curve of the deployment under test (on
+`brave_hopper`, `AUD-AONIA`): the response
 names its conventions; `DF` is monotonically decreasing in `t`; every
 `market_pillar` has a matching `bootstrapped` row; the newest `market_pillar.as_of`
 equals the response `as_of`; recomputing `zero_rate` from `DF` and `t` reproduces
