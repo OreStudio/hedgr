@@ -197,6 +197,28 @@ struct term_fixture final : window_fixture {
     }
 };
 
+/** @brief The party prompt a multi-party sign-in is offered. */
+struct party_prompt_fixture final : window_fixture {
+    render::party_prompt_state prompt;
+
+    party_prompt_fixture() {
+        static_cast<void>(desk.accounts.upsert(model::domain::account{
+            .id = "a", .instance_id = "i", .name = "Desk",
+            .principal = "trader@desk"}));
+        desk.sessions.set_parties(desk.session,
+            "p1\x1f" "Acme UK plc\x1ep2\x1f" "Acme US Inc\x1ep3\x1f"
+            "Acme HK Ltd\x1ep4\x1f" "System Party");
+        desk.sessions.set_account_result(desk.session, "Acme", "System Party",
+            "p4", model::domain::secret_string{"t"});
+    }
+
+    void draw() {
+        auto input = desk.input();
+        input.wall_now_ns = newest_at_ns;
+        hedgr::testing::frame([&] { render::draw_party_prompt(input, prompt); });
+    }
+};
+
 /** @brief A published surface over seven expiries by five strikes. */
 struct surface_fixture final : window_fixture {
     model::state::window_handle window;
@@ -1010,6 +1032,10 @@ TEST_CASE("window gallery", "[.gallery]") {
     {
         surface_fixture surface;
         paint("vol-surface", surface, [](auto& f) { f.draw(); });
+    }
+    {
+        party_prompt_fixture prompt;
+        paint("party-prompt", prompt, [](auto& f) { f.draw(); });
     }
     {
         crm_fixture crm{[](std::size_t at) {

@@ -136,7 +136,13 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
             >= state.parties.size())
         state.choice = 0;
 
-    const ImVec2 size(480.0f, 250.0f);
+    /*
+     * Small, and mostly a combo. The question is one choice with a default
+     * already selected, so the window says the choice and nothing else: the
+     * explanation lives on the control's tooltip, where it is read once by a
+     * person who wants it and skipped by the person who does not.
+     */
+    const ImVec2 size(420.0f, 116.0f);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
@@ -160,22 +166,8 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
     hedgr::ui::theme::shade_window_background(
         hedgr::ui::theme::window_gradient);
 
-    const std::string acting_label =
-        input.sessions.party_name(*session).empty()
-        ? std::string{session_party}
-        : std::string{input.sessions.party_name(*session)};
-    ImGui::TextWrapped(
-        "This login may act as %zu parties. It was signed in as %s.",
-        state.parties.size(), acting_label.c_str());
-    ImGui::Spacing();
-    ImGui::TextWrapped(
-        "The party a session acts as decides which data every window reads. "
-        "Choose it once here; it is remembered for this account, so the next "
-        "sign-in lands in it.");
-
-    ImGui::Spacing();
     ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Act as");
+    ImGui::TextUnformatted("Acting as");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##party", state.parties.name(
@@ -189,11 +181,13 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
         }
         ImGui::EndCombo();
     }
+    ImGui::SetItemTooltip(
+        "The party this session acts as, which decides the data every window "
+        "reads. Remembered for this account, so the next sign-in lands in it. "
+        "Changeable later from a window's status bar.");
 
     ImGui::Spacing();
-    if (ImGui::Button(std::format("Act as {}",
-            state.parties.name(static_cast<std::size_t>(state.choice))).c_str(),
-            ImVec2(220.0f, 0.0f))) {
+    if (ImGui::Button("Continue", ImVec2(120.0f, 0.0f))) {
         hedgr::model::command::command request;
         request.kind = hedgr::model::command::command_kind::select_party;
         request.instance_id = state.instance_id;
@@ -210,17 +204,13 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
         ImGui::End();
         return;
     }
+    ImGui::SetItemTooltip("Act as the party chosen above, and remember it.");
     ImGui::SameLine();
-    if (ImGui::Button("Not now", ImVec2(120.0f, 0.0f)))
+    if (ImGui::Button("Not now", ImVec2(100.0f, 0.0f)))
         dismiss(state);
     ImGui::SetItemTooltip(
         "Act as the party the deployment signed this login in as. The party can "
         "be changed later from a window's status bar.");
-
-    ImGui::Spacing();
-    ImGui::TextDisabled(
-        "Change it later from the market browser's status bar. Windows already "
-        "open read the new party's data once the change is confirmed.");
 
     ImGui::End();
 

@@ -26,10 +26,13 @@ rather than guessed at, as the store's version policy says.
 ## Where the choice is made
 
 1. **After the sign-in answers.** A login holding more than one party and
-   remembering none shows a prompt: the parties IAM listed, the one it signed in
-   as, a "Act as ..." button and "Not now". The prompt is drawn after the windows
-   the sign-in opened, because at the moment Sign in is pressed the parties are
-   not known - they arrive with IAM's answer.
+   remembering none shows a prompt: the title "Act as a party", one row
+   "Acting as <combo>" seeded on the party IAM signed the login in as, and two
+   buttons "Continue" and "Not now". Nothing else: the explanation of what a
+   party decides and that it is remembered lives on the combo's tooltip, where a
+   reader who wants it finds it. The prompt is drawn after the windows the
+   sign-in opened, because at the moment Sign in is pressed the parties are not
+   known - they arrive with IAM's answer.
 2. **From a window's foot.** Every market-data window already carries an "Acting
    as" control; that path is unchanged and writes the same remembered party.
 3. **Next run.** The runtime moves the session to the remembered party as soon as
