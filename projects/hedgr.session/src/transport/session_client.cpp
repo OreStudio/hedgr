@@ -39,6 +39,7 @@
 #include "ores.iam.api/messaging/tenant_type_protocol.hpp"
 #include "ores.marketdata.api/messaging/market_series_protocol.hpp"
 #include "ores.marketdata.api/messaging/fx_vol_surface_operation_protocol.hpp"
+#include "ores.marketdata.api/messaging/observation_read_operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/published_curves_operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/operations_protocol.hpp"
 #include "ores.marketdata.api/messaging/provider_protocol.hpp"
@@ -988,6 +989,72 @@ result<surface_grid> session_client::published_fx_vol_surface(
         for (const auto& point : answer->points)
             grid.values.push_back(point.volatility);
         return grid;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
+result<std::vector<hedgr::session::transport::market_point>>
+session_client::market_series_observations(std::string_view uri,
+    std::string_view provider_code, std::string_view party_id,
+    int days) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "an observation read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_observation_window_request;
+    using ores::marketdata::messaging::get_observation_window_response;
+    try {
+        const auto today = std::chrono::floor<std::chrono::days>(
+            std::chrono::system_clock::now());
+        get_observation_window_request request;
+        request.item = std::string{uri};
+        request.provider_code = std::string{provider_code};
+        request.party_id = std::string{party_id};
+        request.to = std::chrono::year_month_day{today};
+        request.days = days < 1 ? 1 : days;
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_observation_window_response>(client(),
+                get_observation_window_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the observation answer could not be decoded");
+        if (answer->result.outcome != ores::utility::domain::outcome::ok)
+            return fail(session_errc::read_refused,
+                answer->result.message.empty()
+                    ? std::string("the deployment refused the observations")
+                    : answer->result.message);
+        if (answer->coordinates.size() != answer->values.size()
+            || answer->observed_at.size() != answer->values.size())
+            return fail(session_errc::protocol_error,
+                std::format("the observation answer holds {} values, {} "
+                            "coordinates and {} instants",
+                    answer->values.size(), answer->coordinates.size(),
+                    answer->observed_at.size()));
+
+        std::vector<hedgr::session::transport::market_point> points;
+        points.reserve(answer->values.size());
+        for (std::size_t i = 0; i < answer->values.size(); ++i) {
+            double value = 0.0;
+            if (!parse_curve_value(answer->values[i], value))
+                continue;
+            points.push_back(hedgr::session::transport::market_point{
+                .at_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    answer->observed_at[i].time_since_epoch())
+                             .count(),
+                .value = value,
+                .term = hedgr::session::market::series_term(
+                    answer->coordinates[i])});
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read " << points.size() << " observations of '"
+            << answer->provider_code << "' over " << answer->days
+            << " day(s) for " << uri;
+        return points;
     } catch (const std::exception& e) {
         return transport_failure(e);
     } catch (...) {

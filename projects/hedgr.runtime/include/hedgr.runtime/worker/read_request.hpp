@@ -88,6 +88,22 @@ struct curve_request final {
 
     /** @brief The tenor each member is plotted under. */
     std::vector<std::string> member_tenors;
+
+    /**
+     * @brief The URI of a member whose ladder lives in its observations.
+     *
+     * A member with no tenor of its own is one series that carries the whole
+     * ladder: each observation names the term it is for. Such a series is read
+     * as observations rather than as ticks, because a tick reply names the
+     * coordinate, not the term.
+     */
+    std::string member_uri;
+
+    /** @brief The provider of that series, which scopes the observation read. */
+    std::string member_provider;
+
+    /** @brief The party that owns that series, which the read is entitled by. */
+    std::string member_party;
 };
 
 /** @brief The series the deployment publishes, and their providers. */

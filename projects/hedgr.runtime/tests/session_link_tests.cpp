@@ -145,6 +145,39 @@ TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
     CHECK(fact.message == "no answer");
 }
 
+TEST_CASE("a curve whose ladder is in its observations takes the terms",
+    "[link][term]") {
+    /*
+     * An interest-rate series carries the ladder as observations of one series,
+     * each naming its term, so the terms come from the observations and not
+     * from a tick reply's coordinates. Reading it as ticks answers with the
+     * index tenor alone, which is one point on the plot.
+     */
+    fake_link link;
+    link.observations = {
+        session::market_point{.at_ns = 100, .value = 0.01, .term = "1Y"},
+        session::market_point{.at_ns = 100, .value = 0.03, .term = "10Y"},
+        session::market_point{.at_ns = 200, .value = 0.011, .term = "1Y"},
+        session::market_point{.at_ns = 200, .value = 0.031, .term = "10Y"}};
+
+    model::event::event fact;
+    worker::run_curve_read(link,
+        worker::curve_request{.key = "c",
+            .label = "IR GBP",
+            .member_ids = {"s-curve"},
+            .member_tenors = {""},
+            .member_uri = "oresmd://ir/GBP?type=series&instrument=ir_swap",
+            .member_provider = "bloomberg",
+            .member_party = "p"},
+        fact);
+    CHECK(fact.curve_label == "IR GBP");
+    CHECK(fact.curve_pillars == std::vector<std::string>{"1Y", "10Y"});
+    CHECK(fact.curve_as_of_ns == std::vector<std::int64_t>{100, 200});
+    CHECK(fact.curve_values == std::vector<double>{0.01, 0.03, 0.011, 0.031});
+    CHECK(fact.message.empty());
+    CHECK(link.tail_calls == 0);
+}
+
 TEST_CASE("a published curve is read in one call, not one per tenor",
     "[link][term]") {
     fake_link link;

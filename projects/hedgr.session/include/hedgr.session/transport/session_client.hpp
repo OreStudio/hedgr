@@ -661,6 +661,27 @@ public:
         std::string_view blueprint_id, std::int64_t as_of_ns) const;
 
     /**
+     * @brief A series' observations over the last few calendar days.
+     *
+     * One observation per point of the series, each with its own coordinate and
+     * its term, which is what a ladder needs: an interest-rate series carries
+     * its rungs as observations of one series, not as the coordinates of a tick
+     * reply. The window is the deployment's own, bounded by calendar days, so
+     * the answer is the newest day's ladder and no history older than that.
+     *
+     * @param uri the series' canonical oresmd URI.
+     * @param provider_code the provider to read, or empty for the one that
+     *        carries the series; two carriers are refused as ambiguous.
+     * @param party_id whose observations, or empty for the parties this session
+     *        can see.
+     * @param days how many calendar days the window spans, ending today.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<std::vector<market_point>> market_series_observations(
+        std::string_view uri, std::string_view provider_code,
+        std::string_view party_id, int days) const;
+
+    /**
      * @brief Reads every market data provider and its kind.
      *
      * Pages `marketdata.v1.providers.list` until the deployment's total is

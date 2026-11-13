@@ -39,6 +39,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <set>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -566,6 +567,76 @@ TEST_CASE("live providers: history names one series per provider",
                   : std::format("{} ({})", loose.error().message,
                         loose.error().detail).c_str());
     }
+    std::fflush(stdout);
+    session.disconnect();
+}
+
+/**
+ * @brief What a curve whose ladder lives in its observations reads as.
+ *
+ * An interest-rate series can carry its whole ladder as observations of one
+ * series, each naming its term. That is the source the term structure window
+ * uses for such a series, because a tick reply names the coordinate rather than
+ * the term and would answer with the index tenor alone. This asks for the
+ * observations of every IR series the catalogue lists and prints the terms each
+ * one names.
+ *
+ * Hidden, with the live environment:
+ *
+ *     ... HEDGR_LIVE_* ... hedgr.session.tests "[.live-ir-ladder]"
+ */
+TEST_CASE("live IR: the terms a curve's observations name",
+    "[.live-ir-ladder]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto series = session.market_series(500);
+    REQUIRE(series.has_value());
+    std::size_t seen = 0;
+    for (const auto& row : *series) {
+        if (row.asset_class.empty() || row.asset_class != "IR")
+            continue;
+        const auto read = session.market_series_observations(row.oresmd_uri,
+            row.provider_code, {}, 5);
+        if (!read) {
+            std::printf("'%s' failed: %s\n", row.label.c_str(),
+                read.error().message.c_str());
+            continue;
+        }
+        std::set<std::string> terms;
+        for (const auto& point : *read)
+            if (!point.term.empty())
+                terms.insert(point.term);
+        std::printf("'%s' (%s): %zu observations, %zu terms:", row.label.c_str(),
+            row.provider_code.c_str(), read->size(), terms.size());
+        for (const auto& term : terms)
+            std::printf(" %s", term.c_str());
+        std::printf("\n");
+        if (++seen == 5)
+            break;
+    }
+    std::printf("read %zu IR series\n", seen);
     std::fflush(stdout);
     session.disconnect();
 }

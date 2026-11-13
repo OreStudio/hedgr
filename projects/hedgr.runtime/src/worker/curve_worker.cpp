@@ -49,6 +49,15 @@ namespace {
  */
 constexpr std::uint32_t curve_instants = 32;
 
+/**
+ * @brief How many calendar days of observations a ladder's read spans.
+ *
+ * An observation window is bounded by days and ends today, and the synthetic
+ * feed writes one ladder a day, so this is also how many curves the plot can
+ * overlay. The newest instant is the one a desk reads.
+ */
+constexpr int curve_observation_days = 5;
+
 [[nodiscard]] constexpr double curve_gap() {
     return std::numeric_limits<double>::quiet_NaN();
 }
@@ -156,6 +165,52 @@ void run_curve_read(hedgr::session::transport::session_link& link,
      */
     constexpr std::size_t max_history = model::state::curve_history_limit;
     pillar_history by_term;
+
+    /*
+     * A member with no tenor of its own is one series that carries the whole
+     * ladder, and the ladder is in its observations: each names the term it is
+     * for. A tick reply names the coordinate rather than the term, so reading
+     * one as ticks answers with the series' index tenor and nothing else.
+     */
+    if (!request.member_uri.empty()) {
+        const auto read = link.market_series_observations(request.member_uri,
+            request.member_provider, request.member_party,
+            curve_observation_days);
+        if (!read) {
+            answer.message = read.error().message.empty()
+                ? read.error().detail : read.error().message;
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The observations of curve '" << request.key
+                << "' failed: " << answer.message;
+            return;
+        }
+        for (const auto& point : *read) {
+            if (point.term.empty())
+                continue;
+            by_term[point.term][point.at_ns] = point.value;
+        }
+        auto reading = build_curve(by_term, max_history);
+        if (reading.pillars.empty()) {
+            answer.message = "the curve's observations name no term";
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Curve '" << request.key << "' read " << read->size()
+                << " observations and no term";
+            return;
+        }
+        if (!request.label.empty())
+            reading.label = request.label;
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Curve '" << request.key << "' from " << read->size()
+            << " observations (" << reading.label << "): "
+            << reading.pillars.size() << " pillars, "
+            << reading.as_of_ns.size() << " instants";
+        answer.curve_label = std::move(reading.label);
+        answer.curve_pillars = std::move(reading.pillars);
+        answer.curve_as_of_ns = std::move(reading.as_of_ns);
+        answer.curve_values = std::move(reading.values);
+        return;
+    }
+
     const auto count = std::min(request.member_ids.size(),
         request.member_tenors.size());
     for (std::size_t i = 0; i < count; ++i) {
