@@ -11,7 +11,7 @@
 
   <div class="titlebar">
     <span class="flag" title="Euro">
-      <svg width="20" height="14" viewBox="0 0 60 40"><rect width="60" height="40" fill="#003399"/><g fill="#FFCC00"><circle cx="30" cy="20" r="9" fill="none" stroke="#FFCC00" stroke-width="1.5"/><circle cx="30" cy="13" r="1"/><circle cx="30" cy="27" r="1"/><circle cx="24" cy="16" r="1"/><circle cx="36" cy="16" r="1"/><circle cx="24" cy="24" r="1"/><circle cx="36" cy="24" r="1"/></g></svg>
+      <svg width="20" height="14" viewBox="0 0 60 40"><rect width="60" height="40" fill="#003399"/><circle cx="30" cy="20" r="9" fill="none" stroke="#FFCC00" stroke-width="1.5"/><g fill="#FFCC00"><circle cx="30" cy="13" r="1"/><circle cx="30" cy="27" r="1"/><circle cx="24" cy="16" r="1"/><circle cx="36" cy="16" r="1"/><circle cx="24" cy="24" r="1"/><circle cx="36" cy="24" r="1"/></g></svg>
     </span>
     <span class="flag" title="US Dollar">
       <svg width="20" height="14" viewBox="0 0 60 32"><rect width="60" height="32" fill="#fff"/><g fill="#B22234"><rect width="60" height="2.5" y="0"/><rect width="60" height="2.5" y="5"/><rect width="60" height="2.5" y="10"/><rect width="60" height="2.5" y="15"/><rect width="60" height="2.5" y="20"/><rect width="60" height="2.5" y="25"/><rect width="60" height="2.5" y="30"/></g><rect width="24" height="17" fill="#3C3B6E"/></svg>
@@ -19,8 +19,8 @@
     <h1>EURUSD_SSVI</h1>
     <span class="kind">Vol Surface</span>
     <span class="spacer"></span>
-    <span class="badge stale">NOTHING PUBLISHED</span>
-    <span class="badge">AS OF 2026-11-13 14:31:07Z</span>
+    <span class="badge stale">STALE · published 1 day ago</span>
+    <span class="badge">AS OF 2026-11-12 16:00:00Z</span>
   </div>
 
   <div class="meta">
@@ -34,97 +34,154 @@
     <span class="sep">|</span>
     <span>Grid <b>7 × 5</b></span>
     <span class="sep">|</span>
-    <span>Blueprint <b>de7e756a…</b></span>
+    <span>Range <b>7.49% – 10.57%</b></span>
   </div>
 
   <div class="toolbar">
     <span class="tabs">
       <span class="tab active">Surface</span>
-      <span class="tab">Smile</span>
       <span class="tab">Grid</span>
+      <span class="tab">Smile</span>
     </span>
     <span class="spacer" style="flex:1"></span>
-    <span class="select">Expiry 1M</span>
+    <span class="select">Y axis vol</span>
     <span class="select">Strikes delta</span>
     <span class="select">Colour by vol</span>
   </div>
 
-  <!-- The surface itself: strikes across, expiries away, vol as height and colour. -->
+  <!-- The surface: a boxed frame with ticks on all three axes, the mesh over
+       the shading, and a slight perspective. This is what ImPlot has to give
+       us; the mockup is the reference for it. -->
   <div class="panel" style="border-top:none">
-    <h2>Surface · 0.0800 — 0.1760</h2>
-    <svg viewBox="0 0 1100 260" width="100%" height="260" role="img" aria-label="EUR/USD vol surface">
-      <defs>
-        <linearGradient id="vol" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#1e3a8a"/>
-          <stop offset="55%" stop-color="#6d28d9"/>
-          <stop offset="100%" stop-color="#c084fc"/>
-        </linearGradient>
-      </defs>
-      <!-- A fixed isometric carpet: five strikes across, seven expiries deep. -->
-      <g stroke="#0b1020" stroke-width="1">
-        <polygon points="140,190 320,160 470,190 290,222" fill="url(#vol)" opacity="0.98"/>
-        <polygon points="320,160 500,132 650,164 470,190" fill="url(#vol)" opacity="0.94"/>
-        <polygon points="500,132 680,110 830,146 650,164" fill="url(#vol)" opacity="0.90"/>
-        <polygon points="680,110 860,94 1010,134 830,146" fill="url(#vol)" opacity="0.86"/>
-        <polygon points="290,222 470,190 620,214 440,244" fill="url(#vol)" opacity="0.92"/>
-        <polygon points="470,190 650,164 800,192 620,214" fill="url(#vol)" opacity="0.88"/>
-        <polygon points="650,164 830,146 980,178 800,192" fill="url(#vol)" opacity="0.84"/>
-        <polygon points="440,244 620,214 770,234 590,258" fill="url(#vol)" opacity="0.82"/>
-        <polygon points="620,214 800,192 950,216 770,234" fill="url(#vol)" opacity="0.78"/>
-        <polygon points="590,258 770,234 920,250 740,266" fill="url(#vol)" opacity="0.70"/>
+    <h2>Surface · strikes × expiries × vol</h2>
+    <svg viewBox="0 0 1100 380" width="100%" height="380" role="img"
+         aria-label="EUR/USD volatility surface, boxed 3D frame with mesh">
+      <g stroke="#333c52" stroke-width="1" fill="none">
+      <line x1="550.0" y1="235.6" x2="913.1" y2="119.9"/>
+      <line x1="550.0" y1="235.6" x2="299.1" y2="84.2"/>
+      <line x1="550.0" y1="235.6" x2="550.0" y2="503.5" stroke-dasharray="3 4"/>
+      <line x1="913.1" y1="119.9" x2="633.6" y2="4.3"/>
+      <line x1="299.1" y1="84.2" x2="633.6" y2="4.3"/>
+      <line x1="913.1" y1="119.9" x2="889.3" y2="361.2" stroke-dasharray="3 4"/>
+      <line x1="299.1" y1="84.2" x2="314.8" y2="316.7" stroke-dasharray="3 4"/>
+      <line x1="633.6" y1="4.3" x2="628.9" y2="216.0" stroke-dasharray="3 4"/>
+      <line x1="550.0" y1="503.5" x2="889.3" y2="361.2" stroke-dasharray="3 4"/>
+      <line x1="550.0" y1="503.5" x2="314.8" y2="316.7" stroke-dasharray="3 4"/>
+      <line x1="889.3" y1="361.2" x2="628.9" y2="216.0" stroke-dasharray="3 4"/>
+      <line x1="314.8" y1="316.7" x2="628.9" y2="216.0" stroke-dasharray="3 4"/>
       </g>
-      <g fill="#5c6575" font-family="JetBrains Mono, monospace" font-size="10">
-        <text x="126" y="286">DEL/Spot/Put/25</text>
-        <text x="300" y="288">ATM</text>
-        <text x="470" y="270">DEL/Spot/Call/25</text>
-        <text x="640" y="196">1W</text>
-        <text x="700" y="146">1M</text>
-        <text x="760" y="112">3M</text>
-        <text x="820" y="86">6M</text>
-        <text x="880" y="66">1Y</text>
-        <text x="40" y="60" fill="#8b949e">0.1760</text>
-        <text x="40" y="250" fill="#5c6575">0.0800</text>
+      <g>
+      <polygon points="348.0,336.7 431.6,205.1 396.0,189.0 314.8,316.7" fill="#9871e0" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="431.6,205.1 515.6,138.5 478.2,124.7 396.0,189.0" fill="#645abb" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="515.6,138.5 595.9,112.0 557.2,99.3 478.2,124.7" fill="#5452b0" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="595.9,112.0 669.7,146.7 630.7,133.6 557.2,99.3" fill="#675bbd" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="383.2,357.3 469.5,221.5 431.6,205.1 348.0,336.7" fill="#936fdc" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="469.5,221.5 555.3,152.5 515.6,138.5 431.6,205.1" fill="#5f57b8" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="555.3,152.5 636.8,124.7 595.9,112.0 515.6,138.5" fill="#4f50ac" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="636.8,124.7 711.0,159.8 669.7,146.7 595.9,112.0" fill="#6259ba" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="420.8,378.2 509.8,237.8 469.5,221.5 383.2,357.3" fill="#8d6dd8" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="509.8,237.8 597.6,166.2 555.3,152.5 469.5,221.5" fill="#5955b4" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="597.6,166.2 680.4,137.2 636.8,124.7 555.3,152.5" fill="#494da8" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="680.4,137.2 754.8,172.8 711.0,159.8 636.8,124.7" fill="#5c56b6" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="460.8,398.8 552.9,253.5 509.8,237.8 420.8,378.2" fill="#876ad4" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="552.9,253.5 642.7,179.2 597.6,166.2 509.8,237.8" fill="#5352af" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="642.7,179.2 726.9,148.8 680.4,137.2 597.6,166.2" fill="#434aa4" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="726.9,148.8 801.4,184.9 754.8,172.8 680.4,137.2" fill="#5653b1" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="503.7,417.7 599.1,266.9 552.9,253.5 460.8,398.8" fill="#7e66ce" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="599.1,266.9 691.3,189.5 642.7,179.2 552.9,253.5" fill="#4b4ea9" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="691.3,189.5 776.8,157.7 726.9,148.8 642.7,179.2" fill="#3a479e" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="776.8,157.7 851.3,194.6 801.4,184.9 726.9,148.8" fill="#4d4fab" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="550.0,416.8 649.6,259.2 599.1,266.9 503.7,417.7" fill="#6e5ec2" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="649.6,259.2 744.6,178.6 691.3,189.5 599.1,266.9" fill="#3b479e" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="744.6,178.6 832.0,145.8 776.8,157.7 691.3,189.5" fill="#2a3f92" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      <polygon points="832.0,145.8 906.7,184.8 851.3,194.6 776.8,157.7" fill="#3d48a0" fill-opacity="0.92" stroke="#0b1020" stroke-width="1"/>
+      </g>
+      <g fill="none" stroke="#e6edf3" stroke-opacity="0.30" stroke-width="1">
+      <polyline points="550.0,416.8 649.6,259.2 744.6,178.6 832.0,145.8 906.7,184.8"/>
+      <polyline points="503.7,417.7 599.1,266.9 691.3,189.5 776.8,157.7 851.3,194.6"/>
+      <polyline points="460.8,398.8 552.9,253.5 642.7,179.2 726.9,148.8 801.4,184.9"/>
+      <polyline points="420.8,378.2 509.8,237.8 597.6,166.2 680.4,137.2 754.8,172.8"/>
+      <polyline points="383.2,357.3 469.5,221.5 555.3,152.5 636.8,124.7 711.0,159.8"/>
+      <polyline points="348.0,336.7 431.6,205.1 515.6,138.5 595.9,112.0 669.7,146.7"/>
+      <polyline points="314.8,316.7 396.0,189.0 478.2,124.7 557.2,99.3 630.7,133.6"/>
+      <polyline points="550.0,416.8 503.7,417.7 460.8,398.8 420.8,378.2 383.2,357.3 348.0,336.7 314.8,316.7"/>
+      <polyline points="649.6,259.2 599.1,266.9 552.9,253.5 509.8,237.8 469.5,221.5 431.6,205.1 396.0,189.0"/>
+      <polyline points="744.6,178.6 691.3,189.5 642.7,179.2 597.6,166.2 555.3,152.5 515.6,138.5 478.2,124.7"/>
+      <polyline points="832.0,145.8 776.8,157.7 726.9,148.8 680.4,137.2 636.8,124.7 595.9,112.0 557.2,99.3"/>
+      <polyline points="906.7,184.8 851.3,194.6 801.4,184.9 754.8,172.8 711.0,159.8 669.7,146.7 630.7,133.6"/>
+      </g>
+      <g fill="#8b949e" font-family="JetBrains Mono, monospace" font-size="10">
+      <text x="24" y="96" fill="#5c6575" letter-spacing="0.08em">VOL</text>
+      <text x="24" y="116" fill="#8b949e">10.57%</text>
+      <text x="24" y="300" fill="#5c6575">7.49%</text>
       </g>
     </svg>
+    <div class="axis-strip">
+      <span><b>Strikes</b> 10D put · 25D put · ATM · 25D call · 10D call</span>
+      <span><b>Expiries</b> 1W · 1M · 2M · 3M · 6M · 9M · 1Y</span>
+      <span><b>Vol</b> 7.49% – 10.57%</span>
+    </div>
+  </div>
+
+  <!-- The grid: the numbers the surface is drawn from, one row per expiry. -->
+  <div class="panel">
+    <h2>Grid · 7 × 5</h2>
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Expiry</th>
+          <th title="DEL/Spot/Put/10">10D put</th><th title="DEL/Spot/Put/25">25D put</th><th title="ATM">ATM</th><th title="DEL/Spot/Call/25">25D call</th><th title="DEL/Spot/Call/10">10D call</th>
+          <th>ATM mid</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr><td class="left">1W</td><td class="num">9.520</td><td class="num">8.113</td><td class="num">7.550</td><td class="num">7.493</td><td class="num">8.280</td><td class="dim">7.550</td></tr>
+          <tr><td class="left">1M</td><td class="num">9.949</td><td class="num">8.542</td><td class="num">7.979</td><td class="num">7.922</td><td class="num">8.709</td><td class="dim">7.979</td></tr>
+          <tr><td class="left">2M</td><td class="num">10.126</td><td class="num">8.719</td><td class="num">8.156</td><td class="num">8.099</td><td class="num">8.886</td><td class="dim">8.156</td></tr>
+          <tr><td class="left">3M</td><td class="num">10.262</td><td class="num">8.856</td><td class="num">8.292</td><td class="num">8.236</td><td class="num">9.022</td><td class="dim">8.292</td></tr>
+          <tr><td class="left">6M</td><td class="num">10.377</td><td class="num">8.970</td><td class="num">8.407</td><td class="num">8.350</td><td class="num">9.137</td><td class="dim">8.407</td></tr>
+          <tr><td class="left">9M</td><td class="num">10.479</td><td class="num">9.072</td><td class="num">8.509</td><td class="num">8.452</td><td class="num">9.239</td><td class="dim">8.509</td></tr>
+          <tr><td class="left">1Y</td><td class="num">10.570</td><td class="num">9.163</td><td class="num">8.600</td><td class="num">8.543</td><td class="num">9.330</td><td class="dim">8.600</td></tr>
+      </tbody>
+    </table>
   </div>
 
   <!-- One expiry as a curve: the smile is how a vol desk reads a surface. -->
   <div class="panel">
     <h2>Smile · 1M</h2>
     <div class="legend">
-      <span class="key"><span class="swatch"></span>EURUSD_SSVI, 1M</span>
-      <span class="dim">ATM 0.0891 · 25D put 0.0924 · 25D call 0.0877</span>
+      <span class="key"><span class="swatch" style="background:#f0abfc"></span>EURUSD_SSVI, 1M</span>
+      <span class="dim">ATM 7.550% · 1Y ATM 8.600%</span>
     </div>
     <svg viewBox="0 0 1100 140" width="100%" height="140" role="img" aria-label="EUR/USD 1M smile">
       <g stroke="#262d3d" stroke-width="1">
         <line x1="40" y1="110" x2="1080" y2="110"/>
         <line x1="40" y1="20" x2="40" y2="110"/>
       </g>
-      <path d="M80,52 L300,74 L560,96 L820,80 L1040,44" fill="none" stroke="#f0abfc" stroke-width="2"/>
+      <path d="M80,44 L300,70 L560,92 L820,74 L1040,46" fill="none" stroke="#f0abfc" stroke-width="2"/>
       <g fill="#f0abfc">
-        <circle cx="80" cy="52" r="2.5"/><circle cx="300" cy="74" r="2.5"/>
-        <circle cx="560" cy="96" r="2.5"/><circle cx="820" cy="80" r="2.5"/>
-        <circle cx="1040" cy="44" r="2.5"/>
+        <circle cx="80" cy="44" r="2.5"/><circle cx="300" cy="70" r="2.5"/>
+        <circle cx="560" cy="92" r="2.5"/><circle cx="820" cy="74" r="2.5"/>
+        <circle cx="1040" cy="46" r="2.5"/>
       </g>
       <g fill="#5c6575" font-family="JetBrains Mono, monospace" font-size="10">
         <text x="52" y="130">10D put</text><text x="272" y="130">25D put</text>
         <text x="532" y="130">ATM</text><text x="792" y="130">25D call</text>
         <text x="1000" y="130">10D call</text>
-        <text x="46" y="30" fill="#8b949e">0.0940</text>
-        <text x="46" y="106" fill="#5c6575">0.0870</text>
       </g>
     </svg>
   </div>
 
   <div class="foot">
-    <span class="led" style="background:#5c6575"></span>
+    <span class="led"></span>
     <span>tenant_admin@acme_corporation</span>
     <span class="dim">Acting as</span>
     <span class="badge">ACME Corporation UK plc</span>
     <span class="spacer"></span>
-    <span class="hint">no surface is published at or before this instant — calibrating is a write on the deployment</span>
+    <span class="hint">prototype data · brave_hopper has published no surface</span>
     <span class="badge">Copy CSV</span>
   </div>
 </div>
 </body>
 </html>
+
