@@ -67,6 +67,22 @@ currency: `TRY-TLREF`, `CHF-SARON`, `AUD-AONIA`, …), seven pillars each, and
 `get_published_curve_sets` answered one instant per curve with `discount`
 values. `hedgr.session.tests "[.live-curves]"` is the probe.
 
+## The currency flag
+
+The flag on a curve window is read from the series' identity, not from its name.
+`identity.scope` is the schema's subject field - the currency of a rate, the base
+of a spot - so `IR AUD DISCOUNT AUD-AONIA` shows the Australian flag because the
+deployment says the subject is `AUD`. A window that holds only a name and a series
+key (a chart, a term structure, a card, a browser row) looks the key up in the
+session's catalogue and reads the identity from that row. A published curve is not
+a catalogue row and falls back to its name; the fallback is logged once, with the
+reason.
+
+Against `brave_hopper` on 2026-11-13 every IR row's identity carried its currency
+as the subject (`subject='AUD'`, `subject='USD'`, …), and `OREData`'s fx schema
+names `unit_ccy` the subject and `ccy` the quote. `hedgr.runtime.tests
+"[.live-curve-shape]"` with `HEDGR_LIVE_ROW` prints both.
+
 ## The surface slices reuse this shape
 
 A volatility surface is a curve in two dimensions: pillars become a tenor axis

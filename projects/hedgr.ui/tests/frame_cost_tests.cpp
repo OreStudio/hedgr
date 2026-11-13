@@ -249,7 +249,8 @@ struct flag_draw final {
     std::vector<std::string> asked;
 };
 
-flag_draw draw_flags_for(desk& desk, std::string_view label) {
+flag_draw draw_flags_for(desk& desk,
+    const hedgr::ui::widget::currency_pair& currencies) {
     flag_draw result;
     auto input = desk.input();
     const auto gets_before = desk.textures.gets;
@@ -258,7 +259,7 @@ flag_draw draw_flags_for(desk& desk, std::string_view label) {
         const auto vertices_before = list->VtxBuffer.Size;
         const auto cursor_before = ImGui::GetCursorPosY();
         const auto cursor_x_before = ImGui::GetCursorPosX();
-        render::draw_series_flags(input, desk.session, label);
+        render::draw_series_flags(input, desk.session, currencies);
         result.vertices = list->VtxBuffer.Size - vertices_before;
         result.cursor_moved = ImGui::GetCursorPosY() - cursor_before;
         result.cursor_x_moved = ImGui::GetCursorPosX() - cursor_x_before;
@@ -278,13 +279,13 @@ TEST_CASE("a currency is drawn from its server image once it loads",
     desk desk;
     desk.currency_images.set("t", {{"TWD", "img-tw"}});
 
-    const auto before = draw_flags_for(desk, "IR TWD IR_SWAP");
+    const auto before = draw_flags_for(desk, {"TWD", ""});
     CHECK(before.asked == std::vector<std::string>{"img-tw"});
     CHECK(before.vertices == 0);
 
     static_cast<void>(desk.images.put("t", "img-tw", {.mime_type = "image/svg+xml",
         .data = std::vector<std::uint8_t>(4, 3)}));
-    const auto after = draw_flags_for(desk, "IR TWD IR_SWAP");
+    const auto after = draw_flags_for(desk, {"TWD", ""});
     CHECK(after.asked.empty());
     CHECK(after.texture_gets == 1);
     CHECK(after.vertices > 0);
@@ -297,7 +298,7 @@ TEST_CASE("a currency with no server image draws nothing and ends the row",
     desk desk;
     desk.currency_images.set("t", {{"GBP", "img-gb"}});
 
-    const auto drawn = draw_flags_for(desk, "IR TWD IR_SWAP");
+    const auto drawn = draw_flags_for(desk, {"TWD", ""});
 
     CHECK(drawn.asked.empty());
     CHECK(drawn.texture_gets == 0);

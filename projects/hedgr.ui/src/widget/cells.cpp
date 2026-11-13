@@ -356,6 +356,10 @@ ImVec2 value_pill_size(std::string_view text) {
     return measure_pill(bold_at(pill_scale), text);
 }
 
+float value_pill_height() {
+    return pill_height(bold_at(pill_scale));
+}
+
 void value_pill(std::string_view text, theme::tone tone) {
     const face f = bold_at(pill_scale);
     const ImVec2 size = measure_pill(f, text);

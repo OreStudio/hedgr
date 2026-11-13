@@ -533,8 +533,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     open_curve(input, *session, curve);
                 }
                 const float row_y = ImGui::GetItemRectMin().y;
-                request_flags(input, *session, label);
-                const auto pair = hedgr::ui::widget::currencies_of(label);
+                const auto pair =
+                    currencies_of_series(input, *session, curve.id, label);
+                request_flags(input, *session, pair);
                 const float label_end = draw_series_row(label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
@@ -549,9 +550,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 if (ImGui::Selectable("##published-row"))
                     request_published_curve_window(input, *session, curve);
                 const float row_y = ImGui::GetItemRectMin().y;
-                request_flags(input, *session, curve.label);
-                const auto pair =
-                    hedgr::ui::widget::currencies_of(curve.label);
+                const auto pair = currencies_of_series(input, *session,
+                    curve.series_id, curve.label);
+                request_flags(input, *session, pair);
                 const float label_end = draw_series_row(curve.label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
@@ -582,7 +583,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             for (const auto at : curves) {
                 const auto& curve = rows[at];
                 const auto& label = curve_label_of(curve);
-                request_flags(input, *session, label);
+                const auto pair =
+                    currencies_of_series(input, *session, curve.id, label);
+                request_flags(input, *session, pair);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::PushID(curve.id.c_str());
@@ -591,7 +594,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::Selectable("##curve", chosen,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick);
-                const auto pair = hedgr::ui::widget::currencies_of(label);
                 draw_series_row(label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
@@ -615,8 +617,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::Selectable("##published", false,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick);
-                const auto pair =
-                    hedgr::ui::widget::currencies_of(curve.label);
+                const auto pair = currencies_of_series(input, *session,
+                    curve.series_id, curve.label);
                 draw_series_row(curve.label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
@@ -695,8 +697,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     request_series_window(input, *session, domain::window_kind::chart,
                         row->id, row->label);
                 }
-                request_flags(input, *session, row->label);
-                const auto pair = hedgr::ui::widget::currencies_of(row->label);
+                const auto pair =
+                    currencies_of_series(input, *session, row->id, row->label);
+                request_flags(input, *session, pair);
                 draw_series_row(row->label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
@@ -734,7 +737,6 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
                 ++index) {
                 const auto* row = &rows[visible[static_cast<std::size_t>(index)]];
-                request_flags(input, *session, row->label);
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::PushID(row->id.c_str());
@@ -742,7 +744,9 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick
                         | ImGuiSelectableFlags_AllowOverlap);
-                const auto pair = hedgr::ui::widget::currencies_of(row->label);
+                const auto pair =
+                    currencies_of_series(input, *session, row->id, row->label);
+                request_flags(input, *session, pair);
                 draw_series_row(row->label, 0.0f,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));

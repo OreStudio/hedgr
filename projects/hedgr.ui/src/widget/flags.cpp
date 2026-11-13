@@ -37,6 +37,27 @@ namespace {
 
 }
 
+currency_pair currencies_of(
+    const hedgr::model::domain::market_series_identity& identity) {
+    /*
+     * The subject is what the series is about, in the deployment's vocabulary:
+     * a rate's currency, a spot's base, a default's reference entity. The
+     * schema names the field, so the pair is read from the identity and never
+     * from the characters of a name.
+     */
+    currency_pair pair;
+    pair.base = iso_code(identity.scope);
+    for (const auto& field : identity.fields) {
+        if (field.name == "ccy") {
+            pair.quote = iso_code(field.text);
+            break;
+        }
+    }
+    if (pair.base.empty())
+        pair.quote.clear();
+    return pair;
+}
+
 currency_pair currencies_of(std::string_view label) {
     /*
      * The label is the interface's reading of a series URI, and it says the

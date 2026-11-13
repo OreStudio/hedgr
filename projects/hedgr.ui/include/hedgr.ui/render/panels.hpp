@@ -25,6 +25,7 @@
 #include "hedgr.model/domain/window.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/export.hpp"
+#include "hedgr.ui/widget/flags.hpp"
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "hedgr.ui/widget/view_state.hpp"
 #include <cstdint>
@@ -186,13 +187,34 @@ identity_of(const render_input& input,
 identity_text(const identity_bar_state& state);
 
 /**
- * @brief Asks the runtime for the flags a label names, once each.
+ * @brief The currencies a series names, read from the identity the deployment
+ * gave it.
+ *
+ * A screen holds a series' key and its name, and the identity is the
+ * catalogue's: the subject field the deployment named, plus the fields beside
+ * it. The key is looked up in the session's catalogue and the pair is read from
+ * the row, so a screen never parses a label to guess a currency.
+ *
+ * The label is read only where the catalogue cannot answer: a row the session's
+ * catalogue does not list yet, or a published curve, which is one calibrated
+ * object rather than a series and so is not a catalogue row. Falling back is
+ * logged, because a screen with the wrong flag is then a data question and not
+ * a drawing one.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::ui::widget::currency_pair
+currencies_of_series(const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view series_id,
+    std::string_view label);
+
+/**
+ * @brief Asks the runtime for the flags of a pair, once each.
  *
  * A flag is an assets image; the screen cannot block on one, so it asks and
  * draws no flag until the answer lands.
  */
 HEDGR_UI_EXPORT void request_flags(const render_input& input,
-    hedgr::model::state::session_handle session, std::string_view label);
+    hedgr::model::state::session_handle session,
+    const hedgr::ui::widget::currency_pair& pair);
 
 /**
  * @brief Asks the runtime for one currency's flag, once.
@@ -208,7 +230,7 @@ image_texture(const render_input& input,
     hedgr::model::state::session_handle session, std::string_view currency);
 
 /**
- * @brief Draws a label's currency flags at the right edge of the current line.
+ * @brief Draws a pair's currency flags at the right edge of the current line.
  *
  * Both market-data screens put their flags at the right of the heading rather
  * than in front of its name: the name is what the reader came for, and a flag
@@ -223,13 +245,13 @@ image_texture(const render_input& input,
  * whose right end holds controls.
  */
 HEDGR_UI_EXPORT void draw_series_flags(const render_input& input,
-    const hedgr::model::state::session_handle session, std::string_view label,
-    float inset = 0.0f);
+    const hedgr::model::state::session_handle session,
+    const hedgr::ui::widget::currency_pair& pair, float inset = 0.0f);
 
 /** @brief The width @c draw_series_flags takes, zero while no flag is loaded. */
 [[nodiscard]] HEDGR_UI_EXPORT float series_flags_width(
     const render_input& input, hedgr::model::state::session_handle session,
-    std::string_view label);
+    const hedgr::ui::widget::currency_pair& pair);
 
 [[nodiscard]] HEDGR_UI_EXPORT bool sign_in_needs_password(
     hedgr::model::domain::store_lock lock, bool has_credential) noexcept;

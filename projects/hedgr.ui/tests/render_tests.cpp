@@ -1114,7 +1114,7 @@ TEST_CASE("a flag request asks for the image the map names", "[flags]") {
         {{"GBP", "image-gbp"}, {"USD", "image-usd"}});
     auto input = input_with(state, store_lock::unlocked);
 
-    request_flags(input, session, "FX GBP/USD");
+    request_flags(input, session, {"GBP", "USD"});
     auto queued = state.commands.drain();
     REQUIRE(queued.size() == 2);
     CHECK(queued[0].kind == command_kind::load_image);
@@ -1124,7 +1124,7 @@ TEST_CASE("a flag request asks for the image the map names", "[flags]") {
 
     state.pending_images.insert(make_tenant_key("tenant-1", "image-gbp"));
     state.pending_images.insert(make_tenant_key("tenant-1", "image-usd"));
-    request_flags(input, session, "FX GBP/USD");
+    request_flags(input, session, {"GBP", "USD"});
     CHECK(state.commands.size() == 0);
 }
 

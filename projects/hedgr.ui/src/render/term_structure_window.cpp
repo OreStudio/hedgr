@@ -147,7 +147,15 @@ void render_term_structure(window_handle handle, const render_input& input,
         ImGui::Text("%zu", pillars);
     }
     ImGui::SameLine();
-    draw_series_flags(input, *session, terms->label);
+    /*
+     * Every rung of a curve shares one subject, so the first rung's identity
+     * names the curve's currency. A published curve is not a catalogue row and
+     * has no rung to ask, so it falls back to its name.
+     */
+    const std::string_view flags_series = terms->member_ids.empty()
+        ? std::string_view{} : std::string_view{terms->member_ids.front()};
+    draw_series_flags(input, *session,
+        currencies_of_series(input, *session, flags_series, terms->label));
 
     const float foot_height = widget::status_foot_height(status, foot);
     const ImVec2 available = ImGui::GetContentRegionAvail();

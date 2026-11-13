@@ -97,15 +97,15 @@ struct card_layout final {
 
 /** @brief Draws the flags and the pair chip, and returns the row's height. */
 void draw_header(const render_input& input,
-    std::optional<state::session_handle> session, std::string_view label,
+    std::optional<state::session_handle> session,
+    const hedgr::ui::widget::currency_pair& currencies, std::string_view label,
     ImVec2 at, float width) {
-    const float pill_h = widget::value_pill_size(label).y;
+    const float pill_h = widget::value_pill_height();
     float chip_x = at.x;
     if (session) {
-        request_flags(input, *session, label);
-        const auto pair = widget::currencies_of(label);
-        const auto base = image_texture(input, *session, pair.base);
-        const auto quote = image_texture(input, *session, pair.quote);
+        request_flags(input, *session, currencies);
+        const auto base = image_texture(input, *session, currencies.base);
+        const auto quote = image_texture(input, *session, currencies.quote);
         const float flag_h = pill_h * theme::flag_height_fraction;
         const float flags_w = widget::flag_pair_width(flag_h, base, quote);
         const float gap = ImGui::GetStyle().ItemSpacing.x;
@@ -343,7 +343,7 @@ void render_mini_plot(window_handle handle, const render_input& input,
     const bool has_points = !reading && points.size > 0;
 
     const std::string_view label = card->label;
-    const float header = widget::value_pill_size(label).y;
+    const float header = widget::value_pill_height();
     const card_layout l = lay_out(origin, size, header, has_points);
 
     ImGuiWindow* const window = ImGui::GetCurrentWindow();
@@ -379,7 +379,12 @@ void render_mini_plot(window_handle handle, const render_input& input,
             l.line_max,
             ImGui::ColorConvertFloat4ToU32(theme::chart_line_colour()));
 
-    draw_header(input, session, label, l.min, l.max.x - l.min.x);
+    auto currencies = hedgr::ui::widget::currency_pair{};
+    if (session)
+        currencies = currencies_of_series(input, *session, card->series_id,
+            label);
+    draw_header(input, session, currencies, label, l.min,
+        l.max.x - l.min.x);
     const float below_header = l.min.y + l.header + l.gap;
     if (has_points) {
         ImGui::SetCursorScreenPos(ImVec2(l.min.x, below_header));
