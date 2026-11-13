@@ -42,9 +42,10 @@ currency_pair currencies_of(std::string_view label) {
      * The label is the interface's reading of a series URI, and it says the
      * currency in different places for different assets: `FX GBP/USD` carries a
      * pair, `IR AUD 1D` names one currency beside the asset, and a curve's own
-     * name can carry it inside a hyphen - `IR AUD DISCOUNT AUD-AONIA`. So a
-     * word holding a slash is the pair, and otherwise the first ISO-shaped word
-     * is the one currency; the rest of the words are names, not codes.
+     * name carries it inside a hyphen - the window is titled `AUD-AONIA`, which
+     * is one word and only its first half is a currency. So a word holding a
+     * slash is the pair, and otherwise every part of a word, split at hyphens
+     * and underscores, is looked at for the one currency.
      */
     currency_pair pair;
     auto word_start = std::size_t{0};
@@ -61,8 +62,17 @@ currency_pair currencies_of(std::string_view label) {
             return {iso_code(word.substr(0, slash)),
                 iso_code(word.substr(slash + 1))};
         }
-        if (pair.base.empty())
-            pair.base = iso_code(word);
+        auto part_start = std::size_t{0};
+        for (std::size_t j = 0; j <= word.size(); ++j) {
+            const bool part_end = j == word.size() || word[j] == '-'
+                || word[j] == '_';
+            if (!part_end)
+                continue;
+            const auto part = word.substr(part_start, j - part_start);
+            part_start = j + 1;
+            if (pair.base.empty())
+                pair.base = iso_code(part);
+        }
     }
     return pair;
 }

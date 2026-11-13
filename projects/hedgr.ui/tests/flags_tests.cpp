@@ -54,6 +54,10 @@ TEST_CASE("a label with no currency names none", "[flags]") {
 TEST_CASE("any ISO shaped currency is named", "[flags]") {
     CHECK(currencies_of("IR TWD IR_SWAP").base == "TWD");
     CHECK(currencies_of("FX TWD/USD").base == "TWD");
+    /* The window is titled with the curve's own name, and only its head is a
+     * currency: `AUD-AONIA` is the label the log shows. */
+    CHECK(currencies_of("AUD-AONIA").base == "AUD");
+    CHECK(currencies_of("IR AUD DISCOUNT AUD-AONIA").base == "AUD");
 }
 
 TEST_CASE("a word that is not a currency code is not named", "[flags]") {
