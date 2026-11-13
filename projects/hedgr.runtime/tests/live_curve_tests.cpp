@@ -213,6 +213,27 @@ TEST_CASE("live curve: the rungs a curve's series name", "[.live-curve-shape]") 
             std::printf("\n");
         }
     }
+
+    /*
+     * A label that names several rows: what tells them apart? If it is a time,
+     * the browser has to show the time, because four rows under one name are
+     * four curves a person cannot tell apart.
+     */
+    if (const auto* label = std::getenv("HEDGR_LIVE_ROW")) {
+        std::size_t printed = 0;
+        for (const auto& row : *catalogue) {
+            if (row.label != label)
+                continue;
+            std::printf("row %s tenor='%s' curve_key='%s' curve_label='%s'\n",
+                row.id.c_str(), row.tenor.c_str(), row.curve_key.c_str(),
+                row.curve_label.c_str());
+            for (const auto& field : row.identity.fields)
+                std::printf("    %s='%s'\n", field.name.c_str(),
+                    field.text.c_str());
+            if (++printed == 5)
+                break;
+        }
+    }
     std::fflush(stdout);
     session.disconnect();
 }

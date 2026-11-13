@@ -25,31 +25,46 @@
 
 namespace hedgr::ui::widget {
 
-currency_pair currencies_of(std::string_view label) {
-    const auto code = [](std::string_view word) {
-        const bool iso = word.size() == 3
-            && std::all_of(word.begin(), word.end(),
-                [](char c) { return c >= 'A' && c <= 'Z'; });
-        return iso ? std::string{word} : std::string{};
-    };
-    const auto second = [&label]() -> std::string_view {
-        const auto first = label.find(' ');
-        if (first == std::string_view::npos)
-            return {};
-        auto rest = label.substr(first + 1);
-        const auto end = rest.find(' ');
-        return rest.substr(0, end);
-    }();
+namespace {
 
-    if (second.empty())
-        return {};
-    const auto slash = second.find('/');
-    if (slash != std::string_view::npos) {
-        const auto base = second.substr(0, slash);
-        const auto quote = second.substr(slash + 1);
-        return {code(base), code(quote)};
+/** @brief @p word when it is an ISO-shaped currency code, or empty. */
+[[nodiscard]] std::string iso_code(std::string_view word) {
+    const bool iso = word.size() == 3
+        && std::all_of(word.begin(), word.end(),
+            [](char c) { return c >= 'A' && c <= 'Z'; });
+    return iso ? std::string{word} : std::string{};
+}
+
+}
+
+currency_pair currencies_of(std::string_view label) {
+    /*
+     * The label is the interface's reading of a series URI, and it says the
+     * currency in different places for different assets: `FX GBP/USD` carries a
+     * pair, `IR AUD 1D` names one currency beside the asset, and a curve's own
+     * name can carry it inside a hyphen - `IR AUD DISCOUNT AUD-AONIA`. So a
+     * word holding a slash is the pair, and otherwise the first ISO-shaped word
+     * is the one currency; the rest of the words are names, not codes.
+     */
+    currency_pair pair;
+    auto word_start = std::size_t{0};
+    for (std::size_t i = 0; i <= label.size(); ++i) {
+        const bool end = i == label.size() || label[i] == ' ';
+        if (!end)
+            continue;
+        const auto word = label.substr(word_start, i - word_start);
+        word_start = i + 1;
+        if (word.empty())
+            continue;
+        if (const auto slash = word.find('/');
+            slash != std::string_view::npos) {
+            return {iso_code(word.substr(0, slash)),
+                iso_code(word.substr(slash + 1))};
+        }
+        if (pair.base.empty())
+            pair.base = iso_code(word);
     }
-    return {code(second), {}};
+    return pair;
 }
 
 float flag_width_for(float height) noexcept {
