@@ -224,9 +224,11 @@ TEST_CASE("live curve: the rungs a curve's series name", "[.live-curve-shape]") 
         for (const auto& row : *catalogue) {
             if (row.label != label)
                 continue;
-            std::printf("row %s tenor='%s' curve_key='%s' curve_label='%s'\n",
+            std::printf("row %s tenor='%s' curve_key='%s' curve_label='%s' "
+                        "party='%s' provider='%s'\n",
                 row.id.c_str(), row.tenor.c_str(), row.curve_key.c_str(),
-                row.curve_label.c_str());
+                row.curve_label.c_str(), row.party_id.c_str(),
+                row.provider_code.c_str());
             for (const auto& field : row.identity.fields)
                 std::printf("    %s='%s'\n", field.name.c_str(),
                     field.text.c_str());
