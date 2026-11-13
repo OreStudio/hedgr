@@ -229,6 +229,12 @@ TEST_CASE("live curve: the rungs a curve's series name", "[.live-curve-shape]") 
                 row.id.c_str(), row.tenor.c_str(), row.curve_key.c_str(),
                 row.curve_label.c_str(), row.party_id.c_str(),
                 row.provider_code.c_str());
+            /* What a flag is read from: the schema's subject and the type. */
+            std::printf("    identity asset='%s' subject='%s' instrument='%s' "
+                        "quote='%s'\n",
+                row.identity.asset.c_str(), row.identity.scope.c_str(),
+                row.identity.instrument_type.c_str(),
+                row.identity.quote_type.c_str());
             for (const auto& field : row.identity.fields)
                 std::printf("    %s='%s'\n", field.name.c_str(),
                     field.text.c_str());

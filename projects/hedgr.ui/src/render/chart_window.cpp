@@ -533,7 +533,9 @@ void render_chart(window_handle handle, const render_input& input,
             .options = chart_ema_labels.data(),
             .option_count = static_cast<int>(chart_ema_labels.size()),
             .selected = &state.market_view.chart_ema}};
-    const float flags_width = series_flags_width(input, *session, chart->label);
+    const auto currencies = currencies_of_series(input, *session,
+        chart->series_id, chart->label);
+    const float flags_width = series_flags_width(input, *session, currencies);
     const auto icons = begin_header_row(
         docked ? std::span<const header_icon>{docked_icons}
                : std::span<const header_icon>{floating_icons},
@@ -554,7 +556,7 @@ void render_chart(window_handle handle, const render_input& input,
      */
     ImGui::SetCursorPosX(ImGui::GetWindowContentRegionMax().x
         - icons.flags_inset - flags_width);
-    draw_series_flags(input, *session, chart->label, icons.flags_inset);
+    draw_series_flags(input, *session, currencies, icons.flags_inset);
     if (icons.view_changed)
         chart_view_changed(handle, input, state, view_before);
 

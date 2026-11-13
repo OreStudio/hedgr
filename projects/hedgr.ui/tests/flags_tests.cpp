@@ -66,6 +66,84 @@ TEST_CASE("a word that is not a currency code is not named", "[flags]") {
     CHECK(currencies_of("FX GBPX/USD").base.empty());
 }
 
+TEST_CASE("a rate's identity names its one currency", "[flags][identity]") {
+    hedgr::model::domain::market_series_identity identity;
+    identity.asset = "ir";
+    identity.instrument_type = "ir_swap";
+    identity.scope = "AUD";
+
+    const auto pair = currencies_of(identity);
+
+    CHECK(pair.base == "AUD");
+    CHECK(pair.quote.empty());
+}
+
+TEST_CASE("a spot's identity names its base and its quote", "[flags][identity]") {
+    hedgr::model::domain::market_series_identity identity;
+    identity.asset = "fx";
+    identity.instrument_type = "fx_spot";
+    identity.scope = "GBP";
+    identity.fields.push_back({.name = "ccy", .text = "USD"});
+
+    const auto pair = currencies_of(identity);
+
+    CHECK(pair.base == "GBP");
+    CHECK(pair.quote == "USD");
+}
+
+TEST_CASE("an identity with no currency names none", "[flags][identity]") {
+    hedgr::model::domain::market_series_identity identity;
+    identity.asset = "equity";
+    identity.instrument_type = "equity_spot";
+    identity.scope = "AAPL";
+
+    const auto pair = currencies_of(identity);
+
+    CHECK(pair.base.empty());
+    CHECK(pair.quote.empty());
+}
+
+TEST_CASE("a window asks for the flag its series' identity names",
+    "[flags][identity]") {
+    /*
+     * The name says USD and the deployment says AUD. The identity is what the
+     * deployment said, so the window shows the Australian flag: a flag is a
+     * claim about the series, and a name is something a person typed.
+     */
+    hedgr::testing::desk desk;
+    desk.currency_images.set("t", {{"AUD", "img-au"}, {"USD", "img-us"}});
+    hedgr::model::domain::market_series_row row;
+    row.id = "series-1";
+    row.label = "IR USD SOMETHING";
+    row.identity.asset = "ir";
+    row.identity.instrument_type = "ir_swap";
+    row.identity.scope = "AUD";
+    desk.market.apply_catalogue("i", "a", {row});
+    auto input = desk.input();
+
+    const auto pair = hedgr::ui::render::currencies_of_series(input,
+        desk.session, row.id, row.label);
+    REQUIRE(pair.base == "AUD");
+    CHECK(pair.quote.empty());
+
+    hedgr::ui::render::request_flags(input, desk.session, pair);
+    const auto queued = desk.commands.drain();
+    REQUIRE(queued.size() == 1);
+    CHECK(queued[0].image_id == "img-au");
+}
+
+TEST_CASE("a series the catalogue does not list falls back to its name",
+    "[flags][identity]") {
+    hedgr::testing::desk desk;
+    auto input = desk.input();
+
+    const auto pair = hedgr::ui::render::currencies_of_series(input,
+        desk.session, "unknown", "FX GBP/USD");
+
+    CHECK(pair.base == "GBP");
+    CHECK(pair.quote == "USD");
+}
+
 TEST_CASE("a principal and a tenant read as one line", "[identity]") {
     hedgr::ui::render::identity_bar_state state;
     state.signed_in = true;
@@ -238,7 +316,8 @@ TEST_CASE("a heading's flags are three quarters of the price pill, centred on it
         auto* list = ImGui::GetWindowDrawList();
         const float pill = widget::value_pill_size("FX GBP/USD").y;
 
-        hedgr::ui::render::draw_series_flags(input, desk.session, "FX GBP/USD");
+        hedgr::ui::render::draw_series_flags(input, desk.session,
+            {"GBP", "USD"});
 
         const auto image = vertices_with(list, 1);
         REQUIRE_FALSE(image.vertices.empty());

@@ -273,9 +273,84 @@ void request_flag(const render_input& input,
     input.commands.push(std::move(request));
 }
 
+namespace {
+
+/** @brief The catalogue row a session lists @p series_id as, or nullptr. */
+[[nodiscard]] const domain::market_series_row* catalogue_row(
+    const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view series_id) {
+    if (series_id.empty())
+        return nullptr;
+    const auto* catalogue = input.market.catalogue(
+        input.sessions.instance_id(session),
+        input.sessions.account_id(session));
+    return catalogue != nullptr ? catalogue->row_of(series_id) : nullptr;
+}
+
+/**
+ * @brief Whether the keys in @p parts have all been seen before.
+ *
+ * A drawing path runs sixty times a second over every visible row, so a
+ * diagnostic that repeats itself has to be suppressed without allocating:
+ * building the message to look it up would cost a heap block per row per frame,
+ * which is the very frame cost these screens are measured for. The keys are
+ * hashed end to end instead, with a separator that no id contains.
+ */
+[[nodiscard]] bool seen(std::initializer_list<std::string_view> parts) {
+    std::uint64_t hash = 1469598103934665603ull;
+    for (const auto part : parts) {
+        for (const char c : part) {
+            hash ^= static_cast<unsigned char>(c);
+            hash *= 1099511628211ull;
+        }
+        hash ^= 0x1full;
+        hash *= 1099511628211ull;
+    }
+    static std::unordered_set<std::uint64_t> said;
+    if (!said.insert(hash).second)
+        return true;
+    if (said.size() > 512)
+        said.clear();
+    return false;
+}
+
+/** @brief Said once per series, on the first frame a name had to be parsed. */
+void trace_label_fallback(std::string_view series_id, std::string_view label,
+    std::string_view why) {
+    if (seen({series_id, label, why}))
+        return;
+    BOOST_LOG_SEV(lg(), ores::logging::debug)
+        << "Flags for '" << label << "' (" << series_id << ") read from the "
+        << "label, " << why;
+}
+
+}
+
+hedgr::ui::widget::currency_pair currencies_of_series(
+    const render_input& input,
+    hedgr::model::state::session_handle session, std::string_view series_id,
+    std::string_view label) {
+    if (const auto* row = catalogue_row(input, session, series_id)) {
+        if (!row->identity.empty()) {
+            auto pair = hedgr::ui::widget::currencies_of(row->identity);
+            if (!pair.base.empty())
+                return pair;
+            trace_label_fallback(series_id, label,
+                "because its subject is not a currency");
+        } else {
+            trace_label_fallback(series_id, label,
+                "because its identity was not parsed");
+        }
+    } else {
+        trace_label_fallback(series_id, label,
+            "because the catalogue does not list it");
+    }
+    return hedgr::ui::widget::currencies_of(label);
+}
+
 void request_flags(const render_input& input,
-    hedgr::model::state::session_handle session, std::string_view label) {
-    const auto pair = hedgr::ui::widget::currencies_of(label);
+    hedgr::model::state::session_handle session,
+    const hedgr::ui::widget::currency_pair& pair) {
     request_flag(input, session, pair.base);
     request_flag(input, session, pair.quote);
 }
@@ -298,13 +373,13 @@ ImTextureID image_texture(const render_input& input,
 }
 
 void trace_absent_flags(const render_input& input,
-    hedgr::model::state::session_handle session, std::string_view label) {
+    hedgr::model::state::session_handle session,
+    const hedgr::ui::widget::currency_pair& pair) {
     /*
      * A header with no flags says nothing about why: the tenant, the map, the
      * currency and the image bytes are four different answers, and the one that
      * is missing is the one an operator has to be told about.
      */
-    const auto pair = hedgr::ui::widget::currencies_of(label);
     const auto tenant_id = input.sessions.tenant_id(session);
     const auto* map = input.currency_images.get(tenant_id);
     const auto* image_id =
@@ -318,28 +393,26 @@ void trace_absent_flags(const render_input& input,
      * moments worth a line; a header that repeats the same sentence sixty times
      * a second buries them.
      */
-    auto reason = std::format("{}|{}|{}|{}|{}|{}", label, tenant_id,
-        map == nullptr ? "absent"
-                       : map->state == hedgr::model::state::image_map_state::ready
-                ? "ready" : "not ready",
-        image_id == nullptr ? "none" : "named",
-        image == nullptr ? "absent" : "held",
-        input.textures == nullptr ? "none" : "present");
-    static std::unordered_set<std::string> said;
-    if (!said.insert(reason).second)
+    const auto map_state = map == nullptr ? std::string_view{"absent"}
+        : map->state == hedgr::model::state::image_map_state::ready
+        ? std::string_view{"ready"} : std::string_view{"not ready"};
+    const auto image_state =
+        image_id == nullptr ? std::string_view{"none"} : "named";
+    const auto bytes_state =
+        image == nullptr ? std::string_view{"absent"} : "held";
+    const auto texture_state =
+        input.textures == nullptr ? std::string_view{"none"} : "present";
+    if (seen({pair.base, pair.quote, tenant_id, map_state, image_state,
+            bytes_state, texture_state}))
         return;
-    if (said.size() > 128)
-        said.clear();
     BOOST_LOG_SEV(lg(), ores::logging::debug)
-        << "No flags for '" << label << "': currencies '" << pair.base
+        << "No flags for currencies '" << pair.base
         << "' / '" << pair.quote << "', tenant "
         << (tenant_id.empty() ? "none" : std::string{tenant_id})
-        << ", map " << (map == nullptr ? "absent"
-                : map->state == hedgr::model::state::image_map_state::ready
-                ? "ready" : "not ready")
-        << ", image id " << (image_id == nullptr ? "none" : "named")
-        << ", bytes " << (image == nullptr ? "absent" : "held")
-        << ", textures " << (input.textures == nullptr ? "none" : "present");
+        << ", map " << map_state
+        << ", image id " << image_state
+        << ", bytes " << bytes_state
+        << ", textures " << texture_state;
 }
 
 std::string identity_text(const identity_bar_state& state) {
@@ -357,12 +430,11 @@ std::string identity_text(const identity_bar_state& state) {
 
 float series_flags_width(const render_input& input,
     const hedgr::model::state::session_handle session,
-    std::string_view label) {
-    request_flags(input, session, label);
-    const auto pair = hedgr::ui::widget::currencies_of(label);
-    const float pill_h = hedgr::ui::widget::value_pill_size(label).y;
+    const hedgr::ui::widget::currency_pair& pair) {
+    request_flags(input, session, pair);
     return hedgr::ui::widget::flag_pair_width(
-        pill_h * hedgr::ui::theme::flag_height_fraction,
+        hedgr::ui::widget::value_pill_height()
+            * hedgr::ui::theme::flag_height_fraction,
         image_texture(input, session, pair.base),
         image_texture(input, session, pair.quote));
 }
@@ -410,13 +482,12 @@ void trace_view_state(std::string_view screen, std::string_view subject,
 
 void draw_series_flags(const render_input& input,
     const hedgr::model::state::session_handle session,
-    std::string_view label, float inset) {
-    request_flags(input, session, label);
+    const hedgr::ui::widget::currency_pair& pair, float inset) {
+    request_flags(input, session, pair);
 
-    const auto pair = hedgr::ui::widget::currencies_of(label);
     const auto base_texture = image_texture(input, session, pair.base);
     const auto quote_texture = image_texture(input, session, pair.quote);
-    const float pill_h = hedgr::ui::widget::value_pill_size(label).y;
+    const float pill_h = hedgr::ui::widget::value_pill_height();
     const float flag_h = pill_h * hedgr::ui::theme::flag_height_fraction;
     const float flags_width =
         hedgr::ui::widget::flag_pair_width(flag_h, base_texture, quote_texture);
@@ -428,7 +499,7 @@ void draw_series_flags(const render_input& input,
          * tail of its own title row: a plot one flag wide, pressed against the
          * right edge of the window.
          */
-        trace_absent_flags(input, session, label);
+        trace_absent_flags(input, session, pair);
         ImGui::NewLine();
         return;
     }

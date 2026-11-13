@@ -239,17 +239,27 @@ keep producing them.
 
 What to do instead:
 
-- a flag is looked up from the currency the *identity* names, never from a label;
-- an FX pair's two currencies are the identity's `scope` and the quote field it
-  carries, not two halves of a display string;
-- where a window holds only a label and a series id (a chart, a term structure),
-  the window resolves the series in the catalogue and reads its identity from
-  there, which is one lookup in a table the frame already holds;
-- `widget::currencies_of` stays only as the fallback for a row whose identity
-  the catalogue could not parse, and nothing new should be built on it.
+- Done: a flag is looked up from the currency the *identity* names, never from a
+  label. `widget::currencies_of(identity)` reads the subject and the `ccy` field;
+  `render::currencies_of_series(input, session, series_id, label)` resolves the
+  series in the session's catalogue and hands the pair to every flag call;
+- Done: an FX pair's two currencies are the identity's `scope` and the quote field
+  it carries, not two halves of a display string;
+- Done: where a window holds only a label and a series id (a chart, a term
+  structure, a card, a browser row), the window resolves the series in the
+  catalogue and reads its identity from there, which is one lookup in a table the
+  frame already holds;
+- Done: `widget::currencies_of(label)` stays only as the fallback for a row whose
+  identity the catalogue could not parse, and nothing new should be built on it.
+  Each fallback is logged once per series, saying which of the three reasons
+  applied: not listed, not parsed, or a subject that is not a currency.
 
 This removes the class of bug rather than the instance: the currency is data the
-deployment states, so the client should read it and not infer it.
+deployment states, so the client should read it and not infer it. Verified against
+brave_hopper: every IR row's identity carries `subject='AUD'` (and its peers), so
+the flag no longer depends on how a curve happens to be named. Both suppression
+paths hash their keys rather than formatting a message, because the frame-cost
+tests draw a steady browser frame and a steady card frame and count allocations.
 
 ## Small items
 

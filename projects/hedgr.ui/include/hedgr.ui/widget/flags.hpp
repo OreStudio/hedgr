@@ -20,6 +20,7 @@
 #ifndef HEDGR_UI_WIDGET_FLAGS_HPP
 #define HEDGR_UI_WIDGET_FLAGS_HPP
 
+#include "hedgr.model/domain/market.hpp"
 #include "hedgr.ui/export.hpp"
 #include "imgui.h"
 #include <string>
@@ -42,17 +43,35 @@ inline constexpr float flag_aspect = 16.0f / 11.0f;
 [[nodiscard]] HEDGR_UI_EXPORT float flag_pair_width(
     float height, ImTextureID base, ImTextureID quote) noexcept;
 
-/** @brief The currencies a series label names, base and quote. */
+/** @brief The currencies a series names, base and quote. */
 struct currency_pair final {
     std::string base;
     std::string quote;
 };
 
 /**
+ * @brief Reads the currencies out of the identity the deployment gave a series.
+ *
+ * This is the authoritative reading and the one every screen uses. The identity
+ * says the subject in the deployment's own words - the subject field of the
+ * series' instrument type, which for a rate is the currency and for a spot is
+ * the base - so `IR AUD DISCOUNT AUD-AONIA` is AUD from its scope alone and not
+ * from the shape of its name. A spot's quote is its identity's `ccy` field.
+ *
+ * A subject that is not an ISO-shaped code yields an empty base: an equity
+ * named AAPL has no flag, and guessing one from the label would be inventing
+ * what the deployment did not say.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT currency_pair
+currencies_of(const hedgr::model::domain::market_series_identity& identity);
+
+/**
  * @brief Reads the currencies out of a label the market catalogue produced.
  *
- * An FX label is "FX GBP/USD" and an interest-rate label is "IR GBP 1D", so
- * the pair comes from the word after the asset class. A word that is not an
+ * Only for a series whose identity was not parsed - a row restored from a
+ * store older than the parse, or a published curve that is not a catalogue row.
+ * An FX label is "FX GBP/USD" and an interest-rate label is "IR GBP 1D", so the
+ * pair comes from the word after the asset class. A word that is not an
  * ISO-shaped code (three capital letters) yields an empty code. Whether the
  * server has an image for it is for the caller to look up.
  */

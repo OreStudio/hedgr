@@ -86,6 +86,15 @@ inline constexpr float value_pill_border = 1.0f;
 [[nodiscard]] HEDGR_UI_EXPORT ImVec2 value_pill_size(std::string_view text);
 
 /**
+ * @brief The height of a value pill, whatever it is showing.
+ *
+ * A pill is as tall as its face and its padding, not as tall as its text, so a
+ * caller that must line something up with one but has no text to measure asks
+ * here. The flags use it to sit at the height of the name they follow.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT float value_pill_height();
+
+/**
  * @brief Draws a bordered chip with bold text and advances past it.
  *
  * Centred on a line taller than itself, as a caption is. Neutral is the chip
