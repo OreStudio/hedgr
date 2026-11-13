@@ -19,6 +19,7 @@ set(files
     "window_look_tests.cpp"
     "ema_tests.cpp"
     "curve_request_tests.cpp"
+    "curve_ladder_tests.cpp"
     "flags_tests.cpp"
     "frame_cost_tests.cpp"
     "gallery_tests.cpp"
