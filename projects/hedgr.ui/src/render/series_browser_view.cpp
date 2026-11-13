@@ -21,6 +21,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string>
+#include <unordered_set>
 
 namespace hedgr::ui::render {
 
@@ -139,12 +141,44 @@ bool update_series_browser_view(series_browser_view& view,
         ? wanted == domain::market_asset::ir
         : query.asset_class == "IR";
     view.rows.clear();
+    std::unordered_set<std::string> listed;
     for (std::size_t i = 0; i < catalogue.size(); ++i) {
         if (hidden(catalogue[i].provider_code))
             continue;
-        if (curves ? listed_as_curve(catalogue[i], query)
-                   : listed_as_series(catalogue[i], query))
+        if (!curves) {
+            if (listed_as_series(catalogue[i], query))
+                view.rows.push_back(static_cast<std::uint32_t>(i));
+            continue;
+        }
+        if (!listed_as_curve(catalogue[i], query))
+            continue;
+        /*
+         * One row per curve, not per series: a curve published several times is
+         * several series with one identity - five `AUD-AONIA` rows under one
+         * name - and a person cannot tell five identical rows are one curve.
+         * A row whose identity the catalogue could not parse has nothing to be
+         * grouped by, so it stays a row of its own rather than collapsing into
+         * its neighbours.
+         */
+        const auto& row = catalogue[i];
+        if (row.identity.empty()) {
             view.rows.push_back(static_cast<std::uint32_t>(i));
+            continue;
+        }
+        std::string key = row.asset_class;
+        key += '\x1f';
+        key += row.identity.scope;
+        key += '\x1f';
+        key += row.identity.instrument_type;
+        key += '\x1f';
+        key += row.identity.quote_type;
+        key += '\x1f';
+        key += row.party_id;
+        key += '\x1f';
+        key += row.provider_code;
+        if (!listed.insert(std::move(key)).second)
+            continue;
+        view.rows.push_back(static_cast<std::uint32_t>(i));
     }
     std::stable_sort(view.rows.begin(), view.rows.end(),
         [&](std::uint32_t a, std::uint32_t b) {
