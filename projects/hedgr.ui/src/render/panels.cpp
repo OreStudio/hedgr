@@ -413,7 +413,13 @@ void trace_absent_flags(const render_input& input,
     if (seen({pair.base, pair.quote, tenant_id, map_state, image_state,
             bytes_state, texture_state}))
         return;
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
+    /*
+     * Info, not debug. A header with no flag is an operator-visible fault, and
+     * the four facts it is made of - tenant, map, image id, bytes - are the only
+     * way to tell a missing map from a refused image. The line is emitted once
+     * per state, so a steady window costs nothing.
+     */
+    BOOST_LOG_SEV(lg(), ores::logging::info)
         << "No flags for currencies '" << pair.base
         << "' / '" << pair.quote << "', tenant "
         << (tenant_id.empty() ? "none" : std::string{tenant_id})

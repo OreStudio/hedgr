@@ -339,3 +339,67 @@ TEST_CASE("live curve: the rungs a curve's series name", "[.live-curve-shape]") 
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief What a deployment's tenant holds as currency flags.
+ *
+ * A flag is an image a currency row names, so an empty map is a tenant whose
+ * currency rows name none - a fact about the deployment, not about the drawing
+ * code. Run it to tell the two apart:
+ *
+ *     HEDGR_LIVE_URL=... ... hedgr.runtime.tests "[.live-flags]"
+ */
+TEST_CASE("live flags: the currency images a tenant holds", "[.live-flags]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    namespace transport = hedgr::session::transport;
+    transport::session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    transport::session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("tenant=%s (%s)\n", signed_in->tenant_name.c_str(),
+        signed_in->tenant_id.c_str());
+
+    /*
+     * The bytes, not only the map: a currency row that names an image is no use
+     * if the tenant may not read that image, and the two failures look the same
+     * on screen - no flag.
+     */
+    const auto aud = session.image_by_id("49ac7e29-76ea-4bdc-a4a6-211b63465db1");
+    if (!aud)
+        std::printf("AUD image refused: %s (%s)\n", aud.error().message.c_str(),
+            aud.error().detail.c_str());
+    else
+        std::printf("AUD image: %zu bytes, mime '%s'\n", aud->data.size(),
+            aud->mime_type.c_str());
+
+    const auto images = session.currency_images();
+    if (!images) {
+        std::printf("currency images refused: %s (%s)\n",
+            images.error().message.c_str(), images.error().detail.c_str());
+    } else {
+        std::printf("currency images: %zu\n", images->size());
+        for (const auto& image : *images)
+            std::printf("  %s -> %s\n", image.currency.c_str(),
+                image.image_id.c_str());
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}

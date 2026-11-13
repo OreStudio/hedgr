@@ -107,6 +107,17 @@ void render_term_structure(window_handle handle, const render_input& input,
     const auto history = std::clamp(state.market_view.term_history,
         term_history_min, term_history_max);
     int history_index = history - 1;
+    /*
+     * The control says how many curves there are to overlay, so it cannot claim
+     * four when the deployment published one instant: the plot would draw one
+     * line under a control reading "4 curves", which reads as a chart that lost
+     * three. The index is clamped to what is held, and the number the control
+     * shows is what is drawn.
+     */
+    const auto held_instants = row != nullptr ? row->as_of_ns.size() : 0;
+    if (held_instants > 0 && static_cast<std::size_t>(history_index)
+            >= held_instants)
+        history_index = static_cast<int>(held_instants) - 1;
     const int primary = has_data
         ? static_cast<int>(row->as_of_ns.size()) - 1 : -1;
     const int first = primary >= 0 ? std::max(0, primary - history + 1) : 0;

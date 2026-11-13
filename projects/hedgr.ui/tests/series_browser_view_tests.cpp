@@ -365,3 +365,53 @@ TEST_CASE("a curve of one series is one rung, honestly", "[curve]") {
     CHECK(group.field.empty());
     CHECK(group.rungs == std::vector<std::string>{"1D"});
 }
+
+TEST_CASE("a currency finds both sides of a pair and a rate", "[browser][view]") {
+    /*
+     * A desk filters by currency: "AUD" is the IR curves quoted in AUD and the
+     * FX pairs quoted in AUD, whichever side it is on. The currencies come from
+     * the typed identity, so a pair is found from its quote as well.
+     */
+    auto ir = row("ir-aud", "IR AUD IR_SWAP", "IR", "", "p1", "demo");
+    ir.identity.asset = "ir";
+    ir.identity.instrument_type = "ir_swap";
+    ir.identity.scope = "AUD";
+
+    auto fx_base = row("fx-aud", "FX AUD/USD", "FX", "", "p1", "demo");
+    fx_base.identity.asset = "fx";
+    fx_base.identity.instrument_type = "fx_spot";
+    fx_base.identity.scope = "AUD";
+    fx_base.identity.fields.push_back({.name = "ccy", .text = "USD"});
+
+    auto fx_quote = row("fx-gbp-aud", "FX GBP/AUD", "FX", "", "p1", "demo");
+    fx_quote.identity.asset = "fx";
+    fx_quote.identity.instrument_type = "fx_spot";
+    fx_quote.identity.scope = "GBP";
+    fx_quote.identity.fields.push_back({.name = "ccy", .text = "AUD"});
+
+    auto other = row("fx-eur", "FX EUR/JPY", "FX", "", "p1", "demo");
+    other.identity.asset = "fx";
+    other.identity.instrument_type = "fx_spot";
+    other.identity.scope = "EUR";
+    other.identity.fields.push_back({.name = "ccy", .text = "JPY"});
+
+    const std::vector catalogue{ir, fx_base, fx_quote, other};
+    render::series_browser_view view;
+
+    /*
+     * With no asset class chosen everything matches, and an IR series is listed
+     * as the series rows it is - one per rung. What the filter adds is the pair
+     * whose quote is AUD, which the label alone does not make obvious.
+     */
+    render::update_series_browser_view(view, query(1, "aud"), catalogue);
+    CHECK(ids(view, catalogue) == strings{"fx-aud", "fx-gbp-aud", "ir-aud"});
+
+    /* And the curve list finds the rate quoted in AUD. */
+    render::update_series_browser_view(view, query(1, "aud", "IR"),
+        catalogue);
+    CHECK(ids(view, catalogue) == strings{"ir-aud"});
+
+    /* A currency nobody quotes finds nothing. */
+    render::update_series_browser_view(view, query(1, "nzd"), catalogue);
+    CHECK(ids(view, catalogue).empty());
+}
