@@ -90,20 +90,14 @@ struct curve_request final {
     std::vector<std::string> member_tenors;
 
     /**
-     * @brief The URI of a member whose ladder lives in its observations.
+     * @brief The typed identity of a member whose ladder is its own shape.
      *
      * A member with no tenor of its own is one series that carries the whole
-     * ladder: each observation names the term it is for. Such a series is read
-     * as observations rather than as ticks, because a tick reply names the
-     * coordinate, not the term.
+     * ladder. The deployment states that shape: the evolution read declares the
+     * object's axes and every node on them, then one value per node per instant,
+     * which is the term structure itself. Empty for the other kind of member.
      */
-    std::string member_uri;
-
-    /** @brief The provider of that series, which scopes the observation read. */
-    std::string member_provider;
-
-    /** @brief The party that owns that series, which the read is entitled by. */
-    std::string member_party;
+    hedgr::model::domain::market_series_identity member_identity;
 };
 
 /** @brief The series the deployment publishes, and their providers. */

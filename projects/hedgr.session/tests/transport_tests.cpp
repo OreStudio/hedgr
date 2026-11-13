@@ -617,23 +617,35 @@ TEST_CASE("live IR: the terms a curve's observations name",
     for (const auto& row : *series) {
         if (row.asset_class.empty() || row.asset_class != "IR")
             continue;
-        const auto read = session.market_series_observations(row.oresmd_uri,
-            row.provider_code, {}, 5);
-        if (!read) {
-            std::printf("'%s' failed: %s\n", row.label.c_str(),
-                read.error().message.c_str());
+        /*
+         * The same series through both reads that could carry a ladder: the
+         * observations, whose coordinates name the term, and the evolution,
+         * whose shape declares its axes. Printing both is how the choice is
+         * made from what the deployment states rather than from a guess.
+         */
+        const auto evolution = session.market_series_evolution(row.id,
+            row.identity, 0, 0);
+        if (!evolution) {
+            std::printf("'%s' evolution failed: %s\n", row.label.c_str(),
+                evolution.error().message.c_str());
             continue;
         }
-        std::set<std::string> terms;
-        for (const auto& point : *read)
-            if (!point.term.empty())
-                terms.insert(point.term);
-        std::printf("'%s' (%s): %zu observations, %zu terms:", row.label.c_str(),
-            row.provider_code.c_str(), read->size(), terms.size());
-        for (const auto& term : terms)
-            std::printf(" %s", term.c_str());
-        std::printf("\n");
-        if (++seen == 5)
+        std::printf("'%s' evolution: fields ", row.label.c_str());
+        for (const auto& field : evolution->fields)
+            std::printf("'%s' ", field.c_str());
+        std::printf("%zu nodes, %zu instants\n", evolution->nodes.size(),
+            evolution->instants.size());
+        for (std::size_t i = 0;
+            i < evolution->nodes.size() && i < 12; ++i) {
+            std::printf("  node:");
+            for (const auto& label : evolution->nodes[i])
+                std::printf(" %s", label.c_str());
+            if (!evolution->instants.empty()
+                && i < evolution->instants.back().values.size())
+                std::printf(" = %.6f", evolution->instants.back().values[i]);
+            std::printf("\n");
+        }
+        if (++seen == 3)
             break;
     }
     std::printf("read %zu IR series\n", seen);

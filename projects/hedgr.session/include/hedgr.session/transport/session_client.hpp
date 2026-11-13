@@ -261,6 +261,31 @@ struct market_series_read final {
     std::vector<market_point> terms;
 };
 
+/**
+ * @brief One composite object's shape and the object at each instant.
+ *
+ * The axes are declared once because they belong to the shape rather than to
+ * the points: @c fields names them in order, every node holds one label per
+ * field, and every instant holds one value per node, index for index. A value
+ * that is empty is a hole the shape declares and no point filled.
+ */
+struct series_evolution final {
+    /** @brief The axis names, in the order every node's coordinates use. */
+    std::vector<std::string> fields;
+
+    /** @brief The declared nodes, each with one label per field. */
+    std::vector<std::vector<std::string>> nodes;
+
+    /** @brief One instant's values, index for index with @c nodes. */
+    struct instant final {
+        std::int64_t as_of_ns = 0;
+        std::vector<double> values;
+    };
+
+    /** @brief The instants, oldest first. */
+    std::vector<instant> instants;
+};
+
 /** @brief One pillar of a published curve: its name and its value. */
 struct curve_point final {
     /** @brief The pillar, as the deployment spells it ("10Y", "3M"). */
@@ -664,10 +689,11 @@ public:
      * @brief A series' observations over the last few calendar days.
      *
      * One observation per point of the series, each with its own coordinate and
-     * its term, which is what a ladder needs: an interest-rate series carries
-     * its rungs as observations of one series, not as the coordinates of a tick
-     * reply. The window is the deployment's own, bounded by calendar days, so
-     * the answer is the newest day's ladder and no history older than that.
+     * its term. The term structure does not use this: `get_series_evolution`
+     * states the object's shape outright, axes and nodes, where a window of
+     * observations leaves the caller to infer which coordinate is which term.
+     * This read is kept for what it is - the series' points over a few calendar
+     * days - and is exercised by the live probe.
      *
      * @param uri the series' canonical oresmd URI.
      * @param provider_code the provider to read, or empty for the one that
@@ -680,6 +706,25 @@ public:
     [[nodiscard]] result<std::vector<market_point>> market_series_observations(
         std::string_view uri, std::string_view provider_code,
         std::string_view party_id, int days) const;
+
+    /**
+     * @brief One composite object as instants by nodes: a curve's whole shape.
+     *
+     * The deployment states the object's axes and every node on them once, then
+     * one value per node per instant, which is the term structure itself: the
+     * axes are declared rather than inferred, so a ladder is read whole rather
+     * than assembled from whichever coordinate a tick reply happened to carry.
+     *
+     * @param series_id the series' key, used when no identity is given.
+     * @param identity the typed identity the catalogue parsed, or empty.
+     * @param from_ns the first instant of the range, inclusive, epoch ns.
+     * @param to_ns the last instant, inclusive; zero means now.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<series_evolution> market_series_evolution(
+        std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity,
+        std::int64_t from_ns, std::int64_t to_ns) const;
 
     /**
      * @brief Reads every market data provider and its kind.

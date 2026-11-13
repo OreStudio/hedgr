@@ -194,11 +194,14 @@ public:
     [[nodiscard]] virtual result<surface_grid> published_fx_vol_surface(
         std::string_view blueprint_id, std::int64_t as_of_ns) const = 0;
 
-    /** @brief A series' observations, which is where a ladder's terms live. */
-    [[nodiscard]] virtual result<std::vector<market_point>>
-    market_series_observations(std::string_view uri,
-        std::string_view provider_code, std::string_view party_id,
-        int days) const = 0;
+    /**
+     * @brief A composite object as instants by nodes: the deployment's own
+     * statement of the object's shape.
+     */
+    [[nodiscard]] virtual result<series_evolution> market_series_evolution(
+        std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity,
+        std::int64_t from_ns, std::int64_t to_ns) const = 0;
 };
 
 /** @brief Forwards each call to a client it does not own. */
@@ -351,12 +354,12 @@ public:
         return client_.published_fx_vol_surface(blueprint_id, as_of_ns);
     }
 
-    [[nodiscard]] result<std::vector<market_point>>
-    market_series_observations(std::string_view uri,
-        std::string_view provider_code, std::string_view party_id,
-        int days) const override {
-        return client_.market_series_observations(uri, provider_code, party_id,
-            days);
+    [[nodiscard]] result<series_evolution> market_series_evolution(
+        std::string_view series_id,
+        const hedgr::model::domain::market_series_identity& identity,
+        std::int64_t from_ns, std::int64_t to_ns) const override {
+        return client_.market_series_evolution(series_id, identity, from_ns,
+            to_ns);
     }
 
 private:

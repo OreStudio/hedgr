@@ -1062,6 +1062,104 @@ session_client::market_series_observations(std::string_view uri,
     }
 }
 
+namespace {
+
+/*
+ * The two help the evolution read below and are written further down, beside
+ * the tick reads that use them: an identity resolved by listing the
+ * deployment's own, and the wall clock the range's open end is taken from.
+ */
+[[nodiscard]] result<ores::marketdata::messaging::resolve_series_identity_request>
+series_identity(ores::nats::service::nats_client& nats,
+    std::string_view series_id, std::chrono::milliseconds timeout);
+[[nodiscard]] std::int64_t clock_now_ns();
+
+}
+
+result<hedgr::session::transport::series_evolution>
+session_client::market_series_evolution(std::string_view series_id,
+    const hedgr::model::domain::market_series_identity& identity,
+    std::int64_t from_ns, std::int64_t to_ns) const {
+    if (!is_connected() || !is_authenticated())
+        return fail(session_errc::not_authenticated,
+            "an evolution read needs a signed-in session");
+
+    using ores::marketdata::messaging::get_series_evolution_request;
+    using ores::marketdata::messaging::get_series_evolution_response;
+    try {
+        get_series_evolution_request request;
+        if (!identity.empty()) {
+            request.identity.asset = identity.asset;
+            request.identity.scope = identity.scope;
+            request.identity.instrument_type = identity.instrument_type;
+            request.identity.quote_type = identity.quote_type;
+            request.identity.party_id = identity.party_id;
+            request.identity.provider_code = identity.provider_code;
+            request.identity.fields.reserve(identity.fields.size());
+            for (const auto& field : identity.fields) {
+                request.identity.fields.push_back(
+                    {.name = field.name, .text = field.text});
+            }
+        } else {
+            auto listed = series_identity(client(), series_id,
+                options_.request_timeout);
+            if (!listed)
+                return std::unexpected(std::move(listed.error()));
+            request.identity = std::move(*listed);
+        }
+        request.from_instant = std::chrono::system_clock::time_point{
+            std::chrono::nanoseconds{from_ns}};
+        request.to_instant = std::chrono::system_clock::time_point{
+            std::chrono::nanoseconds{to_ns == 0 ? clock_now_ns() : to_ns}};
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_series_evolution_response>(client(),
+                get_series_evolution_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer)
+            return fail(session_errc::protocol_error,
+                "the evolution answer could not be decoded");
+        if (!answer->success)
+            return fail(session_errc::read_refused,
+                answer->message.empty()
+                    ? std::string("the deployment refused the evolution")
+                    : answer->message);
+
+        hedgr::session::transport::series_evolution evolution;
+        evolution.fields = answer->coordinate_fields;
+        evolution.nodes.reserve(answer->nodes.size());
+        for (const auto& node : answer->nodes)
+            evolution.nodes.push_back(node.coordinates);
+        evolution.instants.reserve(answer->instants.size());
+        for (const auto& held : answer->instants) {
+            hedgr::session::transport::series_evolution::instant instant;
+            instant.as_of_ns =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    held.as_of.time_since_epoch())
+                    .count();
+            instant.values.assign(evolution.nodes.size(),
+                std::numeric_limits<double>::quiet_NaN());
+            for (std::size_t i = 0;
+                i < held.values.size() && i < evolution.nodes.size(); ++i) {
+                double value = 0.0;
+                if (parse_curve_value(held.values[i], value))
+                    instant.values[i] = value;
+            }
+            evolution.instants.push_back(std::move(instant));
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Evolution of series '" << series_id << "': "
+            << evolution.fields.size() << " axis field(s), "
+            << evolution.nodes.size() << " nodes, "
+            << evolution.instants.size() << " instants";
+        return evolution;
+    } catch (const std::exception& e) {
+        return transport_failure(e);
+    } catch (...) {
+        return transport_failure();
+    }
+}
+
 result<int> session_client::refresh() {
     if (!is_authenticated()) {
         return fail(session_errc::not_authenticated,

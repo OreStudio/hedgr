@@ -145,37 +145,52 @@ TEST_CASE("a failed pillar becomes the event's message", "[link][term]") {
     CHECK(fact.message == "no answer");
 }
 
-TEST_CASE("a curve whose ladder is in its observations takes the terms",
+TEST_CASE("a curve takes the shape the deployment states for it",
     "[link][term]") {
     /*
-     * An interest-rate series carries the ladder as observations of one series,
-     * each naming its term, so the terms come from the observations and not
-     * from a tick reply's coordinates. Reading it as ticks answers with the
-     * index tenor alone, which is one point on the plot.
+     * An interest-rate series carries the ladder as one object with an axis per
+     * term. The evolution read says so outright - its axes, every node on them,
+     * and one value per node per instant - so nothing has to be inferred from a
+     * tick reply, whose coordinates name no term.
      */
     fake_link link;
-    link.observations = {
-        session::market_point{.at_ns = 100, .value = 0.01, .term = "1Y"},
-        session::market_point{.at_ns = 100, .value = 0.03, .term = "10Y"},
-        session::market_point{.at_ns = 200, .value = 0.011, .term = "1Y"},
-        session::market_point{.at_ns = 200, .value = 0.031, .term = "10Y"}};
+    link.evolution.fields = {"term"};
+    link.evolution.nodes = {{"1Y"}, {"10Y"}};
+    link.evolution.instants = {
+        {.as_of_ns = 100, .values = {0.01, 0.03}},
+        {.as_of_ns = 200, .values = {0.011, 0.031}}};
 
     model::event::event fact;
-    worker::run_curve_read(link,
-        worker::curve_request{.key = "c",
-            .label = "IR GBP",
-            .member_ids = {"s-curve"},
-            .member_tenors = {""},
-            .member_uri = "oresmd://ir/GBP?type=series&instrument=ir_swap",
-            .member_provider = "bloomberg",
-            .member_party = "p"},
-        fact);
+    worker::curve_request request{.key = "c", .label = "IR GBP"};
+    request.member_ids = {"s-curve"};
+    request.member_tenors = {""};
+    request.member_identity = model::domain::market_series_identity{
+        .asset = "ir", .scope = "GBP", .instrument_type = "ir_swap"};
+    worker::run_curve_read(link, request, fact);
     CHECK(fact.curve_label == "IR GBP");
     CHECK(fact.curve_pillars == std::vector<std::string>{"1Y", "10Y"});
     CHECK(fact.curve_as_of_ns == std::vector<std::int64_t>{100, 200});
     CHECK(fact.curve_values == std::vector<double>{0.01, 0.03, 0.011, 0.031});
     CHECK(fact.message.empty());
     CHECK(link.tail_calls == 0);
+}
+
+TEST_CASE("a shape with no term axis is reported, not drawn",
+    "[link][term]") {
+    fake_link link;
+    link.evolution.fields = {"strike"};
+    link.evolution.nodes = {{"ATM"}};
+    link.evolution.instants = {{.as_of_ns = 100, .values = {0.2}}};
+
+    model::event::event fact;
+    worker::curve_request request{.key = "c"};
+    request.member_ids = {"s-curve"};
+    request.member_tenors = {""};
+    request.member_identity = model::domain::market_series_identity{
+        .asset = "fx", .instrument_type = "fx_option"};
+    worker::run_curve_read(link, request, fact);
+    CHECK(fact.curve_pillars.empty());
+    CHECK(fact.message.find("no term axis") != std::string::npos);
 }
 
 TEST_CASE("a published curve is read in one call, not one per tenor",

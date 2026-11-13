@@ -438,28 +438,19 @@ void read_service::start_term_structure_read(
         .member_ids = st->member_ids,
         .member_tenors = st->member_tenors};
     /*
-     * A member with no tenor of its own carries the whole ladder in its
-     * observations, and an observation read is entitled by the series' URI, its
-     * provider and its party. The catalogue is where those are stated, so the
-     * request takes them from it rather than from a command that never had
-     * them.
+     * A member with no tenor of its own carries the whole ladder, and the
+     * deployment states that shape rather than leaving it to be inferred: the
+     * evolution read declares the object's axes and every node on them. The
+     * catalogue is where the series' typed identity is stated, so the request
+     * takes it from there rather than from a command that never had it.
      */
     if (!published && st->member_tenors.front().empty()) {
         const auto* catalogue = market_.catalogue(read->instance_id,
             read->account_id);
         const auto* row = catalogue != nullptr
             ? catalogue->row_of(st->member_ids.front()) : nullptr;
-        if (row != nullptr) {
-            request.member_uri = row->uri;
-            request.member_provider = row->provider_code;
-            /*
-             * The party is left unstated. An observation is entitled by party
-             * and the catalogue row names the party that owns the series, which
-             * is not the party reading it: asking for the row's party answered
-             * nothing, and asking for none answers with the parties this
-             * session can see, which is the desk's own view.
-             */
-        }
+        if (row != nullptr)
+            request.member_identity = row->identity;
     }
     if (!submit_read(*read, request))
         return;
@@ -494,16 +485,17 @@ void read_service::load_term_structure(
         .published = published,
         .member_ids = cmd.member_ids,
         .member_tenors = cmd.member_tenors};
-    /* As in start_term_structure_read: a composite member is read by URI. */
+    /*
+     * As in start_term_structure_read: a composite member is read as the shape
+     * the deployment states, which needs the series' typed identity.
+     */
     if (!published && cmd.member_tenors.front().empty()) {
         const auto* catalogue = market_.catalogue(cmd.instance_id,
             cmd.account_id);
         const auto* row = catalogue != nullptr
             ? catalogue->row_of(cmd.member_ids.front()) : nullptr;
-        if (row != nullptr) {
-            request.member_uri = row->uri;
-            request.member_provider = row->provider_code;
-        }
+        if (row != nullptr)
+            request.member_identity = row->identity;
     }
     if (!submit_read(*read, request))
         return;
