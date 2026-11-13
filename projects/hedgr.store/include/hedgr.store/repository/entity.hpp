@@ -139,6 +139,15 @@ struct account_entity final {
     std::string name;
     std::string principal;
     std::string folder_id;
+
+    /**
+     * @brief The party this account last acted as, or empty for none yet.
+     *
+     * A choice rather than a secret, so it belongs on the struct a list reads:
+     * the sign-in prompt says which party the next sign-in will land in, and
+     * that is read before any window exists.
+     */
+    std::string party_id;
 };
 
 /**
@@ -157,6 +166,7 @@ struct account_credential_entity final {
     std::string name;
     std::string principal;
     std::string folder_id;
+    std::string party_id;
     std::optional<std::string> credential;
 };
 

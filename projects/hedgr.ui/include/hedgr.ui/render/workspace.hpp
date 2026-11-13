@@ -24,6 +24,7 @@
 #include "hedgr.ui/export.hpp"
 #include "hedgr.ui/render/menu_bar.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
+#include "hedgr.ui/render/party_prompt.hpp"
 #include "hedgr.ui/render/renderer.hpp"
 #include "hedgr.ui/widget/menu_bar.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
@@ -336,6 +337,15 @@ private:
      * so the request is kept until the walk reaches it.
      */
     bool focus_instances_ = false;
+
+    /**
+     * @brief What the sign-in's party prompt holds between frames.
+     *
+     * Scratch, like the lock control: the question is about a session, not about
+     * a window, and it is asked once after a sign-in that may act as more than
+     * one party. See @c hedgr::ui::render::draw_party_prompt.
+     */
+    party_prompt_state party_prompt_;
 
     /**
      * @brief The message ladder the bottom strip draws and the frame ages.

@@ -109,6 +109,38 @@ lock_service::store_credential(const command::command& cmd) {
     return std::nullopt;
 }
 
+void lock_service::store_party(std::string_view account_id,
+    std::string_view party_id) {
+    if (!account_repo_) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Cannot remember party '" << party_id << "' for account '"
+            << account_id << "': the store is not open";
+        return;
+    }
+
+    if (auto saved = account_repo_->set_party(account_id, party_id); !saved) {
+        BOOST_LOG_SEV(lg(), ores::logging::error)
+            << "Could not remember party '" << party_id << "' for account '"
+            << account_id << "': " << saved.error().message;
+        return;
+    }
+
+    /*
+     * The table is updated after the store, and only then: a row that said the
+     * party had been remembered while the write failed would make the next
+     * sign-in skip the party prompt for a party that was never saved.
+     */
+    if (const auto handle = accounts_.find(account_id)) {
+        auto row = *accounts_.get(*handle);
+        row.party_id = std::string{party_id};
+        static_cast<void>(accounts_.upsert(std::move(row)));
+    }
+
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Account '" << account_id << "' now acts as party '" << party_id
+        << "' on every sign-in";
+}
+
 void lock_service::remember(std::string account_id,
     std::string password) {
     auto master_password = master_password_;

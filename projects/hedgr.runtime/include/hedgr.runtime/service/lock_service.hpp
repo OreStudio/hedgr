@@ -126,6 +126,16 @@ public:
     store_credential(const model::command::command& cmd);
 
     /**
+     * @brief Records the party an account acts as, so the next sign-in repeats it.
+     *
+     * Written when a session switches party, which is the only moment the choice
+     * exists. A write that fails leaves the table row unchanged too, so what the
+     * next sign-in reads is what the store holds rather than what this run hoped
+     * it held.
+     */
+    void store_party(std::string_view account_id, std::string_view party_id);
+
+    /**
      * @brief Seals a password and sends it back to be stored.
      *
      * The key derivation is deliberate work, so it runs on the pool and the

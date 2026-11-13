@@ -19,7 +19,39 @@
  */
 #include "hedgr.model/event/event.hpp"
 
+#include <algorithm>
+
 namespace hedgr::model::event {
+
+namespace {
+constexpr char unit_separator = '\x1f';
+constexpr char record_separator = '\x1e';
+}
+
+bool holds_party(std::string_view serialised,
+    std::string_view party_id) noexcept {
+    if (party_id.empty())
+        return false;
+    auto rest = serialised;
+    while (!rest.empty()) {
+        const auto record = rest.find(record_separator);
+        const auto entry = rest.substr(0, record);
+        const auto unit = entry.find(unit_separator);
+        if (entry.substr(0, unit) == party_id)
+            return true;
+        if (record == std::string_view::npos)
+            break;
+        rest.remove_prefix(record + 1);
+    }
+    return false;
+}
+
+std::size_t party_count(std::string_view serialised) noexcept {
+    if (serialised.empty())
+        return 0;
+    return 1 + static_cast<std::size_t>(
+        std::count(serialised.begin(), serialised.end(), record_separator));
+}
 
 std::string_view to_string(event_kind value) noexcept {
     switch (value) {

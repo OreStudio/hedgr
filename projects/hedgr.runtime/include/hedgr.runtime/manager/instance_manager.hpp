@@ -380,6 +380,16 @@ private:
      */
     void complete_session(service::session_effect effect);
 
+    /**
+     * @brief Asks a signed-in session to act as @p party_id.
+     *
+     * The one way the runtime moves a session to another party, whether the ask
+     * came from a control or from the party the account remembered. A refusal
+     * reaches the bar through the answer rather than through the call.
+     */
+    void switch_party(std::string_view instance_id, std::string_view account_id,
+        std::string_view party_id);
+
     /** @brief Starts one read a session's fact asked for, on its own actor. */
     void start_session_read(const service::session_effect::read_start& read);
 
@@ -513,6 +523,10 @@ private:
                             std::string password) {
                 lock_service_.remember(std::string{account_id},
                     std::move(password));
+            },
+            .remember_party = [this](std::string_view account_id,
+                                  std::string_view party_id) {
+                lock_service_.store_party(account_id, party_id);
             },
         }};
     service::read_service read_service_{sessions_,

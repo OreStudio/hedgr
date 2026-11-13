@@ -38,6 +38,13 @@ namespace worker = hedgr::runtime::worker;
 using support::lg;
 using support::running_key;
 
+/** @brief The account row @p account_id names, or nullptr. */
+[[nodiscard]] const domain::account* account_row(
+    const model::state::account_table& accounts, std::string_view account_id) {
+    const auto handle = accounts.find(account_id);
+    return handle ? accounts.get(*handle) : nullptr;
+}
+
 /** @brief Every live session row, holes skipped, for a whole-table walk. */
 [[nodiscard]] std::vector<model::state::session_handle>
 live_sessions(const model::state::session_table& sessions) {
@@ -372,6 +379,18 @@ session_effect session_service::select_party(
     }
 
     /*
+     * A choice of the party the session already acts as is a confirmation, not a
+     * request: the actor would find nothing to change and answer nothing, so the
+     * choice would never reach the account. Remembering it here is what makes
+     * "this is my party" stick when it happens to be the deployment's default.
+     */
+    if (cmd.party_id == deps_->sessions.party_id(*handle)) {
+        if (deps_->remember_party)
+            deps_->remember_party(cmd.account_id, cmd.party_id);
+        return effect;
+    }
+
+    /*
      * The choice is handed to the session's own actor, which owns the
      * transport. A session with no actor left has nothing to ask, and saying so
      * is better than leaving the control changed and nothing happening.
@@ -488,6 +507,33 @@ std::optional<session_effect> session_service::apply(
          * series browser or chart live on the sign-in that owns it.
          */
         effect.rebind.push_back({ev.instance_id, ev.account_id, *handle});
+
+        /*
+         * The party this account acted as last time wins over the one the
+         * deployment signed the login in as. A remembered party the login no
+         * longer holds is not asked for: the deployment answers such a request
+         * with a refusal, and a refusal on every sign-in for a party that has
+         * been removed is noise about a choice the operator has to make again.
+         */
+        if (const auto* row = account_row(deps_->accounts, ev.account_id);
+            row != nullptr && !row->party_id.empty()
+            && row->party_id != ev.party_id) {
+            if (model::event::holds_party(ev.parties, row->party_id)) {
+                BOOST_LOG_SEV(lg(), ores::logging::info)
+                    << "Session '" << ev.instance_id << "' / '"
+                    << ev.account_id << "' signed in as party '" << ev.party_id
+                    << "' and will act as the remembered party '"
+                    << row->party_id << "'";
+                effect.party = session_effect::party_switch{ev.instance_id,
+                    ev.account_id, row->party_id};
+            } else {
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "Session '" << ev.instance_id << "' / '"
+                    << ev.account_id << "' remembers party '" << row->party_id
+                    << "', which this login may no longer act as; it stays on '"
+                    << ev.party_id << "' and the next choice replaces it";
+            }
+        }
         break;
     case model::event::event_kind::session_token_refreshed:
         /*
@@ -514,6 +560,14 @@ std::optional<session_effect> session_service::apply(
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Session '" << ev.instance_id << "' / '" << ev.account_id
             << "' now acts as party '" << ev.party_id << "'";
+
+        /*
+         * The choice is remembered against the account, so the next sign-in
+         * starts in it. Written on the confirmation and not on the request: a
+         * party the instance refuses must not become the remembered one.
+         */
+        if (deps_->remember_party)
+            deps_->remember_party(ev.account_id, ev.party_id);
         break;
     case model::event::event_kind::session_party_refused:
         /*

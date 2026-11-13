@@ -149,15 +149,15 @@ instance sample_instance() {
 }
 
 /**
- * @brief The version 7 instance table, kept here as a literal.
+ * @brief The version 8 instance table, kept here as a literal.
  *
- * Production no longer carries the version 7 statement, and resurrecting it
+ * Production no longer carries the version 8 statement, and resurrecting it
  * would leave a dead copy of the old schema in the component for the test's
- * sake. The literal is the shape the developer store held before the icon key
- * was added, so the migration runs against the real old table rather than
- * against the current table wearing an old version number.
+ * sake. The literal is the shape the developer store held before an account
+ * gained the party it acts as, so the migration runs against the real old
+ * tables rather than against the current ones wearing an old version number.
  */
-constexpr std::string_view version_seven_instance_ddl = R"(CREATE TABLE instance (
+constexpr std::string_view version_eight_instance_ddl = R"(CREATE TABLE instance (
         id TEXT PRIMARY KEY NOT NULL,
         name TEXT NOT NULL UNIQUE,
         nats_url TEXT NOT NULL,
@@ -167,33 +167,52 @@ constexpr std::string_view version_seven_instance_ddl = R"(CREATE TABLE instance
         tls_ca TEXT NOT NULL,
         tls_cert TEXT NOT NULL,
         tls_key TEXT NOT NULL,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        icon_key TEXT NOT NULL DEFAULT ''
+    ))";
+
+/** @brief The version 8 account table: the current shape without `party_id`. */
+constexpr std::string_view version_eight_account_ddl = R"(CREATE TABLE account (
+        id TEXT PRIMARY KEY,
+        instance_id TEXT NOT NULL REFERENCES instance(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        principal TEXT NOT NULL,
+        folder_id TEXT NOT NULL,
+        credential TEXT,
+        UNIQUE(instance_id, principal)
     ))";
 
 /**
- * @brief Writes a version 7 store with two instance rows into an open file.
+ * @brief Writes a version 8 store with two instances and one account.
  *
- * Only the two tables the migration touches are created. The rest arrive from
+ * Only the tables the migration touches are created. The rest arrive from
  * apply_schema after the migration, which is exactly what an operator's open
  * does, so the test exercises the real path rather than a hand-built replica of
  * the current schema.
  */
-void plant_version_seven_store(database& db) {
-    REQUIRE(db.execute(version_seven_instance_ddl).has_value());
+void plant_version_eight_store(database& db) {
+    REQUIRE(db.execute(version_eight_instance_ddl).has_value());
+    REQUIRE(db.execute(version_eight_account_ddl).has_value());
     REQUIRE(db.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
                 .has_value());
-    REQUIRE(db.execute("INSERT INTO schema_version (version) VALUES (7)")
+    REQUIRE(db.execute("INSERT INTO schema_version (version) VALUES (8)")
                 .has_value());
 
     const auto planted = db.execute(
         "INSERT INTO instance "
         "(id, name, nats_url, subject_prefix, wire_format, folder_id, "
-        "tls_ca, tls_cert, tls_key, created_at) VALUES "
+        "tls_ca, tls_cert, tls_key, created_at, icon_key) VALUES "
         "('inst-1', 'Local', 'nats://localhost:20405', 'ores.local', 'msgpack', "
-        "'', '', '', '', '2026-01-01T00:00:00Z'), "
+        "'', '', '', '', '2026-01-01T00:00:00Z', 'brave_hopper'), "
         "('inst-2', 'Staging', 'nats://localhost:20605', 'ores.staging', 'json', "
-        "'', '', '', '', '2026-01-02T00:00:00Z')");
+        "'', '', '', '', '2026-01-02T00:00:00Z', '')");
     REQUIRE(planted.has_value());
+
+    const auto accounts = db.execute(
+        "INSERT INTO account "
+        "(id, instance_id, name, principal, folder_id, credential) VALUES "
+        "('acct-1', 'inst-1', 'Desk', 'trader@desk', '', NULL)");
+    REQUIRE(accounts.has_value());
 }
 
 }
@@ -410,6 +429,45 @@ TEST_CASE("removing an instance cascades to its accounts", "[store]") {
     const auto remaining = accounts.list_for_instance("inst-1");
     REQUIRE(remaining.has_value());
     REQUIRE(remaining.value().empty());
+}
+
+TEST_CASE("the party an account acts as round-trips on its own", "[store]") {
+    auto db = fresh_store();
+    instance_repository instances(db);
+    account_repository accounts(db);
+
+    REQUIRE(instances.save(sample_instance()).has_value());
+
+    account row;
+    row.id = "id-1";
+    row.instance_id = "inst-1";
+    row.name = "Desk";
+    row.principal = "trader@desk";
+    REQUIRE(accounts.save(row).has_value());
+
+    /*
+     * An account saved without a choice reads back as the empty party, which is
+     * the stored meaning of "nothing chosen yet" rather than a party.
+     */
+    REQUIRE(accounts.list().value().front().party_id.empty());
+
+    /*
+     * The choice is written on its own, because that is how it arrives: a
+     * session switching party knows the account and the party and nothing else
+     * about the row. A save of the whole row would carry a stale copy of the
+     * name, the principal and the folder with it.
+     */
+    REQUIRE(accounts.set_party("id-1", "party-uk").has_value());
+    const auto chosen = accounts.list();
+    REQUIRE(chosen.has_value());
+    REQUIRE(chosen.value().front().party_id == "party-uk");
+    REQUIRE(chosen.value().front().name == "Desk");
+    REQUIRE(chosen.value().front().principal == "trader@desk");
+
+    /* An account that is gone cannot be given a party. */
+    const auto missing = accounts.set_party("id-missing", "party-uk");
+    REQUIRE_FALSE(missing.has_value());
+    REQUIRE(missing.error().code == store_errc::not_found);
 }
 
 TEST_CASE("a window bound to a session round-trips", "[store]") {
@@ -778,16 +836,16 @@ TEST_CASE("a file written with another schema version is refused", "[store]") {
 
     /*
      * A file from a build newer than this one is refused as well, and it is not
-     * dragged through the version 7 migration on the way: a version above the
+     * dragged through the version 8 migration on the way: a version above the
      * current one means the file knows columns this build does not, so reading
      * it as older would corrupt it.
      */
-    REQUIRE(reopened.value().execute("UPDATE schema_version SET version = 9")
+    REQUIRE(reopened.value().execute("UPDATE schema_version SET version = 10")
                 .has_value());
     const auto from_the_future = reopened.value().apply_schema();
     REQUIRE_FALSE(from_the_future.has_value());
     REQUIRE(from_the_future.error().code == store_errc::schema_mismatch);
-    REQUIRE(from_the_future.error().message.contains("9"));
+    REQUIRE(from_the_future.error().message.contains("10"));
     REQUIRE(from_the_future.error().message.contains("delete the file"));
 
     /* A file this build wrote opens without complaint. */
@@ -798,14 +856,14 @@ TEST_CASE("a file written with another schema version is refused", "[store]") {
     REQUIRE(fresh.value().apply_schema().has_value());
 }
 
-TEST_CASE("a version 7 store is migrated and keeps its rows", "[store]") {
+TEST_CASE("a version 8 store is migrated and keeps its rows", "[store]") {
     using hedgr::store::repository::schema_version_entity;
 
     const temporary_database scratch;
     {
         auto opened = database::open(scratch.path());
         REQUIRE(opened.has_value());
-        plant_version_seven_store(opened.value());
+        plant_version_eight_store(opened.value());
     }
 
     auto reopened = database::open(scratch.path());
@@ -826,7 +884,7 @@ TEST_CASE("a version 7 store is migrated and keeps its rows", "[store]") {
     REQUIRE(versions.value().front().version ==
             hedgr::store::repository::schema_version());
 
-    /* The rows are still there, ordered by name, with the empty key. */
+    /* The instances are still there, with the icon key they already carried. */
     instance_repository repository(db);
     const auto rows = repository.list();
     REQUIRE(rows.has_value());
@@ -835,38 +893,33 @@ TEST_CASE("a version 7 store is migrated and keeps its rows", "[store]") {
     REQUIRE(rows.value()[0].name == "Local");
     REQUIRE(rows.value()[0].nats_url == "nats://localhost:20405");
     REQUIRE(rows.value()[0].subject_prefix == "ores.local");
-    REQUIRE(rows.value()[0].icon_key.empty());
+    REQUIRE(rows.value()[0].icon_key == "brave_hopper");
     REQUIRE(rows.value()[1].id == "inst-2");
     REQUIRE(rows.value()[1].name == "Staging");
     REQUIRE(rows.value()[1].icon_key.empty());
 
     /*
-     * The new column is not merely present. A key saved through the repository
-     * reads back, so the added column is bound by the same code as a fresh
-     * table's.
+     * The account kept its row and gained the new column as empty, which is the
+     * stored meaning of no party chosen. The party is not derivable from
+     * anything else in the store, so a value filled in here would be a choice
+     * made for the operator.
      */
-    instance keyed = sample_instance();
-    keyed.id = "inst-3";
-    keyed.name = "Keyed";
-    keyed.icon_key = "brave_hopper";
-    REQUIRE(repository.save(keyed).has_value());
-    const auto after = repository.list();
-    REQUIRE(after.has_value());
-    REQUIRE(after.value().size() == 3);
-    REQUIRE(after.value().front().name == "Keyed");
-    REQUIRE(after.value().front().icon_key == "brave_hopper");
+    account_repository accounts(db);
+    const auto stored = accounts.list();
+    REQUIRE(stored.has_value());
+    REQUIRE(stored.value().size() == 1);
+    REQUIRE(stored.value().front().id == "acct-1");
+    REQUIRE(stored.value().front().name == "Desk");
+    REQUIRE(stored.value().front().principal == "trader@desk");
+    REQUIRE(stored.value().front().party_id.empty());
 
-    /* And the new table is usable through its own repository. */
-    shortcut_repository shortcuts(db);
-    shortcut entry;
-    entry.id = "sc-1";
-    entry.target_kind = window_kind::instance_manager;
-    entry.position = 10;
-    REQUIRE(shortcuts.save(entry).has_value());
-    const auto bar = shortcuts.list();
-    REQUIRE(bar.has_value());
-    REQUIRE(bar.value().size() == 1);
-    REQUIRE(bar.value().front().id == "sc-1");
+    /*
+     * The new column is not merely present. A party written through the
+     * repository reads back, so the added column is bound by the same code as a
+     * fresh table's.
+     */
+    REQUIRE(accounts.set_party("acct-1", "party-uk").has_value());
+    REQUIRE(accounts.list().value().front().party_id == "party-uk");
 
     /*
      * A second open finds the file already at the current version, so it
@@ -879,8 +932,8 @@ TEST_CASE("a version 7 store is migrated and keeps its rows", "[store]") {
     REQUIRE(versions_again.value().size() == 1);
     REQUIRE(versions_again.value().front().version ==
             hedgr::store::repository::schema_version());
-    REQUIRE(repository.list().value().size() == 3);
-    REQUIRE(shortcuts.list().value().size() == 1);
+    REQUIRE(repository.list().value().size() == 2);
+    REQUIRE(accounts.list().value().front().party_id == "party-uk");
 }
 
 TEST_CASE("a store below the migration cut-off is refused unmigrated",
@@ -891,14 +944,14 @@ TEST_CASE("a store below the migration cut-off is refused unmigrated",
     {
         auto opened = database::open(scratch.path());
         REQUIRE(opened.has_value());
-        plant_version_seven_store(opened.value());
+        plant_version_eight_store(opened.value());
 
         /*
-         * Version 6 is the nearest store below the one this build migrates, so
-         * it is the boundary of the cut-off. The file has no icon key and must
-         * be refused rather than pushed through the version 7 step.
+         * Version 7 is the nearest store below the one this build migrates, so
+         * it is the boundary of the cut-off. The file has no party column and
+         * must be refused rather than pushed through the version 8 step.
          */
-        REQUIRE(opened.value().execute("UPDATE schema_version SET version = 6")
+        REQUIRE(opened.value().execute("UPDATE schema_version SET version = 7")
                     .has_value());
     }
 
@@ -908,28 +961,25 @@ TEST_CASE("a store below the migration cut-off is refused unmigrated",
 
     REQUIRE_FALSE(applied.has_value());
     REQUIRE(applied.error().code == store_errc::schema_mismatch);
-    REQUIRE(applied.error().message.contains("6"));
+    REQUIRE(applied.error().message.contains("7"));
     REQUIRE(applied.error().message.contains("delete the file"));
 
     /*
-     * Refused, not half-migrated. A statement that names the icon key column is
-     * refused because the column was never added, the shortcut table was not
-     * created either, and the stamp still says 6. A read through the entity
-     * would not prove this, because sqlgen tolerates a missing column and
-     * returns rows without it, so the check is a write that has to name the
-     * column.
+     * Refused, not half-migrated. A statement that names the party column is
+     * refused because the column was never added, and the stamp still says 7. A
+     * read through the entity would not prove this, because sqlgen tolerates a
+     * missing column and returns rows without it, so the check is a write that
+     * has to name the column.
      */
     REQUIRE_FALSE(
-        reopened.value().execute("UPDATE instance SET icon_key = 'migrated'")
+        reopened.value().execute("UPDATE account SET party_id = 'migrated'")
             .has_value());
-    REQUIRE_FALSE(reopened.value().execute("UPDATE shortcut SET position = 0")
-                      .has_value());
     const auto versions =
         sqlgen::read<std::vector<schema_version_entity>>(
             reopened.value().connection());
     REQUIRE(versions.has_value());
     REQUIRE(versions.value().size() == 1);
-    REQUIRE(versions.value().front().version == 6);
+    REQUIRE(versions.value().front().version == 7);
 }
 
 TEST_CASE("every repository reports the DDL of its own table", "[store]") {

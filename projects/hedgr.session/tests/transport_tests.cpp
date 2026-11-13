@@ -301,6 +301,12 @@ TEST_CASE("live shape: what a deployment says about a chart and its flags",
     REQUIRE(signed_in.has_value());
     std::printf("party=%s tenant=%s\n", signed_in->party_id.c_str(),
         signed_in->tenant_id.c_str());
+    /* What a party picker at sign-in would offer, and what it starts on. */
+    std::printf("parties=%zu\n", signed_in->parties.size());
+    for (const auto& party : signed_in->parties)
+        std::printf("  party %s name='%s'%s\n", party.id.c_str(),
+            party.name.c_str(),
+            party.id == signed_in->party_id ? " (acting)" : "");
 
     const auto series = session.market_series(5);
     if (!series) {

@@ -23,6 +23,7 @@
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/render/mini_plot.hpp"
 #include "hedgr.ui/render/panels.hpp"
+#include "hedgr.ui/render/party_prompt.hpp"
 #include "hedgr.ui/render/status_bar.hpp"
 #include "hedgr.ui/render/toolbar.hpp"
 #include "hedgr.ui/widget/controls.hpp"
@@ -785,6 +786,13 @@ void workspace::render(const render_input& input) {
      * the walk drew. See the note where it is opened.
      */
     draw_lock_prompt(input);
+
+    /*
+     * After the lock prompt, because a store that is shut has no accounts to
+     * remember a party on, and this question is only asked once the store and
+     * the login are both open.
+     */
+    draw_party_prompt(input, party_prompt_);
 
     /* A move outlives one frame at most, so one whose window went is dropped. */
     move_ = std::exchange(next_move_, std::nullopt);

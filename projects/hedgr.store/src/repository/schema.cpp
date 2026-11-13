@@ -57,27 +57,28 @@ namespace {
  * folder they sit in, from 6 when the tables stopped being hand-written
  * SQL and started being derived from the entity structs, which moved the
  * `created_at` default out of the table and into the writer, and from 7 when an
- * instance gained its own TLS material as three paths. It goes to 8 with the
- * icon key an instance names its illustration by and the shortcut table the
- * shortcuts bar is kept in. A file written by version 7 is migrated forward by
- * the step below, and a file from any other version is refused.
+ * instance gained its own TLS material as three paths, and from 8 when the
+ * instance gained the icon key it names its illustration by and the store gained
+ * the shortcut table. It goes to 9 with the party an account last acted as, so
+ * the next sign-in lands in the same party rather than in whatever the
+ * deployment defaults to. A file written by version 8 is migrated forward by the
+ * step below, and a file from any other version is refused.
  */
-constexpr std::int64_t current_version = 8;
+constexpr std::int64_t current_version = 9;
 
 /**
  * @brief The one older version this build knows how to bring forward.
  *
  * Only the step immediately below the current version has a migration. The
- * difference between a version 7 file and this build is one empty column on
- * @c instance and one new table, and both are stated exactly rather than
- * guessed, so the step is safe to run on an operator's rows. A version below 7
- * predates changes this code no longer records, and a migration invented from
- * the current end state would silently rewrite rows whose old shape nobody can
- * still confirm. Version 7 is therefore the cut-off. It is migrated, anything
- * older than it and anything newer than this build is refused, and the sentence
- * returned says so.
+ * difference between a version 8 file and this build is one empty column on
+ * @c account, stated exactly rather than guessed, so the step is safe to run on
+ * an operator's rows. A version below 8 predates changes this code no longer
+ * records, and a migration invented from the current end state would silently
+ * rewrite rows whose old shape nobody can still confirm. Version 8 is therefore
+ * the cut-off. It is migrated, anything older than it and anything newer than
+ * this build is refused, and the sentence returned says so.
  */
-constexpr std::int64_t migrated_from_version = 7;
+constexpr std::int64_t migrated_from_version = 8;
 
 /**
  * @brief The version the file was written with, when it records one.
@@ -145,27 +146,21 @@ result<void> begin_transaction(sqlite::database& db) {
 }
 
 /**
- * @brief Brings a version 7 file to the version 8 shape without losing a row.
+ * @brief Brings a version 8 file to the version 9 shape without losing a row.
  *
- * Two changes make the difference. @c instance gains @c icon_key, empty on
- * every existing row, and @c shortcut is created. The create statement comes
- * from @c ddl_for, which is the same statement the fresh-create path applies,
- * so the table cannot end up with a shape the repository that binds it does not
- * expect.
- *
- * Every existing row gets the empty key, because empty is the stored meaning of
- * no illustration chosen. The seeder's rows are derivable, because it names an
- * instance @c inst-env-<label> after the environment it found, so a key could
- * be read off the name. It is not done, because the store cannot tell a row the
- * seeder wrote from one an operator typed with a name of the same shape, and a
- * key invented for the wrong row is a picture the operator never chose.
+ * One change makes the difference: @c account gains @c party_id, empty on every
+ * existing row. Empty is the stored meaning of no party chosen yet, which the
+ * sign-in reads as "ask", so no row has to be given a party it never had. The
+ * party is not derivable from anything else in the store: it is a choice the
+ * operator made at a sign-in, and a value invented from a default would be that
+ * choice made for them.
  *
  * The whole migration runs in one transaction. SQLite makes DDL transactional,
  * so a failure after the column was added puts the file back exactly as it was
- * and leaves the version row saying 7. That is what makes the next open retry
+ * and leaves the version row saying 8. That is what makes the next open retry
  * the whole migration rather than trust a shape that is neither version.
  */
-result<void> migrate_seven_to_eight(sqlite::database& db) {
+result<void> migrate_eight_to_nine(sqlite::database& db) {
     if (auto started = begin_transaction(db); !started)
         return std::unexpected(started.error());
 
@@ -186,21 +181,9 @@ result<void> migrate_seven_to_eight(sqlite::database& db) {
      * being the value every existing row takes from it.
      */
     if (auto added = db.execute(
-            "ALTER TABLE instance ADD COLUMN icon_key TEXT NOT NULL DEFAULT ''");
+            "ALTER TABLE account ADD COLUMN party_id TEXT NOT NULL DEFAULT ''");
         !added)
         return abandon(added.error());
-
-    const auto shortcut = ddl_for(shortcut_entity::tablename);
-    if (shortcut.empty()) {
-        return abandon(sqlite::store_error{
-            .code = sqlite::store_errc::schema_mismatch,
-            .message = "the shortcut table has no definition to create, so the "
-                       "version 7 store cannot be migrated",
-            .sqlite_code = 0,
-        });
-    }
-    if (auto created = db.execute(shortcut); !created)
-        return abandon(created.error());
 
     if (auto stamped = db.execute(std::format(
             "UPDATE schema_version SET version = {}", current_version));
@@ -273,7 +256,7 @@ result<void> apply(sqlite::database& db) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Migrating the store from version " << migrated_from_version
             << " to " << current_version;
-        if (auto migrated = migrate_seven_to_eight(db); !migrated)
+        if (auto migrated = migrate_eight_to_nine(db); !migrated)
             return std::unexpected(migrated.error());
     }
 

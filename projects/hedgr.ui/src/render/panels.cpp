@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/panels.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.model/signal/names.hpp"
 #include "hedgr.model/signal/signal.hpp"
 #include "hedgr.ui/icon/icons.hpp"
@@ -518,6 +519,27 @@ void draw_series_flags(const render_input& input,
 bool sign_in_needs_password(domain::store_lock lock,
     bool has_credential) noexcept {
     return lock != domain::store_lock::unlocked || !has_credential;
+}
+
+bool needs_party_choice(const render_input& input,
+    hedgr::model::state::session_handle session) {
+    if (input.sessions.status(session)
+        != hedgr::model::domain::session_status::authenticated)
+        return false;
+    if (hedgr::model::event::party_count(input.sessions.parties(session)) < 2)
+        return false;
+
+    /*
+     * The account is the row the choice is remembered on. A session whose
+     * account the catalogue does not list yet is not asked: the store is where
+     * the answer will be written, and asking before it is readable would put a
+     * prompt on screen that could not save what it was told.
+     */
+    const auto handle = input.accounts.find(input.sessions.account_id(session));
+    if (!handle)
+        return false;
+    const auto* row = input.accounts.get(*handle);
+    return row != nullptr && row->party_id.empty();
 }
 
 bool shows_window(domain::window_kind kind, const render_input& input,

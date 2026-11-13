@@ -86,6 +86,17 @@ public:
     set_parent(std::string_view id, std::string_view folder_id);
 
     /**
+     * @brief Stores @p party_id as the party this account acts as.
+     *
+     * The party is a choice the operator made at a sign-in, written when a
+     * session switches party and read at the next sign-in so that session starts
+     * in it. An empty @p party_id means nothing has been chosen; it is not a
+     * party.
+     */
+    [[nodiscard]] result<void>
+    set_party(std::string_view id, std::string_view party_id);
+
+    /**
      * @brief Stores @p sealed as the account's credential.
      *
      * The value is already sealed by the caller: this class never sees a
