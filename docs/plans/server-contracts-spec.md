@@ -21,6 +21,35 @@ test; and where a deployment simply has nothing of a kind (a party with no vol
 blueprints, a currency with no published curve), say so in the response and in
 the test rather than bending the contract to fit.
 
+## As implemented (verified 2026-11-13)
+
+The operations exist in the `ores_dev_prime_origin` checkout, in
+`projects/ores.marketdata/api/include/ores.marketdata.api/messaging/operations_protocol.hpp`,
+and follow this spec closely. Notes for the client work, from the header itself:
+
+- subjects: `marketdata.v1.ops.list_instruments`, `.get_rate_ladder`,
+  `.get_fx_montage`, `.get_curve_analytics`; all with `requires_session = true`.
+- `list_instruments`: `party_id`, `query`, `kinds`, `provider_code`,
+  `offset`/`limit` (both `std::int64_t`); response `instruments[]`, `total`,
+  `truncated`. A `market_instrument` carries `instrument_id`, `kind`, `name`,
+  `currency`, `base_currency`, `quote_currency`, `instrument_type`,
+  `quote_type`, `forward_start`, `axes[]`, `sources[]`, `party_id`, `stale`,
+  `as_of`. Order is by kind then name.
+- `get_rate_ladder`: the response adds `provider_count`, `tenor_convention` and
+  `day_count_convention` beside the rungs, so the screen can state the
+  conventions the rungs rest on. A rung is `tenor`, `maturity_date`,
+  `year_fraction`, `quotes[]` and `consensus`; `consensus` names its `method`
+  and `providers_used`.
+- `get_fx_montage`: `pair_name`, `base_currency`, `quote_currency`,
+  `spot_by_provider[]`, `consensus`, and the change and day range fields.
+- `get_curve_analytics`: `curve_conventions` (`index_name`, `day_count`,
+  `compounding`, `interpolation`, `calendar`), `curve_market_pillar` and the
+  bootstrapped rows.
+
+One difference from this spec to respect: `instrument_axis` and
+`instrument_source` are the header's names for what the spec calls `axis` and
+`source`. The header is the contract.
+
 ## Ground rules for every operation
 
 These are the conventions the existing operations already follow; a new operation
