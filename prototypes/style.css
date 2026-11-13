@@ -253,3 +253,17 @@ tbody tr.total { background: rgba(31, 38, 52, 0.6); font-weight: 600; }
 .foot .led { width: 6px; height: 6px; border-radius: 999px; background: var(--good); display: inline-block; }
 
 .hint { color: var(--subtle); font-size: 11px; }
+
+/* The axis names under a generated plot, where a 3D projection cannot hold
+   them without drawing them across the surface. */
+.axis-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.axis-strip b { color: var(--subtle); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-right: 6px; }
