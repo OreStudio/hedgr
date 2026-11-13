@@ -1,0 +1,1127 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AUD-AONIA Curve Dialog Prototype</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            terminal: {
+              bg: '#0d1117',
+              surface: '#131720',
+              elevated: '#181d28',
+              hover: '#1f2634',
+              border: '#262d3d',
+              borderLight: '#333c52',
+              text: '#e6edf3',
+              muted: '#8b949e',
+              subtle: '#5c6575',
+              accent: '#38bdf8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #090c10;
+      color: #e6edf3;
+      font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    /* Custom subtle scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #131720;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #262d3d;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #384259;
+    }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.45; }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-2 sm:p-5 bg-[radial-gradient(ellipse_at_top,_#151c28_0%,_#090c10_75%)]">
+
+  <!-- Main Institutional Curve Inspector Container -->
+  <div id="dialogWindow" class="w-full max-w-6xl bg-terminal-surface border border-terminal-border rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col transition-all duration-200">
+
+    <!-- 1. Window Title Bar -->
+    <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-terminal-elevated border-b border-terminal-border select-none">
+      <div class="flex items-center gap-2.5">
+        <button id="collapseBtn" title="Toggle Collapse" class="text-terminal-muted hover:text-terminal-text p-1 rounded hover:bg-terminal-hover transition-colors">
+          <svg id="collapseIcon" class="w-3.5 h-3.5 transition-transform duration-200" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M3.2 5.5L8 10.5l4.8-5H3.2z"/>
+          </svg>
+        </button>
+
+        <!-- Curve Icon + Title + Australian Flag -->
+        <div class="flex items-center gap-2">
+          <div class="w-5 h-5 rounded bg-sky-500/15 border border-sky-400/30 flex items-center justify-center text-sky-400">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 17l6-6 4 4 8-8"/>
+              <path d="M17 7h4v4"/>
+            </svg>
+          </div>
+          <span class="font-semibold text-sm tracking-tight text-white">AUD-AONIA</span>
+
+          <!-- Crisp Inline Australian Flag SVG -->
+          <span class="inline-flex items-center ml-0.5 shadow-sm rounded-[2px] overflow-hidden border border-white/10" title="Australian Dollar (AUD) — RBA Overnight Index Average">
+            <svg class="w-5 h-3.5" viewBox="0 0 60 30">
+              <rect width="60" height="30" fill="#00008B"/>
+              <path d="M0,0 L30,15 M30,0 L0,15" stroke="#fff" stroke-width="3"/>
+              <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#fff" stroke-width="5"/>
+              <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#FF0000" stroke-width="3"/>
+              <circle cx="15" cy="22.5" r="2.6" fill="#fff"/>
+              <circle cx="45" cy="6" r="1.4" fill="#fff"/>
+              <circle cx="38" cy="12" r="1.4" fill="#fff"/>
+              <circle cx="51" cy="11" r="1.4" fill="#fff"/>
+              <circle cx="45" cy="24" r="1.4" fill="#fff"/>
+              <circle cx="47.5" cy="16.5" r="1" fill="#fff"/>
+            </svg>
+          </span>
+        </div>
+
+        <span class="hidden sm:inline-block text-xs text-terminal-muted font-mono pl-1">Bootstrapped Curve Inspector</span>
+        <span class="hidden lg:inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-terminal-bg border border-terminal-border text-[11px] font-mono text-terminal-muted">
+          <span>AsOf: <strong class="text-terminal-text">2026-11-12</strong></span>
+          <span class="text-terminal-subtle">|</span>
+          <span>Spot: <strong class="text-sky-300">T+1</strong></span>
+        </span>
+      </div>
+
+      <!-- Right Window Controls -->
+      <div class="flex items-center gap-2">
+        <!-- Interactive Feed Status Pill Toggle -->
+        <button id="feedStatusToggle" class="group flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-mono border transition-all cursor-pointer bg-amber-500/10 border-amber-400/35 text-amber-200 hover:bg-amber-500/20" title="Click to toggle simulated LIVE / STALE feed">
+          <span id="statusDot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse-subtle"></span>
+          <span id="statusLabel" class="font-semibold tracking-wide text-amber-300">STALE</span>
+          <span class="text-amber-400/50">•</span>
+          <span id="statusTimestamp" class="text-[11px] opacity-90">&gt;10m • 2026-11-12T12:02:35Z</span>
+          <span class="text-[10px] uppercase tracking-wider px-1.5 py-0.2 rounded bg-black/35 text-terminal-muted group-hover:text-white transition-colors ml-0.5">Toggle</span>
+        </button>
+
+        <button id="closeDialogBtn" class="text-terminal-muted hover:text-white p-1.5 rounded-md hover:bg-terminal-hover transition-colors" title="Reset View">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Collapsible Content Body -->
+    <div id="dialogBody" class="flex flex-col divide-y divide-terminal-border">
+
+      <!-- 2. Curve Conventions Metadata Strip -->
+      <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 bg-terminal-bg/80 text-[11px] font-mono">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-terminal-muted">
+          <div class="flex items-center gap-1.5">
+            <span class="text-terminal-subtle">Index:</span>
+            <span class="text-terminal-text font-medium">AONIA (RBA)</span>
+          </div>
+          <span class="text-terminal-borderLight hidden sm:inline">•</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-terminal-subtle">Day Count:</span>
+            <span class="px-1.5 py-0.5 rounded bg-terminal-elevated border border-terminal-border text-sky-300">ACT/365F</span>
+          </div>
+          <span class="text-terminal-borderLight hidden sm:inline">•</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-terminal-subtle">Compounding:</span>
+            <span class="text-terminal-text">Continuous</span>
+          </div>
+          <span class="text-terminal-borderLight hidden sm:inline">•</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-terminal-subtle">Interpolation:</span>
+            <span id="metaInterpLabel" class="text-terminal-text">Log-Linear DF</span>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-terminal-subtle">Pillars:</span>
+          <span class="px-1.5 py-0.5 rounded bg-terminal-elevated border border-terminal-border text-terminal-text font-semibold">7</span>
+          <span id="summaryAgePill" class="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-400/30 text-amber-300">
+            Snapshot &gt;10m
+          </span>
+        </div>
+      </div>
+
+      <!-- 3. View Mode Switcher & Curve Overlay Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-terminal-surface">
+        <!-- Segmented View Mode Switcher -->
+        <div class="inline-flex p-0.5 rounded-lg bg-terminal-bg border border-terminal-border" role="tablist" aria-label="Grid View Mode">
+          <button data-view="pillars" class="view-mode-btn px-3 py-1 rounded-md text-xs font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+            Market Pillars
+          </button>
+          <button data-view="bootstrapped" class="view-mode-btn px-3 py-1 rounded-md text-xs font-medium transition-all bg-terminal-elevated text-sky-300 border border-terminal-borderLight shadow-sm cursor-pointer">
+            Bootstrapped Curve
+          </button>
+          <button data-view="all" class="view-mode-btn px-3 py-1 rounded-md text-xs font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+            All Columns
+          </button>
+        </div>
+
+        <!-- Right Controls: Overlay Comparison & Refresh -->
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-terminal-muted">Benchmark:</span>
+            <div class="relative">
+              <select id="curveCountSelect" aria-label="Curve Overlay Selector" class="appearance-none bg-terminal-elevated hover:bg-terminal-hover text-terminal-text border border-terminal-borderLight rounded-md pl-2.5 pr-7 py-1 text-xs font-medium focus:outline-none focus:border-sky-400 transition-colors cursor-pointer">
+                <option value="1">1 Curve (Current)</option>
+                <option value="2">2 Curves (vs Prior Close T-1)</option>
+              </select>
+              <svg class="w-3.5 h-3.5 text-terminal-muted pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+              </svg>
+            </div>
+          </div>
+
+          <button id="refreshFeedBtn" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-sky-300 font-medium text-xs transition-all cursor-pointer">
+            <svg id="refreshIcon" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 2v6h-6"/>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+              <path d="M3 22v-6h6"/>
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+            </svg>
+            <span>Refresh Feed</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4. Institutional Data Table -->
+      <div class="overflow-x-auto bg-terminal-surface">
+        <table class="w-full text-left border-collapse whitespace-nowrap">
+          <thead id="curveTableHead">
+            <!-- Dynamic Header populated via JS -->
+          </thead>
+          <tbody id="curveTableBody" class="divide-y divide-terminal-border/60 font-mono text-xs tabular-nums">
+            <!-- Dynamic Rows populated via JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 5. Interactive Yield & Discount Factor Curve Chart -->
+      <div class="p-4 bg-terminal-bg/75">
+        <!-- Chart Control Toolbar -->
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <!-- Left: Y-Axis Metric Selector -->
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-[11px] font-mono uppercase tracking-wider text-terminal-muted">Y-Axis:</span>
+            <div class="inline-flex p-0.5 rounded-md bg-terminal-surface border border-terminal-border">
+              <button data-ymetric="zero" class="y-metric-btn px-2.5 py-1 rounded text-[11px] font-medium transition-all bg-sky-500/20 text-sky-300 border border-sky-400/30 cursor-pointer">
+                Zero Rate (%)
+              </button>
+              <button data-ymetric="fwd" class="y-metric-btn px-2.5 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+                Implied Fwd (%)
+              </button>
+              <button data-ymetric="df" class="y-metric-btn px-2.5 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+                Discount Factor
+              </button>
+            </div>
+          </div>
+
+          <!-- Center/Right: X-Axis Spacing & Interpolation Toggles -->
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- X-Axis Spacing Toggle -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-mono uppercase tracking-wider text-terminal-muted">X-Axis:</span>
+              <div class="inline-flex p-0.5 rounded-md bg-terminal-surface border border-terminal-border">
+                <button data-xmode="categorical" class="x-mode-btn px-2 py-1 rounded text-[11px] font-medium transition-all bg-terminal-elevated text-terminal-text border border-terminal-borderLight cursor-pointer">
+                  Tenor (Cat.)
+                </button>
+                <button data-xmode="proportional" class="x-mode-btn px-2 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+                  Maturity (τ)
+                </button>
+              </div>
+            </div>
+
+            <!-- Interpolation Preview Toggle -->
+            <div class="flex items-center gap-1.5">
+              <span class="text-[11px] font-mono uppercase tracking-wider text-terminal-muted">Interp:</span>
+              <div class="inline-flex p-0.5 rounded-md bg-terminal-surface border border-terminal-border">
+                <button data-interp="smooth" class="interp-btn px-2 py-1 rounded text-[11px] font-medium transition-all bg-terminal-elevated text-terminal-text border border-terminal-borderLight cursor-pointer">
+                  Log-Linear DF
+                </button>
+                <button data-interp="linear" class="interp-btn px-2 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer">
+                  Piecewise Linear
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Legend Bar -->
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2 text-xs">
+          <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+              <span class="w-3.5 h-0.5 bg-sky-400 inline-block rounded-full"></span>
+              <span id="primaryLegendLabel" class="font-medium text-terminal-text">AUD-AONIA Zero Rate (%)</span>
+            </div>
+            <div id="secondCurveLegend" class="hidden items-center gap-2">
+              <span class="w-3.5 h-0.5 border-t-2 border-dashed border-amber-300 inline-block"></span>
+              <span class="font-medium text-amber-200/90">Prior Close (T-1)</span>
+            </div>
+          </div>
+          <span class="text-[11px] font-mono text-terminal-subtle">ACT/365F Continuous • Spot 2026-11-13</span>
+        </div>
+
+        <!-- Responsive SVG Chart Container -->
+        <div id="chartContainer" class="relative w-full h-64 sm:h-72 bg-terminal-surface border border-terminal-border rounded-lg overflow-hidden select-none">
+          <svg id="curveSvg" class="w-full h-full block"></svg>
+
+          <!-- Floating Crosshair Institutional Tooltip -->
+          <div id="chartTooltip" class="pointer-events-none opacity-0 transition-opacity duration-100 absolute z-20 min-w-[235px] p-3 rounded-lg bg-[#161b26]/95 backdrop-blur-md border border-terminal-borderLight shadow-2xl text-xs font-mono">
+            <div class="flex items-center justify-between border-b border-terminal-border pb-1.5 mb-2">
+              <div>
+                <span id="ttRung" class="font-bold text-white text-sm">3M</span>
+                <span id="ttMatDate" class="text-[11px] text-terminal-muted ml-1.5">2027-02-13</span>
+              </div>
+              <span id="ttDeltaBadge" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-400/30">+2.1 bps</span>
+            </div>
+            <div class="space-y-1 tabular-nums text-[11px]">
+              <div class="flex justify-between gap-4">
+                <span class="text-terminal-muted">Par Mid Rate:</span>
+                <span id="ttPar" class="text-terminal-text font-medium">4.308%</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-terminal-muted">Zero Rate:</span>
+                <span id="ttZero" class="text-sky-300 font-semibold">4.308%</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-terminal-muted">Implied Fwd:</span>
+                <span id="ttFwd" class="text-cyan-200">4.308%</span>
+              </div>
+              <div class="flex justify-between gap-4">
+                <span class="text-terminal-muted">Discount Factor:</span>
+                <span id="ttDf" class="text-terminal-text">0.98929</span>
+              </div>
+              <div id="ttPriorRow" class="hidden justify-between gap-4 pt-1.5 mt-1 border-t border-terminal-border/70">
+                <span class="text-amber-300/85">T-1 Prior Value:</span>
+                <span id="ttPriorVal" class="text-amber-200">4.256%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. Bottom Institutional Footer Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-terminal-elevated text-xs">
+        <!-- Left Context: Tenant + Acting Entity -->
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center gap-1.5 text-terminal-muted font-mono text-[11px]">
+            <span class="w-2 h-2 rounded-full bg-sky-400/80"></span>
+            <span>tenant_admin@acme_corporation</span>
+          </div>
+
+          <div class="h-4 w-[1px] bg-terminal-border hidden sm:block"></div>
+
+          <div class="flex items-center gap-2">
+            <span class="text-terminal-muted">Acting as:</span>
+            <div class="relative">
+              <select id="entitySelect" aria-label="Acting Entity" class="appearance-none bg-terminal-surface hover:bg-terminal-hover text-white border border-terminal-borderLight rounded-md pl-2.5 pr-7 py-1 text-xs font-medium focus:outline-none focus:border-sky-400 transition-colors cursor-pointer">
+                <option value="uk">ACME Corporation UK plc</option>
+                <option value="au">ACME Corporation AU Pty Ltd</option>
+              </select>
+              <svg class="w-3.5 h-3.5 text-terminal-muted pointer-events-none absolute right-2 top-1/2 -translate-y-1/2" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Actions: Export JSON / CSV & Feed Status -->
+        <div class="flex flex-wrap items-center gap-2.5 ml-auto">
+          <span id="toastFeedback" class="text-[11px] font-mono text-emerald-300 opacity-0 transition-opacity duration-200"></span>
+
+          <div class="inline-flex rounded-md shadow-sm" role="group">
+            <button id="copyJsonBtn" class="px-2.5 py-1 text-xs font-mono font-medium text-terminal-text bg-terminal-surface hover:bg-terminal-hover border border-terminal-borderLight rounded-l-md transition-colors cursor-pointer" title="Copy Bootstrapped Curve JSON to Clipboard">
+              Copy JSON
+            </button>
+            <button id="copyCsvBtn" class="px-2.5 py-1 text-xs font-mono font-medium text-terminal-text bg-terminal-surface hover:bg-terminal-hover border-t border-b border-r border-terminal-borderLight rounded-r-md transition-colors cursor-pointer" title="Copy Curve Table as CSV to Clipboard">
+              Copy CSV
+            </button>
+          </div>
+
+          <div class="hidden md:flex items-center gap-1.5 pl-2 border-l border-terminal-border font-mono text-[11px]">
+            <span id="footerStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
+            <span id="footerStatusText" class="text-amber-300">STALE (2026-11-12T12:02:35Z)</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    // Authentic AUD-AONIA Bootstrapped Curve & Pillar Dataset
+    // Valuation Date: 2026-11-12, Spot Lag: T+1 (2026-11-13), Day Count: ACT/365F
+    // Discount Factors match the exact values from the screenshot: 0.98929 down to 0.35857
+    const rawPillars = [
+      {
+        tenor: '3M',
+        instrument: 'AUD OIS 3M',
+        maturityDate: '2027-02-13',
+        tau: 92 / 365,          // ~0.252055 ACT/365F
+        df: 0.98929,
+        priorDf: 0.98934,
+        halfSpreadBps: 0.4
+      },
+      {
+        tenor: '6M',
+        instrument: 'AUD OIS 6M',
+        maturityDate: '2027-05-13',
+        tau: 181 / 365,         // ~0.495890 ACT/365F
+        df: 0.97903,
+        priorDf: 0.97914,
+        halfSpreadBps: 0.5
+      },
+      {
+        tenor: '12M',
+        instrument: 'AUD OIS 12M',
+        maturityDate: '2027-11-13',
+        tau: 365 / 365,         // 1.000000 ACT/365F
+        df: 0.95825,
+        priorDf: 0.95848,
+        halfSpreadBps: 0.6
+      },
+      {
+        tenor: '2Y',
+        instrument: 'AUD OIS 2Y',
+        maturityDate: '2028-11-13',
+        tau: 731 / 365,         // 2028 is leap year -> 2.002740 ACT/365F
+        df: 0.91859,
+        priorDf: 0.91910,
+        halfSpreadBps: 0.75
+      },
+      {
+        tenor: '5Y',
+        instrument: 'AUD OIS 5Y',
+        maturityDate: '2031-11-13',
+        tau: 1826 / 365,        // 5.002740 ACT/365F
+        df: 0.81332,
+        priorDf: 0.81465,
+        halfSpreadBps: 1.0
+      },
+      {
+        tenor: '10Y',
+        instrument: 'AUD OIS 10Y',
+        maturityDate: '2036-11-13',
+        tau: 3653 / 365,        // 10.008219 ACT/365F
+        df: 0.66872,
+        priorDf: 0.67120,
+        halfSpreadBps: 1.25
+      },
+      {
+        tenor: '30Y',
+        instrument: 'AUD OIS 30Y',
+        maturityDate: '2056-11-13',
+        tau: 10958 / 365,       // 30.021918 ACT/365F
+        df: 0.35857,
+        priorDf: 0.36295,
+        halfSpreadBps: 2.0
+      }
+    ];
+
+    // Pre-compute continuous zero rates, piecewise forward rates, par rates, and T-1 deltas
+    const curveData = rawPillars.map((p, idx, arr) => {
+      // Continuously compounded zero rate: z(t) = -ln(DF) / tau
+      const zeroRate = (-Math.log(p.df) / p.tau) * 100;
+      const priorZeroRate = (-Math.log(p.priorDf) / p.tau) * 100;
+
+      // Instantaneous/period forward rate: f(t_{i-1}, t_i) = -ln(DF_i / DF_{i-1}) / (tau_i - tau_{i-1})
+      let fwdRate, priorFwdRate;
+      if (idx === 0) {
+        fwdRate = zeroRate;
+        priorFwdRate = priorZeroRate;
+      } else {
+        const prev = arr[idx - 1];
+        const dTau = p.tau - prev.tau;
+        fwdRate = (-Math.log(p.df / prev.df) / dTau) * 100;
+        priorFwdRate = (-Math.log(p.priorDf / prev.priorDf) / dTau) * 100;
+      }
+
+      // Approximate Par OIS Rate (%) aligned with term structure
+      const parMid = idx <= 2
+        ? ((1 / p.df - 1) / p.tau) * 100
+        : zeroRate * 1.008;
+      const priorParMid = idx <= 2
+        ? ((1 / p.priorDf - 1) / p.tau) * 100
+        : priorZeroRate * 1.008;
+
+      const spreadBps = p.halfSpreadBps * 2;
+      const bidRate = parMid - (p.halfSpreadBps / 100);
+      const askRate = parMid + (p.halfSpreadBps / 100);
+      const shiftBps = (zeroRate - priorZeroRate) * 100;
+
+      return {
+        ...p,
+        zeroRate,
+        priorZeroRate,
+        fwdRate,
+        priorFwdRate,
+        parMid,
+        priorParMid,
+        bidRate,
+        askRate,
+        spreadBps,
+        shiftBps
+      };
+    });
+
+    // Application State
+    const state = {
+      isLive: false,
+      viewMode: 'bootstrapped', // 'pillars' | 'bootstrapped' | 'all'
+      yMetric: 'zero',          // 'zero' | 'fwd' | 'df'
+      xMode: 'categorical',     // 'categorical' | 'proportional'
+      interpMode: 'smooth',     // 'smooth' | 'linear'
+      curveCount: 1,            // 1 or 2
+      hoveredIndex: null,
+      collapsed: false
+    };
+
+    // DOM References
+    const tableHead = document.getElementById('curveTableHead');
+    const tableBody = document.getElementById('curveTableBody');
+    const curveSvg = document.getElementById('curveSvg');
+    const chartContainer = document.getElementById('chartContainer');
+    const chartTooltip = document.getElementById('chartTooltip');
+
+    // Helper: Format shift in bps with sign & color
+    function formatShiftHtml(bps) {
+      const sign = bps > 0 ? '+' : '';
+      const cls = bps > 0 ? 'text-emerald-400' : (bps < 0 ? 'text-rose-400' : 'text-terminal-muted');
+      return `<span class="${cls}">${sign}${bps.toFixed(1)}</span>`;
+    }
+
+    // Render Table Head & Rows based on active View Mode
+    function renderTable() {
+      const showCompare = state.curveCount === 2;
+      const ageBadgeText = state.isLive ? '2s' : '>10m';
+      const ageColorClass = state.isLive ? 'text-emerald-400/90' : 'text-amber-300/85';
+
+      if (state.viewMode === 'pillars') {
+        tableHead.innerHTML = `
+          <tr class="border-b border-terminal-border bg-terminal-elevated/50 text-[11px] font-semibold uppercase tracking-wider text-terminal-muted">
+            <th class="py-2 px-4">Instrument</th>
+            <th class="py-2 px-3">Tenor</th>
+            <th class="py-2 px-3 text-right">Bid (%)</th>
+            <th class="py-2 px-3 text-right">Ask (%)</th>
+            <th class="py-2 px-3 text-right text-sky-300">Mid (%)</th>
+            <th class="py-2 px-3 text-right">Spread (bps)</th>
+            ${showCompare ? '<th class="py-2 px-3 text-right text-amber-200/80">Prior Mid (%)</th>' : ''}
+            <th class="py-2 px-3 text-right">Chg (bps)</th>
+            <th class="py-2 px-4 text-right">Age</th>
+          </tr>
+        `;
+      } else if (state.viewMode === 'bootstrapped') {
+        tableHead.innerHTML = `
+          <tr class="border-b border-terminal-border bg-terminal-elevated/50 text-[11px] font-semibold uppercase tracking-wider text-terminal-muted">
+            <th class="py-2 px-4">Tenor</th>
+            <th class="py-2 px-3">Maturity Date</th>
+            <th class="py-2 px-3 text-right">Year Frac (τ)</th>
+            <th class="py-2 px-3 text-right text-sky-300">Zero Rate (%)</th>
+            <th class="py-2 px-3 text-right text-cyan-200">Implied Fwd (%)</th>
+            <th class="py-2 px-3 text-right">Discount Factor</th>
+            ${showCompare ? '<th class="py-2 px-3 text-right text-amber-200/80">Prior Zero (%)</th>' : ''}
+            <th class="py-2 px-3 text-right">Shift (bps)</th>
+            <th class="py-2 px-4 text-right">Age</th>
+          </tr>
+        `;
+      } else {
+        // All Columns Combined Mode
+        tableHead.innerHTML = `
+          <tr class="border-b border-terminal-border bg-terminal-elevated/50 text-[11px] font-semibold uppercase tracking-wider text-terminal-muted">
+            <th class="py-2 px-4">Instrument</th>
+            <th class="py-2 px-3">Maturity</th>
+            <th class="py-2 px-3 text-right">τ</th>
+            <th class="py-2 px-3 text-right">Bid (%)</th>
+            <th class="py-2 px-3 text-right">Ask (%)</th>
+            <th class="py-2 px-3 text-right">Par Mid (%)</th>
+            <th class="py-2 px-3 text-right text-sky-300">Zero (%)</th>
+            <th class="py-2 px-3 text-right text-cyan-200">Fwd (%)</th>
+            <th class="py-2 px-3 text-right">Discount Factor</th>
+            <th class="py-2 px-3 text-right">Shift (bps)</th>
+            <th class="py-2 px-4 text-right">Age</th>
+          </tr>
+        `;
+      }
+
+      tableBody.innerHTML = curveData.map((row, idx) => {
+        const isHovered = state.hoveredIndex === idx;
+        const rowBg = isHovered
+          ? 'bg-sky-500/15 text-white'
+          : 'hover:bg-terminal-hover/85 text-terminal-text';
+
+        if (state.viewMode === 'pillars') {
+          return `
+            <tr data-index="${idx}" class="transition-colors duration-75 cursor-pointer ${rowBg}">
+              <td class="py-2 px-4 font-semibold ${isHovered ? 'text-sky-300' : 'text-white'}">
+                <div class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full ${isHovered ? 'bg-sky-400 opacity-100' : 'opacity-0'}"></span>
+                  <span>${row.instrument}</span>
+                </div>
+              </td>
+              <td class="py-2 px-3 text-terminal-muted">${row.tenor}</td>
+              <td class="py-2 px-3 text-right text-terminal-text">${row.bidRate.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right text-terminal-text">${row.askRate.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right font-semibold text-sky-300">${row.parMid.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right text-terminal-muted">${row.spreadBps.toFixed(1)}</td>
+              ${showCompare ? `<td class="py-2 px-3 text-right text-amber-200/80">${row.priorParMid.toFixed(3)}</td>` : ''}
+              <td class="py-2 px-3 text-right">${formatShiftHtml(row.shiftBps)}</td>
+              <td class="py-2 px-4 text-right ${ageColorClass}">${ageBadgeText}</td>
+            </tr>
+          `;
+        } else if (state.viewMode === 'bootstrapped') {
+          return `
+            <tr data-index="${idx}" class="transition-colors duration-75 cursor-pointer ${rowBg}">
+              <td class="py-2 px-4 font-semibold ${isHovered ? 'text-sky-300' : 'text-white'}">
+                <div class="flex items-center gap-2">
+                  <span class="w-1.5 h-1.5 rounded-full ${isHovered ? 'bg-sky-400 opacity-100' : 'opacity-0'}"></span>
+                  <span>${row.tenor}</span>
+                </div>
+              </td>
+              <td class="py-2 px-3 text-terminal-muted">${row.maturityDate}</td>
+              <td class="py-2 px-3 text-right text-terminal-muted">${row.tau.toFixed(4)}</td>
+              <td class="py-2 px-3 text-right font-semibold text-sky-300">${row.zeroRate.toFixed(4)}%</td>
+              <td class="py-2 px-3 text-right text-cyan-200/90">${row.fwdRate.toFixed(4)}%</td>
+              <td class="py-2 px-3 text-right font-medium text-white">${row.df.toFixed(5)}</td>
+              ${showCompare ? `<td class="py-2 px-3 text-right text-amber-200/80">${row.priorZeroRate.toFixed(4)}%</td>` : ''}
+              <td class="py-2 px-3 text-right">${formatShiftHtml(row.shiftBps)}</td>
+              <td class="py-2 px-4 text-right ${ageColorClass}">${ageBadgeText}</td>
+            </tr>
+          `;
+        } else {
+          return `
+            <tr data-index="${idx}" class="transition-colors duration-75 cursor-pointer ${rowBg}">
+              <td class="py-2 px-4 font-semibold ${isHovered ? 'text-sky-300' : 'text-white'}">${row.instrument}</td>
+              <td class="py-2 px-3 text-terminal-muted">${row.maturityDate}</td>
+              <td class="py-2 px-3 text-right text-terminal-muted">${row.tau.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right">${row.bidRate.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right">${row.askRate.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right font-medium">${row.parMid.toFixed(3)}</td>
+              <td class="py-2 px-3 text-right font-semibold text-sky-300">${row.zeroRate.toFixed(4)}%</td>
+              <td class="py-2 px-3 text-right text-cyan-200/90">${row.fwdRate.toFixed(4)}%</td>
+              <td class="py-2 px-3 text-right font-medium text-white">${row.df.toFixed(5)}</td>
+              <td class="py-2 px-3 text-right">${formatShiftHtml(row.shiftBps)}</td>
+              <td class="py-2 px-4 text-right ${ageColorClass}">${ageBadgeText}</td>
+            </tr>
+          `;
+        }
+      }).join('');
+
+      // Attach synchronized hover listeners
+      tableBody.querySelectorAll('tr').forEach(tr => {
+        const idx = Number(tr.dataset.index);
+        tr.addEventListener('mouseenter', () => setHoveredIndex(idx));
+        tr.addEventListener('mouseleave', () => setHoveredIndex(null));
+      });
+    }
+
+    // Helper: Build smooth SVG Catmull-Rom / cubic Bezier path for continuous curve inspection
+    function buildSmoothPath(points) {
+      if (points.length < 2) return '';
+      let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i === 0 ? i : i - 1];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const p3 = points[i + 2 < points.length ? i + 2 : i + 1];
+
+        const tension = 0.22;
+        const cp1x = p1.x + (p2.x - p0.x) * tension;
+        const cp1y = p1.y + (p2.y - p0.y) * tension;
+        const cp2x = p2.x - (p3.x - p1.x) * tension;
+        const cp2y = p2.y - (p3.y - p1.y) * tension;
+
+        d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+      }
+      return d;
+    }
+
+    // Extract active and prior numeric value for the chosen Y-axis metric
+    function getMetricValues(item) {
+      if (state.yMetric === 'zero') {
+        return { current: item.zeroRate, prior: item.priorZeroRate, decimals: 3, suffix: '%' };
+      } else if (state.yMetric === 'fwd') {
+        return { current: item.fwdRate, prior: item.priorFwdRate, decimals: 3, suffix: '%' };
+      } else {
+        return { current: item.df, prior: item.priorDf, decimals: 5, suffix: '' };
+      }
+    }
+
+    // Render Interactive SVG Curve Chart
+    function renderChart() {
+      const rect = chartContainer.getBoundingClientRect();
+      const width = rect.width || 880;
+      const height = rect.height || 272;
+
+      const pad = { top: 22, right: 72, bottom: 32, left: 26 };
+      const plotW = Math.max(120, width - pad.left - pad.right);
+      const plotH = Math.max(90, height - pad.top - pad.bottom);
+
+      // Update Legend Label
+      const legendMap = {
+        zero: 'AUD-AONIA Zero Rate (%)',
+        fwd: 'AUD-AONIA Implied Forward Rate (%)',
+        df: 'AUD-AONIA Discount Factor P(0,T)'
+      };
+      document.getElementById('primaryLegendLabel').textContent = legendMap[state.yMetric];
+
+      // Determine Y-Axis scale & ticks with generous padding so nodes never clip
+      let yMin, yMax, yTicks, formatYTick;
+      if (state.yMetric === 'df') {
+        yMin = 0.30;
+        yMax = 1.05;
+        yTicks = [1.00, 0.90, 0.80, 0.70, 0.60, 0.50, 0.40, 0.30];
+        formatYTick = (v) => v.toFixed(5);
+      } else if (state.yMetric === 'zero') {
+        yMin = 3.20;
+        yMax = 4.50;
+        yTicks = [4.40, 4.20, 4.00, 3.80, 3.60, 3.40, 3.20];
+        formatYTick = (v) => v.toFixed(2) + '%';
+      } else {
+        // Implied Forward (%) spans ~3.06% to ~4.31%
+        yMin = 2.90;
+        yMax = 4.50;
+        yTicks = [4.40, 4.10, 3.80, 3.50, 3.20, 2.90];
+        formatYTick = (v) => v.toFixed(2) + '%';
+      }
+
+      // Determine X-Axis positioning (Categorical vs Proportional Year Fraction tau)
+      const minTau = curveData[0].tau;
+      const maxTau = curveData[curveData.length - 1].tau;
+      const getX = (i) => {
+        if (state.xMode === 'categorical') {
+          return pad.left + (i / (curveData.length - 1)) * plotW;
+        } else {
+          const norm = (curveData[i].tau - minTau) / (maxTau - minTau);
+          return pad.left + norm * plotW;
+        }
+      };
+      const getY = (val) => pad.top + ((yMax - val) / (yMax - yMin)) * plotH;
+
+      const mainPoints = curveData.map((d, i) => {
+        const vals = getMetricValues(d);
+        return { x: getX(i), y: getY(vals.current), data: d, vals, idx: i };
+      });
+
+      const priorPoints = curveData.map((d, i) => {
+        const vals = getMetricValues(d);
+        return { x: getX(i), y: getY(vals.prior), data: d, vals, idx: i };
+      });
+
+      const linePath = state.interpMode === 'smooth'
+        ? buildSmoothPath(mainPoints)
+        : mainPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+
+      const priorLinePath = state.interpMode === 'smooth'
+        ? buildSmoothPath(priorPoints)
+        : priorPoints.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
+
+      const areaPath = `${linePath} L ${mainPoints[mainPoints.length - 1].x.toFixed(1)} ${(pad.top + plotH).toFixed(1)} L ${mainPoints[0].x.toFixed(1)} ${(pad.top + plotH).toFixed(1)} Z`;
+
+      // Horizontal Gridlines & Right Y-Axis Labels
+      const yGridSvg = yTicks.map(tick => {
+        const y = getY(tick).toFixed(1);
+        return `
+          <line x1="${pad.left}" y1="${y}" x2="${pad.left + plotW}" y2="${y}" stroke="#1e2433" stroke-width="1" />
+          <text x="${pad.left + plotW + 10}" y="${Number(y) + 3.5}" fill="#8b949e" font-family="JetBrains Mono, monospace" font-size="10.5" text-anchor="start">
+            ${formatYTick(tick)}
+          </text>
+        `;
+      }).join('');
+
+      // Vertical Gridlines & X-Axis Labels
+      const xGridSvg = mainPoints.map((p, i) => {
+        const isHovered = state.hoveredIndex === p.idx;
+        // In proportional mode, hide overlapping labels on tightly clustered short end unless hovered
+        const isCrowdedShortEnd = state.xMode === 'proportional' && (i === 1 || i === 2) && !isHovered;
+        const labelText = state.xMode === 'proportional' && i === 0 ? '3M-1Y' : p.data.tenor;
+
+        return `
+          <line x1="${p.x.toFixed(1)}" y1="${pad.top}" x2="${p.x.toFixed(1)}" y2="${pad.top + plotH}" stroke="${isHovered ? '#38bdf8' : '#1b202e'}" stroke-width="${isHovered ? '1.2' : '1'}" ${isHovered ? 'stroke-dasharray="3 3"' : ''} />
+          ${!isCrowdedShortEnd ? `
+            <text x="${p.x.toFixed(1)}" y="${pad.top + plotH + 20}" fill="${isHovered ? '#7dd3fc' : '#8b949e'}" font-weight="${isHovered ? '600' : '400'}" font-family="JetBrains Mono, monospace" font-size="10.5" text-anchor="middle">
+              ${labelText}
+            </text>
+          ` : ''}
+        `;
+      }).join('');
+
+      // Optional 2nd Curve (Prior Close T-1 in Pastel Amber)
+      const secondCurveSvg = state.curveCount === 2 ? `
+        <path d="${priorLinePath}" fill="none" stroke="#fcd34d" stroke-width="1.75" stroke-dasharray="4 4" opacity="0.88" />
+        ${priorPoints.map(p => `
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" fill="#131720" stroke="#fcd34d" stroke-width="1.5" />
+        `).join('')}
+      ` : '';
+
+      // Compute dynamic hit-target rectangles around each node so proportional mode also hovers smoothly
+      const nodesSvg = mainPoints.map((p, i) => {
+        const isHovered = state.hoveredIndex === p.idx;
+        const leftBound = i === 0 ? pad.left : (mainPoints[i - 1].x + p.x) / 2;
+        const rightBound = i === mainPoints.length - 1 ? pad.left + plotW : (p.x + mainPoints[i + 1].x) / 2;
+        const hitW = Math.max(12, rightBound - leftBound);
+
+        return `
+          <g class="chart-node cursor-pointer" data-index="${p.idx}">
+            ${isHovered ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="10.5" fill="#38bdf8" opacity="0.22" />` : ''}
+            <circle
+              cx="${p.x.toFixed(1)}"
+              cy="${p.y.toFixed(1)}"
+              r="${isHovered ? '5.5' : '4'}"
+              fill="${isHovered ? '#7dd3fc' : '#38bdf8'}"
+              stroke="#0d1117"
+              stroke-width="1.75"
+            />
+            <rect
+              x="${leftBound.toFixed(1)}"
+              y="${pad.top}"
+              width="${hitW.toFixed(1)}"
+              height="${plotH}"
+              fill="transparent"
+            />
+          </g>
+        `;
+      }).join('');
+
+      curveSvg.innerHTML = `
+        <defs>
+          <linearGradient id="curveAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.24"/>
+            <stop offset="100%" stop-color="#38bdf8" stop-opacity="0.01"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Plot Border -->
+        <rect x="${pad.left}" y="${pad.top}" width="${plotW}" height="${plotH}" fill="none" stroke="#262d3d" stroke-width="1" />
+
+        ${yGridSvg}
+        ${xGridSvg}
+
+        <!-- Area & Primary Curve -->
+        <path d="${areaPath}" fill="url(#curveAreaGrad)" />
+        <path d="${linePath}" fill="none" stroke="#38bdf8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" />
+
+        ${secondCurveSvg}
+        ${nodesSvg}
+      `;
+
+      // Bind hover listeners
+      curveSvg.querySelectorAll('.chart-node').forEach(node => {
+        const idx = Number(node.dataset.index);
+        node.addEventListener('mouseenter', () => setHoveredIndex(idx));
+        node.addEventListener('mouseleave', () => setHoveredIndex(null));
+      });
+
+      updateTooltipPosition(mainPoints);
+    }
+
+    // Update Floating Crosshair Institutional Tooltip
+    function updateTooltipPosition(mainPoints) {
+      if (state.hoveredIndex === null || !mainPoints) {
+        chartTooltip.classList.add('opacity-0');
+        return;
+      }
+
+      const pt = mainPoints[state.hoveredIndex];
+      const item = pt.data;
+
+      document.getElementById('ttRung').textContent = item.tenor;
+      document.getElementById('ttMatDate').textContent = item.maturityDate;
+      document.getElementById('ttPar').textContent = item.parMid.toFixed(3) + '%';
+      document.getElementById('ttZero').textContent = item.zeroRate.toFixed(4) + '%';
+      document.getElementById('ttFwd').textContent = item.fwdRate.toFixed(4) + '%';
+      document.getElementById('ttDf').textContent = item.df.toFixed(5);
+
+      const deltaBadge = document.getElementById('ttDeltaBadge');
+      const sign = item.shiftBps > 0 ? '+' : '';
+      deltaBadge.textContent = `${sign}${item.shiftBps.toFixed(1)} bps`;
+
+      const ttPriorRow = document.getElementById('ttPriorRow');
+      if (state.curveCount === 2) {
+        ttPriorRow.classList.remove('hidden');
+        ttPriorRow.classList.add('flex');
+        document.getElementById('ttPriorVal').textContent =
+          pt.vals.prior.toFixed(pt.vals.decimals) + pt.vals.suffix;
+      } else {
+        ttPriorRow.classList.add('hidden');
+        ttPriorRow.classList.remove('flex');
+      }
+
+      chartTooltip.classList.remove('opacity-0');
+
+      const containerW = chartContainer.clientWidth;
+      const ttW = chartTooltip.offsetWidth || 235;
+      const ttH = chartTooltip.offsetHeight || 135;
+
+      let left = pt.x + 14;
+      if (left + ttW > containerW - 78) {
+        left = pt.x - ttW - 14;
+      }
+      left = Math.max(12, left);
+      const top = Math.max(10, Math.min(pt.y - ttH / 2, chartContainer.clientHeight - ttH - 10));
+
+      chartTooltip.style.left = `${left}px`;
+      chartTooltip.style.top = `${top}px`;
+    }
+
+    // Synchronize hover state across table and chart
+    function setHoveredIndex(idx) {
+      if (state.hoveredIndex === idx) return;
+      state.hoveredIndex = idx;
+      renderTable();
+      renderChart();
+    }
+
+    // Update Feed Status UI across Header, Metadata Bar, and Footer
+    function updateFeedStatusUI() {
+      const btn = document.getElementById('feedStatusToggle');
+      const dot = document.getElementById('statusDot');
+      const label = document.getElementById('statusLabel');
+      const ts = document.getElementById('statusTimestamp');
+      const summaryAgePill = document.getElementById('summaryAgePill');
+      const footerDot = document.getElementById('footerStatusDot');
+      const footerText = document.getElementById('footerStatusText');
+
+      if (state.isLive) {
+        btn.className = 'group flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-mono border transition-all cursor-pointer bg-emerald-500/10 border-emerald-400/35 text-emerald-200 hover:bg-emerald-500/20';
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
+        label.className = 'font-semibold tracking-wide text-emerald-300';
+        label.textContent = 'LIVE';
+        ts.textContent = '2s • RBA OIS Stream';
+
+        summaryAgePill.className = 'px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-400/30 text-emerald-300';
+        summaryAgePill.textContent = 'Feed Synced (2s)';
+
+        footerDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        footerText.className = 'text-emerald-300';
+        footerText.textContent = 'LIVE (Streaming)';
+      } else {
+        btn.className = 'group flex items-center gap-2 px-2.5 py-1 rounded-full text-xs font-mono border transition-all cursor-pointer bg-amber-500/10 border-amber-400/35 text-amber-200 hover:bg-amber-500/20';
+        dot.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse-subtle';
+        label.className = 'font-semibold tracking-wide text-amber-300';
+        label.textContent = 'STALE';
+        ts.textContent = '>10m • 2026-11-12T12:02:35Z';
+
+        summaryAgePill.className = 'px-2 py-0.5 rounded bg-amber-500/10 border border-amber-400/30 text-amber-300';
+        summaryAgePill.textContent = 'Snapshot >10m';
+
+        footerDot.className = 'w-2 h-2 rounded-full bg-amber-400';
+        footerText.className = 'text-amber-300';
+        footerText.textContent = 'STALE (2026-11-12T12:02:35Z)';
+      }
+
+      renderTable();
+      renderChart();
+    }
+
+    // Clipboard Copy Helper using document.execCommand('copy') for iFrame reliability
+    function copyTextToClipboard(text, message) {
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        showToast(message);
+      } catch (err) {
+        showToast('Copy failed');
+      }
+      document.body.removeChild(textarea);
+    }
+
+    function showToast(msg) {
+      const feedback = document.getElementById('toastFeedback');
+      feedback.textContent = msg;
+      feedback.classList.remove('opacity-0');
+      setTimeout(() => feedback.classList.add('opacity-0'), 2200);
+    }
+
+    // View Mode Switcher Listeners
+    document.querySelectorAll('.view-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.viewMode = btn.dataset.view;
+        document.querySelectorAll('.view-mode-btn').forEach(b => {
+          const active = b.dataset.view === state.viewMode;
+          b.className = active
+            ? 'view-mode-btn px-3 py-1 rounded-md text-xs font-medium transition-all bg-terminal-elevated text-sky-300 border border-terminal-borderLight shadow-sm cursor-pointer'
+            : 'view-mode-btn px-3 py-1 rounded-md text-xs font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer';
+        });
+        renderTable();
+      });
+    });
+
+    // Y-Axis Metric Toggle Listeners
+    document.querySelectorAll('.y-metric-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.yMetric = btn.dataset.ymetric;
+        document.querySelectorAll('.y-metric-btn').forEach(b => {
+          const active = b.dataset.ymetric === state.yMetric;
+          b.className = active
+            ? 'y-metric-btn px-2.5 py-1 rounded text-[11px] font-medium transition-all bg-sky-500/20 text-sky-300 border border-sky-400/30 cursor-pointer'
+            : 'y-metric-btn px-2.5 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer';
+        });
+        renderChart();
+      });
+    });
+
+    // X-Axis Spacing Toggle Listeners
+    document.querySelectorAll('.x-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.xMode = btn.dataset.xmode;
+        document.querySelectorAll('.x-mode-btn').forEach(b => {
+          const active = b.dataset.xmode === state.xMode;
+          b.className = active
+            ? 'x-mode-btn px-2 py-1 rounded text-[11px] font-medium transition-all bg-terminal-elevated text-terminal-text border border-terminal-borderLight cursor-pointer'
+            : 'x-mode-btn px-2 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer';
+        });
+        renderChart();
+      });
+    });
+
+    // Interpolation Mode Toggle Listeners
+    document.querySelectorAll('.interp-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.interpMode = btn.dataset.interp;
+        document.getElementById('metaInterpLabel').textContent =
+          state.interpMode === 'smooth' ? 'Log-Linear DF' : 'Piecewise Linear';
+        document.querySelectorAll('.interp-btn').forEach(b => {
+          const active = b.dataset.interp === state.interpMode;
+          b.className = active
+            ? 'interp-btn px-2 py-1 rounded text-[11px] font-medium transition-all bg-terminal-elevated text-terminal-text border border-terminal-borderLight cursor-pointer'
+            : 'interp-btn px-2 py-1 rounded text-[11px] font-medium transition-all text-terminal-muted hover:text-terminal-text cursor-pointer';
+        });
+        renderChart();
+      });
+    });
+
+    // Feed Toggle, Overlay Selector, Refresh & Export Buttons
+    document.getElementById('feedStatusToggle').addEventListener('click', () => {
+      state.isLive = !state.isLive;
+      updateFeedStatusUI();
+    });
+
+    document.getElementById('curveCountSelect').addEventListener('change', (e) => {
+      state.curveCount = Number(e.target.value);
+      const legend = document.getElementById('secondCurveLegend');
+      if (state.curveCount === 2) {
+        legend.classList.remove('hidden');
+        legend.classList.add('flex');
+      } else {
+        legend.classList.add('hidden');
+        legend.classList.remove('flex');
+      }
+      renderTable();
+      renderChart();
+    });
+
+    document.getElementById('refreshFeedBtn').addEventListener('click', () => {
+      const icon = document.getElementById('refreshIcon');
+      icon.classList.add('animate-spin');
+      setTimeout(() => {
+        icon.classList.remove('animate-spin');
+        state.isLive = true;
+        updateFeedStatusUI();
+        showToast('Curve refreshed');
+      }, 420);
+    });
+
+    document.getElementById('copyJsonBtn').addEventListener('click', () => {
+      const payload = {
+        curveId: 'AUD-AONIA',
+        asOf: '2026-11-12',
+        spotDate: '2026-11-13',
+        dayCount: 'ACT/365F',
+        compounding: 'Continuous',
+        interpolation: state.interpMode === 'smooth' ? 'Log-Linear DF' : 'Piecewise Linear',
+        status: state.isLive ? 'LIVE' : 'STALE',
+        nodes: curveData.map(d => ({
+          tenor: d.tenor,
+          instrument: d.instrument,
+          maturityDate: d.maturityDate,
+          yearFraction: Number(d.tau.toFixed(6)),
+          parMidPct: Number(d.parMid.toFixed(4)),
+          zeroRatePct: Number(d.zeroRate.toFixed(5)),
+          impliedFwdPct: Number(d.fwdRate.toFixed(5)),
+          discountFactor: d.df,
+          shiftBps: Number(d.shiftBps.toFixed(2))
+        }))
+      };
+      copyTextToClipboard(JSON.stringify(payload, null, 2), 'Copied JSON to clipboard');
+    });
+
+    document.getElementById('copyCsvBtn').addEventListener('click', () => {
+      const headers = ['Tenor,Instrument,MaturityDate,YearFrac,BidPct,AskPct,ParMidPct,ZeroRatePct,ImpliedFwdPct,DiscountFactor,ShiftBps'];
+      const rows = curveData.map(d =>
+        [
+          d.tenor,
+          d.instrument,
+          d.maturityDate,
+          d.tau.toFixed(6),
+          d.bidRate.toFixed(4),
+          d.askRate.toFixed(4),
+          d.parMid.toFixed(4),
+          d.zeroRate.toFixed(5),
+          d.fwdRate.toFixed(5),
+          d.df.toFixed(5),
+          d.shiftBps.toFixed(2)
+        ].join(',')
+      );
+      copyTextToClipboard(headers.concat(rows).join('\n'), 'Copied CSV to clipboard');
+    });
+
+    // Collapse / Expand Dialog Body
+    document.getElementById('collapseBtn').addEventListener('click', () => {
+      state.collapsed = !state.collapsed;
+      document.getElementById('dialogBody').classList.toggle('hidden', state.collapsed);
+      document.getElementById('collapseIcon').style.transform = state.collapsed ? 'rotate(-90deg)' : 'rotate(0deg)';
+      if (!state.collapsed) renderChart();
+    });
+
+    document.getElementById('closeDialogBtn').addEventListener('click', () => {
+      state.collapsed = false;
+      document.getElementById('dialogBody').classList.remove('hidden');
+      document.getElementById('collapseIcon').style.transform = 'rotate(0deg)';
+      renderChart();
+    });
+
+    window.addEventListener('resize', () => {
+      if (!state.collapsed) renderChart();
+    });
+
+    // Initial Render
+    renderTable();
+    renderChart();
+  </script>
+</body>
+</html>

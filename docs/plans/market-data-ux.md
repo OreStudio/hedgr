@@ -123,12 +123,45 @@ ON       4.3120         4.3090         -            -            2s
 - Every rung is backed by a curve the catalogue already holds, so this screen is
   a read across curves, not a new protocol.
 
-### 3. Curve Monitor (exists, re-dressed)
+### 3. Curve Inspector (the Curve Monitor, re-specified)
 
-One curve: the ladder of its own points over the plot, history overlay, and - new
-- a **source selector** when more than one provider carries it, instead of
-several rows in the search that look identical. The window's title says the
-instrument and the source: `IR EUR EST R · ore`.
+The operator prototyped this screen, and it sets the bar higher than the sketch
+that was here: `prototypes/aud_aonia_curve_dialog_prototype.html` (rendered
+alongside it as a PNG). What it establishes:
+
+- **The curve is an analysable object, not a line.** Columns for the market
+  pillars, the year fraction, the zero rate, the implied forward, the discount
+  factor, the shift in basis points and the age. A desk reads a curve for its
+  forwards and its discount factors, not only for its shape.
+- **Two views of the same curve**: *Market Pillars* (the quotes) and
+  *Bootstrapped Curve* (the calibrated points), plus *All Columns*. That is the
+  distinction the deployment's data already carries - published curves are
+  stated as pillars with a value at each - and it is why "the curve" cannot be
+  one table of series.
+- **The conventions are on the screen**: index, day count, compounding,
+  interpolation, pillar count. They are part of the instrument's meaning, so a
+  screen that hides them invites two people to read the same numbers two ways.
+- **Staleness is a first-class state**: a STALE badge with the age per row.
+- **The chart is a view of the table**, with the y axis chosen (zero rate,
+  implied forward, discount factor) and the x axis (tenor or maturity).
+- **The foot repeats who you are**: tenant, acting party, copy JSON, copy CSV.
+
+What it costs and what is missing today:
+
+- The zero rate, forward and discount factor are *derived* from the curve's
+  values with its conventions. The deployment publishes a curve as pillars with
+  one value each; the conventions above (ACT/365F, continuous, log-linear
+  discount factors) are what the prototype assumes, and nothing in our read
+  states them. Either the deployment states them per curve or the screen shows
+  the assumption it made - the second is honest, the first is right.
+- Market Pillars versus Bootstrapped Curve is only a real distinction when both
+  exist. For a tick ladder the pillars *are* the observations; for a published
+  curve they are the calibration's inputs. The screen must say which it is
+  showing rather than imply the other exists.
+
+The two-pane ladder-over-plot that is built today is a subset of this: the
+ladder is the table, the plot is the chart, and the analytics columns, the
+conventions bar, the pillar/curve tabs and the copy actions are the work.
 
 ### 4. FX Montage (new, later)
 
