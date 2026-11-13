@@ -127,15 +127,33 @@ bool mini_plot_button() {
  * party: a published curve is one object the deployment calibrates, not a
  * series under a provider.
  */
+/**
+ * @brief The published curves @p party may act on, matching @p filter.
+ *
+ * The deployment lists a published curve once per party that holds it, so the
+ * same name arrives several times and only one of the copies is the session's.
+ * A published curve is not a catalogue row, but the series it carries usually
+ * is: the row's party is the copy's party, and that is what tells them apart. A
+ * curve whose series the catalogue does not list is kept, because nothing says
+ * it belongs to another party, and dropping it would hide a curve that may well
+ * be the session's own.
+ */
 [[nodiscard]] std::vector<domain::published_curve> published_curves_matching(
     const hedgr::model::state::series_catalogue* catalogue,
-    std::string_view filter) {
+    std::string_view party, std::string_view filter) {
     std::vector<domain::published_curve> matching;
     if (catalogue == nullptr)
         return matching;
-    for (const auto& curve : catalogue->published_curves)
-        if (contains_folded(curve.label, filter))
-            matching.push_back(curve);
+    for (const auto& curve : catalogue->published_curves) {
+        if (!contains_folded(curve.label, filter))
+            continue;
+        if (!party.empty()) {
+            const auto* row = catalogue->row_of(curve.series_id);
+            if (row != nullptr && row->party_id != party)
+                continue;
+        }
+        matching.push_back(curve);
+    }
     std::sort(matching.begin(), matching.end(),
         [](const auto& left, const auto& right) {
             return left.label < right.label;
@@ -557,7 +575,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     if (model::domain::market_asset_of(state.market_asset_class)
         == model::domain::market_asset::ir) {
-        update_series_browser_view(state.series_view,
+        const bool rebuilt = update_series_browser_view(state.series_view,
             {.generation = generation, .filter = filter,
                 .asset_class = state.market_asset_class,
                 .party = state.market_party_id,
@@ -566,6 +584,19 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             rows);
         const auto& curves = state.series_view.rows;
         /*
+         * Said once per rebuild, so the party a list was built for is in the
+         * log beside the rows it produced. A list of curves that seems to hold
+         * another party's data is then a question about this line rather than
+         * about the screen.
+         */
+        if (rebuilt)
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Curves listed for party '"
+                << (state.market_party_id.empty() ? std::string{"any"}
+                                                  : state.market_party_id)
+                << "': " << curves.size() << " of " << rows.size()
+                << " series, filter '" << filter << "'";
+        /*
          * The deployment's own curves. A published curve is one calibrated
          * object rather than a tenor per series, so it is not a catalogue row:
          * the list carries it beside the tick curves, and opening it reads the
@@ -573,7 +604,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
          */
         const auto* read_catalogue = catalogue;
         const auto published = published_curves_matching(read_catalogue,
-            filter);
+            state.market_party_id, filter);
         if (curves.empty() && published.empty()) {
             draw_no_match("No curves match the filters.");
             return;
@@ -607,7 +638,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                     image_texture(input, *session, pair.base),
                     image_texture(input, *session, pair.quote));
                 ImGui::SetCursorScreenPos(ImVec2(label_end + 12.0f, row_y));
-                ImGui::TextDisabled("%zu tenors", std::size_t{1});
+                /*
+                 * The provider, in the combo as well as in the table: two
+                 * curves of one currency can share a name - the same ladder
+                 * quoted by two desks - and the provider is what tells them
+                 * apart without opening either.
+                 */
+                ImGui::TextDisabled("\u00b7 %s", curve.provider_code.c_str());
                 if (chosen)
                     ImGui::SetItemDefaultFocus();
                 ImGui::PopID();
