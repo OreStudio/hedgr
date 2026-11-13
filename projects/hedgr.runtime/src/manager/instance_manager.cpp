@@ -113,6 +113,15 @@ instance_manager::~instance_manager() {
 
 void instance_manager::raise(model_state::condition_key key,
     std::string message) {
+    /*
+     * A condition is what the operator sees on the bar for a few seconds, and a
+     * bar message nobody can find again is a refusal that leaves no trace. It is
+     * logged here, where every refusal passes, with the subject it is about: the
+     * strip is the alarm and the log is the record.
+     */
+    BOOST_LOG_SEV(lg(), ores::logging::warn)
+        << "Condition raised (" << model_state::to_string(key.source) << " '"
+        << key.subject << "'): " << message;
     conditions_.raise(std::move(key), model_state::condition_severity::error,
         std::move(message), steady_now_ns());
 }
@@ -343,7 +352,9 @@ void instance_manager::handle(command::command& cmd) {
      */
     conditions_.clear_verdicts();
 
-    BOOST_LOG_SEV(lg(), ores::logging::debug)
+    const auto command_level = cmd.kind == command::command_kind::select_party
+        ? ores::logging::info : ores::logging::debug;
+    BOOST_LOG_SEV(lg(), command_level)
         << "Command: " << hedgr::model::command::to_string(cmd.kind)
         << (cmd.instance_id.empty() ? std::string{}
                                     : std::format(" instance '{}'", cmd.instance_id))
@@ -583,6 +594,11 @@ void instance_manager::complete_session(service::session_effect effect) {
             conditions_.clear(change.key);
             continue;
         }
+        BOOST_LOG_SEV(lg(), change.severity
+                == model_state::condition_severity::warning
+            ? ores::logging::warn : ores::logging::error)
+            << "Condition (" << model_state::to_string(change.key.source)
+            << " '" << change.key.subject << "'): " << change.message;
         conditions_.raise(change.key, change.severity, change.message,
             steady_now_ns());
     }

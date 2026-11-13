@@ -849,3 +849,73 @@ TEST_CASE("live surfaces: what a deployment publishes as a vol surface",
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief Which of the two party calls a multi-party login accepts first.
+ *
+ * IAM documents `select_party` as the login flow's single-use exchange and
+ * `switch_party` as the call a running session makes. A login that may act as
+ * several parties signs in with a token only `select_party` may present, so
+ * which one works first is the difference between a party combo that sticks and
+ * one that snaps back.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20405 ... hedgr.session.tests "[.live-party]"
+ */
+TEST_CASE("live party: which party call a fresh login accepts",
+    "[.live-party]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    namespace transport = hedgr::session::transport;
+    const auto other = [](const transport::session_account& account) {
+        for (const auto& party : account.parties)
+            if (party.id != account.party_id)
+                return party;
+        return transport::party_choice{};
+    };
+
+    for (const bool select_first : {true, false}) {
+        session_client session(options);
+        REQUIRE(session.connect());
+        const auto signed_in = session.authenticate(principal, password);
+        REQUIRE(signed_in.has_value());
+        const auto target = other(*signed_in);
+        if (target.id.empty()) {
+            std::printf("login holds one party; nothing to switch\n");
+            session.disconnect();
+            continue;
+        }
+        std::printf("login party='%s', trying %s -> '%s'\n",
+            signed_in->party_name.c_str(),
+            select_first ? "select_party" : "switch_party", target.name.c_str());
+        const auto answer = select_first ? session.select_party(target.id)
+                                         : session.switch_party(target.id);
+        if (answer)
+            std::printf("  %s accepted; now acting as '%s'\n",
+                select_first ? "select_party" : "switch_party",
+                session.account().party_name.c_str());
+        else
+            std::printf("  %s refused: %s (%s)\n",
+                select_first ? "select_party" : "switch_party",
+                answer.error().message.c_str(),
+                to_string(answer.error().code).data());
+        std::fflush(stdout);
+        session.disconnect();
+    }
+}

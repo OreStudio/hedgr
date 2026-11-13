@@ -378,6 +378,11 @@ session_effect session_service::select_party(
         return effect;
     }
 
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Session '" << cmd.instance_id << "' / '" << cmd.account_id
+        << "' asked to act as party '" << cmd.party_id << "', from '"
+        << deps_->sessions.party_id(*handle) << "'";
+
     /*
      * A choice of the party the session already acts as is a confirmation, not a
      * request: the actor would find nothing to change and answer nothing, so the
@@ -385,6 +390,10 @@ session_effect session_service::select_party(
      * "this is my party" stick when it happens to be the deployment's default.
      */
     if (cmd.party_id == deps_->sessions.party_id(*handle)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Session '" << cmd.instance_id << "' / '" << cmd.account_id
+            << "' already acts as that party; the choice is remembered without "
+               "asking the instance";
         if (deps_->remember_party)
             deps_->remember_party(cmd.account_id, cmd.party_id);
         return effect;

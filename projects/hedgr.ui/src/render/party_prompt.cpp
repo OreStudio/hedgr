@@ -20,6 +20,7 @@
 #include "hedgr.ui/render/party_prompt.hpp"
 
 #include "hedgr.model/command/command.hpp"
+#include "hedgr.model/event/event.hpp"
 #include "hedgr.ui/render/panels.hpp"
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
@@ -55,6 +56,7 @@ void forget(party_prompt_state& state) {
     state.account_id.clear();
     state.parties = party_list{};
     state.choice = 0;
+    state.seeded = false;
 }
 
 /** @brief Takes up the first signed-in session that still has to be asked. */
@@ -75,6 +77,12 @@ void offer_to_first(const render_input& input, party_prompt_state& state) {
         state.instance_id = std::string{instance_id};
         state.account_id = std::string{account_id};
         state.choice = 0;
+        state.seeded = false;
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Asking account '" << account_id << "' on '" << instance_id
+            << "' which party to act as: the login holds "
+            << model::event::party_count(input.sessions.parties(session))
+            << " and none is remembered";
         return;
     }
 }
@@ -118,9 +126,12 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
      * honest starting point: the operator sees what the session would act as if
      * they said nothing, and moves it one row.
      */
-    const auto acting = state.parties.index_of(session_party);
-    state.choice = acting < state.parties.size()
-        ? static_cast<int>(acting) : state.choice;
+    if (!state.seeded) {
+        const auto acting = state.parties.index_of(session_party);
+        state.choice = acting < state.parties.size()
+            ? static_cast<int>(acting) : 0;
+        state.seeded = true;
+    }
     if (state.choice < 0 || static_cast<std::size_t>(state.choice)
             >= state.parties.size())
         state.choice = 0;

@@ -471,9 +471,13 @@ public:
      * session_errc::authentication_rejected carrying the instance's own
      * message, because that message names the reason a person must act on.
      *
-     * An account with more than one party signs in with a single-use token
-     * that only select_party may present; the caller follows this call with
-     * select_party() in that case.
+     * An account with more than one party is signed in on the deployment's
+     * default party, usually a system one. Measured against `brave_hopper` on
+     * 2026-11-13, a fresh login's token is refused by select_party ("Invalid or
+     * expired token") and accepted by switch_party, so a caller that wants
+     * another party calls switch_party - which is what the session actor does.
+     * The `[.live-party]` probe in the session tests checks both calls against
+     * the deployment rather than trusting either docstring.
      *
      * @param principal the username presented to the instance.
      * @param password the secret presented to the instance.
@@ -499,8 +503,10 @@ public:
     /**
      * @brief Scopes an already signed-in session to one party.
      *
-     * Exchanges the current token for one carrying the chosen party, which is
-     * also what a multi-party sign-in must do before anything else.
+     * Exchanges the current token for one carrying the chosen party. On
+     * `brave_hopper` this call refuses a fresh login's token outright - see
+     * @c authenticate - so prefer @c switch_party unless the deployment is
+     * known to want the login-time exchange.
      *
      * @pre the session is authenticated.
      * @param party_id the party to scope the session to.
