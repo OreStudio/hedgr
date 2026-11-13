@@ -182,6 +182,31 @@ Follow-ups noticed while building the Instances panel, both done:
   grid), per `docs/verification/rates-term-structures.md`, and **B** stays
   superseded by the published curve.
 
+## Flags come from the identity, not from the label
+
+Decided 2026-11-13, after a whole evening of reading labels to find a currency.
+Every catalogue row the deployment sends carries a parsed `identity`, and
+`identity.scope` is the series' subject: `AUD` for `oresmd://ir/AUD?...`, the
+base currency for an FX pair. The client has been deriving the currency from the
+label text - "the second word", then "the first ISO-shaped word", then "split it
+at hyphens" - and each rule failed on a shape the deployment states outright. It
+was a bug in the reader at 00:55 (`Window 'AUD-AONIA'` had no flag) and it will
+keep producing them.
+
+What to do instead:
+
+- a flag is looked up from the currency the *identity* names, never from a label;
+- an FX pair's two currencies are the identity's `scope` and the quote field it
+  carries, not two halves of a display string;
+- where a window holds only a label and a series id (a chart, a term structure),
+  the window resolves the series in the catalogue and reads its identity from
+  there, which is one lookup in a table the frame already holds;
+- `widget::currencies_of` stays only as the fallback for a row whose identity
+  the catalogue could not parse, and nothing new should be built on it.
+
+This removes the class of bug rather than the instance: the currency is data the
+deployment states, so the client should read it and not infer it.
+
 ## Small items
 
 - Done: VIEW > Windows has a title filter at the top of the panel, folded, with a
