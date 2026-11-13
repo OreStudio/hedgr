@@ -182,6 +182,46 @@ Follow-ups noticed while building the Instances panel, both done:
   grid), per `docs/verification/rates-term-structures.md`, and **B** stays
   superseded by the published curve.
 
+## Agreed 2026-11-13: the party at login, and the IR monitor
+
+**1. A party chosen at login, used as the default everywhere.** Signing in as
+`super_admin` lands the session in the system party, and every window then reads
+that party's data as though it were the desk's - the source of much of tonight's
+confusion. The login already answers with every party the principal may act as
+(`get_my_parties`) and the runtime already switches party on a live session
+(`select_party`/`switch_party`, ADR 9). What is missing is the *choice at the
+point of signing in*: a party on the sign-in form (or a picker when the login
+holds more than one), remembered per account, set on the session before any
+window reads, and used as the default for every window, the browser's foot
+control and "Acting as". System party then becomes a party like any other
+rather than an accident of the principal.
+
+**2. An IR monitor for one currency: the ladder and the curve.** The operator
+wants both what a desk reads: the table of every IR quote of a currency,
+ticking, and the bootstrapped curve drawn through it. Both are possible with the
+server API as it stands:
+
+- the *ladder* is one row per rung, and a rung is one series (proven: swap curves
+  are series per `fwd_start` - 0D and 3M under `demo`; other shapes quote per
+  `tenor`). A row's value is what ticks; the watch/subscription the charts
+  already use carries it, so a row costs one watched series;
+- the *curve* is the evolution read (`get_series_evolution`), which states its
+  axes (`fields 'term'`) and every node, or the published curve sets where the
+  deployment publishes the curve;
+- bid/ask, if the deployment carries them, are separate series by `quote_type`,
+  so a two-sided row is a column mapping rather than a new read.
+
+So: one window, two panes - the ladder (a table, as the CRM matrix is) over the
+curve (the term structure plot that already works). One read per rung for the
+ticks, one evolution read for the shape.
+
+**3. What it is called.** In a trading system the table of quotes by tenor is a
+**ladder** (the "swap ladder", "deposit ladder"); the plotted shape is the
+**curve**; a screen holding both is a **curve monitor** - the IR counterpart of
+the FX *montage* (a table of bids and offers) and of the vol *surface monitor*.
+The window is therefore the **IR Curve Monitor**, with two panes, *Ladder* and
+*Curve*, and each piece keeps its own name.
+
 ## Flags come from the identity, not from the label
 
 Decided 2026-11-13, after a whole evening of reading labels to find a currency.
