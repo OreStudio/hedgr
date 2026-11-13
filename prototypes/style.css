@@ -1,0 +1,255 @@
+/*
+ * The shared chrome for the market-data prototypes.
+ *
+ * Deliberately plain CSS and no framework: a mockup has to open from disk on a
+ * machine with no network, and the point of these files is the layout, not the
+ * styling machinery. The palette and type match the AUD-AONIA prototype that
+ * came first, so the screens can be put side by side.
+ */
+:root {
+  --bg: #090c10;
+  --surface: #131720;
+  --elevated: #181d28;
+  --hover: #1f2634;
+  --border: #262d3d;
+  --border-light: #333c52;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --subtle: #5c6575;
+  --accent: #38bdf8;
+  --good: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 24px;
+  min-height: 100vh;
+  background: radial-gradient(ellipse at top, #151c28 0%, var(--bg) 75%);
+  color: var(--text);
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.dialog {
+  width: 100%;
+  max-width: 1180px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+}
+
+/* Title bar: what the screen is about, and how fresh it is. */
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.titlebar h1 {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+
+.titlebar .kind {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.titlebar .spacer { flex: 1; }
+
+.flag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  overflow: hidden;
+  line-height: 0;
+}
+
+/* The conventions/meta row: facts that change what the numbers mean. */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.meta b { color: var(--text); font-weight: 500; }
+.meta .sep { color: var(--subtle); }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs { display: flex; gap: 4px; }
+
+.tab {
+  padding: 4px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: default;
+}
+
+.tab.active {
+  background: var(--hover);
+  color: var(--text);
+  border: 1px solid var(--border-light);
+}
+
+.select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.select::after { content: ' ▾'; color: var(--muted); }
+
+.badge {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border-light);
+  color: var(--muted);
+}
+
+.badge.stale { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); }
+.badge.live { color: var(--good); border-color: rgba(74, 222, 128, 0.3); background: rgba(74, 222, 128, 0.07); }
+.badge.none { color: var(--subtle); }
+
+/* Kinds in the search results. */
+.kind-badge {
+  display: inline-block;
+  min-width: 62px;
+  text-align: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--border-light);
+  color: var(--muted);
+}
+
+.kind-badge.curve { color: #7dd3fc; border-color: rgba(56, 189, 248, 0.35); }
+.kind-badge.pair { color: #c4b5fd; border-color: rgba(196, 181, 253, 0.3); }
+.kind-badge.surface { color: #f0abfc; border-color: rgba(240, 171, 252, 0.3); }
+.kind-badge.ladder { color: #86efac; border-color: rgba(134, 239, 172, 0.3); }
+
+/* Tables. */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  text-align: right;
+  padding: 7px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--subtle);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+thead th:first-child,
+thead th.left { text-align: left; }
+
+tbody td {
+  padding: 5px 10px;
+  text-align: right;
+  border-bottom: 1px solid rgba(38, 45, 61, 0.55);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+tbody td:first-child,
+tbody td.left { text-align: left; }
+
+tbody tr:hover { background: var(--hover); }
+tbody tr.total { background: rgba(31, 38, 52, 0.6); font-weight: 600; }
+
+.num { color: var(--text); }
+.dim { color: var(--muted); }
+.faint { color: var(--subtle); }
+.blank { color: var(--subtle); }
+.pos { color: var(--good); }
+.neg { color: var(--bad); }
+
+.scroll { max-height: 420px; overflow: auto; }
+
+/* Charts and panels. */
+.panel {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px 14px;
+}
+
+.panel h2 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--subtle);
+  text-transform: uppercase;
+}
+
+.legend { display: flex; gap: 16px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.legend .key { display: inline-flex; align-items: center; gap: 6px; }
+.legend .swatch { width: 10px; height: 2px; background: var(--accent); display: inline-block; }
+
+/* The foot: who you are, and what you can take away. */
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 14px;
+  background: var(--elevated);
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+.foot .spacer { flex: 1; }
+.foot .led { width: 6px; height: 6px; border-radius: 999px; background: var(--good); display: inline-block; }
+
+.hint { color: var(--subtle); font-size: 11px; }

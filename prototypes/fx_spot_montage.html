@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FX montage · AUD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="dialog">
+
+  <div class="titlebar">
+    <span class="flag" title="Australian Dollar">
+      <svg width="20" height="14" viewBox="0 0 60 30">
+        <rect width="60" height="30" fill="#00008B"/>
+        <path d="M0,0 L30,15 M30,0 L0,15" stroke="#fff" stroke-width="3"/>
+        <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#fff" stroke-width="5"/>
+        <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#FF0000" stroke-width="3"/>
+        <circle cx="15" cy="22.5" r="2.6" fill="#fff"/>
+        <circle cx="45" cy="6" r="1.4" fill="#fff"/>
+        <circle cx="38" cy="12" r="1.4" fill="#fff"/>
+        <circle cx="51" cy="11" r="1.4" fill="#fff"/>
+        <circle cx="45" cy="24" r="1.4" fill="#fff"/>
+      </svg>
+    </span>
+    <h1>AUD crosses</h1>
+    <span class="kind">FX Montage</span>
+    <span class="spacer"></span>
+    <span class="badge live">LIVE · 1s</span>
+    <span class="badge">AS OF 2026-11-13 14:31:07Z</span>
+  </div>
+
+  <div class="meta">
+    <span>Base <b>AUD</b></span>
+    <span class="sep">|</span>
+    <span>Instrument <b>fx_spot</b></span>
+    <span class="sep">|</span>
+    <span>Quote <b>rate</b></span>
+    <span class="sep">|</span>
+    <span>Pairs <b>6</b></span>
+    <span class="sep">|</span>
+    <span>Sources <b>3</b></span>
+    <span class="sep">|</span>
+    <span>Two-way <b>not supported</b></span>
+  </div>
+
+  <div class="toolbar">
+    <span class="tabs">
+      <span class="tab active">Spot</span>
+      <span class="tab">Forwards</span>
+      <span class="tab">Chart</span>
+    </span>
+    <span class="spacer" style="flex:1"></span>
+    <span class="select">Base AUD</span>
+    <span class="select">Providers all</span>
+    <span class="select">Sort by pair</span>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Pair</th>
+          <th class="left">Flags</th>
+          <th>Bloomberg</th>
+          <th>Demo</th>
+          <th>Derived</th>
+          <th>Consensus</th>
+          <th>Age</th>
+          <th class="left">Chart</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="left">AUD/USD</td>
+          <td class="left">🇦🇺 🇺🇸</td>
+          <td class="num">0.65412</td><td class="num">0.65408</td><td class="blank">–</td>
+          <td class="num">0.65410</td><td class="dim">1s</td>
+          <td class="left dim">▁▂▃▅▆▇▆▅</td>
+        </tr>
+        <tr>
+          <td class="left">AUD/JPY</td>
+          <td class="left">🇦🇺 🇯🇵</td>
+          <td class="num">101.482</td><td class="num">101.470</td><td class="blank">–</td>
+          <td class="num">101.476</td><td class="dim">1s</td>
+          <td class="left dim">▂▃▄▄▅▆▇▆</td>
+        </tr>
+        <tr>
+          <td class="left">AUD/EUR</td>
+          <td class="left">🇦🇺 🇪🇺</td>
+          <td class="num">0.60321</td><td class="num">0.60318</td><td class="blank">–</td>
+          <td class="num">0.60320</td><td class="dim">1s</td>
+          <td class="left dim">▃▃▄▅▅▆▆▅</td>
+        </tr>
+        <tr>
+          <td class="left">AUD/GBP</td>
+          <td class="left">🇦🇺 🇬🇧</td>
+          <td class="num">0.51204</td><td class="num">0.51198</td><td class="blank">–</td>
+          <td class="num">0.51201</td><td class="dim">1s</td>
+          <td class="left dim">▄▅▅▄▄▅▅▆</td>
+        </tr>
+        <tr>
+          <td class="left">AUD/NZD</td>
+          <td class="left">🇦🇺 🇳🇿</td>
+          <td class="num">1.08742</td><td class="blank">–</td><td class="num">1.08738</td>
+          <td class="num">1.08740</td><td class="dim">4s</td>
+          <td class="left dim">▅▅▄▄▄▃▄▄</td>
+        </tr>
+        <tr>
+          <td class="left">AUD/CHF</td>
+          <td class="left">🇦🇺 🇨🇭</td>
+          <td class="num">0.57891</td><td class="blank">–</td><td class="blank">–</td>
+          <td class="num">0.57891</td><td class="dim">14s</td>
+          <td class="left dim">▆▅▅▆▆▅▆▇</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- The same pair opened: the quote over time, which is where a dealer works. -->
+  <div class="panel">
+    <h2>AUD/USD · today</h2>
+    <div class="legend">
+      <span class="key"><span class="swatch"></span>Bloomberg, last 0.65412</span>
+      <span class="dim">high 0.65508 · low 0.65211 · change +0.09%</span>
+    </div>
+    <svg viewBox="0 0 1100 150" width="100%" height="150" role="img" aria-label="AUD/USD today">
+      <g stroke="#262d3d" stroke-width="1">
+        <line x1="40" y1="120" x2="1080" y2="120"/>
+        <line x1="40" y1="20" x2="40" y2="120"/>
+        <line x1="40" y1="45" x2="1080" y2="45" stroke-dasharray="3 4"/>
+        <line x1="40" y1="90" x2="1080" y2="90" stroke-dasharray="3 4"/>
+      </g>
+      <path d="M40,96 L120,92 L200,88 L280,94 L360,86 L440,72 L520,68 L600,74 L680,60 L760,54 L840,62 L920,48 L1000,52 L1080,44"
+            fill="none" stroke="#38bdf8" stroke-width="2"/>
+      <g fill="#5c6575" font-family="JetBrains Mono, monospace" font-size="10">
+        <text x="40" y="142">00:00</text><text x="360" y="142">06:00</text>
+        <text x="700" y="142">12:00</text><text x="1020" y="142">18:00</text>
+        <text x="1085" y="48">0.6541</text><text x="1085" y="24">0.6551</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="foot">
+    <span class="led"></span>
+    <span>tenant_admin@acme_corporation</span>
+    <span class="dim">Acting as</span>
+    <span class="badge">ACME Corporation UK plc</span>
+    <span class="spacer"></span>
+    <span class="hint">mid only: the deployment quotes one side</span>
+    <span class="badge">Copy CSV</span>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rates ladder · AUD swaps</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="dialog">
+
+  <!-- What the screen is, and whether what it shows is current. -->
+  <div class="titlebar">
+    <span class="flag" title="Australian Dollar">
+      <svg width="20" height="14" viewBox="0 0 60 30">
+        <rect width="60" height="30" fill="#00008B"/>
+        <path d="M0,0 L30,15 M30,0 L0,15" stroke="#fff" stroke-width="3"/>
+        <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#fff" stroke-width="5"/>
+        <path d="M15,0 L15,15 M0,7.5 L30,7.5" stroke="#FF0000" stroke-width="3"/>
+        <circle cx="15" cy="22.5" r="2.6" fill="#fff"/>
+        <circle cx="45" cy="6" r="1.4" fill="#fff"/>
+        <circle cx="38" cy="12" r="1.4" fill="#fff"/>
+        <circle cx="51" cy="11" r="1.4" fill="#fff"/>
+        <circle cx="45" cy="24" r="1.4" fill="#fff"/>
+      </svg>
+    </span>
+    <h1>AUD swaps</h1>
+    <span class="kind">Rate Ladder</span>
+    <span class="spacer"></span>
+    <span class="badge live">LIVE · 2s</span>
+    <span class="badge">AS OF 2026-11-13 14:31:07Z</span>
+  </div>
+
+  <!-- Facts that change what the numbers mean. -->
+  <div class="meta">
+    <span>Instrument <b>IR_SWAP</b></span>
+    <span class="sep">|</span>
+    <span>Forward start <b>0D</b></span>
+    <span class="sep">|</span>
+    <span>Day count <b>ACT/365F</b></span>
+    <span class="sep">|</span>
+    <span>Quote <b>rate</b></span>
+    <span class="sep">|</span>
+    <span>Rungs <b>12</b></span>
+    <span class="sep">|</span>
+    <span>Sources <b>4</b></span>
+  </div>
+
+  <div class="toolbar">
+    <span class="tabs">
+      <span class="tab active">Ladder</span>
+      <span class="tab">Curve</span>
+      <span class="tab">History</span>
+    </span>
+    <span class="spacer" style="flex:1"></span>
+    <span class="select">Forward start 0D</span>
+    <span class="select">Providers all</span>
+    <span class="select">Tenors ON–30Y</span>
+  </div>
+
+  <!-- One row per maturity, one column per provider. Mid only. -->
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th class="left">Rung</th>
+          <th class="left">Maturity</th>
+          <th>Bloomberg</th>
+          <th>Demo</th>
+          <th>Derived</th>
+          <th>Ore</th>
+          <th>Consensus</th>
+          <th>Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td class="left">ON</td><td class="left dim">2026-11-14</td><td class="num">4.3120</td><td class="num">4.3090</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.3105</td><td class="dim">2s</td></tr>
+        <tr><td class="left">1W</td><td class="left dim">2026-11-20</td><td class="num">4.3150</td><td class="num">4.3120</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.3135</td><td class="dim">2s</td></tr>
+        <tr><td class="left">1M</td><td class="left dim">2026-12-14</td><td class="num">4.3300</td><td class="num">4.3280</td><td class="num">4.3290</td><td class="blank">–</td><td class="num">4.3290</td><td class="dim">2s</td></tr>
+        <tr><td class="left">3M</td><td class="left dim">2027-02-15</td><td class="num">4.3610</td><td class="num">4.3590</td><td class="num">4.3600</td><td class="blank">–</td><td class="num">4.3600</td><td class="dim">2s</td></tr>
+        <tr><td class="left">6M</td><td class="left dim">2027-05-14</td><td class="num">4.4020</td><td class="num">4.4010</td><td class="num">4.4015</td><td class="blank">–</td><td class="num">4.4015</td><td class="dim">2s</td></tr>
+        <tr><td class="left">1Y</td><td class="left dim">2027-11-14</td><td class="num">4.4380</td><td class="num">4.4360</td><td class="num">4.4370</td><td class="blank">–</td><td class="num">4.4370</td><td class="dim">2s</td></tr>
+        <tr><td class="left">2Y</td><td class="left dim">2028-11-14</td><td class="num">4.4930</td><td class="num">4.4910</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.4920</td><td class="dim">2s</td></tr>
+        <tr><td class="left">5Y</td><td class="left dim">2031-11-14</td><td class="num">4.6120</td><td class="num">4.6100</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.6110</td><td class="dim">3s</td></tr>
+        <tr><td class="left">10Y</td><td class="left dim">2036-11-14</td><td class="num">4.7850</td><td class="num">4.7820</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.7835</td><td class="dim">3s</td></tr>
+        <tr><td class="left">20Y</td><td class="left dim">2046-11-14</td><td class="num">4.9180</td><td class="blank">–</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.9180</td><td class="dim">12s</td></tr>
+        <tr><td class="left">30Y</td><td class="left dim">2056-11-14</td><td class="num">4.9600</td><td class="blank">–</td><td class="blank">–</td><td class="blank">–</td><td class="num">4.9600</td><td class="dim">12s</td></tr>
+        <tr class="total">
+          <td class="left">Spread</td><td class="left faint">30Y − 2Y</td><td class="num">+46.7 bp</td><td class="num">+45.0 bp</td><td class="blank">–</td><td class="blank">–</td><td class="num">+45.9 bp</td><td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- The shape through the same quotes, so the two are read together. -->
+  <div class="panel">
+    <h2>Curve</h2>
+    <div class="legend">
+      <span class="key"><span class="swatch"></span>Consensus, 0D start</span>
+      <span class="dim">ACT/365F · mid · 1 provider per rung where quoted</span>
+    </div>
+    <svg viewBox="0 0 1100 170" width="100%" height="170" role="img" aria-label="AUD swap curve">
+      <g stroke="#262d3d" stroke-width="1">
+        <line x1="40" y1="140" x2="1080" y2="140"/>
+        <line x1="40" y1="20" x2="40" y2="140"/>
+        <line x1="40" y1="20" x2="1080" y2="20" stroke-dasharray="3 4"/>
+        <line x1="40" y1="80" x2="1080" y2="80" stroke-dasharray="3 4"/>
+      </g>
+      <path d="M40,128 L130,122 L220,112 L320,98 L470,76 L620,52 L780,34 L930,26 L1040,22"
+            fill="none" stroke="#38bdf8" stroke-width="2"/>
+      <path d="M40,128 L130,122 L220,112 L320,98 L470,76 L620,52 L780,34 L930,26 L1040,22 L1040,140 L40,140 Z"
+            fill="#38bdf8" opacity="0.10"/>
+      <g fill="#38bdf8">
+        <circle cx="40" cy="128" r="2.5"/><circle cx="130" cy="122" r="2.5"/>
+        <circle cx="220" cy="112" r="2.5"/><circle cx="320" cy="98" r="2.5"/>
+        <circle cx="470" cy="76" r="2.5"/><circle cx="620" cy="52" r="2.5"/>
+        <circle cx="780" cy="34" r="2.5"/><circle cx="930" cy="26" r="2.5"/>
+        <circle cx="1040" cy="22" r="2.5"/>
+      </g>
+      <g fill="#5c6575" font-family="JetBrains Mono, monospace" font-size="10">
+        <text x="36" y="160">ON</text><text x="126" y="160">1W</text>
+        <text x="216" y="160">1M</text><text x="316" y="160">3M</text>
+        <text x="466" y="160">1Y</text><text x="616" y="160">5Y</text>
+        <text x="776" y="160">10Y</text><text x="926" y="160">20Y</text>
+        <text x="1030" y="160">30Y</text>
+        <text x="1060" y="34">4.96%</text><text x="1060" y="82">4.60%</text>
+      </g>
+    </svg>
+  </div>
+
+  <div class="foot">
+    <span class="led"></span>
+    <span>tenant_admin@acme_corporation</span>
+    <span class="dim">Acting as</span>
+    <span class="badge">ACME Corporation UK plc</span>
+    <span class="spacer"></span>
+    <span class="hint">4 sources · 12 rungs · one value per source</span>
+    <span class="badge">Copy CSV</span>
+  </div>
+</div>
+</body>
+</html>

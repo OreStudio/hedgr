@@ -215,6 +215,29 @@ a count.
 Each step leaves a screen that works, and each can be looked at locally before the
 next.
 
+## Viewer or inspector: the same curve, two ways in
+
+The operator asked whether a *curve viewer* exists beside the curve *inspector*.
+It is the right question, and the answer is that they are two depths of one
+screen:
+
+- a **viewer** answers "what is this curve, and where did it move". The plot, the
+  points, the change, the age, the source. A trader's eye, in a second.
+- an **inspector** answers "how was this curve made, and what does it imply". The
+  market pillars against the bootstrapped points, the year fractions, the zero
+  rates, the implied forwards, the discount factors, the shifts, the conventions,
+  the interpolation. A quant's or a risk officer's eye, on the same object.
+
+So: one window kind, **Curve**, with two modes - `Viewer` and `Inspector` - and
+the inspector's table is the viewer's table with more columns. The prototypes
+show the inspector, because it is the harder screen; a viewer is that screen with
+the analytics hidden and the source and change promoted.
+
+The same relationship holds for the other kinds, which is why the prototypes
+share a chrome: a `Ladder` is the viewer of a set of curves and the ladder *is*
+the inspector's pillars; a `Surface` is the viewer of a vol grid and the `Smile`
+slice is its inspector.
+
 ## Decisions I need from you
 
 1. **Menu per asset class plus one Search** - my recommendation - or one

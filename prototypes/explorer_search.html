@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Search · market data</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="dialog">
+
+  <div class="titlebar">
+    <h1>Search</h1>
+    <span class="kind">Market data</span>
+    <span class="spacer"></span>
+    <span class="badge">instrument names, currencies, pairs, providers</span>
+  </div>
+
+  <!-- One input. Currency is the primary way in, so "aud" is the example. -->
+  <div class="toolbar" style="padding:12px 14px">
+    <input id="q" value="aud" autocomplete="off"
+           style="flex:1;min-width:280px;padding:7px 10px;border-radius:7px;border:1px solid #333c52;background:#0d1117;color:#e6edf3;font-family:'JetBrains Mono',monospace;font-size:12.5px" />
+    <span class="select">Asset all</span>
+    <span class="select">Provider all</span>
+    <span class="select">Kind all</span>
+  </div>
+
+  <div class="meta">
+    <span>Party <b>ACME Corporation UK plc</b></span>
+    <span class="sep">|</span>
+    <span>Results <b>5</b></span>
+    <span class="sep">|</span>
+    <span class="hint">Enter opens · ↑↓ moves · Esc clears</span>
+  </div>
+
+  <!-- One row per instrument, whatever its kind. The badge is what the old
+       separate curve/surface combos were for. -->
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th class="left" style="width:80px">Kind</th>
+          <th class="left">Instrument</th>
+          <th class="left">Source</th>
+          <th class="left">Values</th>
+          <th class="left">Freshness</th>
+          <th class="left" style="width:70px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#1f2634;outline:1px solid #333c52">
+          <td class="left"><span class="kind-badge ladder">LADDER</span></td>
+          <td class="left"><b>AUD swaps</b> <span class="dim">· IR_SWAP · 0D / 3M start</span></td>
+          <td class="left dim">bloomberg, demo, derived</td>
+          <td class="left dim">12 rungs · 3 providers</td>
+          <td class="left"><span class="badge live">2s</span></td>
+          <td class="left faint">↵</td>
+        </tr>
+        <tr>
+          <td class="left"><span class="kind-badge curve">CURVE</span></td>
+          <td class="left"><b>AUD-AONIA</b> <span class="dim">· bootstrapped · ore</span></td>
+          <td class="left dim">ore</td>
+          <td class="left dim">7 pillars · published 1 day ago</td>
+          <td class="left"><span class="badge stale">STALE</span></td>
+          <td class="left faint"></td>
+        </tr>
+        <tr>
+          <td class="left"><span class="kind-badge pair">PAIR</span></td>
+          <td class="left"><b>AUD/USD</b> <span class="dim">· fx_spot</span></td>
+          <td class="left dim">bloomberg, demo</td>
+          <td class="left dim">1 price · 2 providers</td>
+          <td class="left"><span class="badge live">1s</span></td>
+          <td class="left faint"></td>
+        </tr>
+        <tr>
+          <td class="left"><span class="kind-badge pair">PAIR</span></td>
+          <td class="left"><b>GBP/AUD</b> <span class="dim">· fx_spot · AUD on the quote side</span></td>
+          <td class="left dim">bloomberg</td>
+          <td class="left dim">1 price · 1 provider</td>
+          <td class="left"><span class="badge live">1s</span></td>
+          <td class="left faint"></td>
+        </tr>
+        <tr>
+          <td class="left"><span class="kind-badge surface">SURFACE</span></td>
+          <td class="left"><b>AUDUSD_SSVI</b> <span class="dim">· vol · ssvi</span></td>
+          <td class="left dim">refdata</td>
+          <td class="left dim">7 × 5 grid · nothing published</td>
+          <td class="left"><span class="badge none">NONE</span></td>
+          <td class="left faint"></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>What Enter does</h2>
+    <div class="legend" style="gap:28px">
+      <span>LADDER → Rates Ladder, this currency and instrument</span>
+      <span>CURVE → Curve Inspector, this source</span>
+      <span>PAIR → FX Montage, this base</span>
+      <span>SURFACE → Vol Surface</span>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span class="led"></span>
+    <span>tenant_admin@acme_corporation</span>
+    <span class="dim">Acting as</span>
+    <span class="badge">ACME Corporation UK plc</span>
+    <span class="spacer"></span>
+    <span class="hint">one row per instrument: a rate curve is never a row per rung</span>
+  </div>
+</div>
+</body>
+</html>
