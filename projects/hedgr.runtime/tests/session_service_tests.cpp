@@ -509,3 +509,33 @@ TEST_CASE("choosing the party the session already acts as remembers it",
     for (const auto& actor : w.actors)
         CHECK(actor->party_asks == 0);
 }
+
+TEST_CASE("choosing another party asks the session to switch",
+    "[sessions][party]") {
+    party_world w;
+
+    worker::session_actor_options options;
+    options.key = model::domain::session_key{"i-1", "a-1"};
+    options.tenant_id = "t-1";
+    options.token = "a-token";
+    REQUIRE(w.service->open(options) != nullptr);
+    REQUIRE(w.actors.size() == 1);
+
+    model::command::command cmd;
+    cmd.kind = model::command::command_kind::select_party;
+    cmd.instance_id = "i-1";
+    cmd.account_id = "a-1";
+    cmd.party_id = "party-uk";
+
+    const auto effect = w.service->select_party(cmd);
+
+    /* The ask reaches the actor, which owns the transport. */
+    CHECK(effect.refusals.empty());
+    CHECK(w.actors.front()->party_asks == 1);
+    CHECK(w.actors.front()->party == "party-uk");
+    /*
+     * And nothing is remembered yet: the choice is written when the instance
+     * confirms it, so a refused switch never becomes the remembered party.
+     */
+    CHECK(w.remembered.empty());
+}
