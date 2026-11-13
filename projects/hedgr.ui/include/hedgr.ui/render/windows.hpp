@@ -200,6 +200,12 @@ HEDGR_UI_EXPORT void render_term_structure(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
+/** @brief One published volatility surface, drawn as a mesh over two axes. */
+HEDGR_UI_EXPORT void render_vol_surface(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 HEDGR_UI_EXPORT void render_command_centre_window(
     hedgr::model::state::window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,

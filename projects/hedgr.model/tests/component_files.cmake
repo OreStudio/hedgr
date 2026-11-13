@@ -12,6 +12,7 @@ set(files
     "channel_tests.cpp"
     "condition_table_tests.cpp"
     "curve_table_tests.cpp"
+    "surface_table_tests.cpp"
     "health_tests.cpp"
     "history_plan_tests.cpp"
     "lookup_cost_tests.cpp"

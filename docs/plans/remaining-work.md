@@ -178,9 +178,25 @@ Follow-ups noticed while building the Instances panel, both done:
   grid and **has published none of them**, so the window that draws one will
   read "nothing is published at or before this instant" until the deployment
   publishes; calibrating is a write and needs the operator's word.
-- Next: **D**, the 3D plot. It reuses the curve's shape (two shared axes and a
-  grid), per `docs/verification/rates-term-structures.md`, and **B** stays
-  superseded by the published curve.
+- Done: **D**, the surface window. `surface_table` is the curve table's twin -
+  two shared `curve_axis` axes and one row-major grid - so a surface reuses the
+  curve data model as agreed, and the window draws it as an axonometric carpet:
+  strikes across, expiries into the screen, volatility as height and as colour.
+  The blueprints travel with the catalogue, the browser offers one combo, and a
+  read that the deployment refuses draws its own sentence.
+
+  Two facts about the deployment learned on the way, both worth knowing before
+  anyone goes looking for a surface that is not there:
+  - **blueprints are not visible to every login.** `super_admin` sees the 10
+    SSVI blueprints; `tenant_admin@acme_corporation` sees none, because the
+    blueprint list is tenant-scoped and the blueprints belong to the system
+    tenant. So a tenant login gets no Surface chooser at all.
+  - **nothing is published yet**, so even as `super_admin` the read answers "No
+    surface of USDJPY_SSVI is published at or before this instant", which is the
+    sentence the window shows. Calibrating and publishing is a write on the
+    deployment, and waits on the operator.
+
+  **B** stays superseded by the published curve.
 
 ## Agreed 2026-11-13: the party at login, and the IR monitor
 

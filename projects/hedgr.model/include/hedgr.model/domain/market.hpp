@@ -257,6 +257,36 @@ struct published_curve final {
     std::uint32_t points = 0;
 };
 
+/**
+ * @brief One volatility surface blueprint a deployment publishes.
+ *
+ * A blueprint is what a surface is calibrated and published under: the pair,
+ * the model, and the two axes the output grid runs on, as the deployment spells
+ * them. The axes travel as the deployment wrote them - `1W,1M,2M` and
+ * `DEL/Spot/Put/25,ATM,...` - because they name a grid the surface module
+ * publishes, not a value this client scales.
+ */
+struct surface_blueprint final {
+    /** @brief The blueprint's identifier. */
+    std::string id;
+
+    /** @brief The name a person wrote for it, such as EURUSD_SSVI. */
+    std::string name;
+
+    /** @brief The pair's base and quote currencies. */
+    std::string base_currency;
+    std::string quote_currency;
+
+    /** @brief The model fitted at each expiry: ssvi, sabr or spline. */
+    std::string smile_model;
+
+    /** @brief The output grid's expiries as tenor codes, comma separated. */
+    std::string expiries;
+
+    /** @brief The output grid's strikes as the deployment spells them. */
+    std::string strikes;
+};
+
 /** @brief The three resolutions a live series keeps. */
 enum class market_level : std::uint8_t {
     fine = 0,

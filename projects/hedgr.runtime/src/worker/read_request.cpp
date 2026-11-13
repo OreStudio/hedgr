@@ -25,6 +25,7 @@
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.runtime/worker/curve_worker.hpp"
+#include "hedgr.runtime/worker/surface_worker.hpp"
 
 namespace hedgr::runtime::worker {
 
@@ -77,6 +78,13 @@ model::event::event read_event(const read_request& request,
                        fact.kind = event::event_kind::curve_sets;
                        fact.curve_key = value.key;
                        fact.curve_label = value.label;
+                   },
+                   [&](const surface_request& value) {
+                       fact.kind = event::event_kind::vol_surface;
+                       fact.blueprint_id = value.blueprint_id;
+                       fact.curve_label = value.label;
+                       fact.base_currency = value.base_currency;
+                       fact.quote_currency = value.quote_currency;
                    },
                    [&](const catalogue_request&) {
                        fact.kind = event::event_kind::series_catalogue;
@@ -133,6 +141,9 @@ void run_read(hedgr::session::transport::session_link& link,
                    },
                    [&](const curve_request& value) {
                        run_curve_read(link, value, answer);
+                   },
+                   [&](const surface_request& value) {
+                       run_surface_read(link, value, answer);
                    },
                    [&](const catalogue_request&) {
                        run_market_read(link, request, answer);

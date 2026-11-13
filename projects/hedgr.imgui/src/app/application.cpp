@@ -836,6 +836,7 @@ void application::render_loop(GLFWwindow* window) {
             .sessions = manager_.sessions(),
             .market = manager_.market(),
             .curves = manager_.curves(),
+            .surfaces = manager_.surfaces(),
             .crm = manager_.crm(),
             .currency_images = manager_.currency_images(),
             .images = manager_.images(),

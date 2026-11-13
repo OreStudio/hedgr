@@ -215,6 +215,11 @@ public:
         return read_service_.curves();
     }
 
+    /** @brief The latest published surface each window read. */
+    [[nodiscard]] const model::state::surface_table& surfaces() const noexcept {
+        return read_service_.surfaces();
+    }
+
     /** @brief The bounded cache of tenant images by identifier. */
     [[nodiscard]] model::state::image_cache& images() noexcept {
         return read_service_.images();

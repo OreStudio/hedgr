@@ -114,6 +114,7 @@ struct desk final {
     model::state::session_table sessions;
     model::state::series_table market;
     model::state::curve_table curves;
+    model::state::surface_table surfaces;
     model::state::crm_table crm;
     model::state::tenant_image_map currency_images;
     model::state::image_cache images;
@@ -149,6 +150,7 @@ struct desk final {
             .sessions = sessions,
             .market = market,
             .curves = curves,
+            .surfaces = surfaces,
             .crm = crm,
             .currency_images = currency_images,
             .images = images,

@@ -41,6 +41,8 @@ void render_crm_matrix(hedgr::model::state::window_handle,
     const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_term_structure(hedgr::model::state::window_handle,
     const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
+void render_vol_surface(hedgr::model::state::window_handle,
+    const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_command_centre_window(hedgr::model::state::window_handle,
     const render_input&, window_ui_state&, hedgr::ui::widget::status_bar&, lock_control&);
 void render_series_browser(hedgr::model::state::window_handle,
@@ -87,6 +89,7 @@ renderer_fn renderer_for(hedgr::model::domain::window_kind kind) noexcept {
         &render_term_structure,
         &render_crm_matrix,
         &render_mini_plot,
+        &render_vol_surface,
     };
     static_assert(every_kind_has_a_renderer(table),
         "every window kind must have a renderer in the table above");

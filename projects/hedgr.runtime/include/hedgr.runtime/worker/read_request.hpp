@@ -65,6 +65,26 @@ struct crm_rates_request final {
 struct deployment_request final {
 };
 
+/** @brief One published volatility surface, by the blueprint it is published
+ *  under. */
+struct surface_request final {
+    /** @brief The blueprint whose newest surface is read. */
+    std::string blueprint_id;
+
+    /** @brief The surface's name, for the event and its log line. */
+    std::string label;
+
+    /** @brief The pair's currencies, for the event. */
+    std::string base_currency;
+    std::string quote_currency;
+
+    /**
+     * @brief The instant to read the newest surface at or before, or zero for
+     * the clock's now.
+     */
+    std::int64_t as_of_ns = 0;
+};
+
 /** @brief One curve, either published or assembled from its tenors' ticks. */
 struct curve_request final {
     /** @brief The curve's key: a published series, or the tick curve's. */
@@ -148,7 +168,8 @@ struct market_history_request final {
  */
 using read_request = std::variant<image_request, image_map_request,
     crm_names_request, crm_rates_request, deployment_request, curve_request,
-    catalogue_request, market_points_request, market_history_request>;
+    surface_request, catalogue_request, market_points_request,
+    market_history_request>;
 
 /**
  * @brief The event a request will answer with, before the read runs.

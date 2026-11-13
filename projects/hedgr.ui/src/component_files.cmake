@@ -29,6 +29,7 @@ set(files
     "render/series_browser.cpp"
     "render/series_browser_view.cpp"
     "render/term_structure_window.cpp"
+    "render/vol_surface_window.cpp"
     "render/instances_panel.cpp"
     "render/menu_bar.cpp"
     "render/status_bar.cpp"

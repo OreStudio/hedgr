@@ -133,6 +133,14 @@ enum class command_kind : std::uint8_t {
      * catalogue and moves the live stream, because both were for the old party.
      */
     select_party = 30,
+    /**
+     * @brief Read the newest published volatility surface of a blueprint.
+     *
+     * Carries the blueprint's id and the pair, because the surface's name and
+     * the blueprint's currencies are what the window shows while the read is
+     * out and what the answer is filed under.
+     */
+    load_vol_surface = 31,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -227,6 +235,13 @@ struct command final {
 
     /** @brief Member tenors, index for index with member_ids. */
     std::vector<std::string> member_tenors;
+
+    /** @brief The blueprint a volatility surface is published under. */
+    std::string blueprint_id;
+
+    /** @brief The pair's currencies, for a volatility surface's title. */
+    std::string base_currency;
+    std::string quote_currency;
 
     /** @brief Party whose CRM rates a window shows, for configure_crm. */
     std::string party_id;
