@@ -125,11 +125,11 @@ TEST_CASE("the party prompt opens for a session that has to choose",
     render::party_prompt_state state;
     frame([&] { render::draw_party_prompt(input, state); });
 
-    /* The question is up, listing the parties, on the one that is acting. */
+    /* The question is up, listing the parties the login holds. */
     CHECK(state.account_id == "a");
     CHECK(state.parties.size() == 2);
-    CHECK(std::string{state.parties.name(
-              static_cast<std::size_t>(state.choice))} == "Acme UK plc");
+    CHECK(std::string{state.parties.name(0)} == "Acme UK plc");
+    CHECK(std::string{state.parties.name(1)} == "Acme US Inc");
 
     /* A session that has declined is not asked again in this run. */
     render::party_prompt_state declined;
@@ -153,37 +153,30 @@ TEST_CASE("the party prompt opens for a session that has to choose",
     CHECK(answered.instance_id.empty());
 }
 
-TEST_CASE("the party prompt keeps the row the operator moved it to",
+TEST_CASE("the row the operator clicks is the party asked for",
     "[party][prompt]") {
     /*
-     * The combo used to be re-seeded from the session's own party on every
-     * frame, so a selection snapped back to the deployment's default before it
-     * could be confirmed. The choice is seeded once, when the prompt opens, and
-     * then belongs to the operator.
+     * The prompt has no confirm step: the row is the answer, so the only thing
+     * that could go silently wrong is a row naming one party while the session
+     * is asked to act as another.
      */
-    headless_imgui imgui;
-    desk desk;
-    static_cast<void>(desk.accounts.upsert(model::domain::account{
-        .id = "a", .instance_id = "i", .name = "Desk",
-        .principal = "trader@desk"}));
-    desk.sessions.set_parties(desk.session,
-        "p1\x1f" "Acme UK plc\x1e" "p2\x1f" "Acme US Inc");
-    desk.sessions.set_account_result(desk.session, "Acme", "Acme UK plc",
-        "p1", model::domain::secret_string{"t"});
-    auto input = desk.input();
-
     render::party_prompt_state state;
-    frame([&] { render::draw_party_prompt(input, state); });
-    /* It opens on the party the session acts as. */
-    CHECK(state.choice == 0);
+    state.instance_id = "i";
+    state.account_id = "a";
+    static_cast<void>(render::update_party_list(state.parties,
+        "p1\x1f" "Acme UK plc\x1ep2\x1f" "Acme US Inc", "p1",
+        "Acme UK plc"));
 
-    /* The operator moves it to the second row. */
-    state.choice = 1;
-    frame([&] { render::draw_party_prompt(input, state); });
-    CHECK(state.choice == 1);
+    const auto first = render::party_choice_command(state, 0);
+    CHECK(first.kind == model::command::command_kind::select_party);
+    CHECK(first.instance_id == "i");
+    CHECK(first.account_id == "a");
+    CHECK(first.party_id == "p1");
 
-    /* And it stays there however many frames pass. */
-    frame([&] { render::draw_party_prompt(input, state); });
-    frame([&] { render::draw_party_prompt(input, state); });
-    CHECK(state.choice == 1);
+    const auto second = render::party_choice_command(state, 1);
+    CHECK(second.party_id == "p2");
+    CHECK(std::string{state.parties.name(1)} == "Acme US Inc");
+
+    /* A row that is not there names no party rather than the last one. */
+    CHECK(render::party_choice_command(state, 9).party_id.empty());
 }
