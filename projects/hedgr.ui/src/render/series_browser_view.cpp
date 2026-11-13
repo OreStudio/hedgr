@@ -93,6 +93,7 @@ namespace domain = hedgr::model::domain;
             || contains_ci(row.uri, query.filter));
 }
 
+
 [[nodiscard]] bool listed_as_series(const domain::market_series_row& row,
     const series_browser_query& query) {
     return (query.asset_class.empty() || row.asset_class == query.asset_class)
