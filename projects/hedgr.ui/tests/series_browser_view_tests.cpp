@@ -294,3 +294,74 @@ TEST_CASE("a login without a party list still lists its own party",
     render::update_party_list(list, "", "", "");
     CHECK(list.empty());
 }
+
+namespace {
+
+/** @brief A swap rung: one series per forward start, all at the same tenor. */
+domain::market_series_row rung(std::string id, std::string forward_start) {
+    domain::market_series_row row{.id = std::move(id),
+        .uri = "oresmd://ir/AUD?fwd_start=" + forward_start,
+        .label = "IR AUD 1D",
+        .asset_class = "IR",
+        .provider_code = "demo",
+        .party_id = "p1",
+        .tenor = "1D"};
+    row.asset = domain::market_asset_of("IR");
+    row.identity.asset = "ir";
+    row.identity.scope = "AUD";
+    row.identity.instrument_type = "ir_swap";
+    row.identity.quote_type = "rate";
+    row.identity.party_id = "p1";
+    row.identity.provider_code = "demo";
+    row.identity.fields = {{.name = "fwd_start", .text = forward_start},
+        {.name = "term", .text = "1D"}};
+    return row;
+}
+
+}
+
+/*
+ * A swap ladder is series that differ by their forward start, not by their
+ * tenor: every rung carries the same `1D` index tenor, so a curve gathered by
+ * "the URI without its tenor" answers with one rung and the plot shows one
+ * point. The grouping must follow the field the deployment actually varies.
+ */
+TEST_CASE("a curve is grouped by the field its rungs vary on", "[curve]") {
+    const std::vector<domain::market_series_row> catalogue{
+        rung("s-0d", "0D"), rung("s-3m", "3M"), rung("s-1y", "1Y")};
+
+    const auto group = render::curve_of(catalogue, catalogue.front());
+    CHECK(group.field == "fwd_start");
+    REQUIRE(group.members.size() == 3);
+    CHECK(group.rungs == std::vector<std::string>{"0D", "3M", "1Y"});
+    CHECK(group.members[0]->id == "s-0d");
+    CHECK(group.members[2]->id == "s-1y");
+}
+
+TEST_CASE("a curve whose rung is its tenor is grouped by that", "[curve]") {
+    std::vector<domain::market_series_row> catalogue;
+    for (const auto& tenor : {"1Y", "10Y", "2Y"}) {
+        auto held = row(std::string{"s-"} + tenor, "IR GBP", "IR", tenor);
+        held.identity.asset = "ir";
+        held.identity.scope = "GBP";
+        held.identity.instrument_type = "ir_swap";
+        held.identity.quote_type = "rate";
+        held.identity.party_id = "p1";
+        held.identity.provider_code = "ore";
+        held.identity.fields = {{.name = "tenor", .text = tenor}};
+        catalogue.push_back(std::move(held));
+    }
+
+    const auto group = render::curve_of(catalogue, catalogue.front());
+    CHECK(group.field == "tenor");
+    CHECK(group.rungs == std::vector<std::string>{"1Y", "2Y", "10Y"});
+}
+
+TEST_CASE("a curve of one series is one rung, honestly", "[curve]") {
+    const std::vector<domain::market_series_row> catalogue{rung("s-0d", "0D")};
+    const auto group = render::curve_of(catalogue, catalogue.front());
+    REQUIRE(group.members.size() == 1);
+    /* Nothing varies, so the rung is the series' own tenor, not a guess. */
+    CHECK(group.field.empty());
+    CHECK(group.rungs == std::vector<std::string>{"1D"});
+}

@@ -31,6 +31,7 @@
 #include "hedgr.ui/widget/status_foot.hpp"
 #include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
+#include "ores.logging/make_logger.hpp"
 #include "implot.h"
 #include <algorithm>
 #include <cctype>
@@ -52,6 +53,13 @@ using hedgr::model::command::command;
 using hedgr::model::command::command_kind;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
+
+/** @brief This file's logger: which rungs a curve opens with, and why. */
+[[nodiscard]] auto& lg() {
+    using namespace ores::logging;
+    static auto instance = make_logger("hedgr.ui.render.series_browser");
+    return instance;
+}
 
 float draw_series_row(std::string_view label, float extra_indent,
     ImTextureID base_texture, ImTextureID quote_texture) {
@@ -160,36 +168,20 @@ void open_curve(const render_input& input,
     const auto account_id = std::string{input.sessions.account_id(session)};
 
     /*
-     * The curve is every tenor the catalogue lists for it, not the one row the
-     * operator happened to click: an IR series is a point, and what a person
-     * reads is the shape those points make together.
+     * The curve is every series of one instrument, not the one row the operator
+     * clicked: an IR series is a point, and what a person reads is the shape
+     * those points make together. Which field names the rungs is the
+     * catalogue's answer and not an assumption - a swap ladder differs by
+     * `fwd_start`, not by `tenor` - so the grouping lives in one function that
+     * a test can check against real rows.
      */
-    std::vector<const domain::market_series_row*> members;
-    std::vector<std::string_view> tenors;
-    if (const auto* catalogue = input.market.catalogue(instance_id, account_id)) {
-        for (const auto& candidate : catalogue->series) {
-            if (candidate.curve_key.empty()
-                || candidate.curve_key != row.curve_key)
-                continue;
-            /*
-             * One provider's copy of the curve, and one row per tenor: every
-             * spot is catalogued twice, once by a reference provider and once by
-             * a vendor, and a read that named both copies of a tenor names it
-             * twice.
-             */
-            if (candidate.provider_code != row.provider_code
-                || candidate.party_id != row.party_id)
-                continue;
-            if (std::find(tenors.begin(), tenors.end(), candidate.tenor)
-                != tenors.end())
-                continue;
-            tenors.push_back(candidate.tenor);
-            members.push_back(&candidate);
-        }
+    curve_group group;
+    if (const auto* catalogue = input.market.catalogue(instance_id, account_id))
+        group = curve_of(catalogue->series, row);
+    if (group.members.empty()) {
+        group.members.push_back(&row);
+        group.rungs.push_back(row.tenor);
     }
-    /* A row with no curve of its own is still plottable as a one-point curve. */
-    if (members.empty() || row.curve_key.empty())
-        members.push_back(&row);
 
     command request;
     request.kind = command_kind::open_window;
@@ -200,12 +192,16 @@ void open_curve(const render_input& input,
     request.account_id = account_id;
     request.curve_key = row.curve_key.empty() ? row.id : row.curve_key;
     request.curve_label = label;
-    request.member_ids.reserve(members.size());
-    request.member_tenors.reserve(members.size());
-    for (const auto* member : members) {
-        request.member_ids.push_back(member->id);
-        request.member_tenors.push_back(member->tenor);
+    request.member_ids.reserve(group.members.size());
+    request.member_tenors.reserve(group.members.size());
+    for (std::size_t i = 0; i < group.members.size(); ++i) {
+        request.member_ids.push_back(group.members[i]->id);
+        request.member_tenors.push_back(group.rungs[i]);
     }
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Curve '" << label << "' (" << row.id << ") opens with "
+        << group.members.size() << " rungs"
+        << (group.field.empty() ? std::string{} : " by '" + group.field + "'");
     input.commands.push(std::move(request));
 }
 

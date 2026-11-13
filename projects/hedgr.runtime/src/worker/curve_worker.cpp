@@ -174,7 +174,14 @@ void run_curve_read(hedgr::session::transport::session_link& link,
      * and not a term, so reading one as ticks answers with the series' index
      * tenor - one point on the plot.
      */
-    if (!request.member_identity.empty()) {
+    /*
+     * The branch is chosen by what the window holds, not by whether the
+     * catalogue could parse the row's URI: a row it could not leaves the
+     * identity empty, and the read then resolves the series by its id rather
+     * than falling back to ticks that cannot name a term.
+     */
+    if (!request.published && !request.member_tenors.empty()
+        && request.member_tenors.front().empty()) {
         const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::system_clock::now().time_since_epoch())
                                 .count();

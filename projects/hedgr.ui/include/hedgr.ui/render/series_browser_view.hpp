@@ -142,6 +142,39 @@ HEDGR_UI_EXPORT bool update_providers(series_browser_view& view,
 [[nodiscard]] HEDGR_UI_EXPORT int tenor_rank(std::string_view tenor);
 
 /**
+ * @brief One curve, as the series the catalogue holds for it.
+ *
+ * A curve is every series of one instrument that shares everything a rung must
+ * not vary - the asset, the subject, the instrument and quote types, the tenor,
+ * the party and the provider - and differs in one identity field, which is what
+ * the rungs are. That field is not always `tenor`: an interest-rate swap ladder
+ * is a series per `fwd_start` with the same `1D` tenor all the way up, so a
+ * curve gathered by its URI-without-tenor answers with one rung.
+ */
+struct curve_group final {
+    /** @brief The members, one per rung, in the order a plot draws them. */
+    std::vector<const hedgr::model::domain::market_series_row*> members;
+
+    /** @brief The rung each member is plotted under, index for index. */
+    std::vector<std::string> rungs;
+
+    /** @brief The identity field the rungs name, or empty when nothing varies. */
+    std::string field;
+};
+
+/**
+ * @brief Gathers the curve @p clicked belongs to, from the catalogue.
+ *
+ * Every series sharing the clicked row's asset, subject, instrument, quote,
+ * tenor, party and provider is a member. The field whose text differs among
+ * them names the rungs; when none differs the clicked row is the whole curve,
+ * a one-point curve that is honestly one point.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT curve_group curve_of(
+    const std::vector<hedgr::model::domain::market_series_row>& catalogue,
+    const hedgr::model::domain::market_series_row& clicked);
+
+/**
  * @brief The parties a login may act as, parsed from the session's column.
  *
  * The runtime serialises the list as id, unit separator, name, with a record

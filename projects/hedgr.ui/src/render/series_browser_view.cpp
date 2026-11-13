@@ -257,4 +257,92 @@ bool update_party_list(party_list& list, std::string_view serialised,
     return true;
 }
 
+namespace {
+
+/**
+ * @brief Whether two rows belong to one curve.
+ *
+ * Everything a rung must not vary: the instrument, its subject, its quoting,
+ * its owner and its provider. The tenor is deliberately not here: on a swap
+ * ladder every rung carries the same `1D` tenor and differs by `fwd_start`,
+ * while on a ladder quoted by tenor the tenor *is* the rung. Whichever field
+ * varies is found afterwards, and that is what the rungs are.
+ */
+[[nodiscard]] bool same_instrument(const domain::market_series_row& left,
+    const domain::market_series_row& right) {
+    return left.asset == right.asset
+        && left.identity.scope == right.identity.scope
+        && left.identity.instrument_type == right.identity.instrument_type
+        && left.identity.quote_type == right.identity.quote_type
+        && left.party_id == right.party_id
+        && left.provider_code == right.provider_code;
+}
+
+/** @brief The text of one identity field of @p row, or empty. */
+[[nodiscard]] std::string field_text(const domain::market_series_row& row,
+    std::string_view name) {
+    for (const auto& field : row.identity.fields)
+        if (field.name == name)
+            return field.text;
+    return {};
+}
+
+}
+
+curve_group curve_of(const std::vector<domain::market_series_row>& catalogue,
+    const domain::market_series_row& clicked) {
+    std::vector<const domain::market_series_row*> members;
+    for (const auto& row : catalogue)
+        if (same_instrument(row, clicked))
+            members.push_back(&row);
+
+    /*
+     * The rung is the identity field whose text differs among the members. The
+     * fields are in schema order and every member of one curve carries the same
+     * set, so the first that differs is the axis - `fwd_start` on a swap ladder,
+     * `tenor` where the ladder is quoted that way.
+     */
+    curve_group group;
+    const auto* first = members.empty() ? &clicked : members.front();
+    for (const auto& field : first->identity.fields) {
+        for (const auto* member : members) {
+            if (field_text(*member, field.name) != field.text) {
+                group.field = field.name;
+                break;
+            }
+        }
+        if (!group.field.empty())
+            break;
+    }
+
+    for (const auto* member : members) {
+        group.members.push_back(member);
+        group.rungs.push_back(group.field.empty()
+                ? member->tenor
+                : field_text(*member, group.field));
+    }
+    /* A plot reads a curve from its shortest rung, so the order is by rung. */
+    std::vector<std::size_t> order(group.members.size());
+    for (std::size_t i = 0; i < order.size(); ++i)
+        order[i] = i;
+    std::stable_sort(order.begin(), order.end(), [&group](auto left, auto right) {
+        const auto a = tenor_rank(group.rungs[left]);
+        const auto b = tenor_rank(group.rungs[right]);
+        if (a != b)
+            return a < b;
+        return group.rungs[left] < group.rungs[right];
+    });
+    curve_group ordered;
+    ordered.field = std::move(group.field);
+    for (const auto i : order) {
+        ordered.members.push_back(group.members[i]);
+        ordered.rungs.push_back(group.rungs[i]);
+    }
+    if (ordered.members.empty()) {
+        ordered.members.push_back(&clicked);
+        ordered.rungs.push_back(clicked.tenor);
+    }
+    return ordered;
+}
+
 }
