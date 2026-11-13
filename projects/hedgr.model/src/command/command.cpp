@@ -75,6 +75,8 @@ std::string_view to_string(command_kind value) noexcept {
         return "load_image";
     case command_kind::load_term_structure:
         return "load_term_structure";
+    case command_kind::load_vol_surface:
+        return "load_vol_surface";
     case command_kind::configure_crm:
         return "configure_crm";
     case command_kind::load_crm_names:

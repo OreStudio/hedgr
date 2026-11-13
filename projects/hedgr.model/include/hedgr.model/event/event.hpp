@@ -151,6 +151,13 @@ enum class event_kind : std::uint8_t {
      * every series the session watches again.
      */
     link_restored = 23,
+    /**
+     * @brief A published volatility surface was read, or could not be.
+     *
+     * One answer per read: the surface is one object, so unlike a curve there
+     * is no history to accumulate and no instant to merge.
+     */
+    vol_surface = 24,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -243,6 +250,19 @@ struct event final {
 
     /** @brief Why the published curve read failed, for series_catalogue. */
     std::string published_curves_error;
+
+    /**
+     * @brief The volatility surface blueprints, for series_catalogue.
+     *
+     * Carried with the catalogue for the published curves' reason: the browser
+     * is what opens a surface, and one refresh fills every list it offers. A
+     * deployment that publishes no surfaces answers with an empty list, which
+     * is a fact and not a failure.
+     */
+    std::vector<domain::surface_blueprint> surface_blueprints;
+
+    /** @brief Why the surface blueprint read failed, for series_catalogue. */
+    std::string surface_blueprints_error;
 
     /** @brief The series a points event is about, for series_points. */
     std::string series_id;
@@ -346,6 +366,23 @@ struct event final {
     std::vector<std::string> curve_pillars;
     std::vector<std::int64_t> curve_as_of_ns;
     std::vector<double> curve_values;
+
+    /**
+     * @brief A published volatility surface, columnar, for @c vol_surface.
+     *
+     * The twin of the curve fields above with a second axis instead of a second
+     * instant: the expiries name the rows, the strikes name the columns, and
+     * @c surface_values is row-major with one row per expiry. The strikes keep
+     * the deployment's order, because they name moneyness rather than a number
+     * a reader sorts.
+     */
+    std::string blueprint_id;
+    std::string base_currency;
+    std::string quote_currency;
+    std::int64_t surface_as_of_ns = 0;
+    std::vector<std::string> surface_expiries;
+    std::vector<std::string> surface_strikes;
+    std::vector<double> surface_values;
 
     /**
      * @brief The parties the login may act as, for session_authenticated.

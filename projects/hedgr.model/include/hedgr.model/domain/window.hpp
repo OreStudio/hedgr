@@ -71,10 +71,12 @@ enum class window_kind : std::uint8_t {
     crm_matrix = 9,
     /** @brief A small card for one series: a window of its own, not a chart. */
     mini_plot = 10,
+    /** @brief One published volatility surface, as a grid over two axes. */
+    vol_surface = 11,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 11;
+inline constexpr std::size_t window_kind_count = 12;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -170,6 +172,25 @@ struct crm_matrix_state final {
     bool reciprocal = false;
 };
 
+/**
+ * @brief State of one published volatility surface window.
+ *
+ * The blueprint is the identity: a surface is published under a blueprint, so
+ * the key is the blueprint's id and the rest is what a title and a read need
+ * before any answer.
+ */
+struct vol_surface_state final {
+    /** @brief The surface's name, shown in the title. */
+    std::string label;
+
+    /** @brief The blueprint the surface is published under. */
+    std::string blueprint_id;
+
+    /** @brief The pair's base and quote currencies. */
+    std::string base_currency;
+    std::string quote_currency;
+};
+
 /** @brief State of a grid window. */
 struct grid_state final {
     /** @brief Resource name, for example "trades". */
@@ -241,7 +262,7 @@ struct command_centre_state final {
 using window_state = std::variant<chart_state, grid_state, notice_state,
     accounts_state, workspace_state, command_centre_state,
     series_browser_state, term_structure_state, crm_matrix_state,
-    mini_plot_state>;
+    mini_plot_state, vol_surface_state>;
 
 /**
  * @brief The persisted description of a window.

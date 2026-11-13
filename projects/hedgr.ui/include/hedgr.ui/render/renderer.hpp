@@ -29,6 +29,7 @@
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/curve_table.hpp"
+#include "hedgr.model/state/surface_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
@@ -435,6 +436,10 @@ struct window_ui_state final {
     /** @brief The curve last chosen in the rates view. */
     std::string market_selected_curve_key;
     std::string market_selected_curve_label;
+
+    /** @brief The volatility surface last chosen in the browser. */
+    std::string market_selected_surface_id;
+    std::string market_selected_surface_label;
 };
 
 /**
@@ -538,6 +543,9 @@ struct render_input final {
 
     /** @brief The latest curve each browser session read. */
     const hedgr::model::state::curve_table& curves;
+
+    /** @brief The latest published volatility surface each window read. */
+    const hedgr::model::state::surface_table& surfaces;
 
     /** @brief The latest CRM batch each session and party read. */
     const hedgr::model::state::crm_table& crm;

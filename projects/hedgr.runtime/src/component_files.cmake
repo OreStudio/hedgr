@@ -32,6 +32,7 @@ set(files
     "worker/tick_sink.cpp"
     "worker/probe_worker.cpp"
     "worker/curve_worker.cpp"
+    "worker/surface_worker.cpp"
     "worker/read_request.cpp"
 )
 
@@ -65,6 +66,7 @@ set(HEADERS
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/deployment_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/image_map_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/curve_worker.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/surface_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/image_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_worker.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../include/hedgr.runtime/worker/crm_names_worker.hpp"

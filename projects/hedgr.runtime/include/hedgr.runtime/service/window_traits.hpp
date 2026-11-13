@@ -46,6 +46,7 @@ enum class read_kind : std::uint8_t {
     market_catalogue,
     market_points,
     term_structure,
+    vol_surface,
     crm_batch,
 };
 
@@ -154,6 +155,7 @@ make_window_trait_table() {
         {term_structure,   30s,     parked,   parked,   after_cadence,  due_now,   read_kind::term_structure,   true},
         {crm_matrix,       1s,      parked,   due_now,  parked,         due_now,   read_kind::crm_batch,        false},
         {mini_plot,        2s,      parked,   parked,   parked,         parked,    read_kind::market_points,    false},
+        {vol_surface,      30s,     parked,   parked,   after_cadence,  due_now,   read_kind::vol_surface,      true},
     }};
 }
 

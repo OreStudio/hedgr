@@ -225,6 +225,30 @@ void request_published_curve_window(const render_input& input,
     input.commands.push(std::move(request));
 }
 
+/**
+ * @brief Opens one published volatility surface, by the blueprint it is under.
+ *
+ * The blueprint is the window's identity, so requesting the same one twice
+ * focuses the window already drawn. The pair travels with the command because
+ * the title and the flags need it before any read answers.
+ */
+void request_vol_surface_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const domain::surface_blueprint& surface) {
+    command request;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::vol_surface;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.series_id = surface.id;
+    request.series_label = surface.name;
+    request.blueprint_id = surface.id;
+    request.curve_label = surface.name;
+    request.base_currency = surface.base_currency;
+    request.quote_currency = surface.quote_currency;
+    input.commands.push(std::move(request));
+}
+
 void render_series_browser(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
@@ -487,6 +511,49 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         draw_foot();
         ImGui::PopID();
     };
+
+    /*
+     * The deployment's volatility surfaces. A surface is published under a
+     * blueprint rather than as a series, so it has no row in the list below:
+     * the chooser is its own control, and opening one draws it. It is offered
+     * whatever the asset filter says, because a surface is not an asset class
+     * and hiding it behind one would make it unfindable.
+     */
+    if (catalogue != nullptr && !catalogue->surfaces.empty()) {
+        ImGui::AlignTextToFramePadding();
+        widget::caption("Surface",
+            "A volatility surface the deployment publishes.");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(360.0f);
+        const char* surface_preview = state.market_selected_surface_label.empty()
+            ? "Select a volatility surface..."
+            : state.market_selected_surface_label.c_str();
+        if (ImGui::BeginCombo("##surface", surface_preview)) {
+            for (const auto& surface : catalogue->surfaces) {
+                const bool chosen
+                    = surface.id == state.market_selected_surface_id;
+                ImGui::PushID(surface.id.c_str());
+                if (ImGui::Selectable(surface.name.c_str(), chosen)) {
+                    state.market_selected_surface_id = surface.id;
+                    state.market_selected_surface_label = surface.name;
+                    request_vol_surface_window(input, *session, surface);
+                }
+                if (chosen)
+                    ImGui::SetItemDefaultFocus();
+                if (!surface.smile_model.empty())
+                    ImGui::SetItemTooltip("%s/%s \u00b7 %s model",
+                        surface.base_currency.c_str(),
+                        surface.quote_currency.c_str(),
+                        surface.smile_model.c_str());
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        if (!catalogue->surfaces_error.empty()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(%s)", catalogue->surfaces_error.c_str());
+        }
+    }
 
     if (model::domain::market_asset_of(state.market_asset_class)
         == model::domain::market_asset::ir) {

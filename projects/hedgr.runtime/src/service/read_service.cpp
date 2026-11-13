@@ -110,6 +110,9 @@ std::optional<refusal> read_service::start(const read_request& request) {
     case read_kind::term_structure:
         start_term_structure_read(request.window);
         return std::nullopt;
+    case read_kind::vol_surface:
+        start_vol_surface_read(request.window);
+        return std::nullopt;
     case read_kind::crm_batch:
         start_crm_read(request.window);
         return std::nullopt;
@@ -503,6 +506,66 @@ void read_service::load_term_structure(
         cmd.curve_key));
 }
 
+void read_service::start_vol_surface_read(
+    model::state::window_handle handle) {
+    if (!is_open() || !windows_.contains(handle))
+        return;
+    const auto spec = windows_.spec(handle, sessions_);
+    const auto* surface = std::get_if<domain::vol_surface_state>(&spec.state);
+    if (surface == nullptr || surface->blueprint_id.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Volatility window "
+            << (surface == nullptr ? "holds no surface" : surface->label)
+            << " not read: it names no blueprint";
+        return;
+    }
+    if (!spec.session)
+        return;
+    auto read = session_read_for(spec.session->instance_id,
+        spec.session->account_id, read_gate::signed_in);
+    if (!read)
+        return;
+
+    /*
+     * The surface's own instant is the clock's now, which reads the newest
+     * surface the deployment has published. A window never asks for a specific
+     * instant: a desk wants the current surface, and a historical one would be
+     * a different screen.
+     */
+    if (!submit_read(*read, worker::surface_request{
+                         .blueprint_id = surface->blueprint_id,
+                         .label = surface->label,
+                         .base_currency = surface->base_currency,
+                         .quote_currency = surface->quote_currency}))
+        return;
+    surfaces_.begin(surfaces_.intern(read->instance_id, read->account_id,
+        surface->blueprint_id));
+}
+
+void read_service::load_vol_surface(const model::command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Volatility surface '" << cmd.blueprint_id << "' ("
+        << cmd.curve_label << ")";
+    if (cmd.blueprint_id.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Volatility surface not read: the command names no blueprint";
+        return;
+    }
+    auto read = session_read_for(cmd.instance_id, cmd.account_id,
+        read_gate::signed_in);
+    if (!read)
+        return;
+
+    if (!submit_read(*read, worker::surface_request{
+                         .blueprint_id = cmd.blueprint_id,
+                         .label = cmd.curve_label,
+                         .base_currency = cmd.base_currency,
+                         .quote_currency = cmd.quote_currency}))
+        return;
+    surfaces_.begin(surfaces_.intern(cmd.instance_id, cmd.account_id,
+        cmd.blueprint_id));
+}
+
 void read_service::load_image(const model::command::command& cmd) {
     auto read = session_read_for(cmd.instance_id, cmd.account_id,
         read_gate::signed_in_with_token);
@@ -624,6 +687,8 @@ bool read_service::apply(const model::event::event& ev) {
                 ev.series, ev.providers);
             market_.apply_published_curves(ev.instance_id, ev.account_id,
                 ev.published_curves, ev.published_curves_error);
+            market_.apply_surface_blueprints(ev.instance_id, ev.account_id,
+                ev.surface_blueprints, ev.surface_blueprints_error);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);
@@ -653,6 +718,18 @@ bool read_service::apply(const model::event::event& ev) {
         const auto handle = curves_.intern(ev.instance_id, ev.account_id,
             ev.curve_key);
         service::apply_curve_event(curves_, handle, ev);
+        return true;
+    }
+    case event::event_kind::vol_surface: {
+        const auto handle = surfaces_.intern(ev.instance_id, ev.account_id,
+            ev.blueprint_id);
+        if (ev.message.empty()) {
+            surfaces_.apply(handle, ev.curve_label, ev.base_currency,
+                ev.quote_currency, ev.surface_as_of_ns, ev.surface_expiries,
+                ev.surface_strikes, ev.surface_values);
+        } else {
+            surfaces_.fail(handle, ev.message);
+        }
         return true;
     }
     case event::event_kind::image_loaded: {

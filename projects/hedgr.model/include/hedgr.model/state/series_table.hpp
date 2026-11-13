@@ -152,6 +152,19 @@ struct HEDGR_MODEL_EXPORT series_catalogue final {
     /** @brief Why the published curve read failed, or empty. */
     std::string published_error;
 
+    /**
+     * @brief The volatility surface blueprints the deployment publishes.
+     *
+     * Beside the published curves and for the same reason: a surface is
+     * published under a blueprint rather than as a series, so it is not a
+     * catalogue row. Empty when the deployment publishes none, or when that
+     * read failed while the series read answered.
+     */
+    std::vector<domain::surface_blueprint> surfaces;
+
+    /** @brief Why the surface blueprint read failed, or empty. */
+    std::string surfaces_error;
+
     /** @brief Where the read stands. */
     catalogue_state state = catalogue_state::unread;
 
@@ -215,6 +228,11 @@ public:
      * leaves the catalogue's own state alone: the chooser then lists what it
      * had and says why the curve list may be short.
      */
+    void apply_surface_blueprints(std::string_view instance_id,
+        std::string_view account_id,
+        std::vector<domain::surface_blueprint> blueprints,
+        std::string error = {});
+
     void apply_published_curves(std::string_view instance_id,
         std::string_view account_id,
         std::vector<domain::published_curve> curves,

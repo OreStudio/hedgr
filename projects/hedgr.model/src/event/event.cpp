@@ -99,6 +99,8 @@ std::string_view to_string(event_kind value) noexcept {
         return "link_lost";
     case event_kind::link_restored:
         return "link_restored";
+    case event_kind::vol_surface:
+        return "vol_surface";
     }
     return "unknown";
 }

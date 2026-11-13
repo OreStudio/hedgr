@@ -108,6 +108,13 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         terms.curve_key = std::string{series_id};
         return terms;
     }
+    case domain::window_kind::vol_surface: {
+        domain::vol_surface_state surface;
+        surface.label = series_label.empty() ? "Volatility surface"
+                                             : std::string{series_label};
+        surface.blueprint_id = std::string{series_id};
+        return surface;
+    }
     case domain::window_kind::accounts: {
         domain::accounts_state accounts;
         accounts.instance_id = std::string{instance_id};
@@ -183,6 +190,11 @@ std::string window_key_for(domain::window_kind kind,
         return series_id.empty()
             ? std::string{}
             : std::format("terms:{}:{}:{}", instance_id, account_id, series_id);
+    case domain::window_kind::vol_surface:
+        return series_id.empty()
+            ? std::string{}
+            : std::format("surface:{}:{}:{}", instance_id, account_id,
+                  series_id);
     case domain::window_kind::crm_matrix:
         return std::format("crm:{}:{}:{}:{}", instance_id, account_id, party_id,
             crm_name);
@@ -437,6 +449,11 @@ open_outcome window_service::open(const command::command& cmd) {
         auto& terms = std::get<domain::term_structure_state>(spec.state);
         terms.member_ids = cmd.member_ids;
         terms.member_tenors = cmd.member_tenors;
+    }
+    if (cmd.new_window_kind == domain::window_kind::vol_surface) {
+        auto& surface = std::get<domain::vol_surface_state>(spec.state);
+        surface.base_currency = cmd.base_currency;
+        surface.quote_currency = cmd.quote_currency;
     }
 
     if (const auto session = sessions_.find(cmd.instance_id, cmd.account_id))

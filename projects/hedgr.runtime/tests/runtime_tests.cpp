@@ -2263,6 +2263,8 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
             false},
         {window_kind::crm_matrix, {}, std::chrono::seconds{1}, true, true},
         {window_kind::mini_plot, "s-1", std::chrono::seconds{2}, true, true},
+        {window_kind::vol_surface, "blueprint-1", std::chrono::seconds{30},
+            true, false},
     };
     REQUIRE(expected.size() == hedgr::model::domain::window_kind_count);
 

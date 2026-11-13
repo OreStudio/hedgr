@@ -155,6 +155,15 @@ void series_table::apply_published_curves(std::string_view instance_id,
     catalogue.generation = ++counter_;
 }
 
+void series_table::apply_surface_blueprints(std::string_view instance_id,
+    std::string_view account_id,
+    std::vector<domain::surface_blueprint> blueprints, std::string error) {
+    auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;
+    catalogue.surfaces = std::move(blueprints);
+    catalogue.surfaces_error = std::move(error);
+    catalogue.generation = ++counter_;
+}
+
 void series_table::fail_catalogue(std::string_view instance_id,
     std::string_view account_id, std::string message) {
     auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;

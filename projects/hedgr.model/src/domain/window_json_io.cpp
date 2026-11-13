@@ -75,6 +75,8 @@ window_state_to_json(window_kind kind, const window_state& state) {
         return write_shape<crm_matrix_state>(state);
     case window_kind::mini_plot:
         return write_shape<mini_plot_state>(state);
+    case window_kind::vol_surface:
+        return write_shape<vol_surface_state>(state);
     }
     return std::unexpected("unknown window kind");
 }
@@ -103,6 +105,8 @@ window_state_from_json(window_kind kind, std::string_view json) {
         return read_shape<crm_matrix_state>(json);
     case window_kind::mini_plot:
         return read_shape<mini_plot_state>(json);
+    case window_kind::vol_surface:
+        return read_shape<vol_surface_state>(json);
     }
     return std::unexpected("unknown window kind");
 }

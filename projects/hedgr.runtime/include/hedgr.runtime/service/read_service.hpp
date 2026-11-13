@@ -27,6 +27,7 @@
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/series_table.hpp"
+#include "hedgr.model/state/surface_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
@@ -132,6 +133,11 @@ public:
         return curves_;
     }
 
+    /** @brief The latest published surface each window read. */
+    [[nodiscard]] const model::state::surface_table& surfaces() const noexcept {
+        return surfaces_;
+    }
+
     /** @brief The bounded cache of tenant images by identifier. */
     [[nodiscard]] model::state::image_cache& images() noexcept {
         return images_;
@@ -179,6 +185,9 @@ public:
 
     /** @brief Reads the latest curve named by a set of tenor series. */
     void load_term_structure(const model::command::command& cmd);
+
+    /** @brief Reads the newest surface the command's blueprint published. */
+    void load_vol_surface(const model::command::command& cmd);
 
     /** @brief Reads the CRM names a party offers. */
     void load_crm_names(const model::command::command& cmd);
@@ -321,6 +330,9 @@ private:
     /** @brief Reads the curve a term-structure window shows. */
     void start_term_structure_read(model::state::window_handle handle);
 
+    /** @brief Reads the surface a volatility window shows. */
+    void start_vol_surface_read(model::state::window_handle handle);
+
     /** @brief Reads the CRM batch a cross-rates window shows. */
     void start_crm_read(model::state::window_handle handle);
 
@@ -361,6 +373,9 @@ private:
 
     /** @brief The latest curve each browser session read. */
     model::state::curve_table curves_;
+
+    /** @brief The latest published surface each window read. */
+    model::state::surface_table surfaces_;
 
     model::state::crm_table crm_;
 };

@@ -59,6 +59,14 @@ namespace transport = hedgr::session::transport;
  */
 constexpr std::uint32_t curve_heads_limit = 200;
 
+/**
+ * @brief How many surface blueprints a catalogue read lists.
+ *
+ * A deployment publishes one blueprint per pair and model, so this is the same
+ * generous ceiling the curves use rather than a page size.
+ */
+constexpr std::uint32_t surface_blueprint_limit = 200;
+
 /** @brief What an unanswered tick read says, for the chart's foot and plot. */
 [[nodiscard]] std::string unanswered_text(const std::string& detail) {
     return "The marketdata service did not answer the tick history call "
@@ -212,6 +220,36 @@ void run_market_read(transport::session_link& link, const read_request& request,
              * read leaves its list empty and says why; it does not fail the
              * catalogue.
              */
+            /*
+             * The surface blueprints travel with the catalogue for the curves'
+             * reason: the browser is what opens a surface. A deployment that
+             * publishes none answers with an empty list, which is a fact about
+             * the desk rather than a failure, so it is not logged as one.
+             */
+            if (const auto surfaces
+                = link.fx_vol_surface_blueprints(surface_blueprint_limit);
+                surfaces) {
+                answer.surface_blueprints.reserve(surfaces->size());
+                for (const auto& blueprint : *surfaces) {
+                    answer.surface_blueprints.push_back(
+                        hedgr::model::domain::surface_blueprint{
+                            .id = blueprint.id,
+                            .name = blueprint.name,
+                            .base_currency = blueprint.base_currency,
+                            .quote_currency = blueprint.quote_currency,
+                            .smile_model = blueprint.smile_model,
+                            .expiries = blueprint.expiries,
+                            .strikes = blueprint.strikes});
+                }
+            } else {
+                answer.surface_blueprints_error
+                    = surfaces.error().message.empty()
+                    ? surfaces.error().detail : surfaces.error().message;
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The surface blueprint read failed: "
+                    << answer.surface_blueprints_error;
+            }
+
             if (const auto curves = link.published_curves(curve_heads_limit);
                 curves) {
                 answer.published_curves = std::move(*curves);

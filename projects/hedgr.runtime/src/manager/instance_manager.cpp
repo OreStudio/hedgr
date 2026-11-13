@@ -380,6 +380,9 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::load_term_structure:
         read_service_.load_term_structure(cmd);
         break;
+    case command::command_kind::load_vol_surface:
+        read_service_.load_vol_surface(cmd);
+        break;
     case command::command_kind::disconnect_session:
         complete_session(session_service_.disconnect(cmd));
         break;

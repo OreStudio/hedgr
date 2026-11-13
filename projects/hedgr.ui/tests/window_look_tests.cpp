@@ -26,6 +26,7 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "hedgr.ui/widget/cells.hpp"
 #include "hedgr.ui/widget/status_bar.hpp"
+#include "hedgr.ui/widget/view_state.hpp"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "implot.h"
@@ -192,6 +193,47 @@ struct term_fixture final : window_fixture {
         input.wall_now_ns = newest_at_ns;
         hedgr::testing::frame([&] {
             render::render_term_structure(window, input, state, status, lock);
+        });
+    }
+};
+
+/** @brief A published surface over seven expiries by five strikes. */
+struct surface_fixture final : window_fixture {
+    model::state::window_handle window;
+
+    surface_fixture() {
+        static const std::vector<std::string> expiries{"1W", "1M", "2M", "3M",
+            "6M", "9M", "1Y"};
+        static const std::vector<std::string> strikes{"DEL/Spot/Put/10",
+            "DEL/Spot/Put/25", "ATM", "DEL/Spot/Call/25", "DEL/Spot/Call/10"};
+
+        /*
+         * A smile that steepens with expiry, which is the shape a reader is
+         * checking for: a bowl along the strikes, a lift along the expiries.
+         */
+        std::vector<double> values;
+        for (std::size_t at = 0; at < expiries.size(); ++at) {
+            for (std::size_t column = 0; column < strikes.size(); ++column) {
+                const double wing
+                    = static_cast<double>(column) - 2.0;
+                values.push_back(0.08 + 0.012 * static_cast<double>(at)
+                    + 0.006 * wing * wing);
+            }
+        }
+        const auto handle = desk.surfaces.intern("i", "a", "blueprint-1");
+        desk.surfaces.apply(handle, "EURUSD_SSVI", "EUR", "USD", newest_at_ns,
+            expiries, strikes, std::move(values));
+        window = desk.open(model::domain::window_kind::vol_surface,
+            model::domain::vol_surface_state{.label = "EURUSD_SSVI",
+                .blueprint_id = "blueprint-1", .base_currency = "EUR",
+                .quote_currency = "USD"});
+    }
+
+    void draw() {
+        auto input = desk.input();
+        input.wall_now_ns = newest_at_ns;
+        hedgr::testing::frame([&] {
+            render::render_vol_surface(window, input, state, status, lock);
         });
     }
 };
@@ -966,6 +1008,10 @@ TEST_CASE("window gallery", "[.gallery]") {
         paint("term-structure", terms, [](auto& f) { f.draw(); });
     }
     {
+        surface_fixture surface;
+        paint("vol-surface", surface, [](auto& f) { f.draw(); });
+    }
+    {
         crm_fixture crm{[](std::size_t at) {
             return std::string{at % 6 == 0 ? "stale" : "fresh"};
         }};
@@ -983,4 +1029,71 @@ TEST_CASE("window gallery", "[.gallery]") {
         docked_desk_fixture grid;
         paint("docked-charts", grid, [](auto& f) { f.draw(); });
     }
+}
+
+TEST_CASE("a surface window draws a mesh, and a sentence when none is published",
+    "[window-look][surfaces]") {
+    headless_imgui imgui;
+    desk desk;
+    static_cast<void>(imgui);
+
+    const auto window = desk.open(model::domain::window_kind::vol_surface,
+        model::domain::vol_surface_state{.label = "EURUSD_SSVI",
+            .blueprint_id = "blueprint-1", .base_currency = "EUR",
+            .quote_currency = "USD"});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+
+    /* Nothing read yet: the window is reading, and draws no mesh. */
+    std::size_t reading_vertices = 0;
+    hedgr::testing::frame([&] {
+        const auto before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        render::render_vol_surface(window, input, state, status, lock);
+        reading_vertices = static_cast<std::size_t>(
+            ImGui::GetWindowDrawList()->VtxBuffer.Size - before);
+    });
+    CHECK(state.traced.state
+        == static_cast<int>(hedgr::ui::widget::view_state::reading));
+
+    /* A published surface: seven expiries by five strikes fills the child. */
+    const auto handle = desk.surfaces.intern("i", "a", "blueprint-1");
+    desk.surfaces.apply(handle, "EURUSD_SSVI", "EUR", "USD", 1'760'000'000'000'000'000,
+        {"1W", "1M", "2M", "3M", "6M", "9M", "1Y"},
+        {"DEL/Spot/Put/25", "ATM", "DEL/Spot/Call/25"},
+        {0.09, 0.08, 0.09, 0.10, 0.09, 0.10, 0.11, 0.10, 0.11, 0.12, 0.11,
+            0.12, 0.13, 0.12, 0.13, 0.14, 0.13, 0.14, 0.15, 0.14, 0.15});
+    auto ready_input = desk.input();
+    std::size_t ready_vertices = 0;
+    hedgr::testing::frame([&] {
+        const auto before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        render::render_vol_surface(window, ready_input, state, status, lock);
+        ready_vertices = static_cast<std::size_t>(
+            ImGui::GetWindowDrawList()->VtxBuffer.Size - before);
+    });
+    CHECK(state.traced.state
+        == static_cast<int>(hedgr::ui::widget::view_state::none));
+    /*
+     * The mesh is one filled quad and one edge per cell, so a surface of six by
+     * four cells is hundreds of vertices - and the reading frame, which draws
+     * only chrome, is not.
+     */
+    CHECK(ready_vertices > 200);
+
+    /*
+     * The deployment refusing the read is a fact, and the window draws its
+     * sentence rather than an empty plot: "nothing is published at or before
+     * this instant" is a state an operator has to be told.
+     */
+    desk.surfaces.fail(handle,
+        "No surface of EURUSD_SSVI is published at or before this instant.");
+    auto failed_input = desk.input();
+    hedgr::testing::frame([&] {
+        render::render_vol_surface(window, failed_input, state, status, lock);
+    });
+    CHECK(state.traced.state
+        == static_cast<int>(hedgr::ui::widget::view_state::error));
+    CHECK(state.traced.reason
+        == "No surface of EURUSD_SSVI is published at or before this instant.");
 }

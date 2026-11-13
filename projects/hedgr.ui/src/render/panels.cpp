@@ -171,6 +171,13 @@ void append_window_title(std::string& out, domain::window_kind kind,
         }
         return put("Term structure");
     }
+    case domain::window_kind::vol_surface: {
+        if (const auto* surface =
+                std::get_if<domain::vol_surface_state>(&state)) {
+            return put(or_else(surface->label, "Volatility surface"));
+        }
+        return put("Volatility surface");
+    }
     }
     return put("Window");
 }
@@ -570,6 +577,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::instance_manager:
     case domain::window_kind::crm_matrix:
     case domain::window_kind::mini_plot:
+    case domain::window_kind::vol_surface:
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:
