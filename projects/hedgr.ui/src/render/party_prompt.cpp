@@ -25,7 +25,9 @@
 #include "hedgr.ui/theme/theme.hpp"
 #include "imgui.h"
 #include "ores.logging/make_logger.hpp"
+#include <algorithm>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -55,8 +57,6 @@ void forget(party_prompt_state& state) {
     state.instance_id.clear();
     state.account_id.clear();
     state.parties = party_list{};
-    state.choice = 0;
-    state.seeded = false;
 }
 
 /** @brief Takes up the first signed-in session that still has to be asked. */
@@ -76,8 +76,6 @@ void offer_to_first(const render_input& input, party_prompt_state& state) {
 
         state.instance_id = std::string{instance_id};
         state.account_id = std::string{account_id};
-        state.choice = 0;
-        state.seeded = false;
         BOOST_LOG_SEV(lg(), ores::logging::info)
             << "Asking account '" << account_id << "' on '" << instance_id
             << "' which party to act as: the login holds "
@@ -121,28 +119,28 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
         return;
     }
 
-    /*
-     * The list starts on the party the deployment chose, because that is the
-     * honest starting point: the operator sees what the session would act as if
-     * they said nothing, and moves it one row.
-     */
-    if (!state.seeded) {
-        const auto acting = state.parties.index_of(session_party);
-        state.choice = acting < state.parties.size()
-            ? static_cast<int>(acting) : 0;
-        state.seeded = true;
-    }
-    if (state.choice < 0 || static_cast<std::size_t>(state.choice)
-            >= state.parties.size())
-        state.choice = 0;
+    const auto session_party_index = state.parties.index_of(session_party);
 
     /*
-     * Small, and mostly a combo. The question is one choice with a default
-     * already selected, so the window says the choice and nothing else: the
-     * explanation lives on the control's tooltip, where it is read once by a
-     * person who wants it and skipped by the person who does not.
+     * One row per party, and the row is the answer. There is no combo to open
+     * and no confirm button, because the question has one answer and the row
+     * that is clicked is it: a two-step pick-then-confirm would ask the operator
+     * to say the same thing twice, and a "Not now" would be a button that means
+     * "act as the default", which is the accident this prompt exists to
+     * prevent.
      */
-    const ImVec2 size(420.0f, 116.0f);
+    const auto rows = static_cast<int>(state.parties.size());
+    const float row_height = ImGui::GetTextLineHeightWithSpacing();
+    const float list_height = std::min(row_height * static_cast<float>(rows),
+        row_height * 9.0f);
+    /*
+     * The title bar, the window's padding and the gap above the list, added to
+     * the list itself: a window sized to its contents exactly leaves no empty
+     * band under the last row.
+     */
+    const ImVec2 size(420.0f, list_height
+            + ImGui::GetTextLineHeightWithSpacing()
+            + 2.0f * ImGui::GetStyle().WindowPadding.y + 8.0f);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(
@@ -156,7 +154,7 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
         | ImGuiWindowFlags_NoDocking;
 
     bool open = true;
-    const char* title = "Act as a party###hedgr-party";
+    const char* title = "Act as which party###hedgr-party";
     if (!ImGui::Begin(title, &open, flags)) {
         ImGui::End();
         if (!open)
@@ -166,57 +164,53 @@ void draw_party_prompt(const render_input& input, party_prompt_state& state) {
     hedgr::ui::theme::shade_window_background(
         hedgr::ui::theme::window_gradient);
 
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted("Acting as");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##party", state.parties.name(
-            static_cast<std::size_t>(state.choice)))) {
+    std::optional<std::size_t> chosen;
+    if (ImGui::BeginChild("##parties", ImVec2(0.0f, list_height),
+            ImGuiChildFlags_None)) {
         for (std::size_t i = 0; i < state.parties.size(); ++i) {
-            const bool chosen = static_cast<int>(i) == state.choice;
-            if (ImGui::Selectable(state.parties.name(i), chosen))
-                state.choice = static_cast<int>(i);
-            if (chosen)
-                ImGui::SetItemDefaultFocus();
+            ImGui::PushID(static_cast<int>(i));
+            const bool acting = i == session_party_index;
+            if (ImGui::Selectable(state.parties.name(i), acting))
+                chosen = i;
+            if (acting) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("signed in as");
+            }
+            ImGui::PopID();
         }
-        ImGui::EndCombo();
     }
+    ImGui::EndChild();
     ImGui::SetItemTooltip(
         "The party this session acts as, which decides the data every window "
-        "reads. Remembered for this account, so the next sign-in lands in it. "
-        "Changeable later from a window's status bar.");
-
-    ImGui::Spacing();
-    if (ImGui::Button("Continue", ImVec2(120.0f, 0.0f))) {
-        hedgr::model::command::command request;
-        request.kind = hedgr::model::command::command_kind::select_party;
-        request.instance_id = state.instance_id;
-        request.account_id = state.account_id;
-        request.party_id = state.parties.id(
-            static_cast<std::size_t>(state.choice));
-        BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Sign-in for account '" << state.account_id
-            << "' asked to act as party '" << request.party_id << "' ("
-            << state.parties.name(static_cast<std::size_t>(state.choice))
-            << ")";
-        input.commands.push(std::move(request));
-        forget(state);
-        ImGui::End();
-        return;
-    }
-    ImGui::SetItemTooltip("Act as the party chosen above, and remember it.");
-    ImGui::SameLine();
-    if (ImGui::Button("Not now", ImVec2(100.0f, 0.0f)))
-        dismiss(state);
-    ImGui::SetItemTooltip(
-        "Act as the party the deployment signed this login in as. The party can "
-        "be changed later from a window's status bar.");
+        "reads. Remembered for this account.");
 
     ImGui::End();
 
-    /* The title bar's close button is the second way to decline. */
+    if (chosen) {
+        auto request = party_choice_command(state, *chosen);
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Sign-in for account '" << state.account_id
+            << "' asked to act as party '" << request.party_id << "' ("
+            << state.parties.name(*chosen) << ")";
+        input.commands.push(std::move(request));
+        forget(state);
+        return;
+    }
+
+    /* The title bar's close button is the only way to decline, and it defers. */
     if (!open)
         dismiss(state);
+}
+
+hedgr::model::command::command party_choice_command(
+    const party_prompt_state& state, std::size_t index) {
+    hedgr::model::command::command request;
+    request.kind = hedgr::model::command::command_kind::select_party;
+    request.instance_id = state.instance_id;
+    request.account_id = state.account_id;
+    request.party_id = index < state.parties.size()
+        ? std::string{state.parties.id(index)} : std::string{};
+    return request;
 }
 
 }

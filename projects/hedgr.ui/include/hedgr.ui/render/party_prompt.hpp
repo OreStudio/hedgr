@@ -54,28 +54,28 @@ struct party_prompt_state final {
     /** @brief The parties the login may act as, and the one it acts as now. */
     party_list parties;
 
-    /** @brief The party the operator has scrolled to, index into @c parties. */
-    int choice = 0;
-
     /**
-     * @brief Whether @c choice has been seeded from the session's own party.
+     * @brief Sessions whose prompt was put down without an answer.
      *
-     * Seeded once, when the prompt opens, and never again: re-seeding it every
-     * frame would overwrite the row the operator just clicked, and the combo
-     * would snap back to the party the deployment chose however often it was
-     * moved.
-     */
-    bool seeded = false;
-
-    /**
-     * @brief Sessions whose prompt was put down for this run.
-     *
-     * "Not now" is an answer. Asking again on the next frame would make the
-     * button a lie, and the prompt's own text says where the choice can be made
-     * instead, so an operator who declines is not stranded.
+     * The title bar's close button is the only way to decline, and declining is
+     * deferral rather than a choice: nothing is remembered, so the question
+     * comes back on the next sign-in instead of a default being adopted
+     * silently. The rows are the answer; there is no button that says "later"
+     * and then means "the default".
      */
     std::unordered_set<std::string> dismissed;
 };
+
+/**
+ * @brief The command that makes @p session act as the party at @p index.
+ *
+ * One row, one click, one command: the dialog has no confirm step because the
+ * row the operator clicks *is* the answer. Exposed so a test can check that the
+ * row names the party it claims to, which is the only thing that could go
+ * silently wrong.
+ */
+[[nodiscard]] HEDGR_UI_EXPORT hedgr::model::command::command
+party_choice_command(const party_prompt_state& state, std::size_t index);
 
 /**
  * @brief Offers the party choice a sign-in needs, and applies the answer.
