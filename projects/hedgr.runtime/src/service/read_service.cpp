@@ -736,6 +736,10 @@ bool read_service::apply(const model::event::event& ev) {
         const auto key = model::state::make_tenant_key(ev.tenant_id,
             ev.image_id);
         if (ev.message.empty()) {
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Image '" << ev.image_id << "' for tenant '" << ev.tenant_id
+                << "' read: " << ev.bytes.size() << " bytes of '" << ev.mime_type
+                << "'";
             if (images_.put(ev.tenant_id, ev.image_id,
                     model::state::image_content{.mime_type = ev.mime_type,
                         .data = ev.bytes})) {
@@ -744,6 +748,9 @@ bool read_service::apply(const model::event::event& ev) {
                 failed_images_.insert(key);
             }
         } else {
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "Image '" << ev.image_id << "' for tenant '" << ev.tenant_id
+                << "' could not be read: " << ev.message;
             failed_images_.insert(key);
         }
         return true;

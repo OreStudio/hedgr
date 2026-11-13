@@ -80,6 +80,29 @@ namespace domain = hedgr::model::domain;
     return false;
 }
 
+/**
+ * @brief Whether one of the currencies a series names contains @p filter.
+ *
+ * A currency is what a desk filters by: "AUD" is the IR curves quoted in AUD and
+ * the FX pairs quoted in AUD on either side. The currencies come from the typed
+ * identity - the subject and the quote field - so a pair is found from its quote
+ * as well as from its base, and an interest-rate series is found at all. The
+ * label is not consulted: it names the currency for a person, and the identity
+ * is what the deployment stated.
+ */
+[[nodiscard]] bool names_currency(const domain::market_series_row& row,
+    std::string_view filter) {
+    if (filter.empty())
+        return true;
+    if (contains_ci(row.identity.scope, filter))
+        return true;
+    for (const auto& field : row.identity.fields) {
+        if (field.name == "ccy" && contains_ci(field.text, filter))
+            return true;
+    }
+    return false;
+}
+
 [[nodiscard]] bool is_ir(const domain::market_series_row& row) {
     if (row.asset != domain::market_asset::unknown)
         return row.asset == domain::market_asset::ir;
@@ -92,7 +115,8 @@ namespace domain = hedgr::model::domain;
         && (query.party.empty() || row.party_id == query.party)
         && (query.provider.empty() || row.provider_code == query.provider)
         && (contains_ci(row.label, query.filter)
-            || contains_ci(row.uri, query.filter));
+            || contains_ci(row.uri, query.filter)
+            || names_currency(row, query.filter));
 }
 
 
@@ -104,7 +128,8 @@ namespace domain = hedgr::model::domain;
         && (contains_ci(row.label, query.filter)
             || contains_ci(row.asset_class, query.filter)
             || contains_ci(row.uri, query.filter)
-            || contains_ci(row.provider_code, query.filter));
+            || contains_ci(row.provider_code, query.filter)
+            || names_currency(row, query.filter));
 }
 
 }
