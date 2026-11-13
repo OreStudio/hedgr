@@ -7,7 +7,14 @@ and `docs/` are.
 
 | File | Question it answers |
 |---|---|
-| `aud_aonia_curve_dialog_prototype.html` | What an IR curve screen is: pillars, bootstrapped points, zero rate / implied forward / discount factor, conventions, staleness |
+| `aud_aonia_curve_dialog_prototype.html` | What an IR **curve inspector** is: pillars and bootstrapped points, zero rate / implied forward / discount factor, conventions, staleness |
+| `rates_ladder_providers.html` | What a **rates ladder** is: maturities as rows, providers as columns, a forward-start selector, mid only, the same quotes drawn as a curve below |
+| `fx_spot_montage.html` | What an **FX montage** is: one base currency, its crosses as rows, providers as columns, and the chosen pair's day below |
+| `vol_surface_smile.html` | What a **vol surface** screen is: the surface, the grid, and one expiry as a smile; what "nothing published" looks like |
+| `explorer_search.html` | What **search** is: instruments as rows with kind badges, a currency as the primary query, and where Enter goes for each kind |
+
+`style.css` is the shared chrome for all of them except the AUD-AONIA one, which
+came first and is self-contained (Tailwind from a CDN).
 
 ## Capturing one
 
