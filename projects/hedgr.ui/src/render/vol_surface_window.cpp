@@ -135,7 +135,8 @@ void render_vol_surface(window_handle handle, const render_input& input,
     facts.has_data = has_grid;
     facts.empty_what = "This deployment publishes no surface for this blueprint.";
     const auto verdict = widget::view_state_of(facts);
-    trace_view_state("volatility surface", window->label, state, verdict);
+    trace_view_state("volatility surface", window->label, foot.identity, state,
+        verdict);
 
     set_health_foot(foot,
         hedgr::model::domain::assess_data_health(row != nullptr ? row->as_of_ns : 0,

@@ -182,7 +182,8 @@ void render_rate_ladder(hedgr::model::state::window_handle handle,
         ? "Choose a currency to read its ladder."
         : "This deployment quotes no ladder for the ladder this window names.";
     const auto verdict = widget::view_state_of(facts);
-    trace_view_state("rate ladder", window->label, state, verdict);
+    trace_view_state("rate ladder", window->label, foot.identity, state,
+        verdict);
 
     if (ladder != nullptr) {
         set_health_foot(foot,

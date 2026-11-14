@@ -572,7 +572,13 @@ void render_chart(window_handle handle, const render_input& input,
     facts.has_data = !no_points;
     facts.empty_what = "This series holds no points.";
     const auto verdict = widget::view_state_of(facts);
-    trace_view_state("chart", chart->label, state, verdict);
+    /*
+     * No identity: the chart's foot is built lazily, and building it here just
+     * to name the party would cost the frame an allocation it does not make
+     * today. A chart's failures name the series, which is enough to find it.
+     */
+    trace_view_state("chart", chart->label, std::string_view{}, state,
+        verdict);
     const bool show_mark = verdict.state == widget::view_state::reading
         || (verdict.state != widget::view_state::none && no_points);
 

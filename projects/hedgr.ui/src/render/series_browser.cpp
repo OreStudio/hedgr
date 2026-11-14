@@ -444,7 +444,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     catalogue_facts.empty_what =
         "This deployment groups no market instruments for this session.";
     const auto catalogue_verdict = widget::view_state_of(catalogue_facts);
-    trace_view_state("market data", "instruments", state, catalogue_verdict);
+    trace_view_state("market data", "instruments", foot.identity, state,
+        catalogue_verdict);
     widget::set_view_foot(foot, catalogue_verdict);
 
     const auto session_party = input.sessions.party_id(*session);
@@ -782,9 +783,32 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                         instrument->quote_type.c_str());
 
                 ImGui::TableNextColumn();
-                for (std::size_t i = 0; i < instrument->sources.size(); ++i)
-                    ImGui::TextDisabled("%s%s", i == 0 ? "" : ", ",
-                        instrument->sources[i].provider_code.c_str());
+                /*
+                 * One line, because a column of stacked provider names makes
+                 * every row three lines tall and the list unreadable, and
+                 * because a provider list is a fact about the row rather than a
+                 * paragraph under it. Built in a stack buffer so a steady frame
+                 * still allocates nothing per row.
+                 */
+                std::array<char, 128> provider_text{};
+                std::size_t used = 0;
+                for (const auto& held : instrument->sources) {
+                    const auto code = std::string_view{held.provider_code};
+                    const std::size_t lead = used == 0 ? 0 : 2;
+                    if (used + lead + code.size() + 1 > provider_text.size())
+                        break;
+                    if (lead != 0) {
+                        provider_text[used++] = ',';
+                        provider_text[used++] = ' ';
+                    }
+                    code.copy(provider_text.data() + used, code.size());
+                    used += code.size();
+                }
+                provider_text[used] = '\0';
+                if (used == 0)
+                    ImGui::TextDisabled("%s", "-");
+                else
+                    ImGui::TextDisabled("%s", provider_text.data());
 
                 ImGui::TableNextColumn();
                 if (instrument->axes.empty())
