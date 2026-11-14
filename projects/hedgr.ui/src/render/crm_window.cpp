@@ -226,7 +226,8 @@ void render_crm_matrix(window_handle handle, const render_input& input,
         facts.has_data = false;
         facts.empty_what = "No rates are configured for this party.";
         const auto verdict = widget::view_state_of(facts);
-        trace_view_state("cross rates", state.crm_name, state, verdict);
+        trace_view_state("cross rates", state.crm_name, foot.identity, state,
+            verdict);
         widget::draw_view_state_body(status, foot, verdict);
         static_cast<void>(
             draw_foot_with_party(input, *session, status, foot, state));

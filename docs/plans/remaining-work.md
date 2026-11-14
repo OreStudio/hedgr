@@ -122,6 +122,60 @@ Follow-ups noticed while building the Instances panel, both done:
   cannot read falls back to the list, so an old catalogue still works. The extra
   call per read, and the two more of a widened first load, are gone.
 
+## The market-data screens, in the order agreed (2026-11-13)
+
+The design is in `docs/plans/market-data-ux.md` and the server contracts are in
+`docs/plans/server-contracts-spec.md`. The order is the operator's, because each
+step is what the next one draws.
+
+1. **Done: rows are instruments.** `session_client::list_instruments` reads the
+   catalogue the server groups, so a curve is one row and not one per pillar or
+   per party, and the axes arrive declared rather than inferred from a tick
+   reply's coordinate. The filter is the deployment's. Measured on `prime_origin`:
+   46 instruments, 20 curves and 26 pairs, `AUD-AONIA` with its seven terms as an
+   axis. See `docs/verification/instrument-catalogue.md`. The market window now
+   draws exactly these rows, with kind badges, and opens by kind; the asset-class
+   combo and the curve and published-curve lists are gone. There is no asset
+   facet, because the catalogue does not carry an asset class.
+2. **Currency as a control**, not a filter that changes what a row is. The
+   search already finds a pair from either side; the control and the facets are
+   still to come, and the read can take `query`, `kinds` and `provider_code`
+   server-side when the list outgrows what a frame can narrow.
+3. **Done, pending the server: the Rates Ladder.** `Rates ▸ Ladder` opens a
+   window that asks for a currency and an instrument (both read from the
+   catalogue) and draws one row per maturity with the maturity date, the year
+   fraction, a column per provider, the deployment's derived value and the age.
+   The conventions the numbers rest on are stated on the screen. Mid only: there
+   are no bid or ask columns, because the deployment quotes one side.
+   **Blocked on a deployment question, not on client work:** each rung comes
+   back with thirteen quotes all from `ore`, one per recent observation, while
+   `provider_count` says one. The window draws the newest of a provider's quotes
+   and the count beside it so nothing is hidden, but the reduction belongs on the
+   server. See `docs/verification/rates-ladder.md`.
+4. **The menu by asset class**, with Search across kinds. `Rates` exists as the
+   first entry; `FX`, `Vol`, `Credit` and `Search` are still to come.
+5. **The FX montage** (`get_fx_montage`) and the surface grid and smile
+   (`get_curve_analytics`). The montage **read is done and the window is
+   deferred**: `prime_origin` holds 26 FX pairs with no observations at all, so
+   every base answers "No provider quotes a cross of … at this as-of". Building
+   the screen now would test its empty state and nothing else. See
+   `docs/verification/fx-montage.md` for what it needs when there is data.
+
+Done ahead of its step: the vol surface is drawn in three dimensions through
+**ImPlot3D**, which is a new dependency (`implot3d` in `vcpkg.json`). The
+carpet it replaces had one fixed viewpoint and a legend that said nothing about
+direction.
+
+Two facts that shape all five, measured rather than assumed:
+
+- every curve on `prime_origin` comes through `ore`, whose provider kind is
+  `reference`, and that source is current. Hiding reference sources by kind would
+  hide every curve. The rule has to be about whether a source has data.
+- the client now builds against the OreStudio checkout that carries these
+  operations, and the bundler refreshes its copies instead of keeping the first
+  one it ever saw. Both were silent failures: a stale `publish/lib` ran the old
+  API and failed at the first new symbol.
+
 ## Curves, in the order given (A to D)
 
 - Done: **A, the IR curve.** Choosing `IR` in the browser lists curves rather

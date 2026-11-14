@@ -46,6 +46,10 @@
 #include <string_view>
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "ores.nats/service/session_expired_error.hpp"
+#include "ores.marketdata.api/messaging/fx_forward_operation_protocol.hpp"
+#include "ores.marketdata.api/messaging/fx_vol_surface_operation_protocol.hpp"
+#include "ores.nats/domain/wire_codec.hpp"
+#include "ores.nats/domain/wire_format.hpp"
 
 using hedgr::session::transport::make_subject;
 using hedgr::session::transport::session_client;
@@ -262,6 +266,34 @@ TEST_CASE("a failure the transport cannot name is a protocol error",
 
     REQUIRE(error.code == session_errc::protocol_error);
     REQUIRE(error.detail == "NATS publish failed: Connection closed");
+}
+
+TEST_CASE("a failure says what it means and why, and drops neither",
+    "[transport][errors]") {
+    using hedgr::session::transport::describe;
+    using hedgr::session::transport::make_error;
+
+    /*
+     * The deployment's own sentence is the one an operator acts on, and the
+     * code's sentence is what a person reads when there is no other. A worker
+     * that reported one and dropped the other turned "No surface of EURUSD_SSVI
+     * is published at or before this instant" into "the deployment refused the
+     * read", which is what this test exists to prevent.
+     */
+    const auto refused = make_error(session_errc::read_refused,
+        "No surface of EURUSD_SSVI is published at or before this instant.");
+    CHECK(describe(refused)
+        == "the deployment refused the read: No surface of EURUSD_SSVI is "
+           "published at or before this instant.");
+
+    /* A code with no cause worth adding is its own sentence. */
+    const auto bare = make_error(session_errc::timeout, "");
+    CHECK(describe(bare) == "the instance did not answer in time");
+
+    /* A cause that repeats the sentence is not said twice. */
+    auto echo = make_error(session_errc::read_refused, "");
+    echo.detail = echo.message;
+    CHECK(describe(echo) == echo.message);
 }
 
 /**
@@ -819,6 +851,29 @@ TEST_CASE("live surfaces: what a deployment publishes as a vol surface",
         std::chrono::system_clock::now().time_since_epoch())
                             .count();
     const auto& first = blueprints->front();
+    /*
+     * Three instants, because a surface that is "not published" at the clock
+     * may still exist: a publish stamped in the future - by a skewed seed clock
+     * or a synthetic feed - is invisible to a read at now, and telling that
+     * apart from a deployment that never published is the difference between a
+     * seeding gap and a client asking the wrong question.
+     */
+    const auto ten_years_ns = 10LL * 365 * 24 * 60 * 60 * 1'000'000'000;
+    for (const auto& [label, at] : std::vector<std::pair<std::string,
+             std::int64_t>>{{"now", now_ns},
+             {"ten years ago", now_ns - ten_years_ns},
+             {"ten years ahead", now_ns + ten_years_ns}}) {
+        const auto any = session.published_fx_vol_surface(first.id, at);
+        if (!any) {
+            std::printf("  at %s: %s (%s)\n", label.c_str(),
+                any.error().message.c_str(), any.error().detail.c_str());
+            continue;
+        }
+        std::printf("  at %s: as_of=%lld %zu x %zu\n", label.c_str(),
+            static_cast<long long>(any->as_of_ns), any->expiries.size(),
+            any->strikes.size());
+    }
+    std::fflush(stdout);
     const auto surface = session.published_fx_vol_surface(first.id, now_ns);
     if (!surface) {
         std::printf("published surface of '%s' failed: %s (%s)\n",
@@ -918,4 +973,563 @@ TEST_CASE("live party: which party call a fresh login accepts",
         std::fflush(stdout);
         session.disconnect();
     }
+}
+
+/**
+ * @brief What the instrument catalogue answers, and whether it filters where
+ * the screens need it to.
+ *
+ * The catalogue is the foundation the market screens are built on: a row per
+ * instrument rather than per series, with the server's kind, its axes in draw
+ * order and a staleness verdict per source. This prints the shape of what comes
+ * back and proves that the filter arguments are applied by the deployment rather
+ * than by this client, because a screen that filtered locally would need a rule
+ * of its own for what matches a search.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.prime_origin \
+ *     HEDGR_LIVE_CA=<checkout>/build/keys/nats/ca.crt \
+ *     HEDGR_LIVE_CERT=<checkout>/build/keys/nats/ores.shell.crt \
+ *     HEDGR_LIVE_KEY=<checkout>/build/keys/nats/ores.shell.key \
+ *     HEDGR_LIVE_PRINCIPAL=super_admin \
+ *     HEDGR_LIVE_PASSWORD=... \
+ *     hedgr.session.tests "[.live-instruments]"
+ */
+TEST_CASE("live instruments: the catalogue a screen draws",
+    "[.live-instruments]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+
+    /* The catalogue reads many rows and derives each one's shape. */
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto all = session.list_instruments();
+    if (!all) {
+        std::printf("instrument catalogue failed: %s (%s)\n",
+            all.error().message.c_str(), all.error().detail.c_str());
+        std::fflush(stdout);
+        session.disconnect();
+        return;
+    }
+    std::printf("catalogue: %zu instruments\n", all->size());
+
+    std::map<std::string, std::size_t> by_kind;
+    for (const auto& instrument : *all)
+        ++by_kind[instrument.kind];
+    for (const auto& [kind, count] : by_kind)
+        std::printf("  kind='%s' count=%zu\n", kind.c_str(), count);
+
+    /*
+     * Which providers each kind actually comes from, with the provider's own
+     * kind beside it. A screen that offered to hide reference definitions would
+     * hide every instrument of a kind whose only source is one, so the
+     * distribution decides whether that is a filter worth offering at all.
+     */
+    std::map<std::string, std::map<std::string, std::size_t>> by_source;
+    for (const auto& instrument : *all)
+        for (const auto& source : instrument.sources)
+            ++by_source[instrument.kind][source.provider_code + " (" +
+                source.provider_kind + ")"];
+    for (const auto& [kind, sources] : by_source)
+        for (const auto& [source, count] : sources)
+            std::printf("  kind='%s' source='%s' count=%zu\n", kind.c_str(),
+                source.c_str(), count);
+
+    /* One of each kind, however much its axes hold. */
+    std::set<std::string> shown;
+    for (const auto& instrument : *all) {
+        if (!shown.insert(instrument.kind).second)
+            continue;
+        std::printf("kind='%s' name='%s' type=%s quote=%s ccy=%s pair=%s/%s "
+                    "fwd=%s stale=%d as_of=%lld\n",
+            instrument.kind.c_str(), instrument.name.c_str(),
+            instrument.instrument_type.c_str(), instrument.quote_type.c_str(),
+            instrument.currency.c_str(), instrument.base_currency.c_str(),
+            instrument.quote_currency.c_str(),
+            instrument.forward_start.c_str(),
+            instrument.stale ? 1 : 0,
+            static_cast<long long>(instrument.as_of_ns));
+        for (const auto& axis : instrument.axes) {
+            std::printf("  axis '%s' holds %zu values:", axis.field.c_str(),
+                axis.values.size());
+            for (std::size_t i = 0; i < axis.values.size() && i < 12; ++i)
+                std::printf(" %s", axis.values[i].c_str());
+            std::printf("%s\n", axis.values.size() > 12 ? " ..." : "");
+        }
+        for (const auto& source : instrument.sources)
+            std::printf("  source provider='%s' kind='%s' stale=%d age=%llds\n",
+                source.provider_code.c_str(), source.provider_kind.c_str(),
+                source.stale ? 1 : 0,
+                static_cast<long long>(source.age_seconds));
+    }
+
+    /*
+     * The deployment applies the filter, so the same query answers fewer rows
+     * without this client having a matching rule of its own.
+     */
+    if (!all->empty()) {
+        const auto& sample = all->front();
+        const auto by_name = session.list_instruments(
+            {.query = sample.name});
+        std::printf("query='%s' -> %s\n", sample.name.c_str(),
+            by_name ? std::format("{} instruments", by_name->size()).c_str()
+                    : by_name.error().message.c_str());
+
+        const auto curves = session.list_instruments({.kinds = {"curve"}});
+        std::printf("kinds={curve} -> %s\n",
+            curves ? std::format("{} instruments", curves->size()).c_str()
+                   : curves.error().message.c_str());
+        if (curves) {
+            for (const auto& curve : *curves)
+                std::printf("  curve '%s'\n", curve.name.c_str());
+        }
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}
+
+/**
+ * @brief What the deployment's rate ladder answers, and whether the numbers
+ * rest on stated conventions.
+ *
+ * The Rates Ladder screen draws one row per maturity and one column per
+ * provider, with the consensus the deployment derives beside them. This prints
+ * the shape of what comes back - the conventions, the provider count, the rungs
+ * and their dates - so the screen is built on measured data rather than on the
+ * sketch in the design document.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.prime_origin ... \
+ *     hedgr.session.tests "[.live-ladder]"
+ */
+TEST_CASE("live ladder: what a currency's rate ladder answers",
+    "[.live-ladder]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    /*
+     * The currencies the catalogue groups, and the instrument types it holds.
+     * Reading the ladder for each pair of them is what tells a person which
+     * ladders the deployment actually quotes.
+     */
+    const auto instruments = session.list_instruments();
+    REQUIRE(instruments.has_value());
+    std::set<std::pair<std::string, std::string>> asked;
+    for (const auto& instrument : *instruments) {
+        const auto currency = instrument.base_currency.empty()
+            ? instrument.currency : instrument.base_currency;
+        if (!currency.empty() && !instrument.instrument_type.empty())
+            asked.emplace(currency, instrument.instrument_type);
+    }
+    std::printf("ladder candidates: %zu currency/type pairs\n", asked.size());
+    for (const auto& [currency, type] : asked) {
+        const auto ladder = session.rate_ladder(currency, type, "", {}, 0);
+        if (!ladder) {
+            std::printf("%s %s -> %s\n", currency.c_str(), type.c_str(),
+                ladder.error().message.c_str());
+            continue;
+        }
+        std::printf("%s %s -> %zu rungs, %d providers, conventions '%s' / "
+                    "'%s', as_of=%lld\n",
+            ladder->currency.c_str(), ladder->instrument_type.c_str(),
+            ladder->rungs.size(), ladder->provider_count,
+            ladder->tenor_convention.c_str(),
+            ladder->day_count_convention.c_str(),
+            static_cast<long long>(ladder->as_of_ns));
+        for (const auto& rung : ladder->rungs) {
+            std::printf("  %-4s %s yf=%.4f consensus=%.6f (%s, %d) quotes:",
+                rung.tenor.c_str(), rung.maturity.c_str(), rung.year_fraction,
+                rung.consensus.value, rung.consensus.method.c_str(),
+                rung.consensus.providers_used);
+            for (const auto& quote : rung.quotes)
+                std::printf(" %s=%.6f(%llds)", quote.provider_code.c_str(),
+                    quote.value, static_cast<long long>(quote.age_seconds));
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
+}
+
+/**
+ * @brief What the deployment's FX montage answers for a base currency.
+ *
+ * The montage is the FX twin of the rate ladder: one row per pair, a spot per
+ * provider, a consensus and the move since an instant the deployment states.
+ * This prints the shape so the screen is built on measured data - in
+ * particular whether the change and the day's range arrive at all.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 ... hedgr.session.tests "[.live-montage]"
+ */
+TEST_CASE("live montage: what a base currency's crosses answer",
+    "[.live-montage]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto instruments = session.list_instruments();
+    REQUIRE(instruments.has_value());
+    std::set<std::string> bases;
+    for (const auto& instrument : *instruments) {
+        const auto base = instrument.base_currency.empty()
+            ? instrument.currency : instrument.base_currency;
+        if (base.size() == 3)
+            bases.insert(base);
+    }
+    std::printf("montage candidates: %zu bases\n", bases.size());
+    for (const auto& base : bases) {
+        const auto montage = session.fx_montage(base);
+        if (!montage) {
+            std::printf("%s -> %s (%s)\n", base.c_str(),
+                montage.error().message.c_str(),
+                montage.error().detail.c_str());
+            continue;
+        }
+        std::printf("%s -> %zu pairs, as_of=%lld change_since=%lld\n",
+            montage->base_currency.c_str(), montage->pairs.size(),
+            static_cast<long long>(montage->as_of_ns),
+            static_cast<long long>(montage->change_since_ns));
+        for (const auto& pair : montage->pairs) {
+            std::printf("  %-9s consensus=%.6f change=%s high=%s low=%s spots:",
+                pair.pair_name.c_str(), pair.consensus,
+                pair.change_pct ? std::format("{:.2f}%", *pair.change_pct)
+                                    .c_str() : "none",
+                pair.day_high ? std::format("{:.5f}", *pair.day_high).c_str()
+                              : "none",
+                pair.day_low ? std::format("{:.5f}", *pair.day_low).c_str()
+                             : "none");
+            for (const auto& spot : pair.spots)
+                std::printf(" %s=%.5f(%llds)", spot.provider_code.c_str(),
+                    spot.value, static_cast<long long>(spot.age_seconds));
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
+}
+
+/**
+ * @brief Why a deployment publishes no surface: asked of the deployment itself.
+ *
+ * Calibration and publication are two calls, and publication is gated: a call
+ * that names no approved request *raises* one for a decider rather than
+ * publishing. So "the deployment should be generating surfaces" is a question
+ * with three possible answers - the calibration refused, the request was raised
+ * and nobody decided it, or the publish happened and the read is asking the
+ * wrong question - and only the deployment can say which.
+ *
+ * This asks, and prints what each call answered. Nothing is approved here: the
+ * probe raises at most one pending request and reports its identifier.
+ *
+ *     HEDGR_LIVE_URL=... hedgr.session.tests "[.live-calibrate]"
+ */
+TEST_CASE("live calibrate: what the deployment says about publishing a surface",
+    "[.live-calibrate]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto blueprints = session.fx_vol_surface_blueprints(10);
+    REQUIRE(blueprints.has_value());
+    REQUIRE_FALSE(blueprints->empty());
+    const auto& blueprint = blueprints->front();
+    std::printf("blueprint '%s' (%s)\n", blueprint.name.c_str(),
+        blueprint.id.c_str());
+
+    const auto as_of = std::chrono::system_clock::now();
+    const ores::nats::wire_codec codec{ores::nats::wire_format::msgpack};
+    const auto as_body = [](const auto& bytes) {
+        return std::string{reinterpret_cast<const char*>(bytes.data()),
+            bytes.size()};
+    };
+    const auto decode = [&](auto tag, const std::string& body) {
+        using response = typename decltype(tag)::type;
+        const auto span = std::span<const std::byte>{
+            reinterpret_cast<const std::byte*>(body.data()), body.size()};
+        const auto answer = codec.decode<response>(span);
+        if (!answer) {
+            std::printf("  could not decode the answer: %s\n",
+                answer.error().what());
+            return std::optional<response>{};
+        }
+        return std::optional<response>{*answer};
+    };
+
+    /* 1. Calibrate: a candidate, or the reason the recipe cannot be read. */
+    using calibrate_request =
+        ores::marketdata::messaging::calibrate_fx_vol_surface_request;
+    using calibrate_response =
+        ores::marketdata::messaging::calibrate_fx_vol_surface_response;
+    calibrate_request cal;
+    cal.blueprint_id = blueprint.id;
+    cal.as_of = as_of;
+    const auto cal_answer = session.authenticated_request(
+        calibrate_request::nats_subject, as_body(codec.encode(cal)));
+    if (!cal_answer) {
+        std::printf("calibrate -> %s (%s)\n", cal_answer.error().message.c_str(),
+            cal_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<calibrate_response>{}, *cal_answer)) {
+        std::printf("calibrate -> success=%d '%s' rho=%.4f eta=%.4f "
+                    "converged=%d max_err=%.2e violations=%zu missing=%zu\n",
+            decoded->success ? 1 : 0, decoded->message.c_str(), decoded->rho,
+            decoded->eta, decoded->converged ? 1 : 0,
+            decoded->max_abs_error, decoded->violations.size(),
+            decoded->missing.size());
+        for (const auto& missing : decoded->missing)
+            std::printf("  missing %s: %zu series read\n",
+                missing.point.c_str(), missing.series_ids.size());
+        for (const auto& violation : decoded->violations)
+            std::printf("  violation %s at %s: %s\n", violation.kind.c_str(),
+                violation.expiry.c_str(), violation.description.c_str());
+    }
+    std::fflush(stdout);
+
+    /*
+     * 1b. The forward set the calibration readsits quotes from: a surface
+     * prices off a published set of forwards, and a set is published from the
+     * funding curves of both currencies. So this is the link above the one that
+     * refused, and it says which of them is missing.
+     */
+    using forward_request =
+        ores::marketdata::messaging::get_published_fx_forward_request;
+    using forward_response =
+        ores::marketdata::messaging::get_published_fx_forward_response;
+    forward_request forward;
+    forward.pair_code = "USD/JPY";
+    forward.as_of = as_of;
+    const auto forward_answer = session.authenticated_request(
+        forward_request::nats_subject, as_body(codec.encode(forward)));
+    if (!forward_answer) {
+        std::printf("forwards -> %s (%s)\n",
+            forward_answer.error().message.c_str(),
+            forward_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<forward_response>{}, *forward_answer)) {
+        std::printf("forwards -> success=%d '%s' publish='%s' spot=%.5f\n",
+            decoded->success ? 1 : 0, decoded->message.c_str(),
+            decoded->publish_id.c_str(), decoded->spot_rate);
+    }
+    std::fflush(stdout);
+
+    /* 2. Publish with no approval: this raises a request, it does not publish. */
+    using publish_request =
+        ores::marketdata::messaging::publish_fx_vol_surface_request;
+    using publish_response =
+        ores::marketdata::messaging::publish_fx_vol_surface_response;
+    publish_request pub;
+    pub.blueprint_id = blueprint.id;
+    pub.as_of = as_of;
+    pub.reason = "hedgr live probe: what stands between a calibration and a "
+                 "published surface";
+    const auto pub_answer = session.authenticated_request(
+        publish_request::nats_subject, as_body(codec.encode(pub)));
+    if (!pub_answer) {
+        std::printf("publish -> %s (%s)\n", pub_answer.error().message.c_str(),
+            pub_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<publish_response>{}, *pub_answer)) {
+        std::printf("publish -> success=%d state='%s' request='%s' '%s'\n",
+            decoded->success ? 1 : 0, decoded->state_code.c_str(),
+            decoded->approval_request_id.c_str(), decoded->message.c_str());
+    }
+    std::fflush(stdout);
+    session.disconnect();
+}
+
+/**
+ * @brief Which party a deployment publishes surfaces for.
+ *
+ * Every read here is party-scoped: a publish belongs to a party, and a session
+ * asking as another party is told "your party has no published surface". So a
+ * probe that signs in once and reads once can report "nothing is published"
+ * about a deployment that has published forty surfaces, which is exactly the
+ * confusion this test exists to settle.
+ *
+ * It signs in, lists the parties the login may act as, and reads the same
+ * EURUSD blueprint as each of them in turn.
+ *
+ *     HEDGR_LIVE_PRINCIPAL=tenant_admin@acme_corporation ... "[.live-parties-surfaces]"
+ */
+TEST_CASE("live parties: which party a deployment publishes a surface for",
+    "[.live-parties-surfaces]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("login holds %zu part%s, starting in '%s'\n",
+        signed_in->parties.size(),
+        signed_in->parties.size() == 1 ? "y" : "ies",
+        signed_in->party_name.c_str());
+
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    std::vector<hedgr::session::transport::party_choice> parties
+        = signed_in->parties;
+    if (parties.empty()) {
+        parties.push_back({.id = signed_in->party_id,
+            .name = signed_in->party_name});
+    }
+    for (const auto& party : parties) {
+        if (!session.switch_party(party.id)) {
+            std::printf("  '%s' (%s): could not act as it\n", party.name.c_str(),
+                party.id.c_str());
+            continue;
+        }
+        const auto blueprints = session.fx_vol_surface_blueprints(20);
+        if (!blueprints) {
+            std::printf("  '%s': blueprints failed: %s\n", party.name.c_str(),
+                blueprints.error().detail.c_str());
+            continue;
+        }
+        if (const auto instruments = session.list_instruments();
+            instruments && !instruments->empty()) {
+            /*
+             * The first rows as the deployment spells them: a name with no
+             * currency behind it is what a window draws as a bare label with no
+             * flag, so this is the read that tells a data problem from a
+             * rendering one.
+             */
+            std::printf("  instruments as '%s': %zu\n", party.name.c_str(),
+                instruments->size());
+            for (std::size_t i = 0; i < instruments->size() && i < 8; ++i) {
+                const auto& instrument = (*instruments)[i];
+                std::printf("    %-7s name='%s' ccy='%s' base='%s' quote='%s' "
+                            "providers=%zu\n",
+                    instrument.kind.c_str(), instrument.name.c_str(),
+                    instrument.currency.c_str(),
+                    instrument.base_currency.c_str(),
+                    instrument.quote_currency.c_str(),
+                    instrument.sources.size());
+            }
+        }
+        std::printf("  '%s' (%s): %zu blueprint%s\n", party.name.c_str(),
+            party.id.c_str(), blueprints->size(),
+            blueprints->size() == 1 ? "" : "s");
+        for (const auto& blueprint : *blueprints) {
+            const auto surface
+                = session.published_fx_vol_surface(blueprint.id, now_ns);
+            if (!surface) {
+                std::printf("    %-14s %s\n", blueprint.name.c_str(),
+                    surface.error().detail.c_str());
+                continue;
+            }
+            std::printf("    %-14s published as_of=%lld %zu x %zu", 
+                blueprint.name.c_str(),
+                static_cast<long long>(surface->as_of_ns),
+                surface->expiries.size(), surface->strikes.size());
+            /* The first value is enough to tell a real grid from an empty one. */
+            if (!surface->values.empty())
+                std::printf(" first=%.6f", surface->values.front());
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
 }

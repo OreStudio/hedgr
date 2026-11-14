@@ -348,11 +348,17 @@ HEDGR_UI_EXPORT void request_published_curve_window(const render_input& input,
  *
  * @param screen the kind of screen, in the words a person reads ("chart").
  * @param subject what the window is about: a series label, a curve's name.
+ * @param identity who the window acts as - tenant, user, party - because a
+ *        read is scoped by the party and a failure is only reproducible when
+ *        the log says which party asked. A marketplace of five parties makes
+ *        "nothing is published" and "nothing is published *for you*" two
+ *        different statements, and this is the one word that tells them apart.
  * @param state the window's own UI state, which remembers the last line.
  * @param verdict what the window's body will draw.
  */
 HEDGR_UI_EXPORT void trace_view_state(std::string_view screen,
-    std::string_view subject, window_ui_state& state,
+    std::string_view subject, std::string_view identity,
+    window_ui_state& state,
     const hedgr::ui::widget::view_verdict& verdict);
 
 /**

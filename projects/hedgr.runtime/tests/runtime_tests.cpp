@@ -2265,6 +2265,7 @@ TEST_CASE("each window kind opens with its own cadence and deadline",
         {window_kind::mini_plot, "s-1", std::chrono::seconds{2}, true, true},
         {window_kind::vol_surface, "blueprint-1", std::chrono::seconds{30},
             true, false},
+        {window_kind::rate_ladder, {}, std::chrono::seconds{30}, true, false},
     };
     REQUIRE(expected.size() == hedgr::model::domain::window_kind_count);
 

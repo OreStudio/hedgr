@@ -30,11 +30,13 @@
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/surface_table.hpp"
+#include "hedgr.model/state/ladder_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
+#include "hedgr.ui/render/surface_plot.hpp"
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
@@ -358,12 +360,14 @@ struct window_ui_state final {
     std::string market_party_id;
 
     /**
-     * @brief The asset class the chooser shows, or empty for all.
+     * @brief The instrument kind the chooser shows, or empty for all.
      *
-     * Choosing IR switches the list from points to term structures: the
-     * per-tenor series of one curve collapse into one row.
+     * The deployment's own word for a kind of instrument. It narrows the list
+     * and never changes what a row is, which is what the asset-class cut this
+     * replaces did: choosing rates switched the list from series to curves, so
+     * two people reading one window could disagree about what a row meant.
      */
-    std::string market_asset_class;
+    std::string market_kind;
 
     /**
      * @brief The provider the chooser lists, or empty for every provider.
@@ -394,6 +398,15 @@ struct window_ui_state final {
 
     /** @brief A chart window's plot arrays, rebuilt when its points change. */
     chart_plot plot;
+
+    /**
+     * @brief A surface window's flattened grid, rebuilt when the surface moves.
+     *
+     * The 3D plot wants three coordinates per grid vertex and a label per axis
+     * tick, which is work a frame must not repeat: it is done once per surface
+     * version, like the chart's candles.
+     */
+    surface_plot surface_view;
 
     /**
      * @brief The span, in nanoseconds, the chart last asked history for.
@@ -428,14 +441,6 @@ struct window_ui_state final {
      * returns the control to the party the session actually holds.
      */
     int acting_party = 0;
-
-    /** @brief The series last chosen in the chooser's combobox. */
-    std::string market_selected_series_id;
-    std::string market_selected_series_label;
-
-    /** @brief The curve last chosen in the rates view. */
-    std::string market_selected_curve_key;
-    std::string market_selected_curve_label;
 
     /** @brief The volatility surface last chosen in the browser. */
     std::string market_selected_surface_id;
@@ -546,6 +551,9 @@ struct render_input final {
 
     /** @brief The latest published volatility surface each window read. */
     const hedgr::model::state::surface_table& surfaces;
+
+    /** @brief The latest rate ladder each window read. */
+    const hedgr::model::state::ladder_table& ladders;
 
     /** @brief The latest CRM batch each session and party read. */
     const hedgr::model::state::crm_table& crm;

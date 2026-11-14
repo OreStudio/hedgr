@@ -1015,6 +1015,7 @@ const char* window_kind_icon(hedgr::model::domain::window_kind value) noexcept {
     case hedgr::model::domain::window_kind::crm_matrix:
     case hedgr::model::domain::window_kind::mini_plot:
     case hedgr::model::domain::window_kind::vol_surface:
+    case hedgr::model::domain::window_kind::rate_ladder:
         return icon::chart;
     }
     return icon::information;

@@ -22,6 +22,7 @@
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/curve_worker.hpp"
+#include "hedgr.runtime/worker/surface_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -295,6 +296,127 @@ TEST_CASE("a failed curve read leaves the catalogue standing",
     REQUIRE(fact.series.size() == 1);
     CHECK(fact.published_curves.empty());
     CHECK(fact.published_curves_error == "curves refused");
+}
+
+TEST_CASE("a catalogue read carries the instruments the deployment groups by",
+    "[link][market][instrument]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-curve", .label = "IR EUR EST R"});
+    link.instruments.push_back(model::domain::market_instrument{
+        .instrument_id = "i-curve", .kind = "curve", .name = "EUR-ESTR",
+        .currency = "EUR", .instrument_type = "discount",
+        .quote_type = "rate",
+        .axes = {{.field = "term", .values = {"3M", "6M", "12M"}}},
+        .sources = {{.provider_code = "ore",
+            .provider_kind = "reference", .series_id = "s-curve",
+            .as_of_ns = 1}},
+        .party_id = "p1"});
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.kind == model::event::event_kind::series_catalogue);
+    CHECK(fact.message.empty());
+    /* The series still travel: a chart is interned from them, not from a row. */
+    REQUIRE(fact.series.size() == 1);
+    REQUIRE(fact.instruments.size() == 1);
+    const auto& instrument = fact.instruments.front();
+    CHECK(instrument.name == "EUR-ESTR");
+    CHECK(instrument.kind == "curve");
+    CHECK(instrument.currency == "EUR");
+    REQUIRE(instrument.axes.size() == 1);
+    CHECK(instrument.axes[0].field == "term");
+    CHECK(instrument.axes[0].values.size() == 3);
+    CHECK(instrument.sources.size() == 1);
+    CHECK(instrument.sources[0].series_id == "s-curve");
+    CHECK(fact.instruments_error.empty());
+}
+
+TEST_CASE("a failed instrument read leaves the catalogue standing and says why",
+    "[link][market][instrument]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-1", .label = "FX EUR/USD"});
+    link.instruments_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "instruments refused"};
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.message.empty());
+    REQUIRE(fact.series.size() == 1);
+    CHECK(fact.instruments.empty());
+    CHECK(fact.instruments_error == "instruments refused");
+}
+
+TEST_CASE("a ladder read carries the rungs and the conventions they rest on",
+    "[link][market][ladder]") {
+    fake_link link;
+    auto& held = link.ladder;
+    held.currency = "AUD";
+    held.instrument_type = "discount";
+    held.as_of_ns = 1'760'000'000'000'000'000;
+    held.provider_count = 1;
+    held.tenor_convention = "RATES_SPOT_FORWARD";
+    held.day_count_convention = "A365F";
+    held.rungs = {
+        {.tenor = "3M", .maturity = "2027-02-14", .year_fraction = 0.2521,
+            .quotes = {{.provider_code = "ore", .value = 0.043015,
+                .as_of_ns = 1'760'000'000'000'000'000, .age_seconds = 401}},
+            .consensus = {.value = 0.042931, .method = "median",
+                .providers_used = 13}}};
+
+    const auto fact = market_read(link, worker::rate_ladder_request{
+        .currency = "AUD", .instrument_type = "discount", .key = "aud|discount|"});
+    CHECK(fact.kind == model::event::event_kind::rate_ladder);
+    CHECK(fact.ladder_key == "aud|discount|");
+    CHECK(fact.message.empty());
+    REQUIRE(fact.ladder.rungs.size() == 1);
+    const auto& rung = fact.ladder.rungs.front();
+    CHECK(rung.tenor == "3M");
+    CHECK(rung.maturity == "2027-02-14");
+    CHECK(rung.year_fraction == 0.2521);
+    CHECK(rung.consensus.method == "median");
+    CHECK(rung.consensus.providers_used == 13);
+    REQUIRE(rung.quotes.size() == 1);
+    CHECK(rung.quotes.front().provider_code == "ore");
+    CHECK(fact.ladder.tenor_convention == "RATES_SPOT_FORWARD");
+    CHECK(fact.ladder.day_count_convention == "A365F");
+}
+
+TEST_CASE("a failed ladder read becomes the event's message",
+    "[link][market][ladder]") {
+    fake_link link;
+    link.ladder_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "no ladder for AUD"};
+    const auto fact = market_read(link, worker::rate_ladder_request{
+        .currency = "AUD", .instrument_type = "discount", .key = "aud|discount|"});
+    CHECK(fact.kind == model::event::event_kind::rate_ladder);
+    CHECK(fact.ladder.rungs.empty());
+    CHECK(fact.message == "no ladder for AUD");
+}
+
+TEST_CASE("a refused surface read says what it means and why",
+    "[link][market][surface]") {
+    /*
+     * The deployment's own sentence is the only one an operator can act on:
+     * "nothing is published at or before this instant" is a fact about the
+     * desk, while "the read was refused" is not. The event carries both.
+     */
+    fake_link link;
+    link.surface_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "the deployment refused the read",
+        .detail = "No surface of EURUSD_SSVI is published at or before this "
+                  "instant."};
+    const auto request = worker::surface_request{.blueprint_id = "bp-1",
+        .label = "EURUSD_SSVI"};
+    auto fact = worker::read_event(request,
+        model::domain::session_key{"market-i", "a"}, {});
+    worker::run_surface_read(link, request, fact);
+    CHECK(fact.kind == model::event::event_kind::vol_surface);
+    CHECK(fact.message
+        == "the deployment refused the read: No surface of EURUSD_SSVI is "
+           "published at or before this instant.");
 }
 
 TEST_CASE("a points read carries its points", "[link][market]") {

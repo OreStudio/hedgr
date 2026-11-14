@@ -841,19 +841,52 @@ TEST_CASE("the market data browser shows the mark for each catalogue state",
     CHECK(empty.says("NO DATA"));
     no_sentences(empty);
 
-    std::vector<model::domain::market_series_row> rows(1);
-    rows[0].id = "s-1";
-    rows[0].label = "FX GBP/USD";
-    rows[0].asset_class = "FX";
-    desk.market.apply_catalogue("i", "a", rows);
+    std::vector<model::domain::market_instrument> instruments(1);
+    instruments[0].instrument_id = "i-1";
+    instruments[0].kind = "pair";
+    instruments[0].name = "FX GBP/USD";
+    instruments[0].base_currency = "GBP";
+    instruments[0].quote_currency = "USD";
+    desk.market.apply_instruments("i", "a", instruments);
     state.filter[0] = 'z';
     const auto unmatched = window_frame(desk, handle, state);
     CHECK(drew(unmatched, shape) == view_state::no_data);
     no_sentences(unmatched);
     CHECK(window_frame(desk, handle, state, body_centre)
-              .says("No series match the filters."));
+              .says("No instruments match the filters."));
     state.filter[0] = '\0';
     CHECK(drew(window_frame(desk, handle, state), shape) == view_state::none);
+}
+
+TEST_CASE("a market row draws its name inside its own column",
+    "[view_state][series_browser][rows]") {
+    /*
+     * The row's name was drawn on the raw draw list from the rectangle of a
+     * selectable spanning the row, whose rectangle starts in the first column.
+     * Every glyph therefore fell left of the Instrument cell's clip rectangle
+     * and the column drew nothing - a blank list that looked like a failed read.
+     * Drawing through ImGui keeps the text in the cell, and makes it text the
+     * frame records, which is what this asserts.
+     */
+    hedgr::testing::headless_imgui imgui;
+    theme::apply_theme();
+    hedgr::testing::desk desk;
+    desk.sessions.set_status(desk.session, session_status::authenticated);
+    desk.market.apply_instruments("i", "a",
+        {model::domain::market_instrument{.instrument_id = "i-1",
+            .kind = "pair", .name = "AUD/USD", .currency = "USD",
+            .base_currency = "AUD", .quote_currency = "USD",
+            .instrument_type = "fx_spot", .quote_type = "rate",
+            .sources = {{.provider_code = "bloomberg",
+                .provider_kind = "data_vendor", .series_id = "s-1",
+                .as_of_ns = 1}},
+            .party_id = "p1"}});
+    const auto handle = desk.open(window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    const auto frame = window_frame(desk, handle, state);
+    CHECK(frame.says("AUD/USD"));
+    CHECK(frame.says("bloomberg"));
 }
 
 TEST_CASE("the command centre shows the mark for each of its states",

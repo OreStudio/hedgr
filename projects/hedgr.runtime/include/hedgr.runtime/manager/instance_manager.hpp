@@ -220,6 +220,11 @@ public:
         return read_service_.surfaces();
     }
 
+    /** @brief The latest rate ladder each window read. */
+    [[nodiscard]] const model::state::ladder_table& ladders() const noexcept {
+        return read_service_.ladders();
+    }
+
     /** @brief The bounded cache of tenant images by identifier. */
     [[nodiscard]] model::state::image_cache& images() noexcept {
         return read_service_.images();

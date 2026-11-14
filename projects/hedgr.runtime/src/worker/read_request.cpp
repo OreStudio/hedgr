@@ -98,6 +98,10 @@ model::event::event read_event(const read_request& request,
                        fact.series_id = value.series_id;
                        fact.history_from_ns = value.from_ns;
                    },
+                   [&](const rate_ladder_request& value) {
+                       fact.kind = event::event_kind::rate_ladder;
+                       fact.ladder_key = value.key;
+                   },
                },
         request);
     return fact;
@@ -152,6 +156,9 @@ void run_read(hedgr::session::transport::session_link& link,
                        run_market_read(link, request, answer);
                    },
                    [&](const market_history_request&) {
+                       run_market_read(link, request, answer);
+                   },
+                   [&](const rate_ladder_request&) {
                        run_market_read(link, request, answer);
                    },
                },

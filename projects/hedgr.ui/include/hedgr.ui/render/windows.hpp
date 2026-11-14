@@ -206,6 +206,19 @@ HEDGR_UI_EXPORT void render_vol_surface(
     window_ui_state& state, hedgr::ui::widget::status_bar& status,
     lock_control& lock);
 
+/**
+ * @brief One currency's rate ladder: a row per maturity, a column per quote.
+ *
+ * The window states the ladder it shows - the currency, the instrument and the
+ * forward start - and the deployment answers it whole. The conventions the
+ * numbers rest on are drawn beside them, because a rate without its day count
+ * is a number two people can read two ways.
+ */
+HEDGR_UI_EXPORT void render_rate_ladder(
+    hedgr::model::state::window_handle handle, const render_input& input,
+    window_ui_state& state, hedgr::ui::widget::status_bar& status,
+    lock_control& lock);
+
 HEDGR_UI_EXPORT void render_command_centre_window(
     hedgr::model::state::window_handle handle, const render_input& input,
     window_ui_state& state, hedgr::ui::widget::status_bar& status,

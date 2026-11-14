@@ -13,6 +13,7 @@
             ]
         },
         "implot",
+        "implot3d",
         {
             "name": "glfw3",
             "features": [

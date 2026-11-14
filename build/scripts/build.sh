@@ -15,7 +15,11 @@ set -euo pipefail
 
 repo_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-ores_source_dir=${ORES_SOURCE_DIR:-/home/marco/Development/OreStudio/ores_dev_brave_hopper}
+# The client reads the market-data operations (list_instruments, get_rate_ladder,
+# get_fx_montage, get_curve_analytics), which this checkout carries. A checkout
+# without them fails to compile rather than failing at run time, which is the
+# point: the header is the contract.
+ores_source_dir=${ORES_SOURCE_DIR:-/home/marco/Development/OreStudio/ores_dev_prime_origin}
 ores_build_dir=${ORES_BUILD_DIR:-${ores_source_dir}/build/output/linux-clang-release-ninja}
 build_dir=${repo_dir}/build/output/linux-clang-release
 

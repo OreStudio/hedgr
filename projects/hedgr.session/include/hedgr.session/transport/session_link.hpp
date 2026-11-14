@@ -176,6 +176,37 @@ public:
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const = 0;
 
+    /**
+     * @brief The instrument catalogue this session may see.
+     *
+     * The deployment's grouping of series into the things a person reads, with
+     * the filter applied there rather than here.
+     */
+    [[nodiscard]] virtual result<
+        std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter) const = 0;
+
+    /**
+     * @brief One currency's rate ladder, across the providers quoting it.
+     *
+     * The rungs arrive in maturity order with the deployment's own dates and
+     * year fractions, and the conventions the numbers rest on travel with them.
+     */
+    [[nodiscard]] virtual result<hedgr::model::domain::rate_ladder> rate_ladder(
+        std::string_view currency, std::string_view instrument_type,
+        std::string_view forward_start,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const = 0;
+
+    /**
+     * @brief One base currency's crosses, with the instant the moves are from.
+     */
+    [[nodiscard]] virtual result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const = 0;
+
     /** @brief The curves the deployment publishes for this session's party. */
     [[nodiscard]] virtual result<
         std::vector<hedgr::model::domain::published_curve>>
@@ -330,6 +361,28 @@ public:
         std::vector<hedgr::model::domain::market_provider_row>>
     list_providers() const override {
         return client_.list_providers();
+    }
+
+    [[nodiscard]] result<std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter) const override {
+        return client_.list_instruments(filter);
+    }
+
+    [[nodiscard]] result<hedgr::model::domain::rate_ladder> rate_ladder(
+        std::string_view currency, std::string_view instrument_type,
+        std::string_view forward_start,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const override {
+        return client_.rate_ladder(currency, instrument_type, forward_start,
+            providers, as_of_ns);
+    }
+
+    [[nodiscard]] result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const override {
+        return client_.fx_montage(base_currency, providers, as_of_ns);
     }
 
     [[nodiscard]] result<std::vector<hedgr::model::domain::published_curve>>

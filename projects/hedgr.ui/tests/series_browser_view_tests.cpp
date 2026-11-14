@@ -17,6 +17,7 @@
  * Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  *
  */
+
 #include "hedgr.model/domain/market.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
 #include <catch2/catch_all.hpp>
@@ -40,19 +41,45 @@ domain::market_series_row row(std::string id, std::string label,
         .tenor = std::move(tenor)};
 }
 
+domain::market_instrument instrument(std::string id, std::string kind,
+    std::string name, std::string currency = {}, std::string base = {},
+    std::string quote = {}, std::vector<std::string> providers = {"ore"},
+    std::int64_t age_seconds = 2) {
+    domain::market_instrument out;
+    out.instrument_id = std::move(id);
+    out.kind = std::move(kind);
+    out.name = std::move(name);
+    out.currency = std::move(currency);
+    out.base_currency = std::move(base);
+    out.quote_currency = std::move(quote);
+    out.instrument_type = "ir_swap";
+    out.quote_type = "rate";
+    out.party_id = "p1";
+    for (auto& provider : providers) {
+        out.sources.push_back(domain::instrument_source{
+            .provider_code = std::move(provider),
+            .provider_kind = "data_vendor",
+            .series_id = "s-" + out.instrument_id,
+            .as_of_ns = 1,
+            .age_seconds = age_seconds,
+            .stale = false});
+    }
+    return out;
+}
+
 render::series_browser_query query(std::uint64_t generation,
-    std::string_view filter = {}, std::string_view asset_class = {},
-    std::string_view party = {}, std::string_view provider = {}) {
-    return {.generation = generation, .filter = filter,
-        .asset_class = asset_class, .party = party, .provider = provider};
+    std::string_view filter = {}, std::string_view kind = {},
+    std::string_view provider = {}) {
+    return {.generation = generation, .filter = filter, .kind = kind,
+        .provider = provider};
 }
 
 std::vector<std::string> ids(const render::series_browser_view& view,
-    const std::vector<domain::market_series_row>& catalogue) {
+    const std::vector<domain::market_instrument>& instruments) {
     std::vector<std::string> result;
     for (const auto at : view.rows) {
-        REQUIRE(at < catalogue.size());
-        result.push_back(catalogue[at].id);
+        REQUIRE(at < instruments.size());
+        result.push_back(instruments[at].instrument_id);
     }
     return result;
 }
@@ -61,202 +88,173 @@ using strings = std::vector<std::string>;
 
 }
 
-TEST_CASE("the series view orders by tenor and then label", "[browser][view]") {
-    const std::vector catalogue{row("a", "B", "FX", "1Y"),
-        row("b", "A", "FX", "1Y"), row("c", "Z", "FX", "1M"),
-        row("d", "Y", "FX", "2W")};
+TEST_CASE("the view lists the deployment's order and sorts nothing",
+    "[browser][view]") {
+    /*
+     * The deployment answers by kind and then by name, and that is the order a
+     * person reads. A second sort here could only disagree with it.
+     */
+    const std::vector instruments{instrument("c", "pair", "GBP/USD"),
+        instrument("a", "curve", "AUD-AONIA"),
+        instrument("b", "surface", "AUD/USD SSVI")};
     render::series_browser_view view;
-    CHECK(render::update_series_browser_view(view, query(1), catalogue));
-    CHECK(ids(view, catalogue) == strings{"d", "c", "b", "a"});
+    CHECK(render::update_series_browser_view(view, query(1), instruments));
+    CHECK(ids(view, instruments) == strings{"c", "a", "b"});
 }
 
-TEST_CASE("the series view drops a hidden provider and shows it again",
+TEST_CASE("a kind narrows the list and never changes what a row is",
+    "[browser][view][kind]") {
+    const std::vector instruments{instrument("p1", "pair", "AUD/USD"),
+        instrument("c1", "curve", "AUD-AONIA"),
+        instrument("c2", "curve", "AUD-SWAP"),
+        instrument("s1", "surface", "AUD/USD SSVI")};
+    render::series_browser_view view;
+    render::update_series_browser_view(view, query(1, "", "curve"),
+        instruments);
+    CHECK(ids(view, instruments) == strings{"c1", "c2"});
+    /* The facet lists the kinds the rows hold, each once, in that order. */
+    CHECK(view.kinds == strings{"curve"});
+
+    render::update_series_browser_view(view, query(1), instruments);
+    CHECK(view.rows.size() == 4);
+    CHECK(view.kinds == strings{"pair", "curve", "surface"});
+    /* A kind nothing holds is not offered. */
+    render::update_series_browser_view(view, query(1, "", "ladder"),
+        instruments);
+    CHECK(view.rows.empty());
+    CHECK(view.kinds.empty());
+}
+
+TEST_CASE("a hidden provider hides an instrument only when nothing else quotes it",
     "[browser][view][providers]") {
-    const std::vector catalogue{
-        row("ore-row", "EUR/USD", "FX", "1Y", "p1", "ore"),
-        row("vendor-row", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
+    const std::vector instruments{
+        instrument("defn", "curve", "AUD-AONIA", "AUD", {}, {}, {"ore"}),
+        instrument("both", "curve", "AUD-SWAP", "AUD", {}, {},
+            {"ore", "bloomberg"})};
+    const std::vector<std::string> hidden{"ore"};
     render::series_browser_view view;
     auto q = query(1);
-    const std::vector<std::string> hidden{"ore"};
     q.hidden_providers = hidden;
-    CHECK(render::update_series_browser_view(view, q, catalogue));
-    CHECK(ids(view, catalogue) == strings{"vendor-row"});
+    CHECK(render::update_series_browser_view(view, q, instruments));
+    /*
+     * The curve only the reference provider quotes is hidden; the one a vendor
+     * also quotes stays, because there is still something to price it with.
+     */
+    CHECK(ids(view, instruments) == strings{"both"});
 
     q.hidden_providers = {};
-    CHECK(render::update_series_browser_view(view, q, catalogue));
-    CHECK(ids(view, catalogue) == strings{"ore-row", "vendor-row"});
+    CHECK(render::update_series_browser_view(view, q, instruments));
+    CHECK(ids(view, instruments) == strings{"defn", "both"});
 }
 
-TEST_CASE("a parsed asset decides the curve view, not the display class",
-    "[browser][view]") {
-    auto rates = row("c", "C", "RATES", "1Y");
-    rates.asset = domain::market_asset::ir;
-    const std::vector catalogue{rates};
+TEST_CASE("the view matches the name, the currencies, the types and the providers",
+    "[browser][view][filter]") {
+    const std::vector instruments{
+        instrument("pair", "pair", "GBP/USD", "USD", "GBP", "USD",
+            {"bloomberg"}),
+        instrument("curve", "curve", "SONIA", "GBP", {}, {}, {"ore"}),
+        instrument("surface", "surface", "EUR-USD SSVI", "EUR", "EUR", "USD",
+            {"refdata"})};
     render::series_browser_view view;
-    /* The display class says RATES; the parsed asset is what chooses curves. */
-    CHECK(render::update_series_browser_view(
-        view, query(1, "", "IR"), catalogue));
-    CHECK(ids(view, catalogue) == strings{"c"});
-}
-
-TEST_CASE("the series view matches the filter on label, class, uri and provider",
-    "[browser][view]") {
-    const std::vector catalogue{row("a", "GBP/USD", "FX"),
-        row("b", "EUR/USD", "RATES", "1Y", "p1", "bloomberg"),
-        row("c", "SONIA", "IR")};
-    render::series_browser_view view;
-    render::update_series_browser_view(view, query(1, "gbp"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"a"});
-    render::update_series_browser_view(view, query(1, "rates"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"b"});
-    render::update_series_browser_view(view, query(1, "uri/son"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"c"});
-    render::update_series_browser_view(view, query(1, "bloom"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"b"});
-}
-
-TEST_CASE("two providers of one item are two rows of the series view",
-    "[browser][view]") {
-    const std::vector catalogue{row("a", "GBP/USD", "FX", "1Y", "p1", "ore"),
-        row("b", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
-    render::series_browser_view view;
-    render::update_series_browser_view(view, query(1, "gbp"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"a", "b"});
-    render::update_series_browser_view(view, query(1, "gbp", "FX", "p1"),
-        catalogue);
-    CHECK(ids(view, catalogue) == strings{"a", "b"});
-    render::update_series_browser_view(view, query(1, "bloomberg"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"b"});
-}
-
-TEST_CASE("the series view is kept while the query is unchanged",
-    "[browser][view]") {
-    const std::vector catalogue{row("a", "A"), row("b", "B")};
-    render::series_browser_view view;
-    CHECK(render::update_series_browser_view(view, query(7, "a", "FX", "p1"),
-        catalogue));
-    CHECK_FALSE(render::update_series_browser_view(view,
-        query(7, "a", "FX", "p1"), catalogue));
-    CHECK(view.builds == 1);
-}
-
-TEST_CASE("each part of the query rebuilds the series view on its own",
-    "[browser][view]") {
-    const std::vector catalogue{row("a", "A", "FX", "1Y", "p1"),
-        row("b", "B", "FX", "1Y", "p2", "bloomberg"),
-        row("c", "C", "RATES", "1Y", "p1")};
-    const auto from_base = [&](const render::series_browser_query& changed,
-                               const strings& expected) {
-        render::series_browser_view view;
-        render::update_series_browser_view(view, query(1), catalogue);
-        REQUIRE(view.rows.size() == 3);
-        CHECK(render::update_series_browser_view(view, changed, catalogue));
-        CHECK(ids(view, catalogue) == expected);
-    };
-    from_base(query(1, "b"), {"b"});
-    from_base(query(1, "", "RATES"), {"c"});
-    from_base(query(1, "", "", "p2"), {"b"});
-    from_base(query(2), {"a", "b", "c"});
-}
-
-TEST_CASE("a catalogue replaced by a shorter one is never read past its end",
-    "[browser][view]") {
-    std::vector<domain::market_series_row> catalogue;
-    for (int i = 0; i < 50; ++i)
-        catalogue.push_back(row("s-" + std::to_string(i), "L" + std::to_string(i)));
-    render::series_browser_view view;
-    render::update_series_browser_view(view, query(1), catalogue);
-    REQUIRE(view.rows.size() == 50);
-
-    catalogue = {row("only", "Only")};
-    CHECK(render::update_series_browser_view(view, query(2), catalogue));
-    CHECK(ids(view, catalogue) == strings{"only"});
-
-    catalogue.clear();
-    CHECK(render::update_series_browser_view(view, query(0), catalogue));
+    render::update_series_browser_view(view, query(1, "gbp"), instruments);
+    CHECK(ids(view, instruments) == strings{"pair", "curve"});
+    /* The quote side of a pair is a currency it names, so AUD finds GBP/AUD. */
+    render::update_series_browser_view(view, query(1, "usd"), instruments);
+    CHECK(ids(view, instruments) == strings{"pair", "surface"});
+    render::update_series_browser_view(view, query(1, "bloom"), instruments);
+    CHECK(ids(view, instruments) == strings{"pair"});
+    render::update_series_browser_view(view, query(1, "ir_swap"), instruments);
+    CHECK(ids(view, instruments).size() == 3);
+    render::update_series_browser_view(view, query(1, "nzd"), instruments);
     CHECK(view.rows.empty());
 }
 
-TEST_CASE("a refresh with the same rows in a new order shows the new order",
-    "[browser][view]") {
-    std::vector catalogue{row("a", "Same"), row("b", "Same"), row("c", "Same")};
-    render::series_browser_view view;
-    render::update_series_browser_view(view, query(1), catalogue);
-    CHECK(ids(view, catalogue) == strings{"a", "b", "c"});
-
-    catalogue = {row("c", "Same"), row("a", "Same"), row("b", "Same")};
-    CHECK(render::update_series_browser_view(view, query(2), catalogue));
-    CHECK(ids(view, catalogue) == strings{"c", "a", "b"});
-}
-
-TEST_CASE("the IR view lists one curve per IR series, ordered by tenor and curve label",
-    "[browser][view]") {
-    auto sonia = row("a", "SONIA 1D", "IR", "1D");
-    sonia.curve_label = "SONIA curve";
-    const std::vector catalogue{row("x", "AAA", "FX"),
-        row("b", "ESTR 1D", "IR", "1D"), sonia,
-        row("c", "SOFR 1M", "IR", "1M"),
-        row("d", "OTHER", "IR", "1D", "p2")};
-    render::series_browser_view view;
-    render::update_series_browser_view(view, query(1, "", "IR", "p1"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"b", "a", "c"});
-    render::update_series_browser_view(view, query(1, "sofr", "IR", "p1"),
-        catalogue);
-    CHECK(ids(view, catalogue) == strings{"c"});
-    CHECK(render::curve_label_of(catalogue[2]) == "SONIA curve");
-    CHECK(render::curve_label_of(catalogue[1]) == "ESTR 1D");
-}
-
-TEST_CASE("the asset classes are listed once, in order, and kept per generation",
-    "[browser][view]") {
-    const std::vector catalogue{row("a", "A", "RATES"), row("b", "B", "FX"),
-        row("c", "C", "RATES"), row("d", "D", "")};
-    render::series_browser_view view;
-    CHECK(render::update_asset_classes(view, 3, catalogue));
-    REQUIRE(view.classes.size() == 2);
-    CHECK(catalogue[view.classes[0]].asset_class == "FX");
-    CHECK(catalogue[view.classes[1]].asset_class == "RATES");
-    CHECK_FALSE(render::update_asset_classes(view, 3, catalogue));
-    CHECK(render::update_asset_classes(view, 4, catalogue));
-    CHECK(view.class_builds == 2);
-}
-
-TEST_CASE("the series view lists one provider when asked, and all when not",
+TEST_CASE("the providers are listed once and sorted",
     "[browser][view][provider]") {
-    const std::vector catalogue{
-        row("a", "EUR/USD", "FX", "1Y", "p1", "ore"),
-        row("b", "EUR/USD", "FX", "1Y", "p1", "bloomberg"),
-        row("c", "GBP/USD", "FX", "1Y", "p1", "bloomberg")};
+    const std::vector instruments{
+        instrument("a", "pair", "A", "USD", "EUR", "USD", {"ore"}),
+        instrument("b", "pair", "B", "USD", "GBP", "USD", {"bloomberg"}),
+        instrument("c", "pair", "C", "USD", "GBP", "USD",
+            {"bloomberg", "ore"}),
+        instrument("d", "pair", "D", "USD", "GBP", "USD", {})};
     render::series_browser_view view;
-    render::update_series_browser_view(view, query(1), catalogue);
-    CHECK(ids(view, catalogue).size() == 3);
-
-    CHECK(render::update_series_browser_view(view,
-        query(1, {}, {}, {}, "bloomberg"), catalogue));
-    CHECK(ids(view, catalogue) == strings{"b", "c"});
-
-    CHECK(render::update_series_browser_view(view,
-        query(1, {}, {}, {}, "ore"), catalogue));
-    CHECK(ids(view, catalogue) == strings{"a"});
-
-    CHECK_FALSE(render::update_series_browser_view(view,
-        query(1, {}, {}, {}, "ore"), catalogue));
+    CHECK(render::update_series_browser_view(view, query(1), instruments));
+    CHECK(view.providers == strings{"bloomberg", "ore"});
 }
 
-TEST_CASE("the providers are listed once, in order, and kept per generation",
-    "[browser][provider]") {
-    const std::vector catalogue{
-        row("a", "A", "FX", "1Y", "p1", "ore"),
-        row("b", "B", "FX", "1Y", "p1", "bloomberg"),
-        row("c", "C", "FX", "1Y", "p2", "bloomberg"),
-        row("d", "D", "FX", "1Y", "p1", "")};
+TEST_CASE("the view is kept while the query is unchanged", "[browser][view]") {
+    const std::vector instruments{instrument("a", "pair", "A"),
+        instrument("b", "pair", "B")};
     render::series_browser_view view;
-    CHECK(render::update_providers(view, 1, catalogue));
-    REQUIRE(view.providers.size() == 2);
-    CHECK(catalogue[view.providers[0]].provider_code == "bloomberg");
-    CHECK(catalogue[view.providers[1]].provider_code == "ore");
-    CHECK_FALSE(render::update_providers(view, 1, catalogue));
-    CHECK(render::update_providers(view, 2, catalogue));
+    CHECK(render::update_series_browser_view(view, query(7, "a", "pair"),
+        instruments));
+    CHECK_FALSE(render::update_series_browser_view(view, query(7, "a", "pair"),
+        instruments));
+    CHECK(view.builds == 1);
+}
+
+TEST_CASE("each part of the query rebuilds the view on its own",
+    "[browser][view]") {
+    const std::vector instruments{
+        instrument("a", "pair", "EUR/USD", "USD", "EUR", "USD", {"ore"}),
+        instrument("b", "curve", "ESTR", "EUR", {}, {}, {"bloomberg"}),
+        instrument("c", "curve", "SOFR", "USD", {}, {}, {"ore"})};
+    const auto from_base = [&](const render::series_browser_query& changed,
+                               const strings& expected) {
+        render::series_browser_view view;
+        render::update_series_browser_view(view, query(1), instruments);
+        REQUIRE(view.rows.size() == 3);
+        CHECK(render::update_series_browser_view(view, changed, instruments));
+        CHECK(ids(view, instruments) == expected);
+    };
+    from_base(query(1, "sofr"), {"c"});
+    from_base(query(1, "", "curve"), {"b", "c"});
+    from_base(query(1, "", "", "bloomberg"), {"b"});
+    from_base(query(2), {"a", "b", "c"});
+}
+
+TEST_CASE("a list replaced by a shorter one is never read past its end",
+    "[browser][view]") {
+    std::vector<domain::market_instrument> instruments;
+    for (int i = 0; i < 50; ++i)
+        instruments.push_back(instrument("i-" + std::to_string(i), "pair",
+            "L" + std::to_string(i)));
+    render::series_browser_view view;
+    render::update_series_browser_view(view, query(1), instruments);
+    REQUIRE(view.rows.size() == 50);
+
+    instruments = {instrument("only", "pair", "Only")};
+    CHECK(render::update_series_browser_view(view, query(2), instruments));
+    CHECK(ids(view, instruments) == strings{"only"});
+
+    instruments.clear();
+    CHECK(render::update_series_browser_view(view, query(0), instruments));
+    CHECK(view.rows.empty());
+}
+
+TEST_CASE("a currency finds both sides of a pair and a rate",
+    "[browser][view][currency]") {
+    /*
+     * A desk searches by currency: "AUD" is every curve quoted in AUD and every
+     * pair quoted in AUD, whichever side it is on. The currencies are the
+     * instrument's own fields, so a pair is found from its quote as well.
+     */
+    const std::vector instruments{
+        instrument("ir-aud", "curve", "AUD-AONIA", "AUD"),
+        instrument("fx-aud", "pair", "AUD/USD", "USD", "AUD", "USD"),
+        instrument("fx-gbp-aud", "pair", "GBP/AUD", "AUD", "GBP", "AUD"),
+        instrument("fx-eur", "pair", "EUR/JPY", "JPY", "EUR", "JPY")};
+    render::series_browser_view view;
+
+    render::update_series_browser_view(view, query(1, "aud"), instruments);
+    CHECK(ids(view, instruments) == strings{"ir-aud", "fx-aud", "fx-gbp-aud"});
+
+    render::update_series_browser_view(view,
+        query(1, "aud", "curve"), instruments);
+    CHECK(ids(view, instruments) == strings{"ir-aud"});
+
+    render::update_series_browser_view(view, query(1, "nzd"), instruments);
+    CHECK(ids(view, instruments).empty());
 }
 
 TEST_CASE("the party list parses the session's column once", "[browser][parties]") {
@@ -364,54 +362,4 @@ TEST_CASE("a curve of one series is one rung, honestly", "[curve]") {
     /* Nothing varies, so the rung is the series' own tenor, not a guess. */
     CHECK(group.field.empty());
     CHECK(group.rungs == std::vector<std::string>{"1D"});
-}
-
-TEST_CASE("a currency finds both sides of a pair and a rate", "[browser][view]") {
-    /*
-     * A desk filters by currency: "AUD" is the IR curves quoted in AUD and the
-     * FX pairs quoted in AUD, whichever side it is on. The currencies come from
-     * the typed identity, so a pair is found from its quote as well.
-     */
-    auto ir = row("ir-aud", "IR AUD IR_SWAP", "IR", "", "p1", "demo");
-    ir.identity.asset = "ir";
-    ir.identity.instrument_type = "ir_swap";
-    ir.identity.scope = "AUD";
-
-    auto fx_base = row("fx-aud", "FX AUD/USD", "FX", "", "p1", "demo");
-    fx_base.identity.asset = "fx";
-    fx_base.identity.instrument_type = "fx_spot";
-    fx_base.identity.scope = "AUD";
-    fx_base.identity.fields.push_back({.name = "ccy", .text = "USD"});
-
-    auto fx_quote = row("fx-gbp-aud", "FX GBP/AUD", "FX", "", "p1", "demo");
-    fx_quote.identity.asset = "fx";
-    fx_quote.identity.instrument_type = "fx_spot";
-    fx_quote.identity.scope = "GBP";
-    fx_quote.identity.fields.push_back({.name = "ccy", .text = "AUD"});
-
-    auto other = row("fx-eur", "FX EUR/JPY", "FX", "", "p1", "demo");
-    other.identity.asset = "fx";
-    other.identity.instrument_type = "fx_spot";
-    other.identity.scope = "EUR";
-    other.identity.fields.push_back({.name = "ccy", .text = "JPY"});
-
-    const std::vector catalogue{ir, fx_base, fx_quote, other};
-    render::series_browser_view view;
-
-    /*
-     * With no asset class chosen everything matches, and an IR series is listed
-     * as the series rows it is - one per rung. What the filter adds is the pair
-     * whose quote is AUD, which the label alone does not make obvious.
-     */
-    render::update_series_browser_view(view, query(1, "aud"), catalogue);
-    CHECK(ids(view, catalogue) == strings{"fx-aud", "fx-gbp-aud", "ir-aud"});
-
-    /* And the curve list finds the rate quoted in AUD. */
-    render::update_series_browser_view(view, query(1, "aud", "IR"),
-        catalogue);
-    CHECK(ids(view, catalogue) == strings{"ir-aud"});
-
-    /* A currency nobody quotes finds nothing. */
-    render::update_series_browser_view(view, query(1, "nzd"), catalogue);
-    CHECK(ids(view, catalogue).empty());
 }

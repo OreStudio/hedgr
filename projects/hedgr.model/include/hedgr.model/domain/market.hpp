@@ -240,6 +240,317 @@ struct market_provider_row final {
 }
 
 /**
+ * @brief One axis of an instrument's shape, with its values in draw order.
+ *
+ * The field is an oresmd field code such as `tenor` or `strike_label`, never a
+ * display name, because it names the coordinate rather than a column heading.
+ * The values arrive in the server's order, so a plot draws them as they come
+ * and never sorts them.
+ */
+struct instrument_axis final {
+    /** @brief The oresmd field code the shape stores, for example tenor. */
+    std::string field;
+
+    /** @brief The values on this axis, in the order the server states them. */
+    std::vector<std::string> values;
+};
+
+/**
+ * @brief One source behind an instrument, and whether its value is current.
+ *
+ * The provider kind is the provider table's own word, so a definition can be
+ * told from a quote without a second read. The staleness verdict is the
+ * server's, measured against the threshold it holds for the instrument's kind:
+ * this client draws it and never recomputes it.
+ */
+struct instrument_source final {
+    /** @brief The provider's code, for example ore or bloomberg. */
+    std::string provider_code;
+
+    /** @brief The provider's own kind, for example reference or data_vendor. */
+    std::string provider_kind;
+
+    /** @brief The series this source quotes the instrument through. */
+    std::string series_id;
+
+    /** @brief When this source's newest observation was taken, epoch ns, or 0. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges this source past its staleness threshold. */
+    bool stale = false;
+};
+
+/**
+ * @brief Whether @p source is a definition rather than a price.
+ *
+ * A reference provider publishes what an instrument is and never ticks, so a
+ * screen that offers prices can leave these out and one that explains an
+ * instrument keeps them.
+ */
+[[nodiscard]] inline bool is_reference_source(
+    const instrument_source& source) noexcept {
+    return source.provider_kind == "reference";
+}
+
+/**
+ * @brief One instrument: the series a person reads as one thing.
+ *
+ * The deployment's definition, not this client's grouping. A curve is one entry
+ * and never one entry per pillar; a pair is one entry with no axes; a surface is
+ * one entry whose two axes are its expiries and its strikes. The name is the
+ * server's, unique within the party and the kind, and is what a person types
+ * into the search.
+ *
+ * The kind is the server's word - `pair`, `ladder`, `curve` or `surface` - and
+ * a screen draws it as a badge rather than deriving a category of its own. Any
+ * grouping this client would be tempted to do is already done here.
+ */
+struct market_instrument final {
+    /** @brief The instrument's identifier, stable within the party. */
+    std::string instrument_id;
+
+    /** @brief The server's kind for it: pair, ladder, curve or surface. */
+    std::string kind;
+
+    /** @brief The name a person searches for and a list draws. */
+    std::string name;
+
+    /** @brief The currency it is about, for a single-currency instrument. */
+    std::string currency;
+
+    /** @brief The pair's base currency, or empty when it is not a pair. */
+    std::string base_currency;
+
+    /** @brief The pair's quote currency, or empty when it is not a pair. */
+    std::string quote_currency;
+
+    /** @brief The schema's instrument type, for example ir_swap or fx_spot. */
+    std::string instrument_type;
+
+    /** @brief The schema's quote type, for example rate or price. */
+    std::string quote_type;
+
+    /** @brief The forward start the instrument is struck at, or empty. */
+    std::string forward_start;
+
+    /** @brief The shape's axes, in the order the server states them. */
+    std::vector<instrument_axis> axes;
+
+    /** @brief The providers behind it, each with its own verdict. */
+    std::vector<instrument_source> sources;
+
+    /** @brief The party that owns it. */
+    std::string party_id;
+
+    /** @brief Whether every source is stale, in the server's judgement. */
+    bool stale = false;
+
+    /** @brief The newest instant any source was observed, epoch ns, or 0. */
+    std::int64_t as_of_ns = 0;
+};
+
+/**
+ * @brief What a caller narrows the instrument catalogue to.
+ *
+ * The deployment applies all three and returns what remains, so a search is one
+ * read rather than a filter this client runs over a cached list: a query it
+ * matches on more than a name, and a kind it knows the full set of.
+ */
+struct instrument_filter final {
+    /** @brief Free text, matched against the facts the server holds. */
+    std::string query;
+
+    /** @brief The kinds wanted, empty for all of them. */
+    std::vector<std::string> kinds;
+
+    /** @brief The provider whose instruments are wanted, empty for all. */
+    std::string provider_code;
+};
+
+/**
+ * @brief One provider's quote of one rung of a ladder.
+ *
+ * A provider that does not quote the rung has no entry rather than a zero,
+ * because a gap is what the desk needs to see: a zero would read as a rate.
+ */
+struct ladder_quote final {
+    /** @brief The provider's code, for example bloomberg. */
+    std::string provider_code;
+
+    /** @brief The rate it quoted, as a number. */
+    double value = 0.0;
+
+    /** @brief When it quoted, epoch nanoseconds, or zero when never. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges the quote past its threshold. */
+    bool stale = false;
+
+    /** @brief The series the quote came from. */
+    std::string series_id;
+};
+
+/**
+ * @brief The value the deployment derives across the quoting providers.
+ *
+ * The method is the deployment's word - so the column can say what it is
+ * rather than leaving a reader to guess - and a consensus over one value says
+ * so by naming a count of one.
+ */
+struct ladder_consensus final {
+    /** @brief The derived value. */
+    double value = 0.0;
+
+    /** @brief How it was derived, in the deployment's words. */
+    std::string method;
+
+    /** @brief How many providers went into it. */
+    int providers_used = 0;
+};
+
+/**
+ * @brief One rung: a tenor, the date it matures and the quotes at it.
+ *
+ * The maturity date and the year fraction are the deployment's, because the
+ * calendar, the day count and the tenor convention are its facts. A client
+ * cannot compute either and must not try: a date this program derived from a
+ * tenor would disagree with the same date in `ores.web`.
+ */
+struct ladder_rung final {
+    /** @brief The tenor as the deployment spells it: "ON", "1W", "10Y". */
+    std::string tenor;
+
+    /** @brief The maturity date, already formatted for a cell. */
+    std::string maturity;
+
+    /** @brief The year fraction the deployment computed for it. */
+    double year_fraction = 0.0;
+
+    /** @brief The quotes, one per provider that quoted this rung. */
+    std::vector<ladder_quote> quotes;
+
+    /** @brief The value derived across those quotes. */
+    ladder_consensus consensus;
+};
+
+/**
+ * @brief One currency's rate ladder, with the facts its numbers rest on.
+ *
+ * A ladder is one shape read across its term axis rather than several series
+ * joined: the provider dimension is one series per provider and each states
+ * every rung. The rungs are in the deployment's maturity order, so `ON` sorts
+ * before `1W` without this client having a tenor-ranking rule of its own.
+ */
+struct rate_ladder final {
+    /** @brief The currency the ladder is quoted in. */
+    std::string currency;
+
+    /** @brief The schema's instrument type, for example ir_swap. */
+    std::string instrument_type;
+
+    /** @brief The forward start it is struck at, or empty for spot. */
+    std::string forward_start;
+
+    /** @brief The instant the ladder answers for, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How many providers quote it. */
+    int provider_count = 0;
+
+    /** @brief The tenor convention the deployment states, or empty. */
+    std::string tenor_convention;
+
+    /** @brief The day count convention the deployment states, or empty. */
+    std::string day_count_convention;
+
+    /** @brief The rungs, in the deployment's maturity order. */
+    std::vector<ladder_rung> rungs;
+};
+
+/**
+ * @brief One provider's spot of one pair.
+ *
+ * A provider that does not quote the pair has no entry rather than a zero.
+ */
+struct montage_spot final {
+    /** @brief The provider's code. */
+    std::string provider_code;
+
+    /** @brief The spot it quoted, as a number. */
+    double value = 0.0;
+
+    /** @brief When it quoted, epoch nanoseconds, or zero when never. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges the quote past its threshold. */
+    bool stale = false;
+
+    /** @brief The series the quote came from. */
+    std::string series_id;
+};
+
+/**
+ * @brief One pair of a montage: the spots, the consensus and the move.
+ *
+ * A pair whose base is on the quote side is included, because a montage is for
+ * the base rather than for the pair's spelling. The change and the range are
+ * absent when the deployment holds no price at the start of the day measured
+ * from, which is a different fact from a change of zero.
+ */
+struct montage_pair final {
+    /** @brief The pair as the deployment spells it, for example GBP/USD. */
+    std::string pair_name;
+
+    /** @brief The pair's currencies. */
+    std::string base_currency;
+    std::string quote_currency;
+
+    /** @brief One spot per provider that quoted the pair. */
+    std::vector<montage_spot> spots;
+
+    /** @brief The spot derived across the quoting providers. */
+    double consensus = 0.0;
+
+    /** @brief The move since the deployment's change instant, or nothing. */
+    std::optional<double> change_pct;
+
+    /** @brief The day's range, or nothing when the deployment holds none. */
+    std::optional<double> day_high;
+    std::optional<double> day_low;
+};
+
+/**
+ * @brief One base currency's crosses, with the instant the moves are from.
+ *
+ * The instant the change and the range are measured from is the deployment's:
+ * a trading day starts when the session says it does, and a client must not
+ * decide what "today" means. It travels once for the whole answer, so every
+ * row's move is measured from the same instant.
+ */
+struct fx_montage final {
+    /** @brief The base currency the crosses are for. */
+    std::string base_currency;
+
+    /** @brief The instant the spots answer for, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief The instant the moves are measured from, epoch nanoseconds. */
+    std::int64_t change_since_ns = 0;
+
+    /** @brief The pairs, in the deployment's order. */
+    std::vector<montage_pair> pairs;
+};
+
+/**
  * @brief One curve the deployment publishes, as a chooser lists it.
  *
  * A curve is an object the deployment calibrates and publishes rather than a

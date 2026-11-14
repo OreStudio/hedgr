@@ -115,6 +115,18 @@ default_state_for(domain::window_kind kind, std::string_view last_error,
         surface.blueprint_id = std::string{series_id};
         return surface;
     }
+    case domain::window_kind::rate_ladder: {
+        /*
+         * A ladder opened from the menu names no currency: it opens and asks
+         * which one, because that is the first of the two clicks. One opened
+         * from a row arrives with the row's label and its currency in the
+         * series id, which the caller sets for a ladder it already knows.
+         */
+        domain::rate_ladder_state ladder;
+        ladder.label = series_label.empty() ? "Rates"
+                                            : std::string{series_label};
+        return ladder;
+    }
     case domain::window_kind::accounts: {
         domain::accounts_state accounts;
         accounts.instance_id = std::string{instance_id};
@@ -195,6 +207,13 @@ std::string window_key_for(domain::window_kind kind,
             ? std::string{}
             : std::format("surface:{}:{}:{}", instance_id, account_id,
                   series_id);
+    case domain::window_kind::rate_ladder:
+        /*
+         * One rates window per session, not one per ladder: choosing another
+         * currency is a choice *inside* the window, the way the kind facet
+         * narrows the market window rather than opening another.
+         */
+        return std::format("rates:{}:{}", instance_id, account_id);
     case domain::window_kind::crm_matrix:
         return std::format("crm:{}:{}:{}:{}", instance_id, account_id, party_id,
             crm_name);
@@ -552,6 +571,25 @@ bool window_service::configure_crm(const command::command& cmd) {
     crm->party_id = cmd.party_id;
     crm->crm_name = cmd.crm_name;
     crm->reciprocal = cmd.crm_reciprocal;
+    return true;
+}
+
+bool window_service::configure_rate_ladder(const command::command& cmd) {
+    const auto handle = windows_.find(cmd.window_id);
+    if (!handle)
+        return false;
+    auto* ladder = std::get_if<domain::rate_ladder_state>(
+        &windows_.state(*handle));
+    if (ladder == nullptr)
+        return false;
+    if (ladder->currency == cmd.currency
+        && ladder->instrument_type == cmd.instrument_type
+        && ladder->forward_start == cmd.forward_start)
+        return false;
+    ladder->currency = cmd.currency;
+    ladder->instrument_type = cmd.instrument_type;
+    ladder->forward_start = cmd.forward_start;
+    ladder->label = cmd.curve_label;
     return true;
 }
 

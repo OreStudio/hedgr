@@ -234,12 +234,27 @@ TEST_CASE("asking twice for a series' card asks for the same window",
 TEST_CASE("a series browser row's Mini plot icon opens a card for that row",
     "[mini_plot][open]") {
     open_desk d;
-    d.desk.market.apply_catalogue("i", "a",
-        {model::domain::market_series_row{.id = "s-0", .label = "FX GBP/USD",
-             .asset_class = "FX", .provider_code = "ore"},
-            model::domain::market_series_row{.id = "s-1",
-                .label = "FX EUR/USD", .asset_class = "FX",
-                .provider_code = "ore"}});
+    /*
+     * The browser lists instruments in the deployment's order, so the order
+     * here is the order on the screen.
+     */
+    d.desk.market.apply_instruments("i", "a",
+        {model::domain::market_instrument{.instrument_id = "i-1",
+             .kind = "pair", .name = "FX EUR/USD", .currency = "USD",
+             .base_currency = "EUR", .quote_currency = "USD",
+             .instrument_type = "fx_spot", .quote_type = "rate",
+             .sources = {{.provider_code = "ore",
+                 .provider_kind = "data_vendor", .series_id = "s-1",
+                 .as_of_ns = 1}},
+             .party_id = "p1"},
+            model::domain::market_instrument{.instrument_id = "i-0",
+                .kind = "pair", .name = "FX GBP/USD", .currency = "USD",
+                .base_currency = "GBP", .quote_currency = "USD",
+                .instrument_type = "fx_spot", .quote_type = "rate",
+                .sources = {{.provider_code = "ore",
+                    .provider_kind = "data_vendor", .series_id = "s-0",
+                    .as_of_ns = 1}},
+                .party_id = "p1"}});
     static_cast<void>(d.desk.open(window_kind::series_browser,
         model::domain::series_browser_state{}, "b"));
     d.place("b", 900.0f, 500.0f);

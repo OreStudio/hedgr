@@ -77,6 +77,8 @@ window_state_to_json(window_kind kind, const window_state& state) {
         return write_shape<mini_plot_state>(state);
     case window_kind::vol_surface:
         return write_shape<vol_surface_state>(state);
+    case window_kind::rate_ladder:
+        return write_shape<rate_ladder_state>(state);
     }
     return std::unexpected("unknown window kind");
 }
@@ -107,6 +109,8 @@ window_state_from_json(window_kind kind, std::string_view json) {
         return read_shape<mini_plot_state>(json);
     case window_kind::vol_surface:
         return read_shape<vol_surface_state>(json);
+    case window_kind::rate_ladder:
+        return read_shape<rate_ladder_state>(json);
     }
     return std::unexpected("unknown window kind");
 }

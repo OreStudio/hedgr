@@ -178,6 +178,13 @@ void append_window_title(std::string& out, domain::window_kind kind,
         }
         return put("Volatility surface");
     }
+    case domain::window_kind::rate_ladder: {
+        if (const auto* ladder =
+                std::get_if<domain::rate_ladder_state>(&state)) {
+            return put(or_else(ladder->label, "Rates"));
+        }
+        return put("Rates");
+    }
     }
     return put("Window");
 }
@@ -454,6 +461,7 @@ float series_flags_width(const render_input& input,
 }
 
 void trace_view_state(std::string_view screen, std::string_view subject,
+    std::string_view identity,
     hedgr::ui::render::window_ui_state& state,
     const hedgr::ui::widget::view_verdict& verdict) {
     using hedgr::ui::widget::view_state;
@@ -481,17 +489,24 @@ void trace_view_state(std::string_view screen, std::string_view subject,
     state.traced.state = code;
     state.traced.reason = std::string{verdict.reason};
 
+    const auto named = [&]() -> std::string_view {
+        return subject.empty() ? std::string_view{"?"} : subject;
+    };
+    const auto as = [&]() {
+        if (identity.empty())
+            return std::string{};
+        return std::format(" as '{}'", identity);
+    };
     if (verdict.reason.empty()) {
         BOOST_LOG_SEV(lg(), ores::logging::info)
-            << "Window '" << (subject.empty() ? std::string_view{"?"} : subject)
-            << "' (" << screen << "): " << word(verdict.state);
+            << "Window '" << named() << "'" << as() << " (" << screen
+            << "): " << word(verdict.state);
         return;
     }
     BOOST_LOG_SEV(lg(), verdict.state == view_state::error
             ? ores::logging::warn : ores::logging::info)
-        << "Window '" << (subject.empty() ? std::string_view{"?"} : subject)
-        << "' (" << screen << "): " << word(verdict.state) << " - "
-        << verdict.reason;
+        << "Window '" << named() << "'" << as() << " (" << screen
+        << "): " << word(verdict.state) << " - " << verdict.reason;
 }
 
 void draw_series_flags(const render_input& input,
@@ -584,6 +599,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::crm_matrix:
     case domain::window_kind::mini_plot:
     case domain::window_kind::vol_surface:
+    case domain::window_kind::rate_ladder:
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:

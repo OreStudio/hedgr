@@ -19,6 +19,7 @@
  */
 #include "hedgr.session/transport/session_error.hpp"
 
+#include <format>
 #include <string>
 #include <utility>
 #include "ores.nats/service/nats_connect_error.hpp"
@@ -70,7 +71,12 @@ using hedgr::session::transport::session_errc;
         case filter_too_large:
             return "the read names more coordinates than the deployment allows";
         case read_refused:
-            return "the deployment refused the tick read";
+            /*
+             * Not "the tick read": the same code is raised by a surface, a
+             * curve, a ladder and an instrument catalogue, and naming one of
+             * them told an operator to look in the wrong place.
+             */
+            return "the deployment refused the read";
     }
     return "the session could not be used";
 }
@@ -89,6 +95,13 @@ to_session_errc(ores::nats::service::nats_error_kind kind) noexcept {
         case nats_error_kind::tls_error:
             return tls_failed;
         case nats_error_kind::connection_timeout:
+            return timeout;
+        case nats_error_kind::request_timeout:
+            /*
+             * The connection is up and the responder was too slow, which is the
+             * same thing a reader needs to know as a connect that never
+             * completed: nobody answered in time.
+             */
             return timeout;
         case nats_error_kind::services_unavailable:
             return services_unavailable;
@@ -143,6 +156,15 @@ session_error make_error(session_errc code, std::string detail) {
         .code = code,
         .message = std::string(message_for(code)),
         .detail = std::move(detail)};
+}
+
+std::string describe(const session_error& error) {
+    if (error.detail.empty() || error.detail == error.message)
+        return error.message.empty()
+            ? std::string{to_string(error.code)} : error.message;
+    if (error.message.empty())
+        return error.detail;
+    return std::format("{}: {}", error.message, error.detail);
 }
 
 session_error translate_connect_error(const std::exception& error) {

@@ -68,6 +68,27 @@ def resolve(name: str, search: list[pathlib.Path]) -> pathlib.Path | None:
     return None
 
 
+def needs_copy(source: pathlib.Path, target: pathlib.Path) -> bool:
+    """Whether the bundled copy is not the library the build just linked against.
+
+    The name alone is not enough to answer this. Two OreStudio checkouts produce
+    the same versioned file name - libores.marketdata.api.so.0.0.30 - from
+    different sources, so a destination that merely exists may hold the other
+    checkout's build. Keeping it produced a client linked against the new API
+    and loading the old one, failing at the first new symbol rather than at the
+    build. Size and modification time tell the two apart.
+    """
+    if not target.exists():
+        return True
+    try:
+        source_stat = source.stat()
+        target_stat = target.stat()
+    except OSError:
+        return True
+    return (source_stat.st_size != target_stat.st_size
+            or source_stat.st_mtime > target_stat.st_mtime)
+
+
 def place(source: pathlib.Path, destination: pathlib.Path,
           soname: str | None, needed_as: str) -> str:
     """Copies a library, links the names it is asked for, and frees its runpath.
@@ -79,7 +100,7 @@ def place(source: pathlib.Path, destination: pathlib.Path,
     """
     real = source.resolve()
     target = destination / real.name
-    if not target.exists():
+    if needs_copy(real, target):
         shutil.copy2(real, target)
         target.chmod(target.stat().st_mode | 0o200)
 

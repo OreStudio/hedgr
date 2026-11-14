@@ -231,6 +231,7 @@ using hedgr::model::state::series_table;
 using hedgr::model::state::crm_table;
 using hedgr::model::state::curve_table;
 using hedgr::model::state::surface_table;
+using hedgr::model::state::ladder_table;
 using hedgr::model::state::password_policy_state;
 using hedgr::model::state::probe_table;
 using hedgr::model::state::session_table;
@@ -251,6 +252,7 @@ struct empty_state final {
     series_table market;
     curve_table curves;
     surface_table surfaces;
+    ladder_table ladders;
     crm_table crm;
     tenant_image_map currency_images;
     image_cache images;
@@ -276,6 +278,7 @@ render_input input_with(empty_state& state, store_lock lock) {
         .market = state.market,
         .curves = state.curves,
         .surfaces = state.surfaces,
+        .ladders = state.ladders,
         .crm = state.crm,
         .currency_images = state.currency_images,
         .images = state.images,
