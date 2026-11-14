@@ -733,6 +733,71 @@ public:
         std::int64_t from_ns, std::int64_t to_ns) const;
 
     /**
+     * @brief Reads one base currency's crosses at an as-of.
+     *
+     * A montage is for the base, not for the pair's spelling, so a pair whose
+     * base is on the quote side is included. The change and the day's range are
+     * the deployment's, measured from an instant it states once for the whole
+     * answer: a trading day starts when the session says it does.
+     *
+     * @param base_currency the base the crosses are for.
+     * @param providers the providers to quote, or empty for every one.
+     * @param as_of_ns the instant to answer for, or zero for the clock's now.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers = {},
+        std::int64_t as_of_ns = 0) const;
+
+    /**
+     * @brief Reads one currency's rate ladder, across the providers quoting it.
+     *
+     * A ladder is one shape read across its term axis, so the deployment answers
+     * its rungs already in maturity order with each rung's date and year
+     * fraction computed. The calendar, the day count and the tenor convention
+     * are the deployment's facts, and they travel with the rungs rather than
+     * being assumed here.
+     *
+     * @param currency the currency the ladder is quoted in.
+     * @param instrument_type the schema's instrument type, for example ir_swap.
+     * @param forward_start the forward start wanted, or empty for spot.
+     * @param providers the providers to quote, or empty for every one.
+     * @param as_of_ns the instant to answer for, or zero for the clock's now.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<hedgr::model::domain::rate_ladder> rate_ladder(
+        std::string_view currency, std::string_view instrument_type,
+        std::string_view forward_start,
+        const std::vector<std::string>& providers = {},
+        std::int64_t as_of_ns = 0) const;
+
+    /**
+     * @brief Reads the instrument catalogue this session may see.
+     *
+     * An instrument is the deployment's own grouping of series into the thing a
+     * person reads: a curve is one entry rather than one per pillar, a pair is
+     * one entry with no axes. The grouping, the naming, the ordering and the
+     * staleness verdict all arrive decided, so nothing above this layer decides
+     * what belongs together.
+     *
+     * The filter is applied by the deployment, not here, so a search is one read
+     * of the catalogue rather than a scan of a cached list. The pages are read
+     * until the deployment's own total is reached, because a truncated
+     * catalogue is an instrument a search never finds.
+     *
+     * @param filter what to narrow to, all empty for the whole catalogue.
+     * @param page_size the rows to ask for at a time.
+     * @pre the session is authenticated.
+     * @return the instruments in the server's order, or why they could not be
+     *         read.
+     */
+    [[nodiscard]] result<std::vector<hedgr::model::domain::market_instrument>>
+    list_instruments(
+        const hedgr::model::domain::instrument_filter& filter = {},
+        std::uint32_t page_size = 500) const;
+
+    /**
      * @brief Reads every market data provider and its kind.
      *
      * Pages `marketdata.v1.providers.list` until the deployment's total is

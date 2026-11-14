@@ -56,18 +56,28 @@ using hedgr::testing::desk;
 using hedgr::testing::frame;
 using hedgr::testing::headless_imgui;
 
-/** @brief The texture asks of one series browser frame over @p rows series. */
+/** @brief The texture asks of one instrument browser frame over @p rows rows. */
 std::size_t texture_asks_over(std::size_t rows) {
     headless_imgui imgui;
     desk desk;
-    std::vector<model::domain::market_series_row> catalogue;
+    std::vector<model::domain::market_instrument> instruments;
     for (std::size_t i = 0; i < rows; ++i) {
-        catalogue.push_back(model::domain::market_series_row{
-            .id = std::format("s-{}", i),
-            .label = std::format("FX GBP/USD {:05}", i),
-            .asset_class = "FX", .provider_code = "ore"});
+        instruments.push_back(model::domain::market_instrument{
+            .instrument_id = std::format("i-{}", i),
+            .kind = "pair",
+            .name = std::format("FX GBP/USD {:05}", i),
+            .currency = "USD",
+            .base_currency = "GBP",
+            .quote_currency = "USD",
+            .instrument_type = "fx_spot",
+            .quote_type = "rate",
+            .sources = {{.provider_code = "ore",
+                .provider_kind = "data_vendor",
+                .series_id = std::format("s-{}", i),
+                .as_of_ns = 1}},
+            .party_id = "p1"});
     }
-    desk.market.apply_catalogue("i", "a", std::move(catalogue));
+    desk.market.apply_instruments("i", "a", std::move(instruments));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;
@@ -601,21 +611,30 @@ TEST_CASE("a steady term structure frame costs nothing per overlay",
 
 namespace {
 
-/** @brief A catalogue of @p rows FX series, a few of them on another party. */
-std::vector<model::domain::market_series_row> browser_catalogue(
+/** @brief A catalogue of @p rows instruments, a few on another party. */
+std::vector<model::domain::market_instrument> browser_instruments(
     std::size_t rows) {
-    std::vector<model::domain::market_series_row> catalogue;
+    std::vector<model::domain::market_instrument> instruments;
     for (std::size_t i = 0; i < rows; ++i) {
-        catalogue.push_back(model::domain::market_series_row{
-            .id = std::format("s-{}", i),
-            .uri = std::format("fx/gbpusd/{}", i),
-            .label = std::format("FX GBP/USD {:05}", i),
-            .asset_class = i % 7 == 0 ? "RATES" : "FX",
-            .provider_code = "ore",
-            .party_id = i % 5 == 0 ? "p2" : "p1",
-            .tenor = i % 3 == 0 ? "1M" : "1Y"});
+        const bool fx = i % 7 != 0;
+        instruments.push_back(model::domain::market_instrument{
+            .instrument_id = std::format("i-{}", i),
+            .kind = fx ? "pair" : "curve",
+            .name = fx ? std::format("FX GBP/USD {:05}", i)
+                       : std::format("IR GBP CURVE {:05}", i),
+            .currency = "GBP",
+            .base_currency = fx ? "GBP" : "",
+            .quote_currency = fx ? "USD" : "",
+            .instrument_type = fx ? "fx_spot" : "discount",
+            .quote_type = "rate",
+            .sources = {{.provider_code = "ore",
+                .provider_kind = "data_vendor",
+                .series_id = std::format("s-{}", i),
+                .as_of_ns = 1,
+                .age_seconds = 2}},
+            .party_id = i % 5 == 0 ? "p2" : "p1"});
     }
-    return catalogue;
+    return instruments;
 }
 
 /** @brief Allocations of one steady series browser frame over @p rows rows. */
@@ -624,7 +643,7 @@ std::size_t browser_frame_allocations(std::size_t rows) {
     desk desk;
     desk.sessions.set_parties(desk.session,
         "p1\x1f" "First party\x1ep2\x1f" "Second party");
-    desk.market.apply_catalogue("i", "a", browser_catalogue(rows));
+    desk.market.apply_instruments("i", "a", browser_instruments(rows));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;
@@ -663,7 +682,7 @@ TEST_CASE("a series browser survives its catalogue being replaced by a shorter o
     "[frame][browser]") {
     headless_imgui imgui;
     desk desk;
-    desk.market.apply_catalogue("i", "a", browser_catalogue(5000));
+    desk.market.apply_instruments("i", "a", browser_instruments(5000));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;
@@ -677,7 +696,7 @@ TEST_CASE("a series browser survives its catalogue being replaced by a shorter o
     };
     draw();
     draw();
-    desk.market.apply_catalogue("i", "a", browser_catalogue(3));
+    desk.market.apply_instruments("i", "a", browser_instruments(3));
     draw();
     desk.textures.gets = 0;
     draw();
@@ -688,7 +707,7 @@ TEST_CASE("one steady series browser frame over 5000 rows",
     "[!benchmark][frame][browser]") {
     headless_imgui imgui;
     desk desk;
-    desk.market.apply_catalogue("i", "a", browser_catalogue(5000));
+    desk.market.apply_instruments("i", "a", browser_instruments(5000));
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;
@@ -719,7 +738,11 @@ struct listed_row final {
 };
 
 /**
- * @brief Draws the browser over one series of @p asset_class labelled @p label.
+ * @brief Draws the browser over one @p kind of instrument labelled @p label.
+ *
+ * The currencies are the instrument's own fields, which is where the flags
+ * beside its name come from: the deployment states them, so nothing here parses
+ * a label to invent one.
  *
  * A flag is a draw command textured by the desk's texture, and the font draws
  * every other glyph, so the two are told apart by texture. The row's text
@@ -727,18 +750,27 @@ struct listed_row final {
  * A glyph is a vertex in the text colour that does not sample the font's white
  * pixel, which rectangles and the built-in flags do.
  */
-listed_row draw_listed_row(desk& desk, std::string_view asset_class,
-    std::string_view label) {
+listed_row draw_listed_row(desk& desk, std::string_view kind,
+    std::string_view label, std::string_view currency,
+    std::string_view base = {}, std::string_view quote = {}) {
     listed_row result;
-    desk.market.apply_catalogue("i", "a",
-        {model::domain::market_series_row{.id = "s-0", .uri = "oresmd://s-0",
-            .label = std::string{label}, .asset_class = std::string{asset_class},
-            .provider_code = "ore", .curve_key = "s-0",
-            .curve_label = std::string{label}}});
+    desk.market.apply_instruments("i", "a",
+        {model::domain::market_instrument{
+            .instrument_id = "i-0", .kind = std::string{kind},
+            .name = std::string{label}, .currency = std::string{currency},
+            .base_currency = std::string{base},
+            .quote_currency = std::string{quote},
+            .instrument_type = "ir_swap",
+            .quote_type = "rate",
+            .sources = {{.provider_code = "ore",
+                .provider_kind = "data_vendor",
+                .series_id = "s-0",
+                .as_of_ns = 1}},
+            .party_id = "p1"}});
     const auto handle = desk.open(model::domain::window_kind::series_browser,
         model::domain::series_browser_state{});
     render::window_ui_state state;
-    state.market_asset_class = std::string{asset_class};
+    state.market_kind = std::string{kind};
     hedgr::ui::widget::status_bar status;
     render::lock_control lock;
     auto input = desk.input();
@@ -762,8 +794,7 @@ listed_row draw_listed_row(desk& desk, std::string_view asset_class,
     const auto* data = ImGui::GetDrawData();
     for (const auto* list : data->CmdLists) {
         const std::string owner = list->_OwnerName;
-        if (owner.find("##curves") == std::string::npos
-            && owner.find("##series") == std::string::npos)
+        if (owner.find("##instruments") == std::string::npos)
             continue;
         std::vector<ImVec2> glyphs;
         for (const auto& cmd : list->CmdBuffer) {
@@ -791,7 +822,7 @@ listed_row draw_listed_row(desk& desk, std::string_view asset_class,
 
 }
 
-TEST_CASE("an IR curve row draws the flag of its currency",
+TEST_CASE("a curve row draws the flag of its currency",
     "[frame][flags][browser]") {
     headless_imgui imgui;
     desk desk;
@@ -799,54 +830,52 @@ TEST_CASE("an IR curve row draws the flag of its currency",
     static_cast<void>(desk.images.put("t", "img-tw", {.mime_type = "image/svg+xml",
         .data = std::vector<std::uint8_t>(4, 3)}));
 
-    const auto drawn = draw_listed_row(desk, "IR", "IR TWD IR_SWAP");
+    const auto drawn =
+        draw_listed_row(desk, "curve", "TWD-AONIA", "TWD");
 
     CHECK(drawn.flag_draws == 1);
     CHECK(drawn.asked.empty());
     CHECK(desk.textures.gets > 0);
 }
 
-TEST_CASE("an IR curve row asks for the image of a currency it has not loaded",
+TEST_CASE("a curve row asks for the image of a currency it has not loaded",
     "[frame][flags][browser]") {
     headless_imgui imgui;
     desk desk;
     desk.currency_images.set("t", {{"TWD", "img-tw"}});
 
-    const auto drawn = draw_listed_row(desk, "IR", "IR TWD IR_SWAP");
+    const auto drawn =
+        draw_listed_row(desk, "curve", "TWD-AONIA", "TWD");
 
     CHECK(drawn.asked == std::vector<std::string>{"img-tw"});
     CHECK(drawn.flag_draws == 0);
 }
 
-TEST_CASE("an IR curve row with no server image shows no flag and keeps the text indent",
+TEST_CASE("a curve row with no server image draws no flag and asks for nothing",
     "[frame][flags][browser]") {
     headless_imgui imgui;
     desk desk;
     desk.currency_images.set("t", {});
 
-    const auto drawn = draw_listed_row(desk, "IR", "IR HUF IR_SWAP");
-    const auto bare = draw_listed_row(desk, "IR", "IR ZZZ IR_SWAP");
+    const auto drawn = draw_listed_row(desk, "curve", "HUF-AONIA", "HUF");
 
     CHECK(drawn.asked.empty());
     CHECK(drawn.flag_draws == 0);
     CHECK(desk.textures.gets == 0);
-    CHECK(drawn.text_x == bare.text_x);
 }
 
-TEST_CASE("an IR curve row with no flag keeps the series row's text indent",
+TEST_CASE("a pair row with no images draws no flag and asks for nothing",
     "[frame][flags][browser]") {
     headless_imgui imgui;
     desk desk;
     desk.currency_images.set("t", {});
 
-    const auto curve = draw_listed_row(desk, "IR", "IR ZZZ IR_SWAP");
-    /* The same first glyph, so the bearing cancels out of the comparison. */
-    const auto series = draw_listed_row(desk, "FX", "IR ZZZ/QQQ");
+    const auto pair = draw_listed_row(desk, "pair", "ZZZ/QQQ", "QQQ", "ZZZ",
+        "QQQ");
 
-    CHECK(curve.asked.empty());
-    CHECK(curve.flag_draws == 0);
-    CHECK(curve.text_x < 200.0f);
-    CHECK(curve.text_x == series.text_x);
+    CHECK(pair.asked.empty());
+    CHECK(pair.flag_draws == 0);
+    CHECK(desk.textures.gets == 0);
 }
 
 namespace {

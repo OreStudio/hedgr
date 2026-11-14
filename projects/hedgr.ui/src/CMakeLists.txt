@@ -51,6 +51,7 @@ target_link_libraries(${lib_target_name}
         ores::logging
         imgui::imgui
         implot::implot
+        implot3d::implot3d
     PRIVATE
         ores::platform
         ores::utility

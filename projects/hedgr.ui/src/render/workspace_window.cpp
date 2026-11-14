@@ -127,6 +127,27 @@ void render_workspace_window(hedgr::model::state::window_handle handle,
             }
             ImGui::EndMenu();
         }
+        /*
+         * The asset-class menu the design asks for, starting with the rates
+         * screen it is for. A ladder is reached in two clicks - Rates, Ladder -
+         * and the window then asks which currency, rather than making a person
+         * find the curve first.
+         */
+        if (ImGui::BeginMenu("Rates")) {
+            if (ImGui::MenuItem("Ladder...", nullptr, false,
+                    session.has_value())) {
+                command request;
+                request.kind = command_kind::open_window;
+                request.instance_id =
+                    std::string{input.sessions.instance_id(*session)};
+                request.account_id =
+                    std::string{input.sessions.account_id(*session)};
+                request.new_window_kind =
+                    hedgr::model::domain::window_kind::rate_ladder;
+                input.commands.push(std::move(request));
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMenuBar();
     }
 

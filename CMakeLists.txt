@@ -161,6 +161,8 @@ find_package(sqlgen CONFIG REQUIRED)
 # ImGui
 find_package(imgui CONFIG REQUIRED)
 find_package(implot CONFIG REQUIRED)
+# The volatility surface is a surface, not a line: it is drawn on three axes.
+find_package(implot3d CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
 find_package(GLEW REQUIRED)
 find_package(OpenGL REQUIRED)

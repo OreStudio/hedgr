@@ -34,14 +34,15 @@
 #include "ores.logging/make_logger.hpp"
 #include "implot.h"
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <vector>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -54,7 +55,7 @@ using hedgr::model::command::command_kind;
 using hedgr::ui::render::render_input;
 using hedgr::ui::render::window_ui_state;
 
-/** @brief This file's logger: which rungs a curve opens with, and why. */
+/** @brief This file's logger: which instrument a row opened, and by what. */
 [[nodiscard]] auto& lg() {
     using namespace ores::logging;
     static auto instance = make_logger("hedgr.ui.render.series_browser");
@@ -80,88 +81,79 @@ float draw_series_row(std::string_view label, float extra_indent,
         label.data() + label.size()).x;
 }
 
-/** @brief Whether @p text holds @p needle, ignoring case and an empty needle. */
-[[nodiscard]] bool contains_folded(std::string_view text,
-    std::string_view needle) {
-    if (needle.empty())
-        return true;
-    const auto lower = [](char character) {
-        return static_cast<char>(
-            std::tolower(static_cast<unsigned char>(character)));
-    };
-    for (std::size_t i = 0; i + needle.size() <= text.size(); ++i) {
-        bool match = true;
-        for (std::size_t j = 0; j < needle.size(); ++j) {
-            if (lower(text[i + j]) != lower(needle[j])) {
-                match = false;
-                break;
-            }
-        }
-        if (match)
-            return true;
+/**
+ * @brief The currencies an instrument names, for the flags beside its name.
+ *
+ * The deployment's own fields, not a reading of its name: a pair carries a base
+ * and a quote, a rate carries the currency it is quoted in. A quote equal to the
+ * base is not a pair and draws one flag rather than the same flag twice.
+ */
+[[nodiscard]] hedgr::ui::widget::currency_pair currencies_of_instrument(
+    const domain::market_instrument& instrument) {
+    hedgr::ui::widget::currency_pair pair;
+    pair.base = instrument.base_currency.empty() ? instrument.currency
+                                                 : instrument.base_currency;
+    pair.quote = instrument.quote_currency;
+    if (pair.quote == pair.base)
+        pair.quote.clear();
+    return pair;
+}
+
+/**
+ * @brief The source an instrument is opened through, or nullptr.
+ *
+ * The first source with data that is not stale, because that is the price a
+ * person expects to read; failing that any source with data, since a stale
+ * price is still the instrument's own; failing that the first source at all, so
+ * an instrument whose providers have never been observed still opens.
+ */
+[[nodiscard]] const domain::instrument_source* opening_source(
+    const domain::market_instrument& instrument) {
+    const domain::instrument_source* observed = nullptr;
+    for (const auto& source : instrument.sources) {
+        if (source.as_of_ns == 0)
+            continue;
+        if (!source.stale)
+            return &source;
+        if (observed == nullptr)
+            observed = &source;
     }
-    return false;
+    if (observed != nullptr)
+        return observed;
+    return instrument.sources.empty() ? nullptr : &instrument.sources.front();
 }
-
-}
-
-namespace hedgr::ui::render {
-
-namespace {
 
 /** @brief The row's flat icon that opens its mini plot, true when pressed. */
-bool mini_plot_button() {
+bool mini_plot_button(std::string_view what) {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::PushStyleColor(ImGuiCol_Text,
         ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
     const bool pressed = ImGui::SmallButton(icon::dashboard);
     ImGui::PopStyleColor(2);
-    ImGui::SetItemTooltip("%s", "Open a mini plot for this series");
+    ImGui::SetItemTooltip("%s", what.data());
     return pressed;
 }
 
 /**
- * @brief The published curves whose name matches @p filter, by name.
+ * @brief The kind an instrument is, upper-cased for its badge.
  *
- * They are listed beside the tick curves rather than filtered by provider or
- * party: a published curve is one object the deployment calibrates, not a
- * series under a provider.
+ * A stack buffer rather than a string: a badge is drawn for every visible row
+ * on every frame, and a frame that allocates per row is a frame that stutters
+ * with the scroll.
  */
-/**
- * @brief The published curves @p party may act on, matching @p filter.
- *
- * The deployment lists a published curve once per party that holds it, so the
- * same name arrives several times and only one of the copies is the session's.
- * A published curve is not a catalogue row, but the series it carries usually
- * is: the row's party is the copy's party, and that is what tells them apart. A
- * curve whose series the catalogue does not list is kept, because nothing says
- * it belongs to another party, and dropping it would hide a curve that may well
- * be the session's own.
- */
-[[nodiscard]] std::vector<domain::published_curve> published_curves_matching(
-    const hedgr::model::state::series_catalogue* catalogue,
-    std::string_view party, std::string_view filter) {
-    std::vector<domain::published_curve> matching;
-    if (catalogue == nullptr)
-        return matching;
-    for (const auto& curve : catalogue->published_curves) {
-        if (!contains_folded(curve.label, filter))
-            continue;
-        if (!party.empty()) {
-            const auto* row = catalogue->row_of(curve.series_id);
-            if (row != nullptr && row->party_id != party)
-                continue;
-        }
-        matching.push_back(curve);
-    }
-    std::sort(matching.begin(), matching.end(),
-        [](const auto& left, const auto& right) {
-            return left.label < right.label;
-        });
-    return matching;
+[[nodiscard]] const char* kind_badge(std::string_view kind,
+    std::array<char, 16>& buffer) {
+    const auto count = std::min(kind.size(), buffer.size() - 1);
+    for (std::size_t i = 0; i < count; ++i)
+        buffer[i] = static_cast<char>(
+            std::toupper(static_cast<unsigned char>(kind[i])));
+    buffer[count] = '\0';
+    return buffer.data();
 }
 
 }
+
+namespace hedgr::ui::render {
 
 void request_series_window(const render_input& input,
     const hedgr::model::state::session_handle session,
@@ -176,6 +168,42 @@ void request_series_window(const render_input& input,
     request.series_label = std::string{label};
     request.series_span_ns = span_ns;
     input.commands.push(std::move(request));
+}
+
+void request_published_curve_window(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const domain::published_curve& curve) {
+    command request;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::term_structure;
+    request.instance_id = std::string{input.sessions.instance_id(session)};
+    request.account_id = std::string{input.sessions.account_id(session)};
+    request.series_id = curve.series_id;
+    request.series_label = curve.label;
+    request.curve_key = curve.series_id;
+    request.curve_label = curve.label;
+    input.commands.push(std::move(request));
+}
+
+namespace {
+
+/**
+ * @brief Whether the deployment publishes the curve carried by @p series_id.
+ *
+ * A published curve is one object the deployment calibrates, with an instant
+ * per state, rather than a series per rung. The catalogue carries published
+ * curves beside the instruments, so whether a curve instrument is a published
+ * one is a lookup rather than a guess.
+ */
+[[nodiscard]] bool published_under(
+    const hedgr::model::state::series_catalogue* catalogue,
+    std::string_view series_id) {
+    if (catalogue == nullptr)
+        return false;
+    return std::any_of(catalogue->published_curves.begin(),
+        catalogue->published_curves.end(), [&](const auto& curve) {
+            return curve.series_id == series_id;
+        });
 }
 
 void open_curve(const render_input& input,
@@ -223,26 +251,6 @@ void open_curve(const render_input& input,
     input.commands.push(std::move(request));
 }
 
-void request_published_curve_window(const render_input& input,
-    hedgr::model::state::session_handle session,
-    const domain::published_curve& curve) {
-    /*
-     * No members: the window reads the deployment's published curve sets
-     * rather than assembling a ladder from one series per tenor, which is what
-     * an empty member list tells the read to do.
-     */
-    command request;
-    request.kind = command_kind::open_window;
-    request.new_window_kind = domain::window_kind::term_structure;
-    request.instance_id = std::string{input.sessions.instance_id(session)};
-    request.account_id = std::string{input.sessions.account_id(session)};
-    request.series_id = curve.series_id;
-    request.series_label = curve.label;
-    request.curve_key = curve.series_id;
-    request.curve_label = curve.label;
-    input.commands.push(std::move(request));
-}
-
 /**
  * @brief Opens one published volatility surface, by the blueprint it is under.
  *
@@ -267,6 +275,99 @@ void request_vol_surface_window(const render_input& input,
     input.commands.push(std::move(request));
 }
 
+/**
+ * @brief Opens what one instrument row names, by the kind the deployment gave.
+ *
+ * The kind is the deployment's, so this is a dispatch and not a guess: a pair
+ * opens its chart, a curve or a ladder opens the term structure, and a surface
+ * opens the volatility surface published for its pair. A curve the deployment
+ * publishes is opened as a published curve, because the deployment states its
+ * points and its instants and assembling them from ticks would be inventing a
+ * different object.
+ */
+void open_instrument(const render_input& input,
+    hedgr::model::state::session_handle session,
+    const domain::market_instrument& instrument) {
+    const auto instance_id = std::string{input.sessions.instance_id(session)};
+    const auto account_id = std::string{input.sessions.account_id(session)};
+    const auto* catalogue = input.market.catalogue(instance_id, account_id);
+
+    if (instrument.kind == "surface") {
+        const auto pair = currencies_of_instrument(instrument);
+        if (catalogue != nullptr) {
+            for (const auto& surface : catalogue->surfaces) {
+                if (surface.base_currency != pair.base
+                    || surface.quote_currency != pair.quote)
+                    continue;
+                BOOST_LOG_SEV(lg(), ores::logging::info)
+                    << "Surface instrument '" << instrument.name
+                    << "' opens blueprint '" << surface.name << "'";
+                request_vol_surface_window(input, session, surface);
+                return;
+            }
+        }
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Surface instrument '" << instrument.name
+            << "' has no blueprint for " << pair.base << "/" << pair.quote
+            << "; nothing to open";
+        return;
+    }
+
+    const auto* source = opening_source(instrument);
+    if (source == nullptr) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Instrument '" << instrument.name << "' (" << instrument.kind
+            << ") names no source series, so there is nothing to open";
+        return;
+    }
+
+    if (instrument.kind == "pair") {
+        request_series_window(input, session, domain::window_kind::chart,
+            source->series_id, instrument.name);
+        return;
+    }
+
+    if (published_under(catalogue, source->series_id)) {
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Curve instrument '" << instrument.name
+            << "' opens as the published curve under '" << source->series_id
+            << "'";
+        request_published_curve_window(input, session,
+            domain::published_curve{.label = instrument.name,
+                .series_id = source->series_id});
+        return;
+    }
+
+    /*
+     * A catalogue row carries the typed identity and the neighbouring rungs the
+     * curve is gathered from. An instrument whose series the series list does
+     * not carry - an older catalogue, or a series read that failed - still
+     * opens: the window reads the one series the instrument named.
+     */
+    if (const auto* row = catalogue != nullptr
+            ? catalogue->row_of(source->series_id)
+            : nullptr) {
+        open_curve(input, session, *row);
+        return;
+    }
+
+    command request;
+    request.kind = command_kind::open_window;
+    request.new_window_kind = domain::window_kind::term_structure;
+    request.instance_id = instance_id;
+    request.account_id = account_id;
+    request.series_id = source->series_id;
+    request.series_label = instrument.name;
+    request.curve_key = source->series_id;
+    request.curve_label = instrument.name;
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Instrument '" << instrument.name << "' opens as the single series '"
+        << source->series_id << "' (the catalogue does not list it)";
+    input.commands.push(std::move(request));
+}
+
+}
+
 void render_series_browser(hedgr::model::state::window_handle handle,
     const render_input& input, window_ui_state& state,
     hedgr::ui::widget::status_bar& status,
@@ -284,25 +385,28 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         return;
     }
 
-    ImGui::SetNextItemWidth(320.0f);
-    ImGui::InputTextWithHint("##filter", "filter by series, asset, provider or URI",
+    ImGui::SetNextItemWidth(360.0f);
+    ImGui::InputTextWithHint("##filter",
+        "search: currency, pair, curve, provider",
         state.filter.data(), state.filter.size());
     ImGui::SameLine();
     if (ImGui::Button(icon::refresh))
         input.commands.push(command{
             .kind = command_kind::refresh_window,
             .window_id = std::string{input.windows.id(handle)}});
-    ImGui::SetItemTooltip("Read the series catalogue again");
+    ImGui::SetItemTooltip("Read the instrument catalogue again");
     const auto* catalogue = input.market.catalogue(
         input.sessions.instance_id(*session),
         input.sessions.account_id(*session));
-    static const std::vector<domain::market_series_row> none;
-    const auto& rows = catalogue != nullptr ? catalogue->series : none;
+    static const std::vector<domain::market_instrument> none;
+    const auto& instruments =
+        catalogue != nullptr ? catalogue->instruments : none;
 
     /*
      * The providers the catalogue read brought with it. A reference provider
-     * defines an instrument and never ticks, so its rows are hidden unless
-     * VIEW > Reference providers is on; an empty provider list hides nothing.
+     * defines an instrument and never ticks, so hiding it is offered; an
+     * instrument is hidden only when no visible provider is left behind it,
+     * which the view decides.
      */
     if (catalogue != nullptr
         && state.reference_generation != catalogue->generation) {
@@ -318,7 +422,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         : std::span<const std::string>{state.reference_providers};
 
     ImGui::SameLine();
-    ImGui::TextDisabled("%zu in tenant", rows.size());
+    ImGui::TextDisabled("%zu instruments", instruments.size());
 
     const auto catalogue_state = catalogue != nullptr
         ? catalogue->state
@@ -330,17 +434,17 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      */
     namespace cat = hedgr::model::state;
     auto catalogue_facts = session_view_facts(input, handle);
-    catalogue_facts.reading = rows.empty()
+    catalogue_facts.reading = instruments.empty()
         && (catalogue_state == cat::catalogue_state::reading
             || catalogue_state == cat::catalogue_state::unread);
     catalogue_facts.read_failure =
         catalogue_state == cat::catalogue_state::failed
         ? std::string_view{catalogue->error} : std::string_view{};
-    catalogue_facts.has_data = !rows.empty();
+    catalogue_facts.has_data = !instruments.empty();
     catalogue_facts.empty_what =
-        "This deployment holds no market series for this session.";
+        "This deployment groups no market instruments for this session.";
     const auto catalogue_verdict = widget::view_state_of(catalogue_facts);
-    trace_view_state("market data", "catalogue", state, catalogue_verdict);
+    trace_view_state("market data", "instruments", state, catalogue_verdict);
     widget::set_view_foot(foot, catalogue_verdict);
 
     const auto session_party = input.sessions.party_id(*session);
@@ -355,8 +459,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      *
      * There is one party at a time per session: this window follows it rather
      * than filtering by another, and the control at the foot is what changes
-     * it. Filtering by a party the session does not hold would list series
-     * whose ticks then had to be read with a token for another party.
+     * it.
      */
     update_party_list(state.parties, input.sessions.parties(*session),
         session_party, input.sessions.party_name(*session));
@@ -370,23 +473,46 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             draw_foot_with_party(input, *session, status, foot, state));
     };
 
+    const bool rebuilt = update_series_browser_view(state.series_view,
+        {.generation = generation, .filter = filter,
+            .kind = state.market_kind,
+            .provider = state.market_provider,
+            .hidden_providers = hidden_providers},
+        instruments);
     /*
-     * Asset class is the first cut. Choosing IR switches the list from points
-     * to term structures: the per-tenor series of one curve become one row.
+     * Said once per rebuild, so the list in the log is the list on the screen:
+     * a row that seems to belong to another party, or to be missing, is then a
+     * question about this line rather than about the screen.
      */
-    update_asset_classes(state.series_view, generation, rows);
+    if (rebuilt)
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Instruments listed for party '"
+            << (state.market_party_id.empty() ? std::string{"any"}
+                                              : state.market_party_id)
+            << "': " << state.series_view.rows.size() << " of "
+            << instruments.size() << ", kind '"
+            << (state.market_kind.empty() ? std::string{"any"}
+                                          : state.market_kind)
+            << "', filter '" << filter << "'";
+
+    /*
+     * The kind cut. It narrows and never changes what a row is: a curve stays a
+     * curve row under every choice, which is the contradiction the old asset
+     * combo created by switching the list from series to curves.
+     */
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(150.0f);
-    const char* asset_preview = state.market_asset_class.empty()
-        ? "All assets" : state.market_asset_class.c_str();
-    if (ImGui::BeginCombo("##asset-class", asset_preview)) {
-        if (ImGui::Selectable("All assets", state.market_asset_class.empty()))
-            state.market_asset_class.clear();
-        for (const auto at : state.series_view.classes) {
-            const auto& asset_class = rows[at].asset_class;
-            const bool chosen = asset_class == state.market_asset_class;
-            if (ImGui::Selectable(asset_class.c_str(), chosen))
-                state.market_asset_class = asset_class;
+    widget::caption("Kind", "The kind of market instrument to list.");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
+    const char* kind_preview =
+        state.market_kind.empty() ? "All kinds" : state.market_kind.c_str();
+    if (ImGui::BeginCombo("##kind", kind_preview)) {
+        if (ImGui::Selectable("All kinds", state.market_kind.empty()))
+            state.market_kind.clear();
+        for (const auto& kind : state.series_view.kinds) {
+            const bool chosen = kind == state.market_kind;
+            if (ImGui::Selectable(kind.c_str(), chosen))
+                state.market_kind = kind;
             if (chosen)
                 ImGui::SetItemDefaultFocus();
         }
@@ -394,27 +520,26 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     }
 
     /*
-     * The provider cut. The same instrument is listed once per provider and
-     * only a data vendor's series tick, so this narrows the list to one.
+     * The provider cut. One instrument may be quoted by several providers, and
+     * only some of them tick, so this narrows the list to those with one.
      */
-    update_providers(state.series_view, generation, rows);
-    const auto hidden_provider = [&](std::string_view code) {
-        return std::find(hidden_providers.begin(), hidden_providers.end(),
-                   code)
-            != hidden_providers.end();
-    };
-    if (hidden_provider(state.market_provider))
+    if (std::find(state.series_view.providers.begin(),
+            state.series_view.providers.end(), state.market_provider)
+        == state.series_view.providers.end())
         state.market_provider.clear();
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(130.0f);
+    widget::caption("Providers", "The provider whose instruments are listed.");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(140.0f);
     const char* provider_preview = state.market_provider.empty()
         ? "All providers" : state.market_provider.c_str();
     if (ImGui::BeginCombo("##provider", provider_preview)) {
         if (ImGui::Selectable("All providers", state.market_provider.empty()))
             state.market_provider.clear();
-        for (const auto at : state.series_view.providers) {
-            const auto& provider = rows[at].provider_code;
-            if (hidden_provider(provider))
+        for (const auto& provider : state.series_view.providers) {
+            if (std::find(hidden_providers.begin(), hidden_providers.end(),
+                    provider)
+                != hidden_providers.end())
                 continue;
             const bool chosen = provider == state.market_provider;
             if (ImGui::Selectable(provider.c_str(), chosen))
@@ -424,7 +549,7 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
         ImGui::EndCombo();
     }
-    ImGui::SetItemTooltip("The provider whose series this window lists.");
+    ImGui::SetItemTooltip("The provider whose instruments this window lists.");
 
     ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (ImGui::Button("Cross rates")) {
@@ -508,7 +633,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
     }
 
-    if (catalogue_verdict.state != widget::view_state::none && rows.empty()) {
+    if (catalogue_verdict.state != widget::view_state::none
+        && instruments.empty()) {
         widget::draw_view_state_body(status, foot, catalogue_verdict);
         draw_foot();
         ImGui::PopID();
@@ -522,8 +648,11 @@ void render_series_browser(hedgr::model::state::window_handle handle,
      */
     const auto draw_no_match = [&](std::string_view what) {
         ImGui::SameLine();
-        if (ImGui::SmallButton("Clear filters"))
+        if (ImGui::SmallButton("Clear filters")) {
             std::fill(state.filter.begin(), state.filter.end(), '\0');
+            state.market_kind.clear();
+            state.market_provider.clear();
+        }
         widget::draw_view_state_body(status, foot,
             {widget::view_state::no_data, widget::view_words::empty, what});
         draw_foot();
@@ -532,10 +661,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
 
     /*
      * The deployment's volatility surfaces. A surface is published under a
-     * blueprint rather than as a series, so it has no row in the list below:
-     * the chooser is its own control, and opening one draws it. It is offered
-     * whatever the asset filter says, because a surface is not an asset class
-     * and hiding it behind one would make it unfindable.
+     * blueprint rather than as a series, and the catalogue does not yet report
+     * one as an instrument, so the chooser is its own control. It is offered
+     * whatever the facets say, because hiding a surface behind one would make
+     * it unfindable.
      */
     if (catalogue != nullptr && !catalogue->surfaces.empty()) {
         ImGui::AlignTextToFramePadding();
@@ -573,246 +702,10 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         }
     }
 
-    if (model::domain::market_asset_of(state.market_asset_class)
-        == model::domain::market_asset::ir) {
-        const bool rebuilt = update_series_browser_view(state.series_view,
-            {.generation = generation, .filter = filter,
-                .asset_class = state.market_asset_class,
-                .party = state.market_party_id,
-                .provider = state.market_provider,
-                .hidden_providers = hidden_providers},
-            rows);
-        const auto& curves = state.series_view.rows;
-        /*
-         * Said once per rebuild, so the party a list was built for is in the
-         * log beside the rows it produced. A list of curves that seems to hold
-         * another party's data is then a question about this line rather than
-         * about the screen.
-         */
-        if (rebuilt)
-            BOOST_LOG_SEV(lg(), ores::logging::info)
-                << "Curves listed for party '"
-                << (state.market_party_id.empty() ? std::string{"any"}
-                                                  : state.market_party_id)
-                << "': " << curves.size() << " of " << rows.size()
-                << " series, filter '" << filter << "'";
-        /*
-         * The deployment's own curves. A published curve is one calibrated
-         * object rather than a tenor per series, so it is not a catalogue row:
-         * the list carries it beside the tick curves, and opening it reads the
-         * deployment's curve sets instead of assembling ticks.
-         */
-        const auto* read_catalogue = catalogue;
-        const auto published = published_curves_matching(read_catalogue,
-            state.market_party_id, filter);
-        if (curves.empty() && published.empty()) {
-            draw_no_match("No curves match the filters.");
-            return;
-        }
-
-        ImGui::AlignTextToFramePadding();
-        widget::caption("Curve");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(520.0f);
-        const char* preview = state.market_selected_curve_label.empty()
-            ? "Select a term structure..." 
-            : state.market_selected_curve_label.c_str();
-        if (ImGui::BeginCombo("##curve-combo", preview,
-                ImGuiComboFlags_HeightLarge)) {
-            for (const auto at : curves) {
-                const auto& curve = rows[at];
-                const auto& label = curve_label_of(curve);
-                ImGui::PushID(curve.id.c_str());
-                const bool chosen = curve.id
-                    == state.market_selected_curve_key;
-                if (ImGui::Selectable("##curve-row", chosen)) {
-                    state.market_selected_curve_key = curve.id;
-                    state.market_selected_curve_label = label;
-                    open_curve(input, *session, curve);
-                }
-                const float row_y = ImGui::GetItemRectMin().y;
-                const auto pair =
-                    currencies_of_series(input, *session, curve.id, label);
-                request_flags(input, *session, pair);
-                const float label_end = draw_series_row(label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
-                ImGui::SetCursorScreenPos(ImVec2(label_end + 12.0f, row_y));
-                /*
-                 * The provider, in the combo as well as in the table: two
-                 * curves of one currency can share a name - the same ladder
-                 * quoted by two desks - and the provider is what tells them
-                 * apart without opening either.
-                 */
-                ImGui::TextDisabled("\u00b7 %s", curve.provider_code.c_str());
-                if (chosen)
-                    ImGui::SetItemDefaultFocus();
-                ImGui::PopID();
-            }
-            for (const auto& curve : published) {
-                ImGui::PushID(curve.series_id.c_str());
-                if (ImGui::Selectable("##published-row"))
-                    request_published_curve_window(input, *session, curve);
-                const float row_y = ImGui::GetItemRectMin().y;
-                const auto pair = currencies_of_series(input, *session,
-                    curve.series_id, curve.label);
-                request_flags(input, *session, pair);
-                const float label_end = draw_series_row(curve.label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
-                ImGui::SetCursorScreenPos(ImVec2(label_end + 12.0f, row_y));
-                ImGui::TextDisabled("%u pillars, published",
-                    curve.points);
-                ImGui::PopID();
-            }
-            ImGui::EndCombo();
-        }
-
-        constexpr ImGuiTableFlags table_flags = ImGuiTableFlags_RowBg
-            | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY
-            | ImGuiTableFlags_SizingStretchProp;
-        const float table_height = std::max(120.0f,
-            ImGui::GetContentRegionAvail().y
-                - widget::status_foot_height(status)
-                - ImGui::GetTextLineHeightWithSpacing() * 2.0f);
-        if (ImGui::BeginTable("##curves", 3, table_flags,
-                ImVec2(0.0f, table_height))) {
-            ImGui::TableSetupColumn("Curve",
-                ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Tenors",
-                ImGuiTableColumnFlags_WidthFixed, 70.0f);
-            ImGui::TableSetupColumn("Provider",
-                ImGuiTableColumnFlags_WidthFixed, 110.0f);
-            ImGui::TableHeadersRow();
-            for (const auto at : curves) {
-                const auto& curve = rows[at];
-                const auto& label = curve_label_of(curve);
-                const auto pair =
-                    currencies_of_series(input, *session, curve.id, label);
-                request_flags(input, *session, pair);
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::PushID(curve.id.c_str());
-                const bool chosen = curve.id
-                    == state.market_selected_curve_key;
-                ImGui::Selectable("##curve", chosen,
-                    ImGuiSelectableFlags_SpanAllColumns
-                        | ImGuiSelectableFlags_AllowDoubleClick);
-                draw_series_row(label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
-                if (ImGui::IsItemHovered()
-                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    state.market_selected_curve_key = curve.id;
-                    state.market_selected_curve_label = label;
-                    open_curve(input, *session, curve);
-                }
-                ImGui::SetItemTooltip("%s", curve.id.c_str());
-                ImGui::PopID();
-                ImGui::TableNextColumn();
-                ImGui::TextDisabled("%zu", std::size_t{1});
-                ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", curve.provider_code.c_str());
-            }
-            for (const auto& curve : published) {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::PushID(curve.series_id.c_str());
-                ImGui::Selectable("##published", false,
-                    ImGuiSelectableFlags_SpanAllColumns
-                        | ImGuiSelectableFlags_AllowDoubleClick);
-                const auto pair = currencies_of_series(input, *session,
-                    curve.series_id, curve.label);
-                draw_series_row(curve.label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
-                if (ImGui::IsItemHovered()
-                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    request_published_curve_window(input, *session, curve);
-                ImGui::SetItemTooltip(
-                    "%s, published by the deployment: %u pillars",
-                    curve.series_id.c_str(), curve.points);
-                ImGui::PopID();
-                ImGui::TableNextColumn();
-                ImGui::TextDisabled("%u", curve.points);
-                ImGui::TableNextColumn();
-                ImGui::TextDisabled("published");
-            }
-            ImGui::EndTable();
-        }
-
-        if (!published.empty())
-            ImGui::TextDisabled(
-                "Double-click a curve to open its term structure; a curve the "
-                "deployment publishes is read as the deployment stated it.");
-        else
-            ImGui::TextDisabled(
-                "Double-click a curve to open its term structure.");
-        draw_foot();
-        ImGui::PopID();
-        return;
-    }
-
-    /*
-     * The filtered series, in one vector so the combobox and the table list
-     * exactly the same rows. The combobox is the quick way in; the table is the
-     * overview, and a row in either opens the same chart.
-     */
-    update_series_browser_view(state.series_view,
-        {.generation = generation, .filter = filter,
-            .asset_class = state.market_asset_class,
-            .party = state.market_party_id,
-            .provider = state.market_provider,
-            .hidden_providers = hidden_providers},
-        rows);
     const auto& visible = state.series_view.rows;
-
     if (visible.empty()) {
-        draw_no_match("No series match the filters.");
+        draw_no_match("No instruments match the filters.");
         return;
-    }
-
-    ImGui::AlignTextToFramePadding();
-    widget::caption("Series");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(420.0f);
-    const char* preview = state.market_selected_series_label.empty()
-        ? "Select a series..."
-        : state.market_selected_series_label.c_str();
-    if (ImGui::BeginCombo("##series-combo", preview,
-            ImGuiComboFlags_HeightLarge)) {
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(visible.size()));
-        /* The chosen row is always drawn, so opening the combo scrolls to it. */
-        for (std::size_t i = 0; i < visible.size(); ++i) {
-            if (rows[visible[i]].id == state.market_selected_series_id)
-                clipper.IncludeItemByIndex(static_cast<int>(i));
-        }
-        while (clipper.Step()) {
-            for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
-                ++index) {
-                const auto* row = &rows[visible[static_cast<std::size_t>(index)]];
-                ImGui::PushID(row->id.c_str());
-                const bool chosen =
-                    row->id == state.market_selected_series_id;
-                if (ImGui::Selectable("##combo-row", chosen)) {
-                    state.market_selected_series_id = row->id;
-                    state.market_selected_series_label = row->label;
-                    request_series_window(input, *session, domain::window_kind::chart,
-                        row->id, row->label);
-                }
-                const auto pair =
-                    currencies_of_series(input, *session, row->id, row->label);
-                request_flags(input, *session, pair);
-                draw_series_row(row->label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
-                if (chosen)
-                    ImGui::SetItemDefaultFocus();
-                ImGui::PopID();
-            }
-        }
-        ImGui::EndCombo();
     }
 
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_RowBg
@@ -823,12 +716,16 @@ void render_series_browser(hedgr::model::state::window_handle handle,
             - widget::status_foot_height(status)
             - ImGui::GetFrameHeightWithSpacing(),
         120.0f);
-    if (ImGui::BeginTable("##series", 4, flags, ImVec2(0.0f, height))) {
-        ImGui::TableSetupColumn("Series", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Asset", ImGuiTableColumnFlags_WidthFixed,
-            80.0f);
-        ImGui::TableSetupColumn("Provider", ImGuiTableColumnFlags_WidthFixed,
-            110.0f);
+    if (ImGui::BeginTable("##instruments", 6, flags, ImVec2(0.0f, height))) {
+        ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed,
+            74.0f);
+        ImGui::TableSetupColumn("Instrument",
+            ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Providers", ImGuiTableColumnFlags_WidthFixed,
+            130.0f);
+        ImGui::TableSetupColumn("Shape", ImGuiTableColumnFlags_WidthFixed,
+            120.0f);
+        ImGui::TableSetupColumn("Age", ImGuiTableColumnFlags_WidthFixed, 70.0f);
         ImGui::TableSetupColumn("##mini", ImGuiTableColumnFlags_WidthFixed
                 | ImGuiTableColumnFlags_NoHeaderLabel,
             ImGui::GetFrameHeight());
@@ -840,41 +737,83 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         while (clipper.Step()) {
             for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
                 ++index) {
-                const auto* row = &rows[visible[static_cast<std::size_t>(index)]];
+                const auto* instrument =
+                    &instruments[visible[static_cast<std::size_t>(index)]];
+                const auto pair = currencies_of_instrument(*instrument);
+                const auto* source = opening_source(*instrument);
+                /*
+                 * The flags are looked up for every visible row, so the pair is
+                 * read from the instrument's own fields rather than parsed from
+                 * a label: no allocation on the frame path, and no reading of a
+                 * name that could disagree with the deployment. Asking for the
+                 * image is what makes the next frame able to draw it.
+                 */
+                request_flags(input, *session, pair);
+                const auto base_texture =
+                    image_texture(input, *session, pair.base);
+                const auto quote_texture =
+                    image_texture(input, *session, pair.quote);
+
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::PushID(row->id.c_str());
-                ImGui::Selectable("##row", false,
+                ImGui::PushID(instrument->instrument_id.c_str());
+                std::array<char, 16> badge{};
+                ImGui::TextDisabled("%s", kind_badge(instrument->kind, badge));
+                ImGui::TableNextColumn();
+                ImGui::Selectable("##instrument", false,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick
                         | ImGuiSelectableFlags_AllowOverlap);
-                const auto pair =
-                    currencies_of_series(input, *session, row->id, row->label);
-                request_flags(input, *session, pair);
-                draw_series_row(row->label, 0.0f,
-                    image_texture(input, *session, pair.base),
-                    image_texture(input, *session, pair.quote));
+                draw_series_row(instrument->name, 0.0f, base_texture,
+                    quote_texture);
                 if (ImGui::IsItemHovered()
-                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                    state.market_selected_series_id = row->id;
-                    state.market_selected_series_label = row->label;
-                    request_series_window(input, *session, domain::window_kind::chart,
-                        row->id, row->label);
-                }
-                ImGui::SetItemTooltip("%s", row->uri.c_str());
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    open_instrument(input, *session, *instrument);
+                if (instrument->stale)
+                    ImGui::SetItemTooltip(
+                        "%s\n%s \u00b7 %s\nEvery source behind it is stale.",
+                        instrument->instrument_id.c_str(),
+                        instrument->instrument_type.c_str(),
+                        instrument->quote_type.c_str());
+                else
+                    ImGui::SetItemTooltip("%s\n%s \u00b7 %s",
+                        instrument->instrument_id.c_str(),
+                        instrument->instrument_type.c_str(),
+                        instrument->quote_type.c_str());
 
-                ImGui::PopID();
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", row->asset_class.c_str());
+                for (std::size_t i = 0; i < instrument->sources.size(); ++i)
+                    ImGui::TextDisabled("%s%s", i == 0 ? "" : ", ",
+                        instrument->sources[i].provider_code.c_str());
+
                 ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", row->provider_code.c_str());
-                ImGui::TableNextColumn();
-                ImGui::PushID(row->id.c_str());
-                if (mini_plot_button()) {
-                    request_series_window(input, *session,
-                        domain::window_kind::mini_plot, row->id, row->label,
-                        chart_span_ns(input.market_view.chart_span));
+                if (instrument->axes.empty())
+                    ImGui::TextDisabled("%s", "-");
+                for (std::size_t i = 0; i < instrument->axes.size(); ++i) {
+                    const auto& axis = instrument->axes[i];
+                    ImGui::TextDisabled("%s%zu %s", i == 0 ? "" : " \u00b7 ",
+                        axis.values.size(), axis.field.c_str());
                 }
+
+                ImGui::TableNextColumn();
+                /*
+                 * The age is the deployment's own count for the source the row
+                 * opens through, not this client's subtraction of two clocks.
+                 */
+                if (instrument->stale)
+                    ImGui::TextDisabled("stale");
+                else if (source != nullptr && source->age_seconds != 0)
+                    ImGui::TextDisabled("%llds",
+                        static_cast<long long>(source->age_seconds));
+                else
+                    ImGui::TextDisabled("%s", "-");
+
+                ImGui::TableNextColumn();
+                if (source != nullptr && mini_plot_button("Open a mini plot"))
+                    request_series_window(input, *session,
+                        domain::window_kind::mini_plot, source->series_id,
+                        instrument->name,
+                        chart_span_ns(input.market_view.chart_span));
                 ImGui::PopID();
             }
         }
@@ -882,7 +821,8 @@ void render_series_browser(hedgr::model::state::window_handle handle,
     }
 
     ImGui::TextDisabled(
-        "Double-click a series to plot it. Each plot keeps its own window.");
+        "Double-click an instrument to open it: a curve opens its term "
+        "structure, a pair its chart, a surface its volatility.");
     draw_foot();
     ImGui::PopID();
 }

@@ -394,6 +394,15 @@ void instance_manager::handle(command::command& cmd) {
     case command::command_kind::load_vol_surface:
         read_service_.load_vol_surface(cmd);
         break;
+    case command::command_kind::configure_rate_ladder:
+        /*
+         * The window's state is written first: the read is filed under the
+         * ladder the window now shows, and a refresh that arrives while it is
+         * out reads the same one rather than the ladder it replaced.
+         */
+        if (window_service_.configure_rate_ladder(cmd))
+            read_service_.load_rate_ladder(cmd);
+        break;
     case command::command_kind::disconnect_session:
         complete_session(session_service_.disconnect(cmd));
         break;

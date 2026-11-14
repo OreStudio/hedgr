@@ -81,77 +81,47 @@ namespace domain = hedgr::model::domain;
 }
 
 /**
- * @brief Whether one of the currencies a series names contains @p filter.
+ * @brief Whether the text @p filter names something about @p instrument.
  *
- * A currency is what a desk filters by: "AUD" is the IR curves quoted in AUD and
- * the FX pairs quoted in AUD on either side. The currencies come from the typed
- * identity - the subject and the quote field - so a pair is found from its quote
- * as well as from its base, and an interest-rate series is found at all. The
- * label is not consulted: it names the currency for a person, and the identity
- * is what the deployment stated.
+ * The deployment's own facts and nothing read off them: the name it gave the
+ * instrument, its currencies, its instrument and quote types, and the providers
+ * behind it. A person types `aud` expecting both the AUD rates and every pair
+ * quoted in AUD from either side, and the name of a pair already carries both
+ * sides; the currency fields are consulted beside it so an instrument whose
+ * name is a curve id is still found by its currency.
  */
-[[nodiscard]] bool names_currency(const domain::market_series_row& row,
+[[nodiscard]] bool names_text(const domain::market_instrument& instrument,
     std::string_view filter) {
-    if (filter.empty())
+    if (contains_ci(instrument.name, filter)
+        || contains_ci(instrument.currency, filter)
+        || contains_ci(instrument.base_currency, filter)
+        || contains_ci(instrument.quote_currency, filter)
+        || contains_ci(instrument.instrument_type, filter)
+        || contains_ci(instrument.quote_type, filter))
         return true;
-    if (contains_ci(row.identity.scope, filter))
-        return true;
-    for (const auto& field : row.identity.fields) {
-        if (field.name == "ccy" && contains_ci(field.text, filter))
+    for (const auto& source : instrument.sources)
+        if (contains_ci(source.provider_code, filter))
             return true;
-    }
     return false;
-}
-
-[[nodiscard]] bool is_ir(const domain::market_series_row& row) {
-    if (row.asset != domain::market_asset::unknown)
-        return row.asset == domain::market_asset::ir;
-    return row.asset_class == "IR";
-}
-
-[[nodiscard]] bool listed_as_curve(const domain::market_series_row& row,
-    const series_browser_query& query) {
-    return is_ir(row)
-        && (query.party.empty() || row.party_id == query.party)
-        && (query.provider.empty() || row.provider_code == query.provider)
-        && (contains_ci(row.label, query.filter)
-            || contains_ci(row.uri, query.filter)
-            || names_currency(row, query.filter));
-}
-
-
-[[nodiscard]] bool listed_as_series(const domain::market_series_row& row,
-    const series_browser_query& query) {
-    return (query.asset_class.empty() || row.asset_class == query.asset_class)
-        && (query.party.empty() || row.party_id == query.party)
-        && (query.provider.empty() || row.provider_code == query.provider)
-        && (contains_ci(row.label, query.filter)
-            || contains_ci(row.asset_class, query.filter)
-            || contains_ci(row.uri, query.filter)
-            || contains_ci(row.provider_code, query.filter)
-            || names_currency(row, query.filter));
 }
 
 }
 
 bool update_series_browser_view(series_browser_view& view,
     const series_browser_query& query,
-    const std::vector<domain::market_series_row>& catalogue) {
+    const std::vector<domain::market_instrument>& instruments) {
     const bool hidden_changed =
         view.hidden_providers.size() != query.hidden_providers.size()
         || !std::equal(view.hidden_providers.begin(),
             view.hidden_providers.end(), query.hidden_providers.begin());
     if (view.builds != 0 && view.generation == query.generation
-        && view.filter == query.filter
-        && view.asset_class == query.asset_class
-        && view.party == query.party
+        && view.filter == query.filter && view.kind == query.kind
         && view.provider == query.provider && !hidden_changed)
         return false;
     ++view.builds;
     view.generation = query.generation;
     view.filter = query.filter;
-    view.asset_class = query.asset_class;
-    view.party = query.party;
+    view.kind = query.kind;
     view.provider = query.provider;
     view.hidden_providers.assign(query.hidden_providers.begin(),
         query.hidden_providers.end());
@@ -161,107 +131,67 @@ bool update_series_browser_view(series_browser_view& view,
                    query.hidden_providers.end(), code)
             != query.hidden_providers.end();
     };
-    const auto wanted = domain::market_asset_of(query.asset_class);
-    const bool curves = wanted != domain::market_asset::unknown
-        ? wanted == domain::market_asset::ir
-        : query.asset_class == "IR";
+    /*
+     * An instrument is listed while it still has a provider to show. Hiding a
+     * reference provider must not hide a curve a data vendor also quotes, so
+     * the test is whether anything visible is left, not whether anything is
+     * hidden.
+     */
+    const auto sourced = [&](const domain::market_instrument& instrument) {
+        if (instrument.sources.empty())
+            return true;
+        return std::any_of(instrument.sources.begin(),
+            instrument.sources.end(), [&](const auto& source) {
+                return !hidden(source.provider_code);
+            });
+    };
+    const auto names_provider = [](const domain::market_instrument& instrument,
+                                    std::string_view code) {
+        return std::any_of(instrument.sources.begin(),
+            instrument.sources.end(), [&](const auto& source) {
+                return source.provider_code == code;
+            });
+    };
+
     view.rows.clear();
-    std::unordered_set<std::string> listed;
-    for (std::size_t i = 0; i < catalogue.size(); ++i) {
-        if (hidden(catalogue[i].provider_code))
+    view.kinds.clear();
+    view.providers.clear();
+    for (std::size_t i = 0; i < instruments.size(); ++i) {
+        const auto& instrument = instruments[i];
+        if (!query.kind.empty() && instrument.kind != query.kind)
             continue;
-        if (!curves) {
-            if (listed_as_series(catalogue[i], query))
-                view.rows.push_back(static_cast<std::uint32_t>(i));
+        if (!query.provider.empty()
+            && !names_provider(instrument, query.provider))
             continue;
-        }
-        if (!listed_as_curve(catalogue[i], query))
+        if (!sourced(instrument))
             continue;
-        /*
-         * One row per curve, not per series: a curve published several times is
-         * several series with one identity - five `AUD-AONIA` rows under one
-         * name - and a person cannot tell five identical rows are one curve.
-         * A row whose identity the catalogue could not parse has nothing to be
-         * grouped by, so it stays a row of its own rather than collapsing into
-         * its neighbours.
-         */
-        const auto& row = catalogue[i];
-        if (row.identity.empty()) {
-            view.rows.push_back(static_cast<std::uint32_t>(i));
-            continue;
-        }
-        std::string key = row.asset_class;
-        key += '\x1f';
-        key += row.identity.scope;
-        key += '\x1f';
-        key += row.identity.instrument_type;
-        key += '\x1f';
-        key += row.identity.quote_type;
-        key += '\x1f';
-        key += row.party_id;
-        key += '\x1f';
-        key += row.provider_code;
-        if (!listed.insert(std::move(key)).second)
+        if (!names_text(instrument, query.filter))
             continue;
         view.rows.push_back(static_cast<std::uint32_t>(i));
     }
-    std::stable_sort(view.rows.begin(), view.rows.end(),
-        [&](std::uint32_t a, std::uint32_t b) {
-            const auto& left = catalogue[a];
-            const auto& right = catalogue[b];
-            const auto a_rank = tenor_rank(left.tenor);
-            const auto b_rank = tenor_rank(right.tenor);
-            if (a_rank != b_rank)
-                return a_rank < b_rank;
-            return curves ? curve_label_of(left) < curve_label_of(right)
-                          : left.label < right.label;
-        });
-    return true;
-}
 
-bool update_asset_classes(series_browser_view& view, std::uint64_t generation,
-    const std::vector<domain::market_series_row>& catalogue) {
-    if (view.class_builds != 0 && view.classes_generation == generation)
-        return false;
-    ++view.class_builds;
-    view.classes_generation = generation;
-    view.classes.clear();
-    for (std::size_t i = 0; i < catalogue.size(); ++i) {
-        if (catalogue[i].asset_class.empty())
-            continue;
-        view.classes.push_back(static_cast<std::uint32_t>(i));
+    /*
+     * The facets come from the rows, not the other way round: a kind with no
+     * instrument is not offered, and every provider listed is one a row can be
+     * narrowed to. The kinds keep the deployment's order, which is why they
+     * need no ranking of their own; the providers are sorted so the combo reads
+     * alphabetically whatever order the instruments arrived in.
+     */
+    view.kinds.clear();
+    for (const auto at : view.rows) {
+        const auto& kind = instruments[at].kind;
+        if (std::find(view.kinds.begin(), view.kinds.end(), kind)
+            == view.kinds.end())
+            view.kinds.push_back(kind);
     }
-    std::sort(view.classes.begin(), view.classes.end(),
-        [&](std::uint32_t a, std::uint32_t b) {
-            return catalogue[a].asset_class < catalogue[b].asset_class;
-        });
-    view.classes.erase(std::unique(view.classes.begin(), view.classes.end(),
-        [&](std::uint32_t a, std::uint32_t b) {
-            return catalogue[a].asset_class == catalogue[b].asset_class;
-        }), view.classes.end());
-    return true;
-}
-
-bool update_providers(series_browser_view& view, std::uint64_t generation,
-    const std::vector<domain::market_series_row>& catalogue) {
-    if (view.provider_builds != 0 && view.providers_generation == generation)
-        return false;
-    ++view.provider_builds;
-    view.providers_generation = generation;
     view.providers.clear();
-    for (std::size_t i = 0; i < catalogue.size(); ++i) {
-        if (catalogue[i].provider_code.empty())
-            continue;
-        view.providers.push_back(static_cast<std::uint32_t>(i));
-    }
-    std::sort(view.providers.begin(), view.providers.end(),
-        [&](std::uint32_t a, std::uint32_t b) {
-            return catalogue[a].provider_code < catalogue[b].provider_code;
-        });
-    view.providers.erase(std::unique(view.providers.begin(),
-        view.providers.end(), [&](std::uint32_t a, std::uint32_t b) {
-            return catalogue[a].provider_code == catalogue[b].provider_code;
-        }), view.providers.end());
+    for (const auto at : view.rows)
+        for (const auto& source : instruments[at].sources)
+            if (std::find(view.providers.begin(), view.providers.end(),
+                    source.provider_code)
+                == view.providers.end())
+                view.providers.push_back(source.provider_code);
+    std::sort(view.providers.begin(), view.providers.end());
     return true;
 }
 

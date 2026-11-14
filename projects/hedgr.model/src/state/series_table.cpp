@@ -164,6 +164,15 @@ void series_table::apply_surface_blueprints(std::string_view instance_id,
     catalogue.generation = ++counter_;
 }
 
+void series_table::apply_instruments(std::string_view instance_id,
+    std::string_view account_id,
+    std::vector<domain::market_instrument> instruments, std::string error) {
+    auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;
+    catalogue.instruments = std::move(instruments);
+    catalogue.instruments_error = std::move(error);
+    catalogue.generation = ++counter_;
+}
+
 void series_table::fail_catalogue(std::string_view instance_id,
     std::string_view account_id, std::string message) {
     auto& catalogue = slot_in(scopes_, {instance_id, account_id}).catalogue;

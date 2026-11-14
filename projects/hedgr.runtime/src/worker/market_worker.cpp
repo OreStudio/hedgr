@@ -118,10 +118,10 @@ market_read_report report_market_read(const read_request& request,
                 count, code);
         }
         return {false, std::format("Market catalogue for '{}' holds {} series "
-                                   "of {} parties and {} published curves; by "
-                                   "provider: {}",
+                                   "of {} parties, {} instruments and {} "
+                                   "published curves; by provider: {}",
             instance, fact.series.size(), parties.size(),
-            fact.published_curves.size(), providers)};
+            fact.instruments.size(), fact.published_curves.size(), providers)};
     }
 
     const auto* history = std::get_if<market_history_request>(&request);
@@ -173,6 +173,31 @@ void run_market_read(transport::session_link& link, const read_request& request,
     event::event& answer) {
     const auto instance = answer.instance_id;
     const bool catalogue = std::holds_alternative<catalogue_request>(request);
+
+    /*
+     * A ladder is one object and one read, and it has nothing to do with the
+     * tick silence a chart's read observes: a ladder that fails is a fact the
+     * window shows, not a series that has gone quiet.
+     */
+    if (const auto* ladder = std::get_if<rate_ladder_request>(&request)) {
+        if (const auto read = link.rate_ladder(ladder->currency,
+                ladder->instrument_type, ladder->forward_start, {}, 0);
+            read) {
+            answer.ladder = *read;
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Rate ladder for " << ladder->currency << " "
+                << ladder->instrument_type << " on '" << instance << "': "
+                << read->rungs.size() << " rungs from "
+                << read->provider_count << " providers";
+        } else {
+            answer.message = describe(read.error());
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The rate ladder read for '" << ladder->currency << " "
+                << ladder->instrument_type << "' failed: " << answer.message;
+        }
+        answer.observed_at_ns = now_ns();
+        return;
+    }
 
     if (!catalogue && silence().silent(instance, now_ns())) {
         answer.message = unanswered_text("not asked again for a few seconds");
@@ -259,6 +284,21 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The published curve read failed: "
                     << answer.published_curves_error;
+            }
+
+            /*
+             * The instruments the deployment groups those series into: the
+             * rows the market window draws. Read whole rather than filtered,
+             * because the window shows the whole catalogue and narrows it in
+             * place; a failed read leaves the list empty and says why, which is
+             * a different thing from a deployment that holds none.
+             */
+            if (auto instruments = link.list_instruments({}); instruments) {
+                answer.instruments = std::move(*instruments);
+            } else {
+                answer.instruments_error = describe(instruments.error());
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The instrument read failed: " << answer.instruments_error;
             }
         } else {
             answer.message = describe(read.error());

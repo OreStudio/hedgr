@@ -101,6 +101,8 @@ std::string_view to_string(event_kind value) noexcept {
         return "link_restored";
     case event_kind::vol_surface:
         return "vol_surface";
+    case event_kind::rate_ladder:
+        return "rate_ladder";
     }
     return "unknown";
 }
