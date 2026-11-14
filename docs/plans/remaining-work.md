@@ -155,7 +155,11 @@ step is what the next one draws.
 4. **The menu by asset class**, with Search across kinds. `Rates` exists as the
    first entry; `FX`, `Vol`, `Credit` and `Search` are still to come.
 5. **The FX montage** (`get_fx_montage`) and the surface grid and smile
-   (`get_curve_analytics`).
+   (`get_curve_analytics`). The montage **read is done and the window is
+   deferred**: `prime_origin` holds 26 FX pairs with no observations at all, so
+   every base answers "No provider quotes a cross of … at this as-of". Building
+   the screen now would test its empty state and nothing else. See
+   `docs/verification/fx-montage.md` for what it needs when there is data.
 
 Done ahead of its step: the vol surface is drawn in three dimensions through
 **ImPlot3D**, which is a new dependency (`implot3d` in `vcpkg.json`). The
