@@ -46,6 +46,10 @@
 #include <string_view>
 #include "ores.nats/service/nats_connect_error.hpp"
 #include "ores.nats/service/session_expired_error.hpp"
+#include "ores.marketdata.api/messaging/fx_forward_operation_protocol.hpp"
+#include "ores.marketdata.api/messaging/fx_vol_surface_operation_protocol.hpp"
+#include "ores.nats/domain/wire_codec.hpp"
+#include "ores.nats/domain/wire_format.hpp"
 
 using hedgr::session::transport::make_subject;
 using hedgr::session::transport::session_client;
@@ -1265,5 +1269,155 @@ TEST_CASE("live montage: what a base currency's crosses answer",
         }
         std::fflush(stdout);
     }
+    session.disconnect();
+}
+
+/**
+ * @brief Why a deployment publishes no surface: asked of the deployment itself.
+ *
+ * Calibration and publication are two calls, and publication is gated: a call
+ * that names no approved request *raises* one for a decider rather than
+ * publishing. So "the deployment should be generating surfaces" is a question
+ * with three possible answers - the calibration refused, the request was raised
+ * and nobody decided it, or the publish happened and the read is asking the
+ * wrong question - and only the deployment can say which.
+ *
+ * This asks, and prints what each call answered. Nothing is approved here: the
+ * probe raises at most one pending request and reports its identifier.
+ *
+ *     HEDGR_LIVE_URL=... hedgr.session.tests "[.live-calibrate]"
+ */
+TEST_CASE("live calibrate: what the deployment says about publishing a surface",
+    "[.live-calibrate]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto blueprints = session.fx_vol_surface_blueprints(10);
+    REQUIRE(blueprints.has_value());
+    REQUIRE_FALSE(blueprints->empty());
+    const auto& blueprint = blueprints->front();
+    std::printf("blueprint '%s' (%s)\n", blueprint.name.c_str(),
+        blueprint.id.c_str());
+
+    const auto as_of = std::chrono::system_clock::now();
+    const ores::nats::wire_codec codec{ores::nats::wire_format::msgpack};
+    const auto as_body = [](const auto& bytes) {
+        return std::string{reinterpret_cast<const char*>(bytes.data()),
+            bytes.size()};
+    };
+    const auto decode = [&](auto tag, const std::string& body) {
+        using response = typename decltype(tag)::type;
+        const auto span = std::span<const std::byte>{
+            reinterpret_cast<const std::byte*>(body.data()), body.size()};
+        const auto answer = codec.decode<response>(span);
+        if (!answer) {
+            std::printf("  could not decode the answer: %s\n",
+                answer.error().what());
+            return std::optional<response>{};
+        }
+        return std::optional<response>{*answer};
+    };
+
+    /* 1. Calibrate: a candidate, or the reason the recipe cannot be read. */
+    using calibrate_request =
+        ores::marketdata::messaging::calibrate_fx_vol_surface_request;
+    using calibrate_response =
+        ores::marketdata::messaging::calibrate_fx_vol_surface_response;
+    calibrate_request cal;
+    cal.blueprint_id = blueprint.id;
+    cal.as_of = as_of;
+    const auto cal_answer = session.authenticated_request(
+        calibrate_request::nats_subject, as_body(codec.encode(cal)));
+    if (!cal_answer) {
+        std::printf("calibrate -> %s (%s)\n", cal_answer.error().message.c_str(),
+            cal_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<calibrate_response>{}, *cal_answer)) {
+        std::printf("calibrate -> success=%d '%s' rho=%.4f eta=%.4f "
+                    "converged=%d max_err=%.2e violations=%zu missing=%zu\n",
+            decoded->success ? 1 : 0, decoded->message.c_str(), decoded->rho,
+            decoded->eta, decoded->converged ? 1 : 0,
+            decoded->max_abs_error, decoded->violations.size(),
+            decoded->missing.size());
+        for (const auto& missing : decoded->missing)
+            std::printf("  missing %s: %zu series read\n",
+                missing.point.c_str(), missing.series_ids.size());
+        for (const auto& violation : decoded->violations)
+            std::printf("  violation %s at %s: %s\n", violation.kind.c_str(),
+                violation.expiry.c_str(), violation.description.c_str());
+    }
+    std::fflush(stdout);
+
+    /*
+     * 1b. The forward set the calibration readsits quotes from: a surface
+     * prices off a published set of forwards, and a set is published from the
+     * funding curves of both currencies. So this is the link above the one that
+     * refused, and it says which of them is missing.
+     */
+    using forward_request =
+        ores::marketdata::messaging::get_published_fx_forward_request;
+    using forward_response =
+        ores::marketdata::messaging::get_published_fx_forward_response;
+    forward_request forward;
+    forward.pair_code = "USD/JPY";
+    forward.as_of = as_of;
+    const auto forward_answer = session.authenticated_request(
+        forward_request::nats_subject, as_body(codec.encode(forward)));
+    if (!forward_answer) {
+        std::printf("forwards -> %s (%s)\n",
+            forward_answer.error().message.c_str(),
+            forward_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<forward_response>{}, *forward_answer)) {
+        std::printf("forwards -> success=%d '%s' publish='%s' spot=%.5f\n",
+            decoded->success ? 1 : 0, decoded->message.c_str(),
+            decoded->publish_id.c_str(), decoded->spot_rate);
+    }
+    std::fflush(stdout);
+
+    /* 2. Publish with no approval: this raises a request, it does not publish. */
+    using publish_request =
+        ores::marketdata::messaging::publish_fx_vol_surface_request;
+    using publish_response =
+        ores::marketdata::messaging::publish_fx_vol_surface_response;
+    publish_request pub;
+    pub.blueprint_id = blueprint.id;
+    pub.as_of = as_of;
+    pub.reason = "hedgr live probe: what stands between a calibration and a "
+                 "published surface";
+    const auto pub_answer = session.authenticated_request(
+        publish_request::nats_subject, as_body(codec.encode(pub)));
+    if (!pub_answer) {
+        std::printf("publish -> %s (%s)\n", pub_answer.error().message.c_str(),
+            pub_answer.error().detail.c_str());
+    } else if (const auto decoded = decode(
+                   std::type_identity<publish_response>{}, *pub_answer)) {
+        std::printf("publish -> success=%d state='%s' request='%s' '%s'\n",
+            decoded->success ? 1 : 0, decoded->state_code.c_str(),
+            decoded->approval_request_id.c_str(), decoded->message.c_str());
+    }
+    std::fflush(stdout);
     session.disconnect();
 }
