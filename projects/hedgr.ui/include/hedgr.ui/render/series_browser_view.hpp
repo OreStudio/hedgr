@@ -36,8 +36,18 @@ struct series_browser_query final {
     /** @brief The catalogue's generation, or 0 when it has none. */
     std::uint64_t generation = 0;
     std::string_view filter;
-    std::string_view asset_class;
-    std::string_view party;
+
+    /**
+     * @brief The instrument kind to list, or empty for every kind.
+     *
+     * The deployment's own word - `pair`, `ladder`, `curve`, `surface`. It is a
+     * facet, not a mode: narrowing to one kind never changes what a row is, and
+     * `All` really means all. There is deliberately no asset-class facet: the
+     * catalogue does not carry an asset class, so offering one would be this
+     * client inventing a grouping the deployment did not state.
+     */
+    std::string_view kind;
+
     /** @brief The provider to list, or empty for every provider. */
     std::string_view provider;
 
@@ -49,81 +59,63 @@ struct series_browser_query final {
  * @brief The browser's rows, filtered and ordered, kept between frames.
  *
  * A catalogue changes when it is read, about once, and a frame draws sixty
- * times a second, so the filtering and the sort happen when the query changes.
- * The rows are positions in the catalogue's vector and never pointers: the
- * vector is replaced as a whole by a refresh, and a position is checked against
- * the generation that made it.
+ * times a second, so the filtering happens when the query changes. The rows are
+ * positions in the instrument list and never pointers: the vector is replaced
+ * as a whole by a refresh, and a position is checked against the generation
+ * that made it.
+ *
+ * The rows are instruments, one per row, in the deployment's order: by kind and
+ * then by name. That is why nothing here sorts - the answer already reads the
+ * way the screen should, and a second order could only disagree with it.
  */
 struct series_browser_view final {
-    /** @brief Positions in the catalogue, in the order the browser lists them. */
+    /** @brief Positions in the instruments, in the order the browser lists them. */
     std::vector<std::uint32_t> rows;
 
     /**
-     * @brief For each asset class of the catalogue, the position of one row.
+     * @brief The kinds the rows hold, each once, in the deployment's order.
      *
-     * Ordered by class name, so the combo lists a class once.
+     * Taken from the instruments rather than from a table of this client's, so
+     * a kind the deployment stops answering stops being offered.
      */
-    std::vector<std::uint32_t> classes;
+    std::vector<std::string> kinds;
 
     /**
-     * @brief For each provider of the catalogue, the position of one row.
+     * @brief The providers the rows name, each once, sorted by code.
      *
-     * Ordered by provider code, so the combo lists a provider once.
+     * Taken from the instruments for the kinds' reason.
      */
-    std::vector<std::uint32_t> providers;
+    std::vector<std::string> providers;
 
-    /** @brief How many times @c rows has been rebuilt. */
+    /** @brief How many times the view has been rebuilt. */
     std::size_t builds = 0;
 
-    /** @brief How many times @c classes has been rebuilt. */
-    std::size_t class_builds = 0;
-
-    /** @brief How many times @c providers has been rebuilt. */
-    std::size_t provider_builds = 0;
-
-    /** @brief The query @c rows answers, valid once @c builds is above zero. */
+    /** @brief The query the view answers, valid once @c builds is above zero. */
     std::uint64_t generation = 0;
     std::string filter;
-    std::string asset_class;
-    std::string party;
+    std::string kind;
     std::string provider;
     std::vector<std::string> hidden_providers;
-
-    /** @brief The generation @c classes was taken at, valid once @c class_builds is above zero. */
-    std::uint64_t classes_generation = 0;
-
-    /** @brief The generation @c providers was taken at, valid once @c provider_builds is above zero. */
-    std::uint64_t providers_generation = 0;
 };
 
 /**
  * @brief Rebuilds @p view when @p query differs from the one it answers.
  *
- * With the IR asset class the rows are the curves, one per IR series, matched
- * on label and URI and ordered by the tenor and the curve's label. Otherwise
- * they are the series, matched on label, asset class, URI and source and
- * ordered by tenor and label.
+ * A row is an instrument, so a curve is one row rather than one per pillar or
+ * per party, and a surface is a row rather than a second list. The text is
+ * matched against the instrument's name, its currencies, its type and its
+ * providers, which is what makes `aud` find both the AUD rates and the pairs
+ * quoted in AUD from either side.
+ *
+ * A hidden provider hides an instrument only when no visible provider is left
+ * behind it, so hiding reference definitions cannot make a curve vanish that a
+ * vendor also quotes.
+ *
  * @return whether it rebuilt.
  */
 HEDGR_UI_EXPORT bool update_series_browser_view(series_browser_view& view,
     const series_browser_query& query,
-    const std::vector<hedgr::model::domain::market_series_row>& catalogue);
-
-/**
- * @brief Rebuilds the asset class list when the catalogue's generation moved.
- * @return whether it rebuilt.
- */
-HEDGR_UI_EXPORT bool update_asset_classes(series_browser_view& view,
-    std::uint64_t generation,
-    const std::vector<hedgr::model::domain::market_series_row>& catalogue);
-
-/**
- * @brief Rebuilds the provider list when the catalogue's generation moved.
- * @return whether it rebuilt.
- */
-HEDGR_UI_EXPORT bool update_providers(series_browser_view& view,
-    std::uint64_t generation,
-    const std::vector<hedgr::model::domain::market_series_row>& catalogue);
+    const std::vector<hedgr::model::domain::market_instrument>& instruments);
 
 /** @brief The name a curve is listed under. */
 [[nodiscard]] inline const std::string& curve_label_of(

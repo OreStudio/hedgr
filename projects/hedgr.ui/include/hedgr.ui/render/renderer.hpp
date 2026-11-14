@@ -358,12 +358,14 @@ struct window_ui_state final {
     std::string market_party_id;
 
     /**
-     * @brief The asset class the chooser shows, or empty for all.
+     * @brief The instrument kind the chooser shows, or empty for all.
      *
-     * Choosing IR switches the list from points to term structures: the
-     * per-tenor series of one curve collapse into one row.
+     * The deployment's own word for a kind of instrument. It narrows the list
+     * and never changes what a row is, which is what the asset-class cut this
+     * replaces did: choosing rates switched the list from series to curves, so
+     * two people reading one window could disagree about what a row meant.
      */
-    std::string market_asset_class;
+    std::string market_kind;
 
     /**
      * @brief The provider the chooser lists, or empty for every provider.
@@ -428,14 +430,6 @@ struct window_ui_state final {
      * returns the control to the party the session actually holds.
      */
     int acting_party = 0;
-
-    /** @brief The series last chosen in the chooser's combobox. */
-    std::string market_selected_series_id;
-    std::string market_selected_series_label;
-
-    /** @brief The curve last chosen in the rates view. */
-    std::string market_selected_curve_key;
-    std::string market_selected_curve_label;
 
     /** @brief The volatility surface last chosen in the browser. */
     std::string market_selected_surface_id;

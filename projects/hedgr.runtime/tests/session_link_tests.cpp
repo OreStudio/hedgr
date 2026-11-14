@@ -297,6 +297,55 @@ TEST_CASE("a failed curve read leaves the catalogue standing",
     CHECK(fact.published_curves_error == "curves refused");
 }
 
+TEST_CASE("a catalogue read carries the instruments the deployment groups by",
+    "[link][market][instrument]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-curve", .label = "IR EUR EST R"});
+    link.instruments.push_back(model::domain::market_instrument{
+        .instrument_id = "i-curve", .kind = "curve", .name = "EUR-ESTR",
+        .currency = "EUR", .instrument_type = "discount",
+        .quote_type = "rate",
+        .axes = {{.field = "term", .values = {"3M", "6M", "12M"}}},
+        .sources = {{.provider_code = "ore",
+            .provider_kind = "reference", .series_id = "s-curve",
+            .as_of_ns = 1}},
+        .party_id = "p1"});
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.kind == model::event::event_kind::series_catalogue);
+    CHECK(fact.message.empty());
+    /* The series still travel: a chart is interned from them, not from a row. */
+    REQUIRE(fact.series.size() == 1);
+    REQUIRE(fact.instruments.size() == 1);
+    const auto& instrument = fact.instruments.front();
+    CHECK(instrument.name == "EUR-ESTR");
+    CHECK(instrument.kind == "curve");
+    CHECK(instrument.currency == "EUR");
+    REQUIRE(instrument.axes.size() == 1);
+    CHECK(instrument.axes[0].field == "term");
+    CHECK(instrument.axes[0].values.size() == 3);
+    CHECK(instrument.sources.size() == 1);
+    CHECK(instrument.sources[0].series_id == "s-curve");
+    CHECK(fact.instruments_error.empty());
+}
+
+TEST_CASE("a failed instrument read leaves the catalogue standing and says why",
+    "[link][market][instrument]") {
+    fake_link link;
+    link.catalogue.push_back(session::market_series_summary{
+        .id = "s-1", .label = "FX EUR/USD"});
+    link.instruments_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "instruments refused"};
+
+    const auto fact = market_read(link, catalogue_request());
+    CHECK(fact.message.empty());
+    REQUIRE(fact.series.size() == 1);
+    CHECK(fact.instruments.empty());
+    CHECK(fact.instruments_error == "instruments refused");
+}
+
 TEST_CASE("a points read carries its points", "[link][market]") {
     fake_link link;
     link.points_read.points = {

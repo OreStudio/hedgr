@@ -118,10 +118,10 @@ market_read_report report_market_read(const read_request& request,
                 count, code);
         }
         return {false, std::format("Market catalogue for '{}' holds {} series "
-                                   "of {} parties and {} published curves; by "
-                                   "provider: {}",
+                                   "of {} parties, {} instruments and {} "
+                                   "published curves; by provider: {}",
             instance, fact.series.size(), parties.size(),
-            fact.published_curves.size(), providers)};
+            fact.instruments.size(), fact.published_curves.size(), providers)};
     }
 
     const auto* history = std::get_if<market_history_request>(&request);
@@ -259,6 +259,21 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The published curve read failed: "
                     << answer.published_curves_error;
+            }
+
+            /*
+             * The instruments the deployment groups those series into: the
+             * rows the market window draws. Read whole rather than filtered,
+             * because the window shows the whole catalogue and narrows it in
+             * place; a failed read leaves the list empty and says why, which is
+             * a different thing from a deployment that holds none.
+             */
+            if (auto instruments = link.list_instruments({}); instruments) {
+                answer.instruments = std::move(*instruments);
+            } else {
+                answer.instruments_error = describe(instruments.error());
+                BOOST_LOG_SEV(lg(), ores::logging::warn)
+                    << "The instrument read failed: " << answer.instruments_error;
             }
         } else {
             answer.message = describe(read.error());

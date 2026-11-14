@@ -689,6 +689,8 @@ bool read_service::apply(const model::event::event& ev) {
                 ev.published_curves, ev.published_curves_error);
             market_.apply_surface_blueprints(ev.instance_id, ev.account_id,
                 ev.surface_blueprints, ev.surface_blueprints_error);
+            market_.apply_instruments(ev.instance_id, ev.account_id,
+                ev.instruments, ev.instruments_error);
         } else {
             market_.fail_catalogue(ev.instance_id, ev.account_id,
                 ev.message);

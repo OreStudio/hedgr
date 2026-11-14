@@ -252,6 +252,18 @@ struct event final {
     std::string published_curves_error;
 
     /**
+     * @brief The instruments the deployment groups its series into.
+     *
+     * Carried with the catalogue because the market window draws one row per
+     * instrument and reads the series only to plot what a row opens. The
+     * grouping, naming and ordering are the deployment's.
+     */
+    std::vector<domain::market_instrument> instruments;
+
+    /** @brief Why the instrument read failed, for series_catalogue. */
+    std::string instruments_error;
+
+    /**
      * @brief The volatility surface blueprints, for series_catalogue.
      *
      * Carried with the catalogue for the published curves' reason: the browser

@@ -153,6 +153,25 @@ struct HEDGR_MODEL_EXPORT series_catalogue final {
     std::string published_error;
 
     /**
+     * @brief The instruments the deployment groups its series into.
+     *
+     * The list the market window draws, because a row is an instrument: a curve
+     * is one row rather than one per pillar or per party, a pair is one row with
+     * no axes. The grouping, the naming and the ordering are the deployment's,
+     * so nothing above this point decides what belongs together.
+     */
+    std::vector<domain::market_instrument> instruments;
+
+    /**
+     * @brief Why the instrument read failed, or empty when it answered.
+     *
+     * A failed instrument read leaves @c instruments as it was and says why
+     * here, because a window that lost its list would report a deployment with
+     * no instruments rather than a read that did not happen.
+     */
+    std::string instruments_error;
+
+    /**
      * @brief The volatility surface blueprints the deployment publishes.
      *
      * Beside the published curves and for the same reason: a surface is
@@ -236,6 +255,21 @@ public:
     void apply_published_curves(std::string_view instance_id,
         std::string_view account_id,
         std::vector<domain::published_curve> curves,
+        std::string error = {});
+
+    /**
+     * @brief Records the instruments a session's deployment groups its series
+     * into.
+     *
+     * Separate from the series for the curves' reason and one more: the series
+     * list is what a chart is interned from, and the instrument list is what a
+     * person reads. A failure is recorded beside the list and leaves the
+     * catalogue's state alone, so a window keeps the instruments it had and
+     * says why they may be out of date.
+     */
+    void apply_instruments(std::string_view instance_id,
+        std::string_view account_id,
+        std::vector<domain::market_instrument> instruments,
         std::string error = {});
 
     /** @brief Marks one session's catalogue read as started. */

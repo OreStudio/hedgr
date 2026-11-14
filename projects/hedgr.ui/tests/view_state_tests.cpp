@@ -841,17 +841,19 @@ TEST_CASE("the market data browser shows the mark for each catalogue state",
     CHECK(empty.says("NO DATA"));
     no_sentences(empty);
 
-    std::vector<model::domain::market_series_row> rows(1);
-    rows[0].id = "s-1";
-    rows[0].label = "FX GBP/USD";
-    rows[0].asset_class = "FX";
-    desk.market.apply_catalogue("i", "a", rows);
+    std::vector<model::domain::market_instrument> instruments(1);
+    instruments[0].instrument_id = "i-1";
+    instruments[0].kind = "pair";
+    instruments[0].name = "FX GBP/USD";
+    instruments[0].base_currency = "GBP";
+    instruments[0].quote_currency = "USD";
+    desk.market.apply_instruments("i", "a", instruments);
     state.filter[0] = 'z';
     const auto unmatched = window_frame(desk, handle, state);
     CHECK(drew(unmatched, shape) == view_state::no_data);
     no_sentences(unmatched);
     CHECK(window_frame(desk, handle, state, body_centre)
-              .says("No series match the filters."));
+              .says("No instruments match the filters."));
     state.filter[0] = '\0';
     CHECK(drew(window_frame(desk, handle, state), shape) == view_state::none);
 }
