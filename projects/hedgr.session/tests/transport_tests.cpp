@@ -264,6 +264,34 @@ TEST_CASE("a failure the transport cannot name is a protocol error",
     REQUIRE(error.detail == "NATS publish failed: Connection closed");
 }
 
+TEST_CASE("a failure says what it means and why, and drops neither",
+    "[transport][errors]") {
+    using hedgr::session::transport::describe;
+    using hedgr::session::transport::make_error;
+
+    /*
+     * The deployment's own sentence is the one an operator acts on, and the
+     * code's sentence is what a person reads when there is no other. A worker
+     * that reported one and dropped the other turned "No surface of EURUSD_SSVI
+     * is published at or before this instant" into "the deployment refused the
+     * read", which is what this test exists to prevent.
+     */
+    const auto refused = make_error(session_errc::read_refused,
+        "No surface of EURUSD_SSVI is published at or before this instant.");
+    CHECK(describe(refused)
+        == "the deployment refused the read: No surface of EURUSD_SSVI is "
+           "published at or before this instant.");
+
+    /* A code with no cause worth adding is its own sentence. */
+    const auto bare = make_error(session_errc::timeout, "");
+    CHECK(describe(bare) == "the instance did not answer in time");
+
+    /* A cause that repeats the sentence is not said twice. */
+    auto echo = make_error(session_errc::read_refused, "");
+    echo.detail = echo.message;
+    CHECK(describe(echo) == echo.message);
+}
+
 /**
  * @brief What a real deployment hands a chart and a flag, printed as it is.
  *
@@ -819,6 +847,29 @@ TEST_CASE("live surfaces: what a deployment publishes as a vol surface",
         std::chrono::system_clock::now().time_since_epoch())
                             .count();
     const auto& first = blueprints->front();
+    /*
+     * Three instants, because a surface that is "not published" at the clock
+     * may still exist: a publish stamped in the future - by a skewed seed clock
+     * or a synthetic feed - is invisible to a read at now, and telling that
+     * apart from a deployment that never published is the difference between a
+     * seeding gap and a client asking the wrong question.
+     */
+    const auto ten_years_ns = 10LL * 365 * 24 * 60 * 60 * 1'000'000'000;
+    for (const auto& [label, at] : std::vector<std::pair<std::string,
+             std::int64_t>>{{"now", now_ns},
+             {"ten years ago", now_ns - ten_years_ns},
+             {"ten years ahead", now_ns + ten_years_ns}}) {
+        const auto any = session.published_fx_vol_surface(first.id, at);
+        if (!any) {
+            std::printf("  at %s: %s (%s)\n", label.c_str(),
+                any.error().message.c_str(), any.error().detail.c_str());
+            continue;
+        }
+        std::printf("  at %s: as_of=%lld %zu x %zu\n", label.c_str(),
+            static_cast<long long>(any->as_of_ns), any->expiries.size(),
+            any->strikes.size());
+    }
+    std::fflush(stdout);
     const auto surface = session.published_fx_vol_surface(first.id, now_ns);
     if (!surface) {
         std::printf("published surface of '%s' failed: %s (%s)\n",

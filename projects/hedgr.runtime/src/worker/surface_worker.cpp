@@ -27,6 +27,8 @@ namespace hedgr::runtime::worker {
 
 namespace {
 
+namespace transport = hedgr::session::transport;
+
 /** @brief This worker's logger: what a surface read found, or why it could not. */
 [[nodiscard]] auto& lg() {
     using namespace ores::logging;
@@ -54,10 +56,10 @@ void run_surface_read(hedgr::session::transport::session_link& link,
         /*
          * The deployment's own sentence is the one an operator can act on: it
          * says whether nothing is published at that instant or whether the read
-         * was refused, and the two are different facts about the desk.
+         * was refused, and the two are different facts about the desk. The
+         * code's sentence says what to do, so both travel together.
          */
-        answer.message = surface.error().message.empty()
-            ? surface.error().detail : surface.error().message;
+        answer.message = transport::describe(surface.error());
         BOOST_LOG_SEV(lg(), ores::logging::warn)
             << "The surface of blueprint '" << request.blueprint_id
             << "' (" << request.label << ") could not be read: "

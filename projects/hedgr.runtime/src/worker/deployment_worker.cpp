@@ -47,12 +47,6 @@ namespace transport = hedgr::session::transport;
  * are needed: the sentence is the instruction and the code is what an engineer
  * is given when the sentence is not enough.
  */
-[[nodiscard]] std::string describe(const transport::session_error& error) {
-    if (error.message.empty())
-        return std::string(transport::to_string(error.code));
-    return error.message;
-}
-
 }
 
 void run_deployment_read(transport::session_link& link, event::event& answer) {
@@ -63,7 +57,7 @@ void run_deployment_read(transport::session_link& link, event::event& answer) {
         << answer.account_id << "'";
 
     if (const auto read = link.deployment(); !read) {
-        snapshot.failure = describe(read.error());
+        snapshot.failure = transport::describe(read.error());
         snapshot.failing_read = "deployment";
     } else {
         snapshot.observed_at_ns =

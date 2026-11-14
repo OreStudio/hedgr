@@ -33,6 +33,8 @@ namespace hedgr::runtime::worker {
 
 namespace {
 
+namespace transport = hedgr::session::transport;
+
 /** @brief This worker's logger: what a curve read found, and where it failed. */
 [[nodiscard]] auto& lg() {
     using namespace ores::logging;
@@ -125,8 +127,7 @@ void run_curve_read(hedgr::session::transport::session_link& link,
         const auto sets = link.published_curve_sets(request.key,
             curve_instants);
         if (!sets) {
-            answer.message = sets.error().message.empty()
-                ? sets.error().detail : sets.error().message;
+            answer.message = transport::describe(sets.error());
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "The published curve '" << request.key << "' failed: "
                 << answer.message;
@@ -193,8 +194,7 @@ void run_curve_read(hedgr::session::transport::session_link& link,
                                        : request.member_ids.front(),
             request.member_identity, from_ns, now_ns);
         if (!read) {
-            answer.message = read.error().message.empty()
-                ? read.error().detail : read.error().message;
+            answer.message = transport::describe(read.error());
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "The evolution of curve '" << request.key
                 << "' failed: " << answer.message;
@@ -264,8 +264,7 @@ void run_curve_read(hedgr::session::transport::session_link& link,
              * keeps an expired session, a refused read and a genuinely empty
              * series from all reading as the same thing.
              */
-            answer.message = read.error().message.empty()
-                ? read.error().detail : read.error().message;
+            answer.message = transport::describe(read.error());
             return;
         }
         /*

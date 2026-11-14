@@ -66,7 +66,7 @@ enum class session_errc : std::uint8_t {
     range_inverted = 11,
     /** @brief The tick read names more coordinates than the service allows. */
     filter_too_large = 12,
-    /** @brief The deployment refused the tick read for another reason. */
+    /** @brief The deployment refused the read, whatever it was reading. */
     read_refused = 13,
 };
 
@@ -114,6 +114,22 @@ to_string(session_errc value) noexcept;
  */
 [[nodiscard]] HEDGR_SESSION_EXPORT session_error
 make_error(session_errc code, std::string detail);
+
+/**
+ * @brief The sentence a person is owed for one failure: what it means, and why.
+ *
+ * A code's sentence is generic by design - "the deployment refused the read" is
+ * the same whatever was read - and the deployment's own words live in
+ * @c detail. A worker that reported only the message turned "No surface of
+ * EURUSD_SSVI is published at or before this instant" into "the deployment
+ * refused the read", which is a sentence an operator cannot act on.
+ *
+ * This joins them: the code's sentence, then the deployment's, when the two say
+ * different things. Neither is dropped, because the first says what to do and
+ * the second says why.
+ */
+[[nodiscard]] HEDGR_SESSION_EXPORT std::string
+describe(const session_error& error);
 
 /**
  * @brief Builds a failure that is ready to be returned from a result.

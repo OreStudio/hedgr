@@ -79,3 +79,63 @@ erase a good surface.
   window only reads one.
 - No cross-section: a reader cannot slice the surface at one expiry as a smile
   curve, which is the obvious next gesture on this screen.
+
+## 2026-11-14: "vol surfaces give errors"
+
+The operator reported that every surface window shows an error. The log said:
+
+```
+W The surface of blueprint 'de2f…' (EURUSD_SSVI) could not be read:
+  the deployment refused the tick read
+```
+
+Two separate things were wrong with that line, and one thing was right.
+
+**What was right:** nothing is published. The read was repeated at three
+instants, so a publish stamped in the future — a skewed seed clock, a synthetic
+feed — could not be mistaken for a missing one:
+
+```
+at now:             No surface of USDJPY_SSVI is published at or before 2026-11-14T01:22:15Z
+at ten years ago:   No surface of USDJPY_SSVI is published at or before 2016-11-16T01:22:15Z
+at ten years ahead: No surface of USDJPY_SSVI is published at or before 2036-11-11T01:22:15Z
+```
+
+Ten blueprints exist on `prime_origin` and on `brave_hopper`; not one of them
+has ever been published. So the screen has nothing to draw, which is a fact
+about the deployment.
+
+**What was wrong:** the client hid the deployment's own sentence in both places
+a person looks.
+
+- The worker logged `error.message` ("the deployment refused the tick read")
+  and dropped `error.detail`, which is the sentence that says *why*. The same
+  mistake was in seven other workers: each chose between the two strings instead
+  of reporting both.
+- `read_refused`'s canonical sentence named a tick read for every read: a
+  surface, a curve, a ladder and an instrument catalogue all reported "refused
+  the tick read", which sends a reader to the wrong place.
+
+Both are fixed: `session_error::describe()` joins the code's sentence and the
+deployment's, `read_refused` now says "the deployment refused the read", and
+every read worker reports through it. The window and the log now say:
+
+```
+the deployment refused the read: No surface of EURUSD_SSVI is published at or
+before 2026-11-14T01:22:15Z.
+```
+
+**What is still wrong, and belongs on the server:** "nothing is published" is a
+state of the deployment, not a failure, so painting it red is the wrong end
+state for a screen. The write shape of a fix is a typed distinction rather than
+a message a client would have to parse:
+
+- `get_published_fx_vol_surface` answers `success = true` with an empty grid and
+  a message, so the window draws its NO DATA state with the deployment's
+  sentence; or
+- the response gains a field such as `published = false`, so the client can tell
+  "this blueprint has never been published" from "this read was refused".
+
+Until then the window shows the deployment's sentence in its error state, which
+is honest and actionable, and the chooser keeps offering the ten blueprints
+because the blueprint list is the only list there is.

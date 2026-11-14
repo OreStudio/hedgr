@@ -74,12 +74,6 @@ constexpr std::uint32_t surface_blueprint_limit = 200;
         + (detail.empty() ? std::string{} : " (" + detail + ")") + ".";
 }
 
-[[nodiscard]] std::string describe(const transport::session_error& error) {
-    return error.message.empty()
-        ? std::string{transport::to_string(error.code)}
-        : error.message;
-}
-
 [[nodiscard]] std::int64_t now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now().time_since_epoch())
@@ -190,7 +184,7 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 << read->rungs.size() << " rungs from "
                 << read->provider_count << " providers";
         } else {
-            answer.message = describe(read.error());
+            answer.message = transport::describe(read.error());
             BOOST_LOG_SEV(lg(), ores::logging::warn)
                 << "The rate ladder read for '" << ladder->currency << " "
                 << ladder->instrument_type << "' failed: " << answer.message;
@@ -268,8 +262,7 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 }
             } else {
                 answer.surface_blueprints_error
-                    = surfaces.error().message.empty()
-                    ? surfaces.error().detail : surfaces.error().message;
+                    = transport::describe(surfaces.error());
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The surface blueprint read failed: "
                     << answer.surface_blueprints_error;
@@ -279,8 +272,8 @@ void run_market_read(transport::session_link& link, const read_request& request,
                 curves) {
                 answer.published_curves = std::move(*curves);
             } else {
-                answer.published_curves_error = curves.error().message.empty()
-                    ? curves.error().detail : curves.error().message;
+                answer.published_curves_error
+                    = transport::describe(curves.error());
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The published curve read failed: "
                     << answer.published_curves_error;
@@ -296,12 +289,12 @@ void run_market_read(transport::session_link& link, const read_request& request,
             if (auto instruments = link.list_instruments({}); instruments) {
                 answer.instruments = std::move(*instruments);
             } else {
-                answer.instruments_error = describe(instruments.error());
+                answer.instruments_error = transport::describe(instruments.error());
                 BOOST_LOG_SEV(lg(), ores::logging::warn)
                     << "The instrument read failed: " << answer.instruments_error;
             }
         } else {
-            answer.message = describe(read.error());
+            answer.message = transport::describe(read.error());
         }
     } else {
         const auto* history = std::get_if<market_history_request>(&request);
@@ -327,8 +320,8 @@ void run_market_read(transport::session_link& link, const read_request& request,
             const bool unanswered = is_unanswered(read.error().code);
             silence().note(instance, unanswered, now_ns());
             answer.message = unanswered
-                ? unanswered_text(describe(read.error()))
-                : describe(read.error());
+                ? unanswered_text(transport::describe(read.error()))
+                : transport::describe(read.error());
         }
         if (read)
             silence().note(instance, false, now_ns());

@@ -22,6 +22,7 @@
 #include "hedgr.runtime/worker/image_map_worker.hpp"
 #include "hedgr.runtime/worker/image_worker.hpp"
 #include "hedgr.runtime/worker/curve_worker.hpp"
+#include "hedgr.runtime/worker/surface_worker.hpp"
 #include "hedgr.runtime/worker/market_worker.hpp"
 #include "hedgr.session/market/tick_stream.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -392,6 +393,30 @@ TEST_CASE("a failed ladder read becomes the event's message",
     CHECK(fact.kind == model::event::event_kind::rate_ladder);
     CHECK(fact.ladder.rungs.empty());
     CHECK(fact.message == "no ladder for AUD");
+}
+
+TEST_CASE("a refused surface read says what it means and why",
+    "[link][market][surface]") {
+    /*
+     * The deployment's own sentence is the only one an operator can act on:
+     * "nothing is published at or before this instant" is a fact about the
+     * desk, while "the read was refused" is not. The event carries both.
+     */
+    fake_link link;
+    link.surface_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "the deployment refused the read",
+        .detail = "No surface of EURUSD_SSVI is published at or before this "
+                  "instant."};
+    const auto request = worker::surface_request{.blueprint_id = "bp-1",
+        .label = "EURUSD_SSVI"};
+    auto fact = worker::read_event(request,
+        model::domain::session_key{"market-i", "a"}, {});
+    worker::run_surface_read(link, request, fact);
+    CHECK(fact.kind == model::event::event_kind::vol_surface);
+    CHECK(fact.message
+        == "the deployment refused the read: No surface of EURUSD_SSVI is "
+           "published at or before this instant.");
 }
 
 TEST_CASE("a points read carries its points", "[link][market]") {
