@@ -733,6 +733,28 @@ public:
         std::int64_t from_ns, std::int64_t to_ns) const;
 
     /**
+     * @brief Reads one currency's rate ladder, across the providers quoting it.
+     *
+     * A ladder is one shape read across its term axis, so the deployment answers
+     * its rungs already in maturity order with each rung's date and year
+     * fraction computed. The calendar, the day count and the tenor convention
+     * are the deployment's facts, and they travel with the rungs rather than
+     * being assumed here.
+     *
+     * @param currency the currency the ladder is quoted in.
+     * @param instrument_type the schema's instrument type, for example ir_swap.
+     * @param forward_start the forward start wanted, or empty for spot.
+     * @param providers the providers to quote, or empty for every one.
+     * @param as_of_ns the instant to answer for, or zero for the clock's now.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<hedgr::model::domain::rate_ladder> rate_ladder(
+        std::string_view currency, std::string_view instrument_type,
+        std::string_view forward_start,
+        const std::vector<std::string>& providers = {},
+        std::int64_t as_of_ns = 0) const;
+
+    /**
      * @brief Reads the instrument catalogue this session may see.
      *
      * An instrument is the deployment's own grouping of series into the thing a

@@ -1767,6 +1767,108 @@ to_instrument(const ores::marketdata::messaging::market_instrument& wire) {
 
 }
 
+result<hedgr::model::domain::rate_ladder> session_client::rate_ladder(
+    std::string_view currency, std::string_view instrument_type,
+    std::string_view forward_start, const std::vector<std::string>& providers,
+    std::int64_t as_of_ns) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "a rate ladder read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "a rate ladder read needs a signed-in session");
+    }
+    if (currency.empty()) {
+        return fail(session_errc::read_refused,
+            "a rate ladder read needs a currency");
+    }
+
+    using ores::marketdata::messaging::get_rate_ladder_request;
+    using ores::marketdata::messaging::get_rate_ladder_response;
+
+    try {
+        get_rate_ladder_request request;
+        request.currency = currency;
+        request.instrument_type = instrument_type;
+        request.forward_start = forward_start;
+        request.providers = providers;
+        if (as_of_ns != 0) {
+            request.as_of = std::chrono::system_clock::time_point{
+                std::chrono::nanoseconds{as_of_ns}};
+        }
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_rate_ladder_response>(client(),
+                get_rate_ladder_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer) {
+            return fail(session_errc::protocol_error,
+                "the rate ladder answer could not be decoded");
+        }
+        if (!answer->success) {
+            return fail(session_errc::read_refused,
+                answer->message.empty()
+                    ? std::format("the deployment refused the {} ladder",
+                          currency)
+                    : answer->message);
+        }
+
+        hedgr::model::domain::rate_ladder ladder;
+        ladder.currency = answer->currency.empty()
+            ? std::string{currency} : answer->currency;
+        ladder.instrument_type = answer->instrument_type;
+        ladder.forward_start = answer->forward_start;
+        ladder.as_of_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            answer->as_of.time_since_epoch())
+                              .count();
+        ladder.provider_count = answer->provider_count;
+        ladder.tenor_convention = answer->tenor_convention;
+        ladder.day_count_convention = answer->day_count_convention;
+        ladder.rungs.reserve(answer->rungs.size());
+        for (const auto& rung : answer->rungs) {
+            hedgr::model::domain::ladder_rung out;
+            out.tenor = rung.tenor;
+            /* The date is the deployment's; formatting it is not computing it. */
+            out.maturity = rung.maturity_date.ok()
+                ? std::format("{:%Y-%m-%d}", rung.maturity_date)
+                : std::string{};
+            out.year_fraction = rung.year_fraction;
+            out.consensus = hedgr::model::domain::ladder_consensus{
+                .value = rung.consensus.value,
+                .method = rung.consensus.method,
+                .providers_used = rung.consensus.providers_used};
+            out.quotes.reserve(rung.quotes.size());
+            for (const auto& quote : rung.quotes) {
+                out.quotes.push_back(hedgr::model::domain::ladder_quote{
+                    .provider_code = quote.provider_code,
+                    .value = quote.value,
+                    .as_of_ns = std::chrono::duration_cast<
+                        std::chrono::nanoseconds>(quote.as_of.time_since_epoch())
+                                    .count(),
+                    .age_seconds = quote.age_seconds,
+                    .stale = quote.stale,
+                    .series_id = quote.series_id});
+            }
+            ladder.rungs.push_back(std::move(out));
+        }
+
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read a " << ladder.currency << " rate ladder of "
+            << ladder.rungs.size() << " rungs from " << ladder.provider_count
+            << " providers on '" << options_.subject_prefix << "'";
+        return ladder;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The rate ladder read failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The rate ladder read failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
 result<std::vector<hedgr::model::domain::market_instrument>>
 session_client::list_instruments(
     const hedgr::model::domain::instrument_filter& filter,

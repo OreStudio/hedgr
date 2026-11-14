@@ -371,6 +371,109 @@ struct instrument_filter final {
 };
 
 /**
+ * @brief One provider's quote of one rung of a ladder.
+ *
+ * A provider that does not quote the rung has no entry rather than a zero,
+ * because a gap is what the desk needs to see: a zero would read as a rate.
+ */
+struct ladder_quote final {
+    /** @brief The provider's code, for example bloomberg. */
+    std::string provider_code;
+
+    /** @brief The rate it quoted, as a number. */
+    double value = 0.0;
+
+    /** @brief When it quoted, epoch nanoseconds, or zero when never. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges the quote past its threshold. */
+    bool stale = false;
+
+    /** @brief The series the quote came from. */
+    std::string series_id;
+};
+
+/**
+ * @brief The value the deployment derives across the quoting providers.
+ *
+ * The method is the deployment's word - so the column can say what it is
+ * rather than leaving a reader to guess - and a consensus over one value says
+ * so by naming a count of one.
+ */
+struct ladder_consensus final {
+    /** @brief The derived value. */
+    double value = 0.0;
+
+    /** @brief How it was derived, in the deployment's words. */
+    std::string method;
+
+    /** @brief How many providers went into it. */
+    int providers_used = 0;
+};
+
+/**
+ * @brief One rung: a tenor, the date it matures and the quotes at it.
+ *
+ * The maturity date and the year fraction are the deployment's, because the
+ * calendar, the day count and the tenor convention are its facts. A client
+ * cannot compute either and must not try: a date this program derived from a
+ * tenor would disagree with the same date in `ores.web`.
+ */
+struct ladder_rung final {
+    /** @brief The tenor as the deployment spells it: "ON", "1W", "10Y". */
+    std::string tenor;
+
+    /** @brief The maturity date, already formatted for a cell. */
+    std::string maturity;
+
+    /** @brief The year fraction the deployment computed for it. */
+    double year_fraction = 0.0;
+
+    /** @brief The quotes, one per provider that quoted this rung. */
+    std::vector<ladder_quote> quotes;
+
+    /** @brief The value derived across those quotes. */
+    ladder_consensus consensus;
+};
+
+/**
+ * @brief One currency's rate ladder, with the facts its numbers rest on.
+ *
+ * A ladder is one shape read across its term axis rather than several series
+ * joined: the provider dimension is one series per provider and each states
+ * every rung. The rungs are in the deployment's maturity order, so `ON` sorts
+ * before `1W` without this client having a tenor-ranking rule of its own.
+ */
+struct rate_ladder final {
+    /** @brief The currency the ladder is quoted in. */
+    std::string currency;
+
+    /** @brief The schema's instrument type, for example ir_swap. */
+    std::string instrument_type;
+
+    /** @brief The forward start it is struck at, or empty for spot. */
+    std::string forward_start;
+
+    /** @brief The instant the ladder answers for, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How many providers quote it. */
+    int provider_count = 0;
+
+    /** @brief The tenor convention the deployment states, or empty. */
+    std::string tenor_convention;
+
+    /** @brief The day count convention the deployment states, or empty. */
+    std::string day_count_convention;
+
+    /** @brief The rungs, in the deployment's maturity order. */
+    std::vector<ladder_rung> rungs;
+};
+
+/**
  * @brief One curve the deployment publishes, as a chooser lists it.
  *
  * A curve is an object the deployment calibrates and publishes rather than a

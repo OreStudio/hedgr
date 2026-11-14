@@ -1053,3 +1053,88 @@ TEST_CASE("live instruments: the catalogue a screen draws",
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief What the deployment's rate ladder answers, and whether the numbers
+ * rest on stated conventions.
+ *
+ * The Rates Ladder screen draws one row per maturity and one column per
+ * provider, with the consensus the deployment derives beside them. This prints
+ * the shape of what comes back - the conventions, the provider count, the rungs
+ * and their dates - so the screen is built on measured data rather than on the
+ * sketch in the design document.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 \
+ *     HEDGR_LIVE_PREFIX=ores.dev.prime_origin ... \
+ *     hedgr.session.tests "[.live-ladder]"
+ */
+TEST_CASE("live ladder: what a currency's rate ladder answers",
+    "[.live-ladder]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    /*
+     * The currencies the catalogue groups, and the instrument types it holds.
+     * Reading the ladder for each pair of them is what tells a person which
+     * ladders the deployment actually quotes.
+     */
+    const auto instruments = session.list_instruments();
+    REQUIRE(instruments.has_value());
+    std::set<std::pair<std::string, std::string>> asked;
+    for (const auto& instrument : *instruments) {
+        const auto currency = instrument.base_currency.empty()
+            ? instrument.currency : instrument.base_currency;
+        if (!currency.empty() && !instrument.instrument_type.empty())
+            asked.emplace(currency, instrument.instrument_type);
+    }
+    std::printf("ladder candidates: %zu currency/type pairs\n", asked.size());
+    for (const auto& [currency, type] : asked) {
+        const auto ladder = session.rate_ladder(currency, type, "", {}, 0);
+        if (!ladder) {
+            std::printf("%s %s -> %s\n", currency.c_str(), type.c_str(),
+                ladder.error().message.c_str());
+            continue;
+        }
+        std::printf("%s %s -> %zu rungs, %d providers, conventions '%s' / "
+                    "'%s', as_of=%lld\n",
+            ladder->currency.c_str(), ladder->instrument_type.c_str(),
+            ladder->rungs.size(), ladder->provider_count,
+            ladder->tenor_convention.c_str(),
+            ladder->day_count_convention.c_str(),
+            static_cast<long long>(ladder->as_of_ns));
+        for (const auto& rung : ladder->rungs) {
+            std::printf("  %-4s %s yf=%.4f consensus=%.6f (%s, %d) quotes:",
+                rung.tenor.c_str(), rung.maturity.c_str(), rung.year_fraction,
+                rung.consensus.value, rung.consensus.method.c_str(),
+                rung.consensus.providers_used);
+            for (const auto& quote : rung.quotes)
+                std::printf(" %s=%.6f(%llds)", quote.provider_code.c_str(),
+                    quote.value, static_cast<long long>(quote.age_seconds));
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
+}
