@@ -129,12 +129,22 @@ void draw_row_name(std::string_view name, ImTextureID base_texture,
     return instrument.sources.empty() ? nullptr : &instrument.sources.front();
 }
 
-/** @brief The row's flat icon that opens its mini plot, true when pressed. */
+/**
+ * @brief The row's flat icon that opens its mini plot, true when pressed.
+ *
+ * A button with no vertical frame padding. The padding is what a frame adds
+ * around its text, and in a table cell it is what sets the row's height: a row
+ * of ordinary text was as tall as a button because this icon sat in it. Removing
+ * only the vertical padding keeps the button's hit area - which is the whole
+ * point of it - and lets the row be as tall as its text.
+ */
 bool mini_plot_button(std::string_view what) {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImGui::PushStyleColor(ImGuiCol_Text,
         ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3.0f, 0.0f));
     const bool pressed = ImGui::SmallButton(icon::dashboard);
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(2);
     ImGui::SetItemTooltip("%s", what.data());
     return pressed;
@@ -795,6 +805,12 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                         instrument->instrument_id.c_str(),
                         instrument->instrument_type.c_str(),
                         instrument->quote_type.c_str());
+                /*
+                 * On the selectable's line, not under it: a cell that holds two
+                 * items makes every row twice as tall as its text, which turns a
+                 * forty-row list into a screenful of five.
+                 */
+                ImGui::SameLine(0.0f, 0.0f);
                 std::array<char, 16> badge{};
                 ImGui::TextDisabled("%s", kind_badge(instrument->kind, badge));
 
