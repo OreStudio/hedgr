@@ -131,9 +131,10 @@ TEST_CASE("every window kind's text parses back to the kind", "[window]") {
         REQUIRE(parsed.has_value());
         CHECK(*parsed == kind);
     }
-    CHECK(domain::window_kind_count == 12);
+    CHECK(domain::window_kind_count == 13);
     CHECK(domain::to_string(domain::window_kind::mini_plot) == "mini_plot");
     CHECK(domain::to_string(domain::window_kind::vol_surface) == "vol_surface");
+    CHECK(domain::to_string(domain::window_kind::rate_ladder) == "rate_ladder");
 }
 
 TEST_CASE("a mini plot's state survives the stored form", "[window]") {

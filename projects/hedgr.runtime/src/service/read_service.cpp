@@ -113,7 +113,9 @@ std::optional<refusal> read_service::start(const read_request& request) {
     case read_kind::vol_surface:
         start_vol_surface_read(request.window);
         return std::nullopt;
-    case read_kind::crm_batch:
+    case read_kind::rate_ladder:
+        start_rate_ladder_read(request.window);
+        return std::nullopt;    case read_kind::crm_batch:
         start_crm_read(request.window);
         return std::nullopt;
     case read_kind::deployment:
@@ -566,6 +568,66 @@ void read_service::load_vol_surface(const model::command::command& cmd) {
         cmd.blueprint_id));
 }
 
+void read_service::start_rate_ladder_read(model::state::window_handle handle) {
+    if (!is_open() || !windows_.contains(handle))
+        return;
+    const auto spec = windows_.spec(handle, sessions_);
+    const auto* ladder = std::get_if<domain::rate_ladder_state>(&spec.state);
+    if (ladder == nullptr || ladder->currency.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Rates window "
+            << (ladder == nullptr ? "holds no ladder" : ladder->label)
+            << " not read: it names no currency";
+        return;
+    }
+    if (!spec.session)
+        return;
+    auto read = session_read_for(spec.session->instance_id,
+        spec.session->account_id, read_gate::signed_in);
+    if (!read)
+        return;
+
+    /*
+     * The ladder's instant is the clock's now, which reads the newest quotes
+     * the deployment holds. A desk wants the current ladder; a historical one
+     * would be a different screen.
+     */
+    const auto key = model::state::ladder_key(ladder->currency,
+        ladder->instrument_type, ladder->forward_start);
+    if (!submit_read(*read, worker::rate_ladder_request{
+                         .currency = ladder->currency,
+                         .instrument_type = ladder->instrument_type,
+                         .forward_start = ladder->forward_start,
+                         .key = key}))
+        return;
+    ladders_.begin(read->instance_id, read->account_id, key);
+}
+
+void read_service::load_rate_ladder(const model::command::command& cmd) {
+    BOOST_LOG_SEV(lg(), ores::logging::info)
+        << "Rate ladder for " << cmd.currency << " " << cmd.instrument_type
+        << (cmd.forward_start.empty() ? "" : " " + cmd.forward_start);
+    if (cmd.currency.empty()) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "Rate ladder not read: the command names no currency";
+        return;
+    }
+    auto read = session_read_for(cmd.instance_id, cmd.account_id,
+        read_gate::signed_in);
+    if (!read)
+        return;
+
+    const auto key = model::state::ladder_key(cmd.currency, cmd.instrument_type,
+        cmd.forward_start);
+    if (!submit_read(*read, worker::rate_ladder_request{
+                         .currency = cmd.currency,
+                         .instrument_type = cmd.instrument_type,
+                         .forward_start = cmd.forward_start,
+                         .key = key}))
+        return;
+    ladders_.begin(cmd.instance_id, cmd.account_id, key);
+}
+
 void read_service::load_image(const model::command::command& cmd) {
     auto read = session_read_for(cmd.instance_id, cmd.account_id,
         read_gate::signed_in_with_token);
@@ -732,6 +794,15 @@ bool read_service::apply(const model::event::event& ev) {
         } else {
             surfaces_.fail(handle, ev.message);
         }
+        return true;
+    }
+    case event::event_kind::rate_ladder: {
+        if (ev.message.empty())
+            ladders_.apply(ev.instance_id, ev.account_id, ev.ladder_key,
+                ev.ladder);
+        else
+            ladders_.fail(ev.instance_id, ev.account_id, ev.ladder_key,
+                ev.message);
         return true;
     }
     case event::event_kind::image_loaded: {

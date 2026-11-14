@@ -28,6 +28,7 @@
 #include "hedgr.model/state/image_cache.hpp"
 #include "hedgr.model/state/series_table.hpp"
 #include "hedgr.model/state/surface_table.hpp"
+#include "hedgr.model/state/ladder_table.hpp"
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.model/state/tenant_image_map.hpp"
 #include "hedgr.model/state/tenant_key.hpp"
@@ -138,6 +139,11 @@ public:
         return surfaces_;
     }
 
+    /** @brief The latest rate ladder each window read. */
+    [[nodiscard]] const model::state::ladder_table& ladders() const noexcept {
+        return ladders_;
+    }
+
     /** @brief The bounded cache of tenant images by identifier. */
     [[nodiscard]] model::state::image_cache& images() noexcept {
         return images_;
@@ -188,6 +194,9 @@ public:
 
     /** @brief Reads the newest surface the command's blueprint published. */
     void load_vol_surface(const model::command::command& cmd);
+
+    /** @brief Reads one currency's rate ladder, as the command names it. */
+    void load_rate_ladder(const model::command::command& cmd);
 
     /** @brief Reads the CRM names a party offers. */
     void load_crm_names(const model::command::command& cmd);
@@ -333,6 +342,9 @@ private:
     /** @brief Reads the surface a volatility window shows. */
     void start_vol_surface_read(model::state::window_handle handle);
 
+    /** @brief Reads the ladder a rates window shows. */
+    void start_rate_ladder_read(model::state::window_handle handle);
+
     /** @brief Reads the CRM batch a cross-rates window shows. */
     void start_crm_read(model::state::window_handle handle);
 
@@ -376,6 +388,9 @@ private:
 
     /** @brief The latest published surface each window read. */
     model::state::surface_table surfaces_;
+
+    /** @brief The latest rate ladder each window read. */
+    model::state::ladder_table ladders_;
 
     model::state::crm_table crm_;
 };

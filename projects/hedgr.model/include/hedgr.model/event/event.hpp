@@ -158,6 +158,14 @@ enum class event_kind : std::uint8_t {
      * is no history to accumulate and no instant to merge.
      */
     vol_surface = 24,
+    /**
+     * @brief A currency's rate ladder was read, or could not be.
+     *
+     * One answer per read: the ladder replaces the one held for its key, since
+     * the deployment states its rungs in maturity order and there is nothing to
+     * merge with what was there.
+     */
+    rate_ladder = 25,
 };
 
 /** @brief The canonical text of an event kind, for logs. */
@@ -395,6 +403,19 @@ struct event final {
     std::vector<std::string> surface_expiries;
     std::vector<std::string> surface_strikes;
     std::vector<double> surface_values;
+
+    /**
+     * @brief One currency's rate ladder, for @c rate_ladder.
+     *
+     * The ladder is one value rather than a set of columns, because it is one
+     * object: its rungs, the quotes at each rung and the consensus the
+     * deployment derived. It travels whole so a window never draws half a
+     * ladder while the other half is still arriving.
+     */
+    domain::rate_ladder ladder;
+
+    /** @brief The key the ladder is held under, for @c rate_ladder. */
+    std::string ladder_key;
 
     /**
      * @brief The parties the login may act as, for session_authenticated.

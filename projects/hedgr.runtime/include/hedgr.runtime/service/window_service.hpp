@@ -121,6 +121,10 @@ public:
     /** @brief Points a CRM window at another matrix. True when it changed one. */
     [[nodiscard]] bool configure_crm(const model::command::command& cmd);
 
+    /** @brief Points a rates window at another ladder. True when it changed one. */
+    [[nodiscard]] bool configure_rate_ladder(
+        const model::command::command& cmd);
+
     /** @brief Gives a chart window its own view. True when it changed one. */
     [[nodiscard]] bool configure_chart(const model::command::command& cmd);
 

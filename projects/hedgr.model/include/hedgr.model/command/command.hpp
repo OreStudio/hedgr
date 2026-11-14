@@ -141,6 +141,16 @@ enum class command_kind : std::uint8_t {
      * out and what the answer is filed under.
      */
     load_vol_surface = 31,
+    /**
+     * @brief Point a rates window at another ladder and read it.
+     *
+     * Carries the currency, the instrument type and the forward start, because
+     * those three are what make one ladder rather than another. The runtime
+     * writes them into the window's state and then reads, so a restored or
+     * refreshed window reads the ladder it is showing rather than the one it
+     * was opened with.
+     */
+    configure_rate_ladder = 32,
 };
 
 /** @brief The canonical text of a command kind, for logs. */
@@ -238,6 +248,15 @@ struct command final {
 
     /** @brief The blueprint a volatility surface is published under. */
     std::string blueprint_id;
+
+    /** @brief The currency a rate ladder is quoted in, for load_rate_ladder. */
+    std::string currency;
+
+    /** @brief The schema's instrument type, for load_rate_ladder. */
+    std::string instrument_type;
+
+    /** @brief The forward start a ladder is struck at, or empty for spot. */
+    std::string forward_start;
 
     /** @brief The pair's currencies, for a volatility surface's title. */
     std::string base_currency;

@@ -141,9 +141,19 @@ step is what the next one draws.
    search already finds a pair from either side; the control and the facets are
    still to come, and the read can take `query`, `kinds` and `provider_code`
    server-side when the list outgrows what a frame can narrow.
-3. **The Rates Ladder window**, from `get_rate_ladder`: provider columns, mid
-   only, the conventions row the server states.
-4. **The menu by asset class**, with Search across kinds.
+3. **Done, pending the server: the Rates Ladder.** `Rates ▸ Ladder` opens a
+   window that asks for a currency and an instrument (both read from the
+   catalogue) and draws one row per maturity with the maturity date, the year
+   fraction, a column per provider, the deployment's derived value and the age.
+   The conventions the numbers rest on are stated on the screen. Mid only: there
+   are no bid or ask columns, because the deployment quotes one side.
+   **Blocked on a deployment question, not on client work:** each rung comes
+   back with thirteen quotes all from `ore`, one per recent observation, while
+   `provider_count` says one. The window draws the newest of a provider's quotes
+   and the count beside it so nothing is hidden, but the reduction belongs on the
+   server. See `docs/verification/rates-ladder.md`.
+4. **The menu by asset class**, with Search across kinds. `Rates` exists as the
+   first entry; `FX`, `Vol`, `Credit` and `Search` are still to come.
 5. **The FX montage** (`get_fx_montage`) and the surface grid and smile
    (`get_curve_analytics`).
 

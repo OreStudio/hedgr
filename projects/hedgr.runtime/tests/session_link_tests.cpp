@@ -346,6 +346,54 @@ TEST_CASE("a failed instrument read leaves the catalogue standing and says why",
     CHECK(fact.instruments_error == "instruments refused");
 }
 
+TEST_CASE("a ladder read carries the rungs and the conventions they rest on",
+    "[link][market][ladder]") {
+    fake_link link;
+    auto& held = link.ladder;
+    held.currency = "AUD";
+    held.instrument_type = "discount";
+    held.as_of_ns = 1'760'000'000'000'000'000;
+    held.provider_count = 1;
+    held.tenor_convention = "RATES_SPOT_FORWARD";
+    held.day_count_convention = "A365F";
+    held.rungs = {
+        {.tenor = "3M", .maturity = "2027-02-14", .year_fraction = 0.2521,
+            .quotes = {{.provider_code = "ore", .value = 0.043015,
+                .as_of_ns = 1'760'000'000'000'000'000, .age_seconds = 401}},
+            .consensus = {.value = 0.042931, .method = "median",
+                .providers_used = 13}}};
+
+    const auto fact = market_read(link, worker::rate_ladder_request{
+        .currency = "AUD", .instrument_type = "discount", .key = "aud|discount|"});
+    CHECK(fact.kind == model::event::event_kind::rate_ladder);
+    CHECK(fact.ladder_key == "aud|discount|");
+    CHECK(fact.message.empty());
+    REQUIRE(fact.ladder.rungs.size() == 1);
+    const auto& rung = fact.ladder.rungs.front();
+    CHECK(rung.tenor == "3M");
+    CHECK(rung.maturity == "2027-02-14");
+    CHECK(rung.year_fraction == 0.2521);
+    CHECK(rung.consensus.method == "median");
+    CHECK(rung.consensus.providers_used == 13);
+    REQUIRE(rung.quotes.size() == 1);
+    CHECK(rung.quotes.front().provider_code == "ore");
+    CHECK(fact.ladder.tenor_convention == "RATES_SPOT_FORWARD");
+    CHECK(fact.ladder.day_count_convention == "A365F");
+}
+
+TEST_CASE("a failed ladder read becomes the event's message",
+    "[link][market][ladder]") {
+    fake_link link;
+    link.ladder_error = session::session_error{
+        .code = session::session_errc::read_refused,
+        .message = "no ladder for AUD"};
+    const auto fact = market_read(link, worker::rate_ladder_request{
+        .currency = "AUD", .instrument_type = "discount", .key = "aud|discount|"});
+    CHECK(fact.kind == model::event::event_kind::rate_ladder);
+    CHECK(fact.ladder.rungs.empty());
+    CHECK(fact.message == "no ladder for AUD");
+}
+
 TEST_CASE("a points read carries its points", "[link][market]") {
     fake_link link;
     link.points_read.points = {

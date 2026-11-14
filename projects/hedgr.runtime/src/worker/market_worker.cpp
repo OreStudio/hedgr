@@ -174,6 +174,31 @@ void run_market_read(transport::session_link& link, const read_request& request,
     const auto instance = answer.instance_id;
     const bool catalogue = std::holds_alternative<catalogue_request>(request);
 
+    /*
+     * A ladder is one object and one read, and it has nothing to do with the
+     * tick silence a chart's read observes: a ladder that fails is a fact the
+     * window shows, not a series that has gone quiet.
+     */
+    if (const auto* ladder = std::get_if<rate_ladder_request>(&request)) {
+        if (const auto read = link.rate_ladder(ladder->currency,
+                ladder->instrument_type, ladder->forward_start, {}, 0);
+            read) {
+            answer.ladder = *read;
+            BOOST_LOG_SEV(lg(), ores::logging::info)
+                << "Rate ladder for " << ladder->currency << " "
+                << ladder->instrument_type << " on '" << instance << "': "
+                << read->rungs.size() << " rungs from "
+                << read->provider_count << " providers";
+        } else {
+            answer.message = describe(read.error());
+            BOOST_LOG_SEV(lg(), ores::logging::warn)
+                << "The rate ladder read for '" << ladder->currency << " "
+                << ladder->instrument_type << "' failed: " << answer.message;
+        }
+        answer.observed_at_ns = now_ns();
+        return;
+    }
+
     if (!catalogue && silence().silent(instance, now_ns())) {
         answer.message = unanswered_text("not asked again for a few seconds");
         answer.observed_at_ns = now_ns();

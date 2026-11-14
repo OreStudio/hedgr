@@ -155,6 +155,27 @@ struct market_history_request final {
 };
 
 /**
+ * @brief One currency's rate ladder: its rungs and the facts they rest on.
+ *
+ * The three facts that name a ladder travel together because they are what the
+ * deployment resolves it by, and the window then states exactly the ladder it
+ * opened rather than looking it up again.
+ */
+struct rate_ladder_request final {
+    /** @brief The currency the ladder is quoted in. */
+    std::string currency;
+
+    /** @brief The schema's instrument type, for example ir_swap. */
+    std::string instrument_type;
+
+    /** @brief The forward start wanted, or empty for spot. */
+    std::string forward_start;
+
+    /** @brief The key the model holds the answer under. */
+    std::string key;
+};
+
+/**
  * @brief One read a session asks for, carrying every input it needs.
  *
  * A read used to be a closure built at the call site, which made the request
@@ -169,7 +190,7 @@ struct market_history_request final {
 using read_request = std::variant<image_request, image_map_request,
     crm_names_request, crm_rates_request, deployment_request, curve_request,
     surface_request, catalogue_request, market_points_request,
-    market_history_request>;
+    market_history_request, rate_ladder_request>;
 
 /**
  * @brief The event a request will answer with, before the read runs.

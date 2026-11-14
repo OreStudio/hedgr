@@ -30,6 +30,7 @@
 #include "hedgr.model/state/crm_table.hpp"
 #include "hedgr.model/state/curve_table.hpp"
 #include "hedgr.model/state/surface_table.hpp"
+#include "hedgr.model/state/ladder_table.hpp"
 #include "hedgr.model/state/probe_table.hpp"
 #include "hedgr.model/state/password_policy_state.hpp"
 #include "hedgr.model/state/tables.hpp"
@@ -550,6 +551,9 @@ struct render_input final {
 
     /** @brief The latest published volatility surface each window read. */
     const hedgr::model::state::surface_table& surfaces;
+
+    /** @brief The latest rate ladder each window read. */
+    const hedgr::model::state::ladder_table& ladders;
 
     /** @brief The latest CRM batch each session and party read. */
     const hedgr::model::state::crm_table& crm;

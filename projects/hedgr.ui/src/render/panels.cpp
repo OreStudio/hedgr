@@ -178,6 +178,13 @@ void append_window_title(std::string& out, domain::window_kind kind,
         }
         return put("Volatility surface");
     }
+    case domain::window_kind::rate_ladder: {
+        if (const auto* ladder =
+                std::get_if<domain::rate_ladder_state>(&state)) {
+            return put(or_else(ladder->label, "Rates"));
+        }
+        return put("Rates");
+    }
     }
     return put("Window");
 }
@@ -584,6 +591,7 @@ bool shows_window(domain::window_kind kind, const render_input& input,
     case domain::window_kind::crm_matrix:
     case domain::window_kind::mini_plot:
     case domain::window_kind::vol_surface:
+    case domain::window_kind::rate_ladder:
         return true;
     case domain::window_kind::accounts:
     case domain::window_kind::workspace:

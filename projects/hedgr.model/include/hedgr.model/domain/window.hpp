@@ -73,10 +73,12 @@ enum class window_kind : std::uint8_t {
     mini_plot = 10,
     /** @brief One published volatility surface, as a grid over two axes. */
     vol_surface = 11,
+    /** @brief One currency's rate ladder: rungs by maturity, providers as columns. */
+    rate_ladder = 12,
 };
 
 /** @brief The number of window kinds, for indexing the renderer table. */
-inline constexpr std::size_t window_kind_count = 12;
+inline constexpr std::size_t window_kind_count = 13;
 
 /** @brief The canonical text of a kind, as stored in the local database. */
 [[nodiscard]] HEDGR_MODEL_EXPORT std::string_view
@@ -191,6 +193,28 @@ struct vol_surface_state final {
     std::string quote_currency;
 };
 
+/**
+ * @brief State of one currency's rate ladder window.
+ *
+ * A ladder is named by the three facts that make it one ladder rather than
+ * another: the currency, the instrument type and the forward start. They are
+ * stored because a restored window has to read the same ladder it was showing,
+ * and there is nobody to ask which one that was.
+ */
+struct rate_ladder_state final {
+    /** @brief The name shown in the title, for example "AUD swaps". */
+    std::string label;
+
+    /** @brief The currency the ladder is quoted in. */
+    std::string currency;
+
+    /** @brief The schema's instrument type, for example ir_swap. */
+    std::string instrument_type;
+
+    /** @brief The forward start it is struck at, or empty for spot. */
+    std::string forward_start;
+};
+
 /** @brief State of a grid window. */
 struct grid_state final {
     /** @brief Resource name, for example "trades". */
@@ -262,7 +286,7 @@ struct command_centre_state final {
 using window_state = std::variant<chart_state, grid_state, notice_state,
     accounts_state, workspace_state, command_centre_state,
     series_browser_state, term_structure_state, crm_matrix_state,
-    mini_plot_state, vol_surface_state>;
+    mini_plot_state, vol_surface_state, rate_ladder_state>;
 
 /**
  * @brief The persisted description of a window.

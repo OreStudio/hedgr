@@ -1057,6 +1057,72 @@ TEST_CASE("window gallery", "[.gallery]") {
     }
 }
 
+TEST_CASE("a rates window draws its rungs, and asks for a currency until it has one",
+    "[window-look][rates]") {
+    headless_imgui imgui;
+    desk desk;
+    static_cast<void>(imgui);
+
+    const auto window = desk.open(model::domain::window_kind::rate_ladder,
+        model::domain::rate_ladder_state{.label = "Rates"});
+    render::window_ui_state state;
+    hedgr::ui::widget::status_bar status;
+    render::lock_control lock;
+    auto input = desk.input();
+
+    /* No currency: the window says so rather than drawing an empty table. */
+    hedgr::testing::frame([&] {
+        render::render_rate_ladder(window, input, state, status, lock);
+    });
+    CHECK(state.traced.state
+        != static_cast<int>(hedgr::ui::widget::view_state::none));
+
+    /*
+     * Two rungs, two providers, one of which quotes nothing at the long end: a
+     * gap is what a desk needs to see, and a zero would read as a rate.
+     */
+    const auto ladder = desk.open(model::domain::window_kind::rate_ladder,
+        model::domain::rate_ladder_state{.label = "AUD swaps",
+            .currency = "AUD", .instrument_type = "discount"},
+        "w-rates");
+    model::domain::rate_ladder held;
+    held.currency = "AUD";
+    held.instrument_type = "discount";
+    held.as_of_ns = 1'760'000'000'000'000'000;
+    held.provider_count = 2;
+    held.tenor_convention = "RATES_SPOT_FORWARD";
+    held.day_count_convention = "A365F";
+    held.rungs = {
+        {.tenor = "3M", .maturity = "2027-02-14", .year_fraction = 0.2521,
+            .quotes = {{.provider_code = "bloomberg", .value = 0.043100,
+                           .as_of_ns = 1'760'000'000'000'000'000,
+                           .age_seconds = 2},
+                {.provider_code = "demo", .value = 0.043000,
+                    .as_of_ns = 1'760'000'000'000'000'000, .age_seconds = 3}},
+            .consensus = {.value = 0.043050, .method = "median",
+                .providers_used = 2}},
+        {.tenor = "30Y", .maturity = "2056-11-14", .year_fraction = 30.0219,
+            .quotes = {{.provider_code = "bloomberg", .value = 0.034178,
+                .as_of_ns = 1'760'000'000'000'000'000, .age_seconds = 2}},
+            .consensus = {.value = 0.034178, .method = "single",
+                .providers_used = 1}}};
+    desk.ladders.apply("i", "a",
+        model::state::ladder_key("AUD", "discount", ""), std::move(held));
+
+    auto ready_input = desk.input();
+    std::size_t ready_vertices = 0;
+    hedgr::testing::frame([&] {
+        const auto before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+        render::render_rate_ladder(ladder, ready_input, state, status, lock);
+        ready_vertices = static_cast<std::size_t>(
+            ImGui::GetWindowDrawList()->VtxBuffer.Size - before);
+    });
+    CHECK(state.traced.state
+        == static_cast<int>(hedgr::ui::widget::view_state::none));
+    /* The chrome alone is not a table of rungs with two provider columns. */
+    CHECK(ready_vertices > 200);
+}
+
 TEST_CASE("a surface window draws a mesh, and a sentence when none is published",
     "[window-look][surfaces]") {
     headless_imgui imgui;

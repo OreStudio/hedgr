@@ -48,6 +48,8 @@ std::string_view to_string(window_kind value) noexcept {
         return "mini_plot";
     case window_kind::vol_surface:
         return "vol_surface";
+    case window_kind::rate_ladder:
+        return "rate_ladder";
     }
     return "unknown";
 }
@@ -78,6 +80,8 @@ window_kind_from_string(std::string_view text) {
         return window_kind::mini_plot;
     if (text == "vol_surface")
         return window_kind::vol_surface;
+    if (text == "rate_ladder")
+        return window_kind::rate_ladder;
     return std::unexpected(std::format("unknown window kind '{}'", text));
 }
 

@@ -28,6 +28,7 @@ set(files
     "render/renderer.cpp"
     "render/series_browser.cpp"
     "render/series_browser_view.cpp"
+    "render/rate_ladder_window.cpp"
     "render/surface_plot.cpp"
     "render/term_structure_window.cpp"
     "render/vol_surface_window.cpp"

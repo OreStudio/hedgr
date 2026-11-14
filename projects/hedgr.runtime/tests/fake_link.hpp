@@ -53,6 +53,7 @@ struct fake_session_link final : session::transport::session_link {
     session::transport::market_series_read points_read;
     std::vector<hedgr::model::domain::market_provider_row> providers;
     std::vector<hedgr::model::domain::market_instrument> instruments;
+    hedgr::model::domain::rate_ladder ladder;
     std::vector<hedgr::model::domain::published_curve> curve_heads;
     std::vector<session::transport::curve_instant> curve_sets;
     std::vector<session::transport::surface_blueprint> blueprints;
@@ -69,6 +70,7 @@ struct fake_session_link final : session::transport::session_link {
     std::optional<session::transport::session_error> points_error;
     std::optional<session::transport::session_error> providers_error;
     std::optional<session::transport::session_error> instruments_error;
+    std::optional<session::transport::session_error> ladder_error;
     std::optional<session::transport::session_error> curves_error;
     std::optional<session::transport::session_error> curve_sets_error;
     std::optional<session::transport::session_error> blueprints_error;
@@ -321,6 +323,14 @@ struct fake_session_link final : session::transport::session_link {
         if (instruments_error)
             return std::unexpected(*instruments_error);
         return instruments;
+    }
+
+    [[nodiscard]] session::transport::result<hedgr::model::domain::rate_ladder>
+    rate_ladder(std::string_view, std::string_view, std::string_view,
+        const std::vector<std::string>&, std::int64_t) const override {
+        if (ladder_error)
+            return std::unexpected(*ladder_error);
+        return ladder;
     }
 
     [[nodiscard]] session::transport::result<

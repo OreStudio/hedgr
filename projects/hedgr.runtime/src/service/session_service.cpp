@@ -658,6 +658,7 @@ std::optional<session_effect> session_service::apply(
     case model::event::event_kind::curve_sets:
     case model::event::event_kind::crm_names:
     case model::event::event_kind::vol_surface:
+    case model::event::event_kind::rate_ladder:
         /*
          * Each is about the deployment or a window rather than about a session,
          * and is applied by the service that owns it before this one is asked.
