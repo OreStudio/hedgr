@@ -139,3 +139,57 @@ a message a client would have to parse:
 Until then the window shows the deployment's sentence in its error state, which
 is honest and actionable, and the chooser keeps offering the ten blueprints
 because the blueprint list is the only list there is.
+
+## 2026-11-14, later: are we publishing surfaces?
+
+The ORE agent verified three layers on bright_faraday: the publish step ran,
+40 publishes are `applied` (not queued), and the published series hold 2,800
+observations with plausible ranges. That evidence is about the database and the
+writer. The question for the client is whether a *reader* sees them, and the
+first answer was "no surface is published" — for two reasons that had nothing to
+do with the publishes.
+
+**1. The read was scoped to the wrong party.** Every one of these reads is
+party-scoped: a surface belongs to a party, and a session asking as another
+party is told, truthfully, that its party has none. Signing in as `super_admin`
+lands on the System Party, which holds no blueprints at all; the ten blueprints
+and (as it turns out) their publishes belong to the four ACME parties. The
+`[.live-parties-surfaces]` probe switches through the parties a login holds and
+reads the same blueprint as each, which is the only way to answer "is a surface
+published" without also asking "as whom".
+
+```
+login holds 5 parties, starting in 'Acme Corporation Plc'
+  'System Party':                   0 blueprints
+  'ACME Corporation UK plc':        10 blueprints, and a surface for each
+  'ACME Corporation HK Ltd':        10 blueprints, and a surface for each
+  'ACME Corporation US Inc':        10 blueprints, and a surface for each
+```
+
+**2. The client could not decode the answer.** With the right party the payload
+arrives and the codec refuses it:
+
+```
+the surface answer could not be decoded: Missing member: series_id
+```
+
+`series_id` was added to `get_published_fx_vol_surface_response` today
+(`450ee54130`, "Slice the published surface, and name the series it came from").
+The client is built against a checkout that has it; the **service** running on
+`bright_faraday` is older than that commit and does not send the field. The
+msgpack object decoder treats a missing non-optional member as an error, which is
+the right default for a contract but means a newer client cannot read an older
+service at all.
+
+So the last mile is a rebuild: bright_faraday's services need to be rebuilt and
+restarted from the current source. Nothing is wrong with the publishes, and
+nothing is wrong with the client beyond its strictness.
+
+Two client-side lessons taken from this, both now in the code:
+
+- a decode failure names the codec's reason ("Missing member: series_id") rather
+  than "could not be decoded", which is what turned this from a mystery into a
+  commit to go and look at;
+- a probe reads as each party a login holds, because a single-party probe
+  reports "nothing is published" about a deployment that published forty
+  surfaces.

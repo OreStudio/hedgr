@@ -970,7 +970,8 @@ result<surface_grid> session_client::published_fx_vol_surface(
                 options_.request_timeout);
         if (!answer)
             return fail(session_errc::protocol_error,
-                "the surface answer could not be decoded");
+                std::format("the surface answer could not be decoded: {}",
+                    answer.error().what()));
         if (!answer->success)
             return fail(session_errc::read_refused,
                 answer->message.empty() ? "the deployment refused the surface"

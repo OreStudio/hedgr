@@ -1421,3 +1421,94 @@ TEST_CASE("live calibrate: what the deployment says about publishing a surface",
     std::fflush(stdout);
     session.disconnect();
 }
+
+/**
+ * @brief Which party a deployment publishes surfaces for.
+ *
+ * Every read here is party-scoped: a publish belongs to a party, and a session
+ * asking as another party is told "your party has no published surface". So a
+ * probe that signs in once and reads once can report "nothing is published"
+ * about a deployment that has published forty surfaces, which is exactly the
+ * confusion this test exists to settle.
+ *
+ * It signs in, lists the parties the login may act as, and reads the same
+ * EURUSD blueprint as each of them in turn.
+ *
+ *     HEDGR_LIVE_PRINCIPAL=tenant_admin@acme_corporation ... "[.live-parties-surfaces]"
+ */
+TEST_CASE("live parties: which party a deployment publishes a surface for",
+    "[.live-parties-surfaces]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+    std::printf("login holds %zu part%s, starting in '%s'\n",
+        signed_in->parties.size(),
+        signed_in->parties.size() == 1 ? "y" : "ies",
+        signed_in->party_name.c_str());
+
+    const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+    std::vector<hedgr::session::transport::party_choice> parties
+        = signed_in->parties;
+    if (parties.empty()) {
+        parties.push_back({.id = signed_in->party_id,
+            .name = signed_in->party_name});
+    }
+    for (const auto& party : parties) {
+        if (!session.switch_party(party.id)) {
+            std::printf("  '%s' (%s): could not act as it\n", party.name.c_str(),
+                party.id.c_str());
+            continue;
+        }
+        const auto blueprints = session.fx_vol_surface_blueprints(20);
+        if (!blueprints) {
+            std::printf("  '%s': blueprints failed: %s\n", party.name.c_str(),
+                blueprints.error().detail.c_str());
+            continue;
+        }
+        std::printf("  '%s' (%s): %zu blueprint%s\n", party.name.c_str(),
+            party.id.c_str(), blueprints->size(),
+            blueprints->size() == 1 ? "" : "s");
+        for (const auto& blueprint : *blueprints) {
+            const auto surface
+                = session.published_fx_vol_surface(blueprint.id, now_ns);
+            if (!surface) {
+                std::printf("    %-14s %s\n", blueprint.name.c_str(),
+                    surface.error().detail.c_str());
+                continue;
+            }
+            std::printf("    %-14s published as_of=%lld %zu x %zu", 
+                blueprint.name.c_str(),
+                static_cast<long long>(surface->as_of_ns),
+                surface->expiries.size(), surface->strikes.size());
+            /* The first value is enough to tell a real grid from an empty one. */
+            if (!surface->values.empty())
+                std::printf(" first=%.6f", surface->values.front());
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
+}
