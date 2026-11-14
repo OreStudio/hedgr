@@ -38,6 +38,7 @@ set(files
     "intro_tests.cpp"
     "status_bar_tests.cpp"
     "series_browser_view_tests.cpp"
+    "surface_plot_tests.cpp"
     "tab_look_tests.cpp"
     "toolbar_tests.cpp"
 )

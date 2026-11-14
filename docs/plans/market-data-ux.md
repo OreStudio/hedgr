@@ -192,9 +192,17 @@ conventions bar, the pillar/curve tabs and the copy actions are the work.
 The pair's siblings in one table - spot, forwards by tenor - with provider
 columns, mid only. The FX twin of the Rates Ladder.
 
-### 5. Surface Monitor (exists)
+### 5. Surface Monitor
 
-Unchanged: the surface, its axes, its range. The menu goes to it directly.
+The surface was drawn as a hand-projected carpet: one fixed viewpoint, a
+colour that meant height and nothing else, and axis names that ran off the
+edge when the grid was wide. It is now drawn on three axes through **ImPlot3D**,
+so a reader can rotate it, read the smiles at each expiry, and see which way is
+up from the box the surface sits in. Strikes across, expiries deep, volatility
+up, with the blueprint's own names as the tick labels.
+
+The grid is flattened once per surface version and kept in the window's state,
+not rebuilt per frame. The menu goes to it directly.
 
 ### 6. Chart
 

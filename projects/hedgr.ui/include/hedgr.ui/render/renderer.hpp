@@ -35,6 +35,7 @@
 #include "hedgr.model/state/tables.hpp"
 #include "hedgr.ui/render/chart_plot.hpp"
 #include "hedgr.ui/render/series_browser_view.hpp"
+#include "hedgr.ui/render/surface_plot.hpp"
 #include "hedgr.ui/render/crm_grid.hpp"
 #include "hedgr.ui/render/market_view.hpp"
 #include "hedgr.ui/widget/browser_state.hpp"
@@ -396,6 +397,15 @@ struct window_ui_state final {
 
     /** @brief A chart window's plot arrays, rebuilt when its points change. */
     chart_plot plot;
+
+    /**
+     * @brief A surface window's flattened grid, rebuilt when the surface moves.
+     *
+     * The 3D plot wants three coordinates per grid vertex and a label per axis
+     * tick, which is work a frame must not repeat: it is done once per surface
+     * version, like the chart's candles.
+     */
+    surface_plot surface_view;
 
     /**
      * @brief The span, in nanoseconds, the chart last asked history for.

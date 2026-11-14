@@ -133,14 +133,24 @@ step is what the next one draws.
    per party, and the axes arrive declared rather than inferred from a tick
    reply's coordinate. The filter is the deployment's. Measured on `prime_origin`:
    46 instruments, 20 curves and 26 pairs, `AUD-AONIA` with its seven terms as an
-   axis. See `docs/verification/instrument-catalogue.md`. Not yet drawn: the
-   Explorer still builds its rows from series.
-2. **Currency as a control**, not a filter that changes what a row is.
+   axis. See `docs/verification/instrument-catalogue.md`. The market window now
+   draws exactly these rows, with kind badges, and opens by kind; the asset-class
+   combo and the curve and published-curve lists are gone. There is no asset
+   facet, because the catalogue does not carry an asset class.
+2. **Currency as a control**, not a filter that changes what a row is. The
+   search already finds a pair from either side; the control and the facets are
+   still to come, and the read can take `query`, `kinds` and `provider_code`
+   server-side when the list outgrows what a frame can narrow.
 3. **The Rates Ladder window**, from `get_rate_ladder`: provider columns, mid
    only, the conventions row the server states.
 4. **The menu by asset class**, with Search across kinds.
 5. **The FX montage** (`get_fx_montage`) and the surface grid and smile
    (`get_curve_analytics`).
+
+Done ahead of its step: the vol surface is drawn in three dimensions through
+**ImPlot3D**, which is a new dependency (`implot3d` in `vcpkg.json`). The
+carpet it replaces had one fixed viewpoint and a legend that said nothing about
+direction.
 
 Two facts that shape all five, measured rather than assumed:
 

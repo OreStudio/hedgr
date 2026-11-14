@@ -27,6 +27,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "implot.h"
+#include "implot3d.h"
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -85,11 +86,12 @@ struct counting_textures final : render::image_texture_source {
     }
 };
 
-/** @brief One ImGui and ImPlot context for the life of a test. */
+/** @brief One ImGui, ImPlot and ImPlot3D context for the life of a test. */
 struct headless_imgui final {
     headless_imgui() {
         ImGui::CreateContext();
         ImPlot::CreateContext();
+        ImPlot3D::CreateContext();
         auto& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(1280.0f, 800.0f);
         io.DeltaTime = 1.0f / 60.0f;
@@ -97,6 +99,7 @@ struct headless_imgui final {
         io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
     }
     ~headless_imgui() {
+        ImPlot3D::DestroyContext();
         ImPlot::DestroyContext();
         ImGui::DestroyContext();
     }
