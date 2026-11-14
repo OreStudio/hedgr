@@ -62,23 +62,29 @@ using hedgr::ui::render::window_ui_state;
     return instance;
 }
 
-float draw_series_row(std::string_view label, float extra_indent,
-    ImTextureID base_texture, ImTextureID quote_texture) {
-    const ImVec2 rect_min = ImGui::GetItemRectMin();
-    const ImVec2 rect_size = ImGui::GetItemRectSize();
-    const auto draw = ImGui::GetWindowDrawList();
-    float x = rect_min.x + 4.0f + extra_indent;
+/**
+ * @brief One row's flags and name, drawn inside the cell the cursor is in.
+ *
+ * The name used to be drawn on the raw draw list, positioned from the rectangle
+ * of a selectable that spans the whole row. That rectangle begins in the first
+ * column, so every glyph was placed to the left of the Instrument cell's clip
+ * rectangle and clipped away: the column drew nothing at all, and what did show
+ * on an earlier frame was the tail of a name that happened to reach past the
+ * clip. Drawing through ImGui at the cell's own cursor keeps the text inside the
+ * cell - and makes it text the frame's log buffer records, so a test can assert
+ * a name was drawn rather than that some pixels moved.
+ */
+void draw_row_name(std::string_view name, ImTextureID base_texture,
+    ImTextureID quote_texture) {
     const float flag_h = ImGui::GetTextLineHeight();
-    const float flag_y = rect_min.y + (rect_size.y - flag_h) * 0.5f;
-    const float flags_width = hedgr::ui::widget::draw_flag_pair(draw,
-        ImVec2(x, flag_y), flag_h, base_texture, quote_texture);
-    x += flags_width > 0.0f ? flags_width + 4.0f : 4.0f;
-    const float text_y =
-        rect_min.y + (rect_size.y - ImGui::GetTextLineHeight()) * 0.5f;
-    draw->AddText(ImVec2(x, text_y), ImGui::GetColorU32(ImGuiCol_Text),
-        label.data(), label.data() + label.size());
-    return x + ImGui::CalcTextSize(label.data(),
-        label.data() + label.size()).x;
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float flags_width = hedgr::ui::widget::draw_flag_pair(
+        ImGui::GetWindowDrawList(), at, flag_h, base_texture, quote_texture);
+    if (flags_width > 0.0f) {
+        ImGui::Dummy(ImVec2(flags_width, flag_h));
+        ImGui::SameLine(0.0f, 4.0f);
+    }
+    ImGui::TextUnformatted(name.data(), name.data() + name.size());
 }
 
 /**
@@ -767,18 +773,17 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
                 ImGui::PushID(instrument->instrument_id.c_str());
-                std::array<char, 16> badge{};
-                ImGui::TextDisabled("%s", kind_badge(instrument->kind, badge));
-                ImGui::TableNextColumn();
+                /*
+                 * The row's hit target is one selectable spanning the row, and
+                 * it is issued in the first column so its rectangle starts where
+                 * the row starts. Everything after it is drawn on top of it.
+                 */
                 ImGui::Selectable("##instrument", false,
                     ImGuiSelectableFlags_SpanAllColumns
                         | ImGuiSelectableFlags_AllowDoubleClick
                         | ImGuiSelectableFlags_AllowOverlap);
-                draw_series_row(instrument->name, 0.0f, base_texture,
-                    quote_texture);
-                if (ImGui::IsItemHovered()
-                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
-                    open_instrument(input, *session, *instrument);
+                const bool opened = ImGui::IsItemHovered()
+                    && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
                 if (instrument->stale)
                     ImGui::SetItemTooltip(
                         "%s\n%s \u00b7 %s\nEvery source behind it is stale.",
@@ -790,6 +795,13 @@ void render_series_browser(hedgr::model::state::window_handle handle,
                         instrument->instrument_id.c_str(),
                         instrument->instrument_type.c_str(),
                         instrument->quote_type.c_str());
+                std::array<char, 16> badge{};
+                ImGui::TextDisabled("%s", kind_badge(instrument->kind, badge));
+
+                ImGui::TableNextColumn();
+                draw_row_name(instrument->name, base_texture, quote_texture);
+                if (opened)
+                    open_instrument(input, *session, *instrument);
 
                 ImGui::TableNextColumn();
                 /*

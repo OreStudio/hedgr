@@ -858,6 +858,37 @@ TEST_CASE("the market data browser shows the mark for each catalogue state",
     CHECK(drew(window_frame(desk, handle, state), shape) == view_state::none);
 }
 
+TEST_CASE("a market row draws its name inside its own column",
+    "[view_state][series_browser][rows]") {
+    /*
+     * The row's name was drawn on the raw draw list from the rectangle of a
+     * selectable spanning the row, whose rectangle starts in the first column.
+     * Every glyph therefore fell left of the Instrument cell's clip rectangle
+     * and the column drew nothing - a blank list that looked like a failed read.
+     * Drawing through ImGui keeps the text in the cell, and makes it text the
+     * frame records, which is what this asserts.
+     */
+    hedgr::testing::headless_imgui imgui;
+    theme::apply_theme();
+    hedgr::testing::desk desk;
+    desk.sessions.set_status(desk.session, session_status::authenticated);
+    desk.market.apply_instruments("i", "a",
+        {model::domain::market_instrument{.instrument_id = "i-1",
+            .kind = "pair", .name = "AUD/USD", .currency = "USD",
+            .base_currency = "AUD", .quote_currency = "USD",
+            .instrument_type = "fx_spot", .quote_type = "rate",
+            .sources = {{.provider_code = "bloomberg",
+                .provider_kind = "data_vendor", .series_id = "s-1",
+                .as_of_ns = 1}},
+            .party_id = "p1"}});
+    const auto handle = desk.open(window_kind::series_browser,
+        model::domain::series_browser_state{});
+    render::window_ui_state state;
+    const auto frame = window_frame(desk, handle, state);
+    CHECK(frame.says("AUD/USD"));
+    CHECK(frame.says("bloomberg"));
+}
+
 TEST_CASE("the command centre shows the mark for each of its states",
     "[view_state][command_centre]") {
     hedgr::testing::headless_imgui imgui;

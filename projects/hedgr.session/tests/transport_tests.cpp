@@ -1488,6 +1488,27 @@ TEST_CASE("live parties: which party a deployment publishes a surface for",
                 blueprints.error().detail.c_str());
             continue;
         }
+        if (const auto instruments = session.list_instruments();
+            instruments && !instruments->empty()) {
+            /*
+             * The first rows as the deployment spells them: a name with no
+             * currency behind it is what a window draws as a bare label with no
+             * flag, so this is the read that tells a data problem from a
+             * rendering one.
+             */
+            std::printf("  instruments as '%s': %zu\n", party.name.c_str(),
+                instruments->size());
+            for (std::size_t i = 0; i < instruments->size() && i < 8; ++i) {
+                const auto& instrument = (*instruments)[i];
+                std::printf("    %-7s name='%s' ccy='%s' base='%s' quote='%s' "
+                            "providers=%zu\n",
+                    instrument.kind.c_str(), instrument.name.c_str(),
+                    instrument.currency.c_str(),
+                    instrument.base_currency.c_str(),
+                    instrument.quote_currency.c_str(),
+                    instrument.sources.size());
+            }
+        }
         std::printf("  '%s' (%s): %zu blueprint%s\n", party.name.c_str(),
             party.id.c_str(), blueprints->size(),
             blueprints->size() == 1 ? "" : "s");
