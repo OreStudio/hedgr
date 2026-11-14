@@ -199,6 +199,14 @@ public:
         const std::vector<std::string>& providers,
         std::int64_t as_of_ns) const = 0;
 
+    /**
+     * @brief One base currency's crosses, with the instant the moves are from.
+     */
+    [[nodiscard]] virtual result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const = 0;
+
     /** @brief The curves the deployment publishes for this session's party. */
     [[nodiscard]] virtual result<
         std::vector<hedgr::model::domain::published_curve>>
@@ -368,6 +376,13 @@ public:
         std::int64_t as_of_ns) const override {
         return client_.rate_ladder(currency, instrument_type, forward_start,
             providers, as_of_ns);
+    }
+
+    [[nodiscard]] result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers,
+        std::int64_t as_of_ns) const override {
+        return client_.fx_montage(base_currency, providers, as_of_ns);
     }
 
     [[nodiscard]] result<std::vector<hedgr::model::domain::published_curve>>

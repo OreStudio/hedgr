@@ -1138,3 +1138,81 @@ TEST_CASE("live ladder: what a currency's rate ladder answers",
     }
     session.disconnect();
 }
+
+/**
+ * @brief What the deployment's FX montage answers for a base currency.
+ *
+ * The montage is the FX twin of the rate ladder: one row per pair, a spot per
+ * provider, a consensus and the move since an instant the deployment states.
+ * This prints the shape so the screen is built on measured data - in
+ * particular whether the change and the day's range arrive at all.
+ *
+ *     HEDGR_LIVE_URL=nats://localhost:20005 ... hedgr.session.tests "[.live-montage]"
+ */
+TEST_CASE("live montage: what a base currency's crosses answer",
+    "[.live-montage]") {
+    const auto* url = std::getenv("HEDGR_LIVE_URL");
+    const auto* principal = std::getenv("HEDGR_LIVE_PRINCIPAL");
+    const auto* password = std::getenv("HEDGR_LIVE_PASSWORD");
+    REQUIRE(url != nullptr);
+    REQUIRE(principal != nullptr);
+    REQUIRE(password != nullptr);
+
+    session_options options;
+    options.nats_url = url;
+    if (const auto* prefix = std::getenv("HEDGR_LIVE_PREFIX"))
+        options.subject_prefix = prefix;
+    options.wire_format = "msgpack";
+    if (const auto* ca = std::getenv("HEDGR_LIVE_CA"))
+        options.tls_ca = ca;
+    if (const auto* cert = std::getenv("HEDGR_LIVE_CERT"))
+        options.tls_cert = cert;
+    if (const auto* key = std::getenv("HEDGR_LIVE_KEY"))
+        options.tls_key = key;
+    options.request_timeout = std::chrono::seconds{120};
+
+    session_client session(options);
+    REQUIRE(session.connect());
+    const auto signed_in = session.authenticate(principal, password);
+    REQUIRE(signed_in.has_value());
+
+    const auto instruments = session.list_instruments();
+    REQUIRE(instruments.has_value());
+    std::set<std::string> bases;
+    for (const auto& instrument : *instruments) {
+        const auto base = instrument.base_currency.empty()
+            ? instrument.currency : instrument.base_currency;
+        if (base.size() == 3)
+            bases.insert(base);
+    }
+    std::printf("montage candidates: %zu bases\n", bases.size());
+    for (const auto& base : bases) {
+        const auto montage = session.fx_montage(base);
+        if (!montage) {
+            std::printf("%s -> %s (%s)\n", base.c_str(),
+                montage.error().message.c_str(),
+                montage.error().detail.c_str());
+            continue;
+        }
+        std::printf("%s -> %zu pairs, as_of=%lld change_since=%lld\n",
+            montage->base_currency.c_str(), montage->pairs.size(),
+            static_cast<long long>(montage->as_of_ns),
+            static_cast<long long>(montage->change_since_ns));
+        for (const auto& pair : montage->pairs) {
+            std::printf("  %-9s consensus=%.6f change=%s high=%s low=%s spots:",
+                pair.pair_name.c_str(), pair.consensus,
+                pair.change_pct ? std::format("{:.2f}%", *pair.change_pct)
+                                    .c_str() : "none",
+                pair.day_high ? std::format("{:.5f}", *pair.day_high).c_str()
+                              : "none",
+                pair.day_low ? std::format("{:.5f}", *pair.day_low).c_str()
+                             : "none");
+            for (const auto& spot : pair.spots)
+                std::printf(" %s=%.5f(%llds)", spot.provider_code.c_str(),
+                    spot.value, static_cast<long long>(spot.age_seconds));
+            std::printf("\n");
+        }
+        std::fflush(stdout);
+    }
+    session.disconnect();
+}

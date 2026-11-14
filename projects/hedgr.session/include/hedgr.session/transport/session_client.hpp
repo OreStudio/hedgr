@@ -733,6 +733,24 @@ public:
         std::int64_t from_ns, std::int64_t to_ns) const;
 
     /**
+     * @brief Reads one base currency's crosses at an as-of.
+     *
+     * A montage is for the base, not for the pair's spelling, so a pair whose
+     * base is on the quote side is included. The change and the day's range are
+     * the deployment's, measured from an instant it states once for the whole
+     * answer: a trading day starts when the session says it does.
+     *
+     * @param base_currency the base the crosses are for.
+     * @param providers the providers to quote, or empty for every one.
+     * @param as_of_ns the instant to answer for, or zero for the clock's now.
+     * @pre the session is authenticated.
+     */
+    [[nodiscard]] result<hedgr::model::domain::fx_montage> fx_montage(
+        std::string_view base_currency,
+        const std::vector<std::string>& providers = {},
+        std::int64_t as_of_ns = 0) const;
+
+    /**
      * @brief Reads one currency's rate ladder, across the providers quoting it.
      *
      * A ladder is one shape read across its term axis, so the deployment answers

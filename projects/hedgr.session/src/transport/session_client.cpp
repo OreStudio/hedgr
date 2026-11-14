@@ -1767,6 +1767,100 @@ to_instrument(const ores::marketdata::messaging::market_instrument& wire) {
 
 }
 
+result<hedgr::model::domain::fx_montage> session_client::fx_montage(
+    std::string_view base_currency, const std::vector<std::string>& providers,
+    std::int64_t as_of_ns) const {
+    if (!is_connected()) {
+        return fail(session_errc::closed,
+            "an FX montage read needs an open connection to the instance");
+    }
+    if (!is_authenticated()) {
+        return fail(session_errc::not_authenticated,
+            "an FX montage read needs a signed-in session");
+    }
+    if (base_currency.empty()) {
+        return fail(session_errc::read_refused,
+            "an FX montage read needs a base currency");
+    }
+
+    using ores::marketdata::messaging::get_fx_montage_request;
+    using ores::marketdata::messaging::get_fx_montage_response;
+
+    try {
+        get_fx_montage_request request;
+        request.base_currency = base_currency;
+        request.providers = providers;
+        if (as_of_ns != 0) {
+            request.as_of = std::chrono::system_clock::time_point{
+                std::chrono::nanoseconds{as_of_ns}};
+        }
+        const auto answer =
+            ores::nats::service::authenticated_request_and_decode<
+                get_fx_montage_response>(client(),
+                get_fx_montage_request::nats_subject, request,
+                options_.request_timeout);
+        if (!answer) {
+            return fail(session_errc::protocol_error,
+                "the FX montage answer could not be decoded");
+        }
+        if (!answer->success) {
+            return fail(session_errc::read_refused,
+                answer->message.empty()
+                    ? std::format("the deployment refused the {} montage",
+                          base_currency)
+                    : answer->message);
+        }
+
+        const auto epoch_ns = [](std::chrono::system_clock::time_point when) {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                when.time_since_epoch())
+                .count();
+        };
+
+        hedgr::model::domain::fx_montage montage;
+        montage.base_currency = answer->base_currency.empty()
+            ? std::string{base_currency} : answer->base_currency;
+        montage.as_of_ns = epoch_ns(answer->as_of);
+        montage.change_since_ns = epoch_ns(answer->change_since);
+        montage.pairs.reserve(answer->pairs.size());
+        for (const auto& pair : answer->pairs) {
+            hedgr::model::domain::montage_pair out;
+            out.pair_name = pair.pair_name;
+            out.base_currency = pair.base_currency;
+            out.quote_currency = pair.quote_currency;
+            out.consensus = pair.consensus;
+            out.change_pct = pair.change_pct;
+            out.day_high = pair.day_high;
+            out.day_low = pair.day_low;
+            out.spots.reserve(pair.spot_by_provider.size());
+            for (const auto& spot : pair.spot_by_provider) {
+                out.spots.push_back(hedgr::model::domain::montage_spot{
+                    .provider_code = spot.provider_code,
+                    .value = spot.value,
+                    .as_of_ns = epoch_ns(spot.as_of),
+                    .age_seconds = spot.age_seconds,
+                    .stale = spot.stale,
+                    .series_id = spot.series_id});
+            }
+            montage.pairs.push_back(std::move(out));
+        }
+
+        BOOST_LOG_SEV(lg(), ores::logging::info)
+            << "Read an FX montage for " << montage.base_currency << " of "
+            << montage.pairs.size() << " pairs on '"
+            << options_.subject_prefix << "'";
+        return montage;
+    } catch (const std::exception& e) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The FX montage read failed: " << e.what();
+        return transport_failure(e);
+    } catch (...) {
+        BOOST_LOG_SEV(lg(), ores::logging::warn)
+            << "The FX montage read failed for an unnamed reason";
+        return transport_failure();
+    }
+}
+
 result<hedgr::model::domain::rate_ladder> session_client::rate_ladder(
     std::string_view currency, std::string_view instrument_type,
     std::string_view forward_start, const std::vector<std::string>& providers,

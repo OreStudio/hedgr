@@ -474,6 +474,83 @@ struct rate_ladder final {
 };
 
 /**
+ * @brief One provider's spot of one pair.
+ *
+ * A provider that does not quote the pair has no entry rather than a zero.
+ */
+struct montage_spot final {
+    /** @brief The provider's code. */
+    std::string provider_code;
+
+    /** @brief The spot it quoted, as a number. */
+    double value = 0.0;
+
+    /** @brief When it quoted, epoch nanoseconds, or zero when never. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief How far behind the service clock that instant is. */
+    std::int64_t age_seconds = 0;
+
+    /** @brief Whether the server judges the quote past its threshold. */
+    bool stale = false;
+
+    /** @brief The series the quote came from. */
+    std::string series_id;
+};
+
+/**
+ * @brief One pair of a montage: the spots, the consensus and the move.
+ *
+ * A pair whose base is on the quote side is included, because a montage is for
+ * the base rather than for the pair's spelling. The change and the range are
+ * absent when the deployment holds no price at the start of the day measured
+ * from, which is a different fact from a change of zero.
+ */
+struct montage_pair final {
+    /** @brief The pair as the deployment spells it, for example GBP/USD. */
+    std::string pair_name;
+
+    /** @brief The pair's currencies. */
+    std::string base_currency;
+    std::string quote_currency;
+
+    /** @brief One spot per provider that quoted the pair. */
+    std::vector<montage_spot> spots;
+
+    /** @brief The spot derived across the quoting providers. */
+    double consensus = 0.0;
+
+    /** @brief The move since the deployment's change instant, or nothing. */
+    std::optional<double> change_pct;
+
+    /** @brief The day's range, or nothing when the deployment holds none. */
+    std::optional<double> day_high;
+    std::optional<double> day_low;
+};
+
+/**
+ * @brief One base currency's crosses, with the instant the moves are from.
+ *
+ * The instant the change and the range are measured from is the deployment's:
+ * a trading day starts when the session says it does, and a client must not
+ * decide what "today" means. It travels once for the whole answer, so every
+ * row's move is measured from the same instant.
+ */
+struct fx_montage final {
+    /** @brief The base currency the crosses are for. */
+    std::string base_currency;
+
+    /** @brief The instant the spots answer for, epoch nanoseconds. */
+    std::int64_t as_of_ns = 0;
+
+    /** @brief The instant the moves are measured from, epoch nanoseconds. */
+    std::int64_t change_since_ns = 0;
+
+    /** @brief The pairs, in the deployment's order. */
+    std::vector<montage_pair> pairs;
+};
+
+/**
  * @brief One curve the deployment publishes, as a chooser lists it.
  *
  * A curve is an object the deployment calibrates and publishes rather than a
