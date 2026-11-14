@@ -738,8 +738,17 @@ void render_series_browser(hedgr::model::state::window_handle handle,
         while (clipper.Step()) {
             for (int index = clipper.DisplayStart; index < clipper.DisplayEnd;
                 ++index) {
-                const auto* instrument =
-                    &instruments[visible[static_cast<std::size_t>(index)]];
+                const auto at = visible[static_cast<std::size_t>(index)];
+                /*
+                 * The view's rows are positions in the catalogue it was built
+                 * from. A catalogue that arrived shorter between the rebuild
+                 * and this line would make the position point past the end, and
+                 * reading there draws a name that is not the instrument's -
+                 * which is worse than drawing no row at all.
+                 */
+                if (at >= instruments.size())
+                    continue;
+                const auto* instrument = &instruments[at];
                 const auto pair = currencies_of_instrument(*instrument);
                 const auto* source = opening_source(*instrument);
                 /*
